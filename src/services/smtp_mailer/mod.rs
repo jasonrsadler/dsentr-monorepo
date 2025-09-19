@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum MailError {
     Other(String),
     InvalidEmailAddress(String),

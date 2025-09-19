@@ -6,6 +6,7 @@ use super::MailError;
 
 /// A mock mailer that records sent emails for testing purposes.
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct MockMailer {
     pub sent_verification_emails: Mutex<Vec<(String, String)>>,
     pub sent_reset_emails: Mutex<Vec<(String, String)>>,

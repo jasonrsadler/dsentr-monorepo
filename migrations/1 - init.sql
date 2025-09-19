@@ -1,10 +1,10 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- Create the database (run this outside of psql first)
-CREATE DATABASE your_database_name;
+CREATE DATABASE dsentr;
 
 
 -- Connect to the database
-\c your_database_name;
+\c dsentr;
 -- (Continue with your other table creation scripts)
 CREATE TABLE IF NOT EXISTS early_access_emails (
     id SERIAL PRIMARY KEY,

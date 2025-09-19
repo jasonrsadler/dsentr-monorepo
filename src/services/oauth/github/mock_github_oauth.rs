@@ -6,6 +6,7 @@ use crate::services::oauth::github::{
 };
 
 #[derive(Default)]
+#[allow(dead_code)]
 pub struct MockGitHubOAuth {
     pub token: GitHubToken,
     pub user_info: GitHubUserInfo,

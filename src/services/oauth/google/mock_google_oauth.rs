@@ -1,6 +1,7 @@
 use super::{errors::GoogleAuthError, service::GoogleOAuthService};
 
 #[derive(Default)]
+#[allow(dead_code)]
 pub struct MockGoogleOAuth {
     pub token: String,
     pub user_info: serde_json::Value,

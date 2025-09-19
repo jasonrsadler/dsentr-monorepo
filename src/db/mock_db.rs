@@ -6,9 +6,11 @@ use uuid::Uuid;
 use super::user_repository::{UserId, UserRepository};
 use crate::models::signup::SignupPayload;
 
+#[allow(dead_code)]
 type MarkVerificationTokenFn =
     Box<dyn Fn(&str, OffsetDateTime) -> Result<Option<Uuid>, sqlx::Error> + Send + Sync>;
 
+#[allow(dead_code)]
 pub struct MockDb {
     pub find_user_result: Option<User>,
     pub create_user_result: Option<User>,
