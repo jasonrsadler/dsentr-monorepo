@@ -42,15 +42,21 @@ describe('joinWaitlist', () => {
       })
     })
 
+    const consoleError = console.error
+    console.error = vi.fn()
     await expect(joinWaitlist(mockEmail)).rejects.toThrow('already on the list')
+    console.error = consoleError
   })
 
   it('throws a generic error if fetch fails', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network error'))
 
+    const consoleError = console.error
+    console.error = vi.fn()
     await expect(joinWaitlist(mockEmail)).rejects.toThrow(
       'An error occurred while joining the waitlist. Please try again later.'
     )
+    console.error = consoleError
   })
 
   it('throws a generic error if response is malformed', async () => {
@@ -61,9 +67,11 @@ describe('joinWaitlist', () => {
         message: undefined
       })
     })
-
+    const consoleError = console.error
+    console.error = vi.fn()
     await expect(joinWaitlist(mockEmail)).rejects.toThrow(
       'An error occurred while joining the waitlist. Please try again later.'
     )
+    console.error = consoleError
   })
 })

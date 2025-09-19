@@ -29,7 +29,7 @@ export default defineConfig({
       tsconfig: './tsconfig.test.json'
     },
     exclude: [...configDefaults.exclude, 'dist'],
-    setupFiles: './src/tests/setup.ts',
+    setupFiles: './tests/setup.ts',
     coverage: {
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: './coverage',
@@ -51,10 +51,10 @@ export default defineConfig({
   server: {
     https: {
       key: fs.readFileSync(
-        path.join(__dirname, '../../mkcert', 'localhost-key.pem')
+        path.join(__dirname, '../../../certs', 'localhost+2-key.pem')
       ),
       cert: fs.readFileSync(
-        path.join(__dirname, '../../mkcert', 'localhost.pem')
+        path.join(__dirname, '../../../certs', 'localhost+2.pem')
       )
     }
   }

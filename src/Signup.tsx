@@ -106,10 +106,8 @@ export default function SignupPage() {
     try {
       const result = await signupUser({ ...form })
       if (result.success) {
-        console.log('successing')
         navigate('/check-email')
       } else {
-        console.log('erroring')
         setMessage(result.message)
         setServerError(true)
       }
@@ -208,23 +206,21 @@ export default function SignupPage() {
                         name={name}
                         value={(form as any)[name]}
                         onChange={handleChange}
-                        className={`w-full border ${
-                          fieldErrors[name]
+                        className={`w-full border ${fieldErrors[name]
                             ? 'border-red-500 dark:border-red-500'
                             : 'border-zinc-300 dark:border-zinc-600'
-                        } bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 rounded px-3 py-2 mt-1 text-sm transition-colors`}
+                          } bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 rounded px-3 py-2 mt-1 text-sm transition-colors`}
                       />
                       {name === 'password' && form.password && (
                         <div className="mt-2">
                           <div className="h-1 rounded bg-zinc-300 dark:bg-zinc-700 overflow-hidden">
                             <div
-                              className={`h-1 transition-all duration-300 ease-in-out ${
-                                passwordStrength.label === 'Weak'
+                              className={`h-1 transition-all duration-300 ease-in-out ${passwordStrength.label === 'Weak'
                                   ? 'bg-red-500 w-1/3'
                                   : passwordStrength.label === 'Moderate'
                                     ? 'bg-yellow-500 w-2/3'
                                     : 'bg-green-500 w-full'
-                              }`}
+                                }`}
                             />
                           </div>
                           <p
@@ -240,11 +236,10 @@ export default function SignupPage() {
               </div>
               <FormButton
                 disabled={loading}
-                className={`${
-                  loading
+                className={`${loading
                     ? 'bg-indigo-400 cursor-not-allowed'
                     : 'bg-indigo-600 hover:bg-indigo-500'
-                }`}
+                  }`}
               >
                 {loading ? 'Signing up…' : 'Sign Up'}
               </FormButton>

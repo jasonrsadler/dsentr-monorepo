@@ -33,13 +33,13 @@ describe('<Login />', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(useAuth as unknown as Mock).mockReturnValue({
-      user: null,
-      isLoading: false,
-      login: mockLogin,
-      logout: vi.fn(),
-      checkAuth: vi.fn()
-    })
+      ; (useAuth as unknown as Mock).mockReturnValue({
+        user: null,
+        isLoading: false,
+        login: mockLogin,
+        logout: vi.fn(),
+        checkAuth: vi.fn()
+      })
 
     originalLocation = window.location
 
@@ -71,16 +71,17 @@ describe('<Login />', () => {
 
   it('submits login form and calls loginWithEmail + login()', async () => {
     const mockUser = { email: 'test@example.com' }
-    ;(loginWithEmail as Mock).mockResolvedValue({
-      success: true,
-      data: { user: mockUser }
-    })
+      ; (loginWithEmail as Mock).mockResolvedValue({
+        success: true,
+        data: { user: mockUser }
+      })
 
     render(<Login />, { wrapper: MemoryRouter })
 
     fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: 'test@example.com' }
     })
+
     fireEvent.change(screen.getByLabelText(/password/i), {
       target: { value: 'password123' }
     })
@@ -98,7 +99,7 @@ describe('<Login />', () => {
   })
 
   it('displays error if login fails', async () => {
-    ;(loginWithEmail as Mock).mockResolvedValue({
+    ; (loginWithEmail as Mock).mockResolvedValue({
       success: false,
       message: 'Invalid credentials'
     })
@@ -118,7 +119,7 @@ describe('<Login />', () => {
 
   it('redirects to dashboard if already logged in', () => {
     // Override mocked useAuth
-    ;(useAuth as unknown as Mock).mockReturnValue({
+    ; (useAuth as unknown as Mock).mockReturnValue({
       user: { email: 'user@example.com' },
       isLoading: false,
       login: mockLogin

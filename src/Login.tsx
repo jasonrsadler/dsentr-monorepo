@@ -44,7 +44,6 @@ export default function Login() {
     setError('')
     const res = await loginWithEmail({ email, password, remember })
     if (res.success && res.data?.user) {
-      console.log(res.data)
       login(res.data.user)
       navigate('/dashboard')
     } else {

@@ -4,7 +4,6 @@ let cachedCsrfToken: string | null = null
 
 export async function getCsrfToken(): Promise<string> {
   if (cachedCsrfToken) {
-    console.log('Using cached CSRF token:', cachedCsrfToken)
     return cachedCsrfToken
   }
 
@@ -18,7 +17,5 @@ export async function getCsrfToken(): Promise<string> {
 
   const token = await res.text()
   cachedCsrfToken = token
-  console.log('Fetched CSRF token:', token)
-  console.log('Cached CSRF token:', cachedCsrfToken)
   return token
 }

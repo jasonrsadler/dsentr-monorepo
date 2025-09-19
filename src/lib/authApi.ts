@@ -73,7 +73,6 @@ export async function loginWithEmail({
         message: data?.message || 'Login failed'
       }
     }
-    console.log('Login response:', data)
 
     if (data.user) {
       login(data.user) // ✅ immediately update Zustand state
