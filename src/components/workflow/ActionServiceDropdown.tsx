@@ -1,14 +1,14 @@
-import { useState } from "react"
+import { useState } from "react";
 
-const triggerTypes = ["Manual", "Webhook", "Schedule"]
+const services = ["SendGrid", "Mailgun", "Amazon SES", "SMTP"];
 
-export default function TriggerTypeDropdown({ value, onChange }) {
-  const [open, setOpen] = useState(false)
+export default function ActionServiceDropdown({ value, onChange }) {
+  const [open, setOpen] = useState(false);
 
-  const handleSelect = (type) => {
-    onChange(type)
-    setOpen(false)
-  }
+  const handleSelect = (service) => {
+    onChange(service);
+    setOpen(false);
+  };
 
   return (
     <div className="relative inline-block w-full text-xs">
@@ -17,10 +17,9 @@ export default function TriggerTypeDropdown({ value, onChange }) {
         onClick={() => setOpen(!open)}
         className="relative w-full text-left px-2 py-1 border rounded bg-zinc-50 dark:bg-zinc-800"
       >
-        {value}
+        {value || "Select Service"}
         <svg
-          className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${open ? "rotate-180" : ""
-            }`}
+          className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
@@ -31,18 +30,18 @@ export default function TriggerTypeDropdown({ value, onChange }) {
       </button>
 
       {open && (
-        <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-32 overflow-auto">
-          {triggerTypes.map((type) => (
+        <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-48 overflow-auto">
+          {services.map(s => (
             <li
-              key={type}
-              onClick={() => handleSelect(type)}
+              key={s}
+              onClick={() => handleSelect(s)}
               className="px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700"
             >
-              {type}
+              {s}
             </li>
           ))}
         </ul>
       )}
     </div>
-  )
+  );
 }

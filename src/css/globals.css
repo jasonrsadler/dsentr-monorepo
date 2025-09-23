@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+
 /* Light mode (default) */
 body {
   @apply bg-white text-gray-900 transition-colors duration-300;
@@ -20,11 +21,21 @@ a {
 }
 
 /* Headings */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   @apply font-bold text-gray-800;
 }
 
-.dark h1, .dark h2, .dark h3, .dark h4, .dark h5, .dark h6 {
+.dark h1,
+.dark h2,
+.dark h3,
+.dark h4,
+.dark h5,
+.dark h6 {
   @apply text-gray-100;
 }
 
@@ -54,9 +65,17 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @keyframes colorShift {
-  0%   { filter: hue-rotate(0deg) brightness(1); }
-  50%  { filter: hue-rotate(20deg) brightness(1.2); }
-  100% { filter: hue-rotate(0deg) brightness(1); }
+  0% {
+    filter: hue-rotate(0deg) brightness(1);
+  }
+
+  50% {
+    filter: hue-rotate(20deg) brightness(1.2);
+  }
+
+  100% {
+    filter: hue-rotate(0deg) brightness(1);
+  }
 }
 
 .modular-animation-wrapper {
@@ -68,6 +87,7 @@ h1, h2, h3, h4, h5, h6 {
     from {
       opacity: 0;
     }
+
     to {
       opacity: 1;
     }
@@ -76,4 +96,24 @@ h1, h2, h3, h4, h5, h6 {
   .animate-fadeIn {
     animation: fadeIn 0.3s ease-out;
   }
+}
+
+.react-flow__controls-button svg {
+  stroke: currentColor;
+}
+
+.dark .react-flow__controls {
+  color: white;
+}
+
+/* Chrome, Edge, Safari */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+input[type=number] {
+  -moz-appearance: textfield;
 }

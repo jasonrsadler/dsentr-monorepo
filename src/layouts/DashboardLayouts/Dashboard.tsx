@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@xyflow/react/dist/style.css'
 import WorkflowToolbar from './Toolbar'
 import FlowCanvas from './FlowCanvas'
@@ -34,6 +34,7 @@ export default function Dashboard() {
   const handleSave = () => {
     if (!saveRef.current) return
 
+    // get validated node data from FlowCanvas
     const nodesData = saveRef.current.saveAllNodes?.() || []
     const edgesData = saveRef.current.getEdges?.() || []
 
@@ -41,20 +42,11 @@ export default function Dashboard() {
     const cleanNodes = nodesData.map(({ id, type, position, data }) => ({ id, type, position, data }))
     const cleanEdges = edgesData.map(({ id, source, target, type }) => ({ id, source, target, type }))
 
-    // Clear dirty on nodes that have no errors
-    const updatedNodes = cleanNodes.map(n => {
-      const hasDuplicateKeys = n.data?.inputs?.map(i => i.key.trim()).filter(k => k).length !==
-        new Set(n.data?.inputs?.map(i => i.key.trim()).filter(k => k)).size
-      const hasInvalidInputs = n.data?.inputs?.some(i => !i.key.trim() || !i.value.trim())
-      return { ...n, data: { ...n.data, dirty: hasDuplicateKeys || hasInvalidInputs } }
-    })
-
-    // Push updated dirty state back to FlowCanvas nodes
-    saveRef.current.setNodesFromToolbar?.(updatedNodes)
+    // Push node state (with correct validated dirty flags) back to canvas
+    saveRef.current.setNodesFromToolbar?.(nodesData)
 
     saveWorkflow(cleanNodes, cleanEdges)
   }
-
 
   const createWorkflow = () => {
     const newWorkflow = { id: `wf-${+new Date()}`, name: 'New Workflow' }
@@ -66,6 +58,12 @@ export default function Dashboard() {
   const selectWorkflow = (id: string) => {
     setCurrentWorkflowId(id)
     setWorkflowDirty(false)
+  }
+
+  const renameWorkflow = (id: string, newName: string) => {
+    setWorkflows(prev =>
+      prev.map(wf => (wf.id === id ? { ...wf, name: newName } : wf))
+    )
   }
 
   return (
@@ -95,6 +93,7 @@ export default function Dashboard() {
           onSave={handleSave}
           onNew={createWorkflow}
           onSelect={selectWorkflow}
+          onRename={renameWorkflow}
           dirty={workflowDirty}
         />
         <ReactFlowProvider>

@@ -5,13 +5,12 @@ import { ChevronUp, ChevronDown, Trash2, Plus } from "lucide-react"
 import TriggerTypeDropdown from "./TriggerTypeDropdown"
 // import TriggerTypeDropdown from "./TriggerTypeDropdown"
 
-export default function ManualTriggerNode({
+export default function TriggerNode({
   id,
   data,
   selected,
   onLabelChange,
   onRun,
-  onSaveInputs,
   onRemove,
   onDirtyChange,
   onUpdateNode
@@ -34,9 +33,11 @@ export default function ManualTriggerNode({
 
   useEffect(() => {
     // notify node update; suppress marking workflow dirty if clearing programmatically
-    onUpdateNode?.(id, { label, inputs, dirty }, true)
-    onDirtyChange?.(dirty, { label, inputs })
-  }, [label, inputs, dirty, id, onDirtyChange, onUpdateNode])
+    onUpdateNode?.(id, { label, inputs, dirty, expanded }, true)
+    if (dirty) {
+      onDirtyChange?.(dirty, { label, inputs, expanded })
+    }
+  }, [label, inputs, dirty, expanded, id, onDirtyChange, onUpdateNode])
 
   const hasInvalidInputs = useMemo(() => {
     if (inputs.length === 0) return false
@@ -57,10 +58,14 @@ export default function ManualTriggerNode({
     })
   }
 
-  const addInput = () => setInputs(prev => [...prev, { key: "", value: "" }])
-  const removeInput = index => setInputs(prev => prev.filter((_, i) => i !== index))
-
-  const saveDisabled = !dirty || hasInvalidInputs || hasDuplicateKeys
+  const addInput = () => {
+    setInputs(prev => [...prev, { key: "", value: "" }])
+    setDirty(true)
+  }
+  const removeInput = index => {
+    setInputs(prev => prev.filter((_, i) => i !== index))
+    setDirty(true)
+  }
 
   const handleRun = async () => {
     setRunning(true)
@@ -75,8 +80,17 @@ export default function ManualTriggerNode({
           {editing ? (
             <input
               value={label}
-              onChange={e => setLabel(e.target.value)}
+              onChange={e => {
+                setLabel(e.target.value)
+                setDirty(true)
+              }}
               onBlur={() => { setEditing(false); onLabelChange?.(id, label) }}
+              onKeyDown={e => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  e.currentTarget.blur()  // triggers onBlur
+                }
+              }}
               className="text-sm font-semibold bg-transparent border-b border-zinc-400 focus:outline-none w-full"
             />
           ) : (
@@ -90,7 +104,7 @@ export default function ManualTriggerNode({
           </div>
         </div>
 
-        <button onClick={handleRun} disabled={running} className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50">
+        <button onClick={handleRun} disabled={running || hasDuplicateKeys || hasInvalidInputs} className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50">
           {running ? "Running..." : "Run"}
         </button>
 
@@ -118,20 +132,6 @@ export default function ManualTriggerNode({
                 {hasDuplicateKeys && (
                   <p className="text-xs text-red-500">Duplicate keys are not allowed</p>
                 )}</div>
-              <button
-                onClick={() => {
-                  onSaveInputs?.(id, inputs)
-                  setDirty(false) // clear badge first
-                  onUpdateNode?.(id, { label, inputs, dirty: false }) // then sync node data
-                }}
-                disabled={saveDisabled}
-                className={`mt-2 w-full py-1 text-xs rounded-md ${saveDisabled
-                  ? "bg-zinc-300 text-zinc-600 cursor-not-allowed"
-                  : "bg-blue-500 text-white hover:bg-blue-600"
-                  }`}
-              >
-                Save Trigger
-              </button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -142,6 +142,7 @@ export default function ManualTriggerNode({
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
             <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl shadow-md w-56">
               <p className="text-sm mb-3">Delete this node?</p>
+              <p className="text-sm mb-3">This action can not be undone</p>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setConfirmingDelete(false)} className="px-2 py-1 text-xs rounded border">Cancel</button>
                 <button onClick={() => { setConfirmingDelete(false); onRemove?.(id) }} className="px-2 py-1 text-xs rounded bg-red-500 text-white hover:bg-red-600">Delete</button>
