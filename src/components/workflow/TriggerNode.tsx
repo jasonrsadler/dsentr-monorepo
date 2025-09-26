@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Handle, Position } from "@xyflow/react"
 import { ChevronUp, ChevronDown, Trash2, Plus } from "lucide-react"
 import TriggerTypeDropdown from "./TriggerTypeDropdown"
+import KeyValuePair from "../UI/ReactFlow/KeyValuePair"
 // import TriggerTypeDropdown from "./TriggerTypeDropdown"
 
 export default function TriggerNode({
@@ -119,19 +120,15 @@ export default function TriggerNode({
                   setDirty(true)
                 }}
               />
-              <p className="text-xs text-zinc-500">Input Variables</p>
-              <div className="space-y-2">
-                {inputs.map((input, index) => (
-                  <div key={index} className="flex gap-1">
-                    <input ref={el => (inputRefs.current[index] = el)} value={input.key} onChange={e => updateInput(index, "key", e.target.value)} placeholder="key" className="flex-1 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent" />
-                    <input value={input.value} onChange={e => updateInput(index, "value", e.target.value)} placeholder="value" className="flex-1 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent" />
-                    <button onClick={() => removeInput(index)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded"><Trash2 size={14} className="text-red-500" /></button>
-                  </div>
-                ))}
-                <button onClick={addInput} className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"><Plus size={14} /> Add variable</button>
-                {hasDuplicateKeys && (
-                  <p className="text-xs text-red-500">Duplicate keys are not allowed</p>
-                )}</div>
+              <KeyValuePair
+                title="Input Variables"
+                variables={inputs}
+                onChange={(updatedVars, nodeHasErrors, childDirty) => {
+                  setInputs(updatedVars)
+                  setDirty(prev => prev || childDirty)
+                }}
+              />
+
             </motion.div>
           )}
         </AnimatePresence>

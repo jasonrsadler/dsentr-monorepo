@@ -1,19 +1,22 @@
-import { useState } from "react";
+import { useState } from "react"
 
-const services = ["SendGrid", "Mailgun", "Amazon SES", "SMTP"];
-
-interface ActionServiceDropdownProps {
-  value: string;
-  onChange: (value: string) => void;
+interface MailgunRegionDropdownProps {
+  value: string
+  onChange: (value: string) => void
 }
 
-export default function ActionServiceDropdown({ value, onChange }: ActionServiceDropdownProps) {
-  const [open, setOpen] = useState(false);
+const regions = [
+  "US (api.mailgun.net)",
+  "EU (api.eu.mailgun.net)"
+]
 
-  const handleSelect = (service: string) => {
-    onChange(service);
-    setOpen(false);
-  };
+export default function MailgunRegionDropdown({ value, onChange }: MailgunRegionDropdownProps) {
+  const [open, setOpen] = useState(false)
+
+  const handleSelect = (region: string) => {
+    onChange(region)
+    setOpen(false)
+  }
 
   return (
     <div className="relative inline-block w-full text-xs">
@@ -22,7 +25,7 @@ export default function ActionServiceDropdown({ value, onChange }: ActionService
         onClick={() => setOpen(!open)}
         className="relative w-full text-left px-2 py-1 border rounded bg-zinc-50 dark:bg-zinc-800"
       >
-        {value || "Select Service"}
+        {value || "Select Region"}
         <svg
           className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
           fill="none"
@@ -35,18 +38,18 @@ export default function ActionServiceDropdown({ value, onChange }: ActionService
       </button>
 
       {open && (
-        <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-48 overflow-auto">
-          {services.map(s => (
+        <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-32 overflow-auto">
+          {regions.map(region => (
             <li
-              key={s}
-              onClick={() => handleSelect(s)}
+              key={region}
+              onClick={() => handleSelect(region)}
               className="px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700"
             >
-              {s}
+              {region}
             </li>
           ))}
         </ul>
       )}
     </div>
-  );
+  )
 }

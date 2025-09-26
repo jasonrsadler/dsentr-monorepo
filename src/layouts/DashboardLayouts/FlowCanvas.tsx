@@ -2,7 +2,6 @@ import { useCallback, useMemo, useEffect } from 'react'
 import {
   ReactFlow,
   Background,
-  Controls,
   MiniMap,
   addEdge,
   useEdgesState,
@@ -14,12 +13,22 @@ import { ConditionNode } from '@/components/Workflow/ConditionNode'
 import NodeEdge from '@/components/Workflow/NodeEdge'
 import CustomControls from '@/components/UI/ReactFlow/CustomControl'
 
-export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }) {
+interface FlowCanvasProps {
+  isDark?: boolean
+  markWorkflowDirty: () => void
+  setSaveRef?: (ref: {
+    saveAllNodes: () => any[]
+    getEdges: () => any[]
+    setNodesFromToolbar: (updatedNodes: any[]) => void
+  }) => void
+}
+
+export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
   const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
 
   const updateNodeData = useCallback(
-    (id, newData, suppressDirty = false) => {
+    (id: string, newData: any, suppressDirty = false) => {
       setNodes(nds =>
         nds.map(n =>
           n.id === id
