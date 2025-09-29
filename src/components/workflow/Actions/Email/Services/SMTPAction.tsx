@@ -57,6 +57,7 @@ export default function SMTPAction({ args, onChange }: { args: SMTPActionProps, 
     setDirty(true)
     setParams(prev => ({ ...prev, [key]: value }))
   }
+
   const errorClass = "text-xs text-red-500"
 
   return (

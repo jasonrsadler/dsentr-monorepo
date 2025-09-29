@@ -1,7 +1,7 @@
-import { useState, useRef, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Handle, Position } from "@xyflow/react"
-import { ChevronUp, ChevronDown, Trash2, Plus } from "lucide-react"
+import { ChevronUp, ChevronDown, Trash2 } from "lucide-react"
 import TriggerTypeDropdown from "./TriggerTypeDropdown"
 import KeyValuePair from "../UI/ReactFlow/KeyValuePair"
 // import TriggerTypeDropdown from "./TriggerTypeDropdown"
@@ -17,14 +17,13 @@ export default function TriggerNode({
   onUpdateNode
 }) {
   const isNewNode = !data?.id
-  const [label, setLabel] = useState(data?.label ?? "Manual Trigger")
+  const [label, setLabel] = useState(data?.label ?? "Trigger")
   const [expanded, setExpanded] = useState(data?.expanded ?? false)
   const [inputs, setInputs] = useState(data?.inputs ?? [])
   const [dirty, setDirty] = useState(data?.dirty ?? isNewNode)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [running, setRunning] = useState(false)
   const [editing, setEditing] = useState(false)
-  const inputRefs = useRef([])
 
   useEffect(() => {
     if (data?.dirty !== undefined && data.dirty !== dirty) {
@@ -49,24 +48,6 @@ export default function TriggerNode({
     const keys = inputs.map(i => i.key.trim()).filter(k => k)
     return new Set(keys).size !== keys.length
   }, [inputs])
-
-  const updateInput = (index, field, value) => {
-    setInputs(prev => {
-      const updated = [...prev]
-      updated[index][field] = value
-      setDirty(true)
-      return updated
-    })
-  }
-
-  const addInput = () => {
-    setInputs(prev => [...prev, { key: "", value: "" }])
-    setDirty(true)
-  }
-  const removeInput = index => {
-    setInputs(prev => prev.filter((_, i) => i !== index))
-    setDirty(true)
-  }
 
   const handleRun = async () => {
     setRunning(true)

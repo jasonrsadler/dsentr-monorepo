@@ -3,13 +3,18 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Handle, Position } from "@xyflow/react"
 import ActionTypeDropdown from "./ActionTypeDropdown"
 import ActionServiceDropdown from "./ActionServiceDropdown"
-import SendGridAction from "./Actions/Email/SendGridAction"
+import SendGridAction from "./Actions/Email/Services/SendGridAction"
 import NodeInputField from "../UI/InputFields/NodeInputField"
 import NodeCheckBoxField from "../UI/InputFields/NodeCheckboxField"
 import NodeHeader from "../UI/ReactFlow/NodeHeader"
-import MailGunAction from "./Actions/Email/MailGunAction"
-import SMTPAction from "./Actions/Email/SMTPAction"
-import AmazonSESAction from "./Actions/Email/AmazonSESAction"
+import MailGunAction from "./Actions/Email/Services/MailGunAction"
+import SMTPAction from "./Actions/Email/Services/SMTPAction"
+import AmazonSESAction from "./Actions/Email/Services/AmazonSESAction"
+import WebhookAction from "./Actions/Webhook/Webhook"
+import MessagingAction from "./Actions/Messaging/MessagingAction"
+import SheetsAction from "./Actions/Google/SheetsAction"
+import HttpRequestAction from "./Actions/HttpRequestAction"
+import RunCustomCodeAction from "./Actions/RunCustomCodeAction"
 
 interface ActionNodeProps {
   id: string
@@ -128,6 +133,20 @@ export default function ActionNode({
             <motion.div key="expanded-content" layout initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2">
               <p className="text-xs text-zinc-500">Action Type</p>
               <ActionTypeDropdown value={actionType} onChange={t => { setActionType(t); setDirty(true) }} />
+              {actionType === 'webhook' && (
+                <div className="flex flex-col gap-2">
+                  <WebhookAction
+                    args={params}
+                    onChange={
+                      (updatedParams, nodeHasErrors, childDirty) => {
+                        setParams(prev => ({ ...prev, ...updatedParams }))
+                        setHasValidationErrors(nodeHasErrors)
+                        setDirty(prev => childDirty || prev)
+                      }
+                    }
+                  />
+                </div>
+              )}
               {actionType === "email" && (
                 <div className="flex flex-col gap-2">
                   <ActionServiceDropdown
@@ -182,6 +201,50 @@ export default function ActionNode({
                   )}
                 </div>
               )}
+              {actionType === "messaging" && (
+                <MessagingAction
+                  args={params}
+                  onChange={(updatedParams, nodeHasErrors, childDirty) => {
+                    setParams(prev => ({ ...prev, ...updatedParams }))
+                    setHasValidationErrors(nodeHasErrors)
+                    setDirty(prev => childDirty || prev)
+                  }}
+                />
+              )}
+              {actionType === "sheets" && (
+                <SheetsAction
+                  args={params}
+                  onChange={
+                    (updatedParams, nodeHasErrors, childDirty) => {
+                      setParams(prev => ({ ...prev, ...updatedParams }))
+                      setHasValidationErrors(nodeHasErrors)
+                      setDirty(prev => childDirty || prev)
+                    }
+                  }
+                />
+              )}
+              {actionType === "http" && (
+                <HttpRequestAction
+                  args={params}
+                  onChange={
+                    (updatedParams, nodeHasErrors, childDirty) => {
+                      setParams(prev => ({ ...prev, ...updatedParams }))
+                      setHasValidationErrors(nodeHasErrors)
+                      setDirty(prev => childDirty || prev)
+                    }
+                  }
+                />
+              )}
+              {actionType === "code" && (
+                <RunCustomCodeAction
+                  args={{ code: params.code || "", language: params.language || "js", inputs: params.inputs || [], outputs: params.outputs || [], dirty }}
+                  onChange={(updatedParams, nodeHasErrors, childDirty) => {
+                    setParams(prev => ({ ...prev, ...updatedParams }))
+                    setHasValidationErrors(nodeHasErrors)
+                    setDirty(prev => childDirty || prev)
+                  }}
+                />
+              )}
               <p className="text-xs text-zinc-500">Execution Options</p>
               <div className="flex gap-2 items-center">
                 <NodeInputField
@@ -219,19 +282,6 @@ export default function ActionNode({
                 >
                   Stop on error
                 </NodeCheckBoxField>
-                {/* <label className="flex items-center gap-1 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={stopOnError}
-                    onChange={
-                      e => {
-                        setStopOnError(e.target.checked);
-                        setDirty(true)
-                      }
-                    }
-                  />
-                  Stop on error
-                </label> */}
               </div>
             </motion.div>
           )}

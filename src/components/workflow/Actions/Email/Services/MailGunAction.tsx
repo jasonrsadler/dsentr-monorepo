@@ -1,6 +1,6 @@
 import NodeInputField from "@/components/UI/InputFields/NodeInputField"
 import { useEffect, useMemo, useState } from "react"
-import MailgunRegionDropdown from "../MailgunRegionDropdown"
+import MailgunRegionDropdown from "../ServiceDropDowns/MailgunRegionDropdown"
 import NodeTextAreaField from "@/components/UI/InputFields/NodeTextAreaField"
 import KeyValuePair from "@/components/UI/ReactFlow/KeyValuePair"
 

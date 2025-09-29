@@ -2,7 +2,7 @@ import NodeInputField from "@/components/UI/InputFields/NodeInputField"
 import NodeTextAreaField from "@/components/UI/InputFields/NodeTextAreaField"
 import KeyValuePair from "@/components/UI/ReactFlow/KeyValuePair"
 import { useEffect, useMemo, useState } from "react"
-import SESRegionDropdown from "../SESRegionDropdown"
+import SESRegionDropdown from "../ServiceDropDowns/SESRegionDropdown"
 
 interface AmazonSESActionProps {
   awsAccessKey: string

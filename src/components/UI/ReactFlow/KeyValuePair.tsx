@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Trash2, Plus } from "lucide-react"
+import NodeInputField from "../InputFields/NodeInputField";
 
 interface KeyValuePairProps {
   title?: string
@@ -19,12 +20,19 @@ export default function KeyValuePair({
   const [vars, setVars] = useState(variables || [])
   const [_, setDirty] = useState(false)
 
+  const prevVariablesRef = useRef(JSON.stringify(variables || []))
+
+  // Sync props only if they actually changed
   useEffect(() => {
-    setVars(variables || [])
+    const newVariablesStr = JSON.stringify(variables || [])
+    if (newVariablesStr !== prevVariablesRef.current) {
+      setVars(variables || [])
+      prevVariablesRef.current = newVariablesStr
+    }
   }, [variables])
 
   const checkVars = (vars: { key: string, value: string }[] = []) => {
-    const normalized = vars.map((v: { key: string, value: string }) => ({
+    const normalized = vars.map(v => ({
       key: v?.key?.toString() || "",
       value: v?.value?.toString() || ""
     }))
@@ -34,9 +42,10 @@ export default function KeyValuePair({
     return anyBlank || hasDuplicateKeys
   }
 
-  const handleUpdate = (updatedVars: { key: string; value: string; }[]) => {
+  const handleUpdate = (updatedVars: { key: string; value: string }[]) => {
     setVars(updatedVars)
     setDirty(true)
+
     const nodeHasErrors = checkVars(updatedVars)
     onChange?.(updatedVars, nodeHasErrors, true)
   }
@@ -55,7 +64,6 @@ export default function KeyValuePair({
   }
 
   const inputClass = "text-xs p-1 w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 placeholder-zinc-400 dark:placeholder-zinc-500"
-
   const hasErrors = checkVars(vars)
 
   return (
@@ -63,7 +71,17 @@ export default function KeyValuePair({
       <p className="text-xs text-zinc-500">{title}</p>
       {vars.map((v, index) => (
         <div key={index} className="flex gap-1">
-          <input
+          <NodeInputField
+            placeholder={placeholderKey}
+            value={v.key}
+            onChange={val => updateVar(index, "key", val)}
+          />
+          <NodeInputField
+            placeholder={placeholderValue}
+            value={v.value}
+            onChange={val => updateVar(index, "value", val)}
+          />
+          {/* <input
             type="text"
             placeholder={placeholderKey}
             className={inputClass}
@@ -76,7 +94,7 @@ export default function KeyValuePair({
             className={inputClass}
             value={v.value}
             onChange={e => updateVar(index, "value", e.target.value)}
-          />
+          /> */}
           <button onClick={() => removeVar(index)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded">
             <Trash2 size={14} className="text-red-500" />
           </button>

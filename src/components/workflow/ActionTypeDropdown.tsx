@@ -3,7 +3,7 @@ import { useState } from "react";
 const actionTypes = [
   { id: "email", label: "Send Email" },
   { id: "webhook", label: "POST Webhook" },
-  { id: "slack", label: "Slack Message" },
+  { id: "messaging", label: "Messaging" },
   { id: "sheets", label: "Create Google Sheet Row" },
   { id: "http", label: "HTTP Request" },
   { id: "code", label: "Run Custom Code" },

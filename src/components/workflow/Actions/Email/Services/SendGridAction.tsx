@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import KeyValuePair from "@/components/UI/ReactFlow/KeyValuePair"
 import NodeInputField from "@/components/UI/InputFields/NodeInputField"
+import NodeTextAreaField from "@/components/UI/InputFields/NodeTextAreaField"
 
 interface SendGridActionProps {
   apiKey: string
@@ -69,27 +70,25 @@ export default function SendGridAction({ args, onChange }: { args: SendGridActio
       />
       {sendGridErrors.apiKey && <p className="text-xs text-red-500">{sendGridErrors.apiKey}</p>}
 
-      <input
+      <NodeInputField
         type="email"
         placeholder="From Email"
-        className={inputClass}
-        value={params.from}
-        onChange={e => updateField("from", e.target.value)}
+        value={params.from || ""}
+        onChange={val => updateField("from", val)}
       />
       {sendGridErrors.from && <p className="text-xs text-red-500">{sendGridErrors.from}</p>}
 
-      <input
+      <NodeInputField
         type="text"
         placeholder="Template ID (optional)"
-        className={inputClass}
-        value={params.templateId}
-        onChange={e => updateField("templateId", e.target.value)}
+        value={params.templateId || ""}
+        onChange={val => updateField("templateId", val)}
       />
 
       {params.templateId && (
         <KeyValuePair
           title="Substitution Variables"
-          variables={params.substitutions}
+          variables={params.substitutions || []}
           onChange={(updatedVars, nodeHasErrors, childDirty) => {
             setParams(prev => ({ ...prev, substitutions: updatedVars }))
             setDirty(prev => prev || childDirty)
@@ -98,30 +97,28 @@ export default function SendGridAction({ args, onChange }: { args: SendGridActio
         />
       )}
 
-      <input
+      <NodeInputField
         type="email"
         placeholder="Recipient Email(s)"
-        className={inputClass}
         value={params.to}
-        onChange={e => updateField("to", e.target.value)}
+        onChange={val => updateField("to", val)}
       />
       {sendGridErrors.to && <p className="text-xs text-red-500">{sendGridErrors.to}</p>}
 
       {!params.templateId && (
         <>
-          <input
+          <NodeInputField
             placeholder="Subject"
-            className={inputClass}
-            value={params.subject}
-            onChange={e => updateField("subject", e.target.value)}
+            value={params.subject || ""}
+            onChange={val => updateField("subject", val)}
           />
           {sendGridErrors.subject && <p className="text-xs text-red-500">{sendGridErrors.subject}</p>}
 
-          <textarea
+          <NodeTextAreaField
             placeholder="Message Body"
-            className={inputClass}
-            value={params.body}
-            onChange={e => updateField("body", e.target.value)}
+            value={params.body || ""}
+            rows={4}
+            onChange={val => updateField("body", val)}
           />
           {sendGridErrors.body && <p className="text-xs text-red-500">{sendGridErrors.body}</p>}
         </>
