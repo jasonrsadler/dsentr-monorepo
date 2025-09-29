@@ -9,9 +9,9 @@ import {
 } from '@xyflow/react'
 import TriggerNode from '@/components/Workflow/TriggerNode'
 import ActionNode from '@/components/Workflow/ActionNode'
-import { ConditionNode } from '@/components/Workflow/ConditionNode'
 import NodeEdge from '@/components/Workflow/NodeEdge'
 import CustomControls from '@/components/UI/ReactFlow/CustomControl'
+import ConditionNode from '@/components/Workflow/ConditionNode'
 
 interface FlowCanvasProps {
   isDark?: boolean
@@ -109,7 +109,15 @@ export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: Fl
         onRun={() => { console.log('Run action', props.id) }}
       />
     ),
-    condition: ConditionNode
+    condition: props => (
+      <ConditionNode
+        {...props}
+        onRemove={removeNode}
+        onDirtyChange={markWorkflowDirty}
+        onUpdateNode={updateNodeData}
+        onRun={() => { console.log('Run Condition', props.id) }}
+      />
+    )
   }), [removeNode, markWorkflowDirty, updateNodeData])
 
   const onNodesChange = useCallback(changes => {

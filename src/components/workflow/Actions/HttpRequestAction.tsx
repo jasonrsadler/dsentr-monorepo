@@ -3,7 +3,7 @@ import NodeInputField from "@/components/UI/InputFields/NodeInputField"
 import NodeTextAreaField from "@/components/UI/InputFields/NodeTextAreaField"
 import NodeCheckBoxField from "@/components/UI/InputFields/NodeCheckboxField"
 import KeyValuePair from "@/components/UI/ReactFlow/KeyValuePair"
-import { useEffect, useMemo, useState } from "react"
+import { useState } from "react"
 
 interface HttpRequestActionProps {
   url: string
@@ -47,22 +47,11 @@ export default function HttpRequestAction({
   const updateField = (key: keyof HttpRequestActionProps, value: any) => {
     setParams(prev => {
       const next = { ...prev, [key]: value }
-      debouncedOnChange(next)
+      const errors = hasErrors(next)
+      onChange?.(next, Object.keys(errors).length > 0, true)
       return next
     })
   }
-
-  // Debounced parent update
-  const debouncedOnChange = useMemo(() => {
-    let timer: NodeJS.Timeout
-    return (next: Partial<HttpRequestActionProps>) => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        const errors = hasErrors(next)
-        onChange?.(next, Object.keys(errors).length > 0, true)
-      }, 150)
-    }
-  }, [onChange])
 
   const hasErrors = (updatedParams: Partial<HttpRequestActionProps>) => {
     const errs: Record<string, string> = {}
@@ -96,13 +85,13 @@ export default function HttpRequestAction({
       <KeyValuePair
         title="Headers"
         variables={params.headers || []}
-        onChange={(updatedVars, nodeHasErrors, childDirty) => updateField("headers", updatedVars)}
+        onChange={(updatedVars) => updateField("headers", updatedVars)}
       />
 
       <KeyValuePair
         title="Query Parameters"
         variables={params.queryParams || []}
-        onChange={(updatedVars, nodeHasErrors, childDirty) => updateField("queryParams", updatedVars)}
+        onChange={(updatedVars) => updateField("queryParams", updatedVars)}
       />
 
       {/* Body input */}

@@ -63,7 +63,6 @@ export default function KeyValuePair({
     handleUpdate([...vars, { key: "", value: "" }])
   }
 
-  const inputClass = "text-xs p-1 w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 placeholder-zinc-400 dark:placeholder-zinc-500"
   const hasErrors = checkVars(vars)
 
   return (
@@ -81,20 +80,6 @@ export default function KeyValuePair({
             value={v.value}
             onChange={val => updateVar(index, "value", val)}
           />
-          {/* <input
-            type="text"
-            placeholder={placeholderKey}
-            className={inputClass}
-            value={v.key}
-            onChange={e => updateVar(index, "key", e.target.value)}
-          />
-          <input
-            type="text"
-            placeholder={placeholderValue}
-            className={inputClass}
-            value={v.value}
-            onChange={e => updateVar(index, "value", e.target.value)}
-          /> */}
           <button onClick={() => removeVar(index)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded">
             <Trash2 size={14} className="text-red-500" />
           </button>

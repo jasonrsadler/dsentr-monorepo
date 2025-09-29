@@ -5,9 +5,9 @@ import NodeDropdownField from "@/components/UI/InputFields/NodeDropdownField"
 
 interface RunCustomCodeActionProps {
   code: string       // user-entered JS/TS code
-  language?: "js" | "ts"
-  inputs?: Record<string, any>
-  outputs?: Record<string, any>
+  language: "js" | "ts"
+  inputs?: { key: string; value: string }[]
+  outputs?: { key: string; value: string }[]
   dirty: boolean
   setParams: (params: Partial<RunCustomCodeActionProps>) => void
   setDirty: (dirty: boolean) => void
@@ -53,7 +53,7 @@ export default function RunCustomCodeAction({
       />
       <KeyValuePair
         title="Inputs"
-        variables={inputs}
+        variables={inputs || []}
         onChange={(updated, nodeHasErrors, childDirty) => {
           setInputs(updated)
           setDirty(prev => prev || childDirty)
