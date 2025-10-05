@@ -24,6 +24,17 @@ impl JsonResponse {
         )
     }
 
+    pub fn not_found(msg: &str) -> impl IntoResponse {
+        (
+            StatusCode::NOT_FOUND,
+            Json(JsonResponse {
+                status: "error".to_string(),
+                success: false,
+                message: msg.to_string(),
+            }),
+        )
+    }
+
     pub fn conflict(msg: &str) -> impl IntoResponse {
         (
             StatusCode::CONFLICT,

@@ -1,4 +1,4 @@
-use crate::db::user_repository::UserRepository;
+use crate::db::{user_repository::UserRepository, workflow_repository::WorkflowRepository};
 use crate::services::oauth::{
     github::service::GitHubOAuthService, google::service::GoogleOAuthService,
 };
@@ -8,6 +8,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<dyn UserRepository>,
+    pub workflow_repo: Arc<dyn WorkflowRepository>,
     pub mailer: Arc<dyn Mailer>,
     pub google_oauth: Arc<dyn GoogleOAuthService>,
     pub github_oauth: Arc<dyn GitHubOAuthService + Send + Sync>,

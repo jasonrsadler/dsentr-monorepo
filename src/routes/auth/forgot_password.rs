@@ -62,7 +62,10 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        db::user_repository::{UserId, UserRepository},
+        db::{
+            mock_db::NoopWorkflowRepository,
+            user_repository::{UserId, UserRepository},
+        },
         models::{
             signup::SignupPayload,
             user::{OauthProvider, PublicUser, User, UserRole},
@@ -201,6 +204,7 @@ mod tests {
         let github_oauth = Arc::new(MockGitHubOAuth::default());
         let state = AppState {
             db: repo,
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             mailer,
             google_oauth,
             github_oauth,
@@ -308,6 +312,7 @@ mod tests {
         let github_oauth = Arc::new(MockGitHubOAuth::default());
         let state = AppState {
             db: repo,
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             mailer,
             google_oauth,
             github_oauth,

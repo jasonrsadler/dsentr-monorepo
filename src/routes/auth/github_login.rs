@@ -196,7 +196,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{
-        db::mock_db::MockDb,
+        db::mock_db::{MockDb, NoopWorkflowRepository},
         routes::auth::github_login::{github_callback, github_login},
         services::{
             oauth::{
@@ -245,6 +245,7 @@ mod tests {
         let github_oauth = Arc::new(MockGitHubOAuth::default());
         let state = AppState {
             db: repo,
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             mailer,
             google_oauth,
             github_oauth,
@@ -313,6 +314,7 @@ mod tests {
 
         let app_state = AppState {
             db: Arc::new(MockDb::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(FailingGitHubOAuth),

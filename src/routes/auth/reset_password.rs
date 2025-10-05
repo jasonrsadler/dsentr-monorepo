@@ -227,6 +227,7 @@ mod tests {
         let db = Arc::new(MockRepo { behavior });
         let state = AppState {
             db,
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             mailer: Arc::new(crate::services::smtp_mailer::MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

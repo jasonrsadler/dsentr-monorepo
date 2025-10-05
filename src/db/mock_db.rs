@@ -4,7 +4,10 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::user_repository::{UserId, UserRepository};
+use crate::db::workflow_repository::WorkflowRepository;
 use crate::models::signup::SignupPayload;
+use crate::models::workflow::Workflow;
+use serde_json::Value;
 
 #[allow(dead_code)]
 type MarkVerificationTokenFn =
@@ -127,5 +130,41 @@ impl UserRepository for MockDb {
     }
     async fn insert_early_access_email(&self, email: &str) -> Result<(), sqlx::Error> {
         (self.insert_early_access_email_fn)(email.to_string())
+    }
+}
+
+#[derive(Default)]
+pub struct NoopWorkflowRepository;
+
+#[async_trait]
+impl WorkflowRepository for NoopWorkflowRepository {
+    async fn create_workflow(
+        &self,
+        _user_id: Uuid,
+        _name: &str,
+        _description: Option<&str>,
+        _data: Value,
+    ) -> Result<Workflow, sqlx::Error> {
+        unimplemented!("Workflow repository behavior is not part of this test scenario");
+    }
+
+    async fn list_workflows_by_user(&self, _user_id: Uuid) -> Result<Vec<Workflow>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn find_workflow_by_id(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn delete_workflow(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
     }
 }

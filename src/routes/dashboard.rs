@@ -1,5 +1,5 @@
-use axum::{http::header, response::IntoResponse, Json};
 use crate::routes::auth::session::AuthSession;
+use axum::{http::header, response::IntoResponse, Json};
 use serde_json::json;
 
 pub async fn dashboard_handler(AuthSession(claims): AuthSession) -> impl IntoResponse {

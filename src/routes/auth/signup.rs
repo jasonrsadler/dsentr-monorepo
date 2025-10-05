@@ -273,6 +273,7 @@ mod tests {
             .route("/", axum::routing::post(handle_signup))
             .with_state(AppState {
                 db: Arc::new(repo),
+                workflow_repo: Arc::new(NoopWorkflowRepository::default()),
                 mailer: Arc::new(mailer),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),

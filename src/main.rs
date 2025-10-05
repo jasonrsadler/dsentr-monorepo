@@ -18,6 +18,7 @@ use axum::{
 };
 use config::Config;
 use db::postgres_user_repository::PostgresUserRepository;
+use db::postgres_workflow_repository::PostgresWorkflowRepository;
 use reqwest::Client;
 use responses::JsonResponse;
 use routes::auth::{handle_login, handle_signup, verify_email};
@@ -44,7 +45,7 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 use utils::csrf::{get_csrf_token, validate_csrf};
 
-use crate::db::user_repository::UserRepository;
+use crate::db::{user_repository::UserRepository, workflow_repository::WorkflowRepository};
 use crate::services::smtp_mailer::SmtpMailer;
 use crate::state::AppState;
 
@@ -132,6 +133,10 @@ async fn main() {
         pool: pg_pool.clone(),
     }) as Arc<dyn UserRepository>;
 
+    let workflow_repo = Arc::new(PostgresWorkflowRepository {
+        pool: pg_pool.clone(),
+    }) as Arc<dyn WorkflowRepository>;
+
     // Initialize mailer
     let mailer = Arc::new(SmtpMailer::new().expect("Failed to initialize mailer"));
     let http_client = Client::new();
@@ -146,6 +151,7 @@ async fn main() {
 
     let state = AppState {
         db: user_repo,
+        workflow_repo,
         mailer,
         google_oauth,
         github_oauth,

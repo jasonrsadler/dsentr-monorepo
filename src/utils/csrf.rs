@@ -1,22 +1,11 @@
 use axum::{
-    body::Body, 
-    http::{
-        Method, 
-        Request, 
-        StatusCode,
-        header::SET_COOKIE,
-        HeaderMap,
-        HeaderValue
-    }, 
-    middleware::Next, 
-    response::{Response, IntoResponse}
+    body::Body,
+    http::{header::SET_COOKIE, HeaderMap, HeaderValue, Method, Request, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
 };
 use axum_extra::extract::cookie::Cookie;
-use base64::{
-    self, 
-    prelude::BASE64_URL_SAFE_NO_PAD, 
-    Engine
-};
+use base64::{self, prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use rand_core::RngCore;
 
 pub struct CsrfLayer;
@@ -40,9 +29,7 @@ pub async fn validate_csrf(req: Request<Body>, next: Next) -> Result<Response, S
     ) {
         let headers = req.headers();
 
-        let token_header = headers
-            .get("x-csrf-token")
-            .and_then(|v| v.to_str().ok());
+        let token_header = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
 
         let cookie_header = req
             .headers()
@@ -51,7 +38,7 @@ pub async fn validate_csrf(req: Request<Body>, next: Next) -> Result<Response, S
             .filter_map(|v| v.to_str().ok())
             .collect::<Vec<_>>()
             .join("; ");
-        
+
         if let Some(csrf_token) = token_header {
             if let Some(cookie_token) = extract_csrf_from_cookie(&cookie_header) {
                 if csrf_token == cookie_token {
@@ -91,7 +78,10 @@ pub async fn get_csrf_token() -> Response {
     );
 
     let mut headers = HeaderMap::new();
-    headers.insert(SET_COOKIE, HeaderValue::from_str(&set_cookie_value).unwrap());
+    headers.insert(
+        SET_COOKIE,
+        HeaderValue::from_str(&set_cookie_value).unwrap(),
+    );
 
     // Return the token in the body in case the frontend needs it, with headers
     (StatusCode::OK, headers, token).into_response()

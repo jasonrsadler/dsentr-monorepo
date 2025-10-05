@@ -51,7 +51,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        db::mock_db::MockDb,
+        db::mock_db::{MockDb, NoopWorkflowRepository},
         services::{
             oauth::{
                 github::mock_github_oauth::MockGitHubOAuth,
@@ -69,6 +69,7 @@ mod tests {
             .route("/", post(verify_email))
             .with_state(AppState {
                 db: Arc::new(db),
+                workflow_repo: Arc::new(NoopWorkflowRepository::default()),
                 mailer: Arc::new(MockMailer::default()),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),

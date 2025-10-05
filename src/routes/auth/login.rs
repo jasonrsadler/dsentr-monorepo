@@ -159,7 +159,10 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        db::{mock_db::MockDb, user_repository::UserRepository},
+        db::{
+            mock_db::{MockDb, NoopWorkflowRepository},
+            user_repository::UserRepository,
+        },
         models::user::{OauthProvider, User, UserRole},
         routes::auth::login::LoginPayload,
         services::{
@@ -201,6 +204,7 @@ mod tests {
     fn build_app(db: impl UserRepository + 'static) -> Router {
         let app_state = AppState {
             db: Arc::new(db),
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             mailer: Arc::new(MockMailer::default()), // Not used in these tests
             google_oauth: Arc::new(MockGoogleOAuth::default()), // Not used in these tests
             github_oauth: Arc::new(MockGitHubOAuth::default()), // Not used in these tests
