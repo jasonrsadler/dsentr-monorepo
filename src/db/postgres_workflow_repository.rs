@@ -73,6 +73,37 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         Ok(result)
     }
 
+    async fn update_workflow(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        name: &str,
+        description: Option<&str>,
+        data: Value,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        let result = sqlx::query_as!(
+            Workflow,
+            r#"
+            UPDATE workflows
+            SET name = $3,
+                description = $4,
+                data = $5,
+                updated_at = now()
+            WHERE user_id = $1 AND id = $2
+            RETURNING id, user_id, name, description, data, created_at as "created_at!", updated_at as "updated_at!"
+            "#,
+            user_id,
+            workflow_id,
+            name,
+            description,
+            data
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result)
+    }
+
     async fn delete_workflow(&self, user_id: Uuid, workflow_id: Uuid) -> Result<bool, sqlx::Error> {
         let result = sqlx::query!(
             r#"
@@ -88,4 +119,3 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         Ok(result.rows_affected() > 0)
     }
 }
-

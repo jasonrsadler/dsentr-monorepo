@@ -160,6 +160,17 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(None)
     }
 
+    async fn update_workflow(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _name: &str,
+        _description: Option<&str>,
+        _data: Value,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        Ok(None)
+    }
+
     async fn delete_workflow(
         &self,
         _user_id: Uuid,

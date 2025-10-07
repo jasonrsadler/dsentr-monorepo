@@ -13,7 +13,7 @@ use axum::http::Method;
 use axum::{
     http::HeaderName,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use config::Config;
@@ -32,6 +32,7 @@ use routes::{
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
+    workflows::{create_workflow, delete_workflow, get_workflow, list_workflows, update_workflow},
 };
 use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
@@ -159,7 +160,7 @@ async fn main() {
 
     let cors = CorsLayer::new()
         .allow_origin(config.frontend_origin.parse::<HeaderValue>().unwrap())
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([
             AUTHORIZATION,
             CONTENT_TYPE,
@@ -199,11 +200,21 @@ async fn main() {
             config: auth_governor_conf.clone(),
         });
 
+    let workflow_routes = Router::new()
+        .route("/", post(create_workflow).get(list_workflows))
+        .route(
+            "/{workflow_id}",
+            get(get_workflow)
+                .put(update_workflow)
+                .delete(delete_workflow),
+        )
+        .layer(csrf_layer.clone());
     let app = Router::new()
         .route("/", get(root))
         .route("/api/early-access", post(handle_early_access))
         .route("/api/dashboard", get(dashboard_handler))
         .nest("/api/auth", auth_routes) // <-- your auth routes with CSRF selectively applied
+        .nest("/api/workflows", workflow_routes)
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(GovernorLayer {
@@ -254,3 +265,4 @@ async fn establish_connection(database_url: &str) -> PgPool {
     info!("✅ Successfully connected to the database");
     pool
 }
+

@@ -22,5 +22,18 @@ pub trait WorkflowRepository: Send + Sync {
         workflow_id: Uuid,
     ) -> Result<Option<Workflow>, sqlx::Error>;
 
-    async fn delete_workflow(&self, user_id: Uuid, workflow_id: Uuid) -> Result<bool, sqlx::Error>;
+    async fn update_workflow(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        name: &str,
+        description: Option<&str>,
+        data: Value,
+    ) -> Result<Option<Workflow>, sqlx::Error>;
+
+    async fn delete_workflow(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<bool, sqlx::Error>;
 }

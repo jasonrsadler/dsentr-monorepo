@@ -7,8 +7,8 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
-    models::workflow::CreateWorkflow, responses::JsonResponse,
-    routes::auth::session::AuthSession, state::AppState,
+    models::workflow::CreateWorkflow, responses::JsonResponse, routes::auth::session::AuthSession,
+    state::AppState,
 };
 
 pub async fn create_workflow(
@@ -108,6 +108,43 @@ pub async fn get_workflow(
     }
 }
 
+pub async fn update_workflow(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+    Json(payload): Json<CreateWorkflow>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    let CreateWorkflow {
+        name,
+        description,
+        data,
+    } = payload;
+
+    match app_state
+        .workflow_repo
+        .update_workflow(user_id, workflow_id, &name, description.as_deref(), data)
+        .await
+    {
+        Ok(Some(workflow)) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "workflow": workflow
+            })),
+        )
+            .into_response(),
+        Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error updating workflow: {:?}", e);
+            JsonResponse::server_error("Failed to update workflow").into_response()
+        }
+    }
+}
 pub async fn delete_workflow(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -131,4 +168,3 @@ pub async fn delete_workflow(
         }
     }
 }
-
