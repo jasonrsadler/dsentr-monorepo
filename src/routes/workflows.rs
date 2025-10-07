@@ -247,15 +247,25 @@ pub async fn list_workflow_logs(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    // Fetch workflow meta (for name) and logs
+    let wf_meta = app_state
+        .workflow_repo
+        .find_workflow_by_id(user_id, workflow_id)
+        .await;
+
     match app_state
         .workflow_repo
         .list_workflow_logs(user_id, workflow_id, 200, 0)
         .await
     {
-        Ok(entries) => (
-            StatusCode::OK,
-            Json(json!({"success": true, "logs": entries}))
-        ).into_response(),
+        Ok(entries) => {
+            let mut payload = json!({"success": true, "logs": entries});
+            if let Ok(Some(wf)) = wf_meta {
+                // Attach minimal workflow info to help the client display context
+                payload["workflow"] = json!({ "id": wf.id, "name": wf.name });
+            }
+            (StatusCode::OK, Json(payload)).into_response()
+        }
         Err(e) => {
             eprintln!("DB error listing logs: {:?}", e);
             JsonResponse::server_error("Failed to fetch logs").into_response()
