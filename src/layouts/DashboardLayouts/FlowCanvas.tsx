@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useEffect } from 'react'
+import { useCallback, useMemo, useEffect, useRef } from 'react'
 import {
   ReactFlow,
   Background,
@@ -13,6 +13,40 @@ import NodeEdge from '@/components/Workflow/NodeEdge'
 import CustomControls from '@/components/UI/ReactFlow/CustomControl'
 import ConditionNode from '@/components/Workflow/ConditionNode'
 
+function normalizeNode(n: any) {
+  return {
+    id: n.id,
+    type: n.type,
+    position: n.position,
+    data: sanitizeData(n.data),
+  };
+}
+function normalizeEdge(e: any) {
+  // Coalesce potentially undefined fields to stable values so snapshots match
+  const label = (e as any).label ?? null;
+  const animated = Boolean((e as any).animated);
+  return {
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    sourceHandle: e.sourceHandle,
+    targetHandle: e.targetHandle,
+    type: e.type,
+    data: e.data,
+    label,
+    animated,
+  };
+}
+function sortById<T extends { id: string }>(arr: T[]): T[] {
+  return [...arr].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function sanitizeData(data: any) {
+  if (!data || typeof data !== 'object') return data;
+  const { dirty, ...rest } = data as any;
+  return rest;
+}
+
 interface FlowCanvasProps {
   isDark?: boolean
   markWorkflowDirty: () => void
@@ -21,12 +55,50 @@ interface FlowCanvasProps {
     getEdges: () => any[]
     setNodesFromToolbar: (updatedNodes: any[]) => void
   }) => void
+  workflowId?: string | null
+  workflowData?: { nodes: any[]; edges: any[] }
+  onGraphChange?: (graph: { nodes: any[]; edges: any[] }) => void
 }
 
-export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: FlowCanvasProps) {
+export default function FlowCanvas({
+  isDark,
+  markWorkflowDirty,
+  setSaveRef,
+  workflowId,
+  workflowData,
+  onGraphChange
+}: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
   const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
-
+  const rafRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!workflowId) {
+      setNodes([])
+      setEdges([])
+      return
+    }
+    const incomingNodes = (workflowData?.nodes ?? []).map((node: any) => ({
+      ...node,
+      data: { ...(node.data ?? {}), dirty: node.data?.dirty ?? false }
+    }))
+    setNodes(incomingNodes)
+    setEdges(workflowData?.edges ?? [])
+  }, [workflowId, workflowData, setNodes, setEdges])
+  useEffect(() => {
+    if (!onGraphChange) return
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    const nodesSnap = nodes
+    const edgesSnap = edges
+    rafRef.current = requestAnimationFrame(() => {
+      const cleanNodes = sortById(nodesSnap.map(normalizeNode))
+      const cleanEdges = sortById(edgesSnap.map(normalizeEdge))
+      onGraphChange({ nodes: cleanNodes, edges: cleanEdges })
+    })
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+  }, [nodes, edges, onGraphChange])
   const updateNodeData = useCallback(
     (id: string, newData: any, suppressDirty = false) => {
       setNodes(nds =>
@@ -59,32 +131,30 @@ export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: Fl
       }
     })
 
-    setNodes(clearedNodes) // commit to state so UI updates
+    setNodes(clearedNodes)
 
-    return clearedNodes // still return array for backend save
+    return clearedNodes
   }, [nodes, setNodes])
-
-
-
   useEffect(() => {
     if (setSaveRef) {
       setSaveRef({
         saveAllNodes,
         getEdges: () => edges,
-        setNodesFromToolbar: (updatedNodes) => setNodes(nds =>
-          nds.map(n => {
-            const updated = updatedNodes.find(u => u.id === n.id)
-            return updated ? { ...n, data: { ...n.data, ...updated.data } } : n
-          })
-        )
+        setNodesFromToolbar: updatedNodes =>
+          setNodes(nds =>
+            nds.map(n => {
+              const updated = updatedNodes.find(u => u.id === n.id)
+              return updated ? { ...n, data: { ...n.data, ...updated.data } } : n
+            })
+          )
       })
     }
-  }, [edges, saveAllNodes, setSaveRef])
+  }, [edges, saveAllNodes, setSaveRef, setNodes])
 
   const removeNode = useCallback(
     id => {
       setNodes(nds => nds.filter(n => n.id !== id))
-      setEdges(eds => eds.filter(e => e.source !== id && e.target !== id)) // remove connected edges
+      setEdges(eds => eds.filter(e => e.source !== id && e.target !== id))
       markWorkflowDirty()
     },
     [setNodes, setEdges, markWorkflowDirty]
@@ -97,7 +167,9 @@ export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: Fl
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
         onUpdateNode={updateNodeData}
-        onRun={() => { console.log('Run trigger', props.id) }}
+        onRun={() => {
+          console.log('Run trigger', props.id)
+        }}
       />
     ),
     action: props => (
@@ -106,7 +178,9 @@ export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: Fl
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
         onUpdateNode={updateNodeData}
-        onRun={() => { console.log('Run action', props.id) }}
+        onRun={() => {
+          console.log('Run action', props.id)
+        }}
       />
     ),
     condition: props => (
@@ -115,55 +189,71 @@ export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: Fl
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
         onUpdateNode={updateNodeData}
-        onRun={() => { console.log('Run Condition', props.id) }}
+        onRun={() => {
+          console.log('Run Condition', props.id)
+        }}
       />
     )
   }), [removeNode, markWorkflowDirty, updateNodeData])
 
-  const onNodesChange = useCallback(changes => {
-    markWorkflowDirty()
-    onNodesChangeInternal(changes)
-  }, [onNodesChangeInternal, markWorkflowDirty])
+  const onNodesChange = useCallback(
+    changes => {
+      markWorkflowDirty()
+      onNodesChangeInternal(changes)
+    },
+    [onNodesChangeInternal, markWorkflowDirty]
+  )
 
-  const onEdgesChange = useCallback(changes => {
-    markWorkflowDirty()
-    onEdgesChangeInternal(changes)
-  }, [onEdgesChangeInternal, markWorkflowDirty])
+  const onEdgesChange = useCallback(
+    changes => {
+      markWorkflowDirty()
+      onEdgesChangeInternal(changes)
+    },
+    [onEdgesChangeInternal, markWorkflowDirty]
+  )
 
   const onConnect = useCallback(
-    (params) => {
-      setEdges((eds) =>
+    params => {
+      setEdges(eds =>
         addEdge(
           {
             ...params,
-            type: "nodeEdge",
-            data: { edgeType: "default" }, // important
+            type: 'nodeEdge',
+            data: { edgeType: 'default' }
           },
           eds
         )
-      );
+      )
     },
     [setEdges]
-  );
+  )
 
-  const onDrop = useCallback(event => {
-    event.preventDefault()
-    const type = event.dataTransfer.getData('application/reactflow')
-    if (!type) return
+  const onDrop = useCallback(
+    event => {
+      event.preventDefault()
+      const type = event.dataTransfer.getData('application/reactflow')
+      if (!type) return
 
-    const bounds = event.currentTarget.getBoundingClientRect()
-    const position = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+      const bounds = event.currentTarget.getBoundingClientRect()
+      const position = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
 
-    const newNode = {
-      id: `${type}-${+new Date()}`,
-      type: type.toLowerCase(),
-      position,
-      data: { label: type, expanded: type.toLowerCase() === 'trigger' || type.toLowerCase() === 'action', dirty: true, inputs: [] }
-    }
+      const newNode = {
+        id: `${type}-${+new Date()}`,
+        type: type.toLowerCase(),
+        position,
+        data: {
+          label: type,
+          expanded: type.toLowerCase() === 'trigger' || type.toLowerCase() === 'action',
+          dirty: true,
+          inputs: []
+        }
+      }
 
-    setNodes(nds => [...nds, newNode])
-    markWorkflowDirty()
-  }, [setNodes, markWorkflowDirty])
+      setNodes(nds => [...nds, newNode])
+      markWorkflowDirty()
+    },
+    [setNodes, markWorkflowDirty]
+  )
 
   const onDragOver = useCallback(event => {
     event.preventDefault()
@@ -172,30 +262,28 @@ export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: Fl
 
   const handleEdgeTypeChange = useCallback(
     (edgeId, newType) => {
-      setEdges((eds) =>
-        eds.map((e) =>
-          e.id === edgeId ? { ...e, data: { ...e.data, edgeType: newType } } : e
-        )
-      );
+      setEdges(eds =>
+        eds.map(e => (e.id === edgeId ? { ...e, data: { ...e.data, edgeType: newType } } : e))
+      )
     },
     [setEdges]
-  );
+  )
 
   const handleEdgeDelete = useCallback(
-    (edgeId) => {
-      setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+    edgeId => {
+      setEdges(eds => eds.filter(e => e.id !== edgeId))
     },
     [setEdges]
-  );
+  )
 
   const edgeTypes = useMemo(
     () => ({
-      nodeEdge: (edgeProps) => (
+      nodeEdge: edgeProps => (
         <NodeEdge {...edgeProps} onDelete={handleEdgeDelete} onChangeType={handleEdgeTypeChange} />
-      ),
+      )
     }),
     [handleEdgeDelete, handleEdgeTypeChange]
-  );
+  )
 
   return (
     <ReactFlow
@@ -214,10 +302,23 @@ export default function FlowCanvas({ isDark, markWorkflowDirty, setSaveRef }: Fl
       className='flex-1'
     >
       <Background gap={16} size={1} />
-      <div className={isDark ? "text-white" : "text-black"}>
+      <div className={isDark ? 'text-white' : 'text-black'}>
         <CustomControls />
-        <MiniMap nodeColor={(node) => (node.type === 'trigger' ? '#10B981' : '#6366F1')} style={{ background: 'transparent' }} />
+        <MiniMap
+          nodeColor={node => (node.type === 'trigger' ? '#10B981' : '#6366F1')}
+          style={{ background: 'transparent' }}
+        />
       </div>
-    </ReactFlow >
+    </ReactFlow>
   )
 }
+
+
+
+
+
+
+
+
+
+

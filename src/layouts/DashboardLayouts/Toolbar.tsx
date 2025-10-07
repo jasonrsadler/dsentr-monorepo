@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react"
 
-export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onRename, dirty }) {
+export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onRename, dirty, saving = false }) {
   const [editingName, setEditingName] = useState(false)
   const [name, setName] = useState(workflow?.name || "")
 
-  // Update name state when workflow changes
   useEffect(() => {
     setName(workflow?.name || "")
   }, [workflow?.id, workflow?.name])
@@ -15,6 +14,8 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
     }
     setEditingName(false)
   }
+
+  const isSavingDisabled = !dirty || saving
 
   return (
     <div className="flex items-center gap-2 p-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
@@ -54,16 +55,15 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
 
       <button
         onClick={onSave}
-        disabled={!dirty}
-        className={`px-2 py-1 rounded ${dirty
-          ? "bg-green-500 text-white hover:bg-green-600"
-          : "bg-zinc-300 text-zinc-600 cursor-not-allowed"
-          }`}
+        disabled={isSavingDisabled}
+        className={`px-2 py-1 rounded ${isSavingDisabled ? "bg-zinc-300 text-zinc-600 cursor-not-allowed" : "bg-green-500 text-white hover:bg-green-600"}`}
       >
-        Save
+        {saving ? "Saving..." : "Save"}
       </button>
 
-      {dirty && <span className="w-2 h-2 rounded-full bg-blue-500" />}
+      {dirty && !saving && <span className="w-2 h-2 rounded-full bg-blue-500" />}
     </div>
   )
 }
+
+
