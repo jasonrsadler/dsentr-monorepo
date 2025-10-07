@@ -85,3 +85,18 @@ export async function updateWorkflow(id: string, payload: WorkflowPayload): Prom
   const data = await handleJsonResponse(res)
   return data.workflow
 }
+
+export async function deleteWorkflow(id: string): Promise<{ success: boolean }> {
+  const csrfToken = await getCsrfToken()
+
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${id}`, {
+    method: 'DELETE',
+    headers: {
+      'x-csrf-token': csrfToken,
+    },
+    credentials: 'include',
+  })
+
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true) }
+}

@@ -5,6 +5,12 @@ import FlowCanvas from './FlowCanvas'
 import ActionIcon from '@/assets/svg-components/ActionIcon'
 import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
+import SettingsButton from '@/components/Settings/SettingsButton'
+import SettingsModal from '@/components/Settings/SettingsModal'
+import WorkflowsTab from '@/components/Settings/tabs/WorkflowsTab'
+import LogsTab from '@/components/Settings/tabs/LogsTab'
+import PreferencesTab from '@/components/Settings/tabs/PreferencesTab'
+import { useWorkflowLogs } from '@/stores/workflowLogs'
 import {
   listWorkflows,
   createWorkflow as createWorkflowApi,
@@ -122,6 +128,12 @@ export default function Dashboard() {
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isSavingRef = useRef(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [disallowDuplicateNames, setDisallowDuplicateNames] = useState<boolean>(() => {
+    const v = localStorage.getItem('pref_disallow_duplicate_names')
+    return v ? v === '1' : false
+  })
+  const addLog = useWorkflowLogs((s) => s.add)
   const saveRef = useRef<{
     saveAllNodes?: () => any[]
     getEdges?: () => any[]
@@ -258,8 +270,17 @@ export default function Dashboard() {
       setIsSaving(true)
       setError(null)
 
+      const base = 'New Workflow'
+      const names = new Set(workflows.map(w => w.name))
+      let unique = base
+      if (disallowDuplicateNames && names.has(unique)) {
+        let i = 2
+        while (names.has(`${base} (${i})`)) i++
+        unique = `${base} (${i})`
+      }
+
       const payload = {
-        name: 'New Workflow',
+        name: unique,
         description: null,
         data: createEmptyGraph()
       }
@@ -372,6 +393,34 @@ export default function Dashboard() {
         normalized
       )
 
+      // Prepare diffs for logs from previous saved snapshot to new saved snapshot (user data only)
+      try {
+        const prevSaved = JSON.parse(lastSavedSnapshotRef.current)
+        const currSaved = JSON.parse(savedSnapshot)
+        const prevFlat = flatten(prevSaved)
+        const currFlat = flatten(currSaved)
+        const diffs: { path: string; from: unknown; to: unknown }[] = []
+        const keys = new Set<string>([...Object.keys(prevFlat), ...Object.keys(currFlat)])
+        for (const k of Array.from(keys).sort()) {
+          if (!k.startsWith('graph.nodes[')) continue
+          if (k.includes('.position')) continue
+          if (!k.includes('.data.')) continue
+          if (prevFlat[k] !== currFlat[k]) {
+            diffs.push({ path: k, from: prevFlat[k], to: currFlat[k] })
+            if (diffs.length >= 100) break
+          }
+        }
+        if (diffs.length > 0) {
+          addLog({
+            id: (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : `${Date.now()}`,
+            workflowId: updated.id,
+            workflowName: updated.name ?? currentWorkflow.name,
+            timestamp: Date.now(),
+            diffs,
+          })
+        }
+      } catch {}
+
       lastSavedSnapshotRef.current = savedSnapshot
       pendingSnapshotRef.current = null
       setWorkflowDirty(false)
@@ -395,7 +444,15 @@ export default function Dashboard() {
   }, [currentWorkflow, workflowOptions])
 
   return (
-    <div className="flex h-[calc(100vh-4rem)]">
+    <div className="flex flex-col h-[calc(100vh-4rem)]">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded bg-gradient-to-br from-indigo-500 to-violet-600" />
+          <span className="font-semibold">DSentr</span>
+        </div>
+        <SettingsButton onOpenSettings={() => setSettingsOpen(true)} />
+      </div>
+      <div className="flex h-full">
       <aside className="w-64 border-r border-zinc-200 dark:border-zinc-700 p-4 bg-zinc-100 dark:bg-zinc-800">
         <h2 className="font-semibold mb-4 text-zinc-700 dark:text-zinc-200">Tasks</h2>
         {[
@@ -448,6 +505,44 @@ export default function Dashboard() {
           )}
         </ReactFlowProvider>
       </div>
+      </div>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        tabs={[
+          { key: 'workflows', label: 'Workflows' },
+          { key: 'logs', label: 'Logs' },
+          { key: 'preferences', label: 'Preferences' },
+        ]}
+        renderTab={(key) => {
+          if (key === 'workflows') {
+            return (
+              <WorkflowsTab
+                workflows={workflows}
+                onDeleted={(id) => {
+                  setWorkflows((prev) => prev.filter((w) => w.id !== id))
+                  if (currentWorkflowId === id) {
+                    const next = workflows.find((w) => w.id !== id)
+                    setCurrentWorkflowId(next?.id ?? null)
+                    setWorkflowData(createEmptyGraph())
+                  }
+                }}
+              />
+            )
+          }
+          if (key === 'logs') return <LogsTab />
+          return (
+            <PreferencesTab
+              disallowDuplicateNames={disallowDuplicateNames}
+              onToggleDuplicateNames={(v) => {
+                setDisallowDuplicateNames(v)
+                localStorage.setItem('pref_disallow_duplicate_names', v ? '1' : '0')
+              }}
+            />
+          )
+        }}
+      />
     </div>
   )
 }
