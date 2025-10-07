@@ -129,6 +129,7 @@ export default function Dashboard() {
     saveAllNodes?: () => any[]
     getEdges?: () => any[]
     setNodesFromToolbar?: (updatedNodes: any[]) => void
+    loadGraph?: (graph: { nodes: any[]; edges: any[] }) => void
   } | null>(null)
   const lastSavedSnapshotRef = useRef<string>(
     serializeSnapshot({ name: '', description: null }, createEmptyGraph())
@@ -219,30 +220,71 @@ export default function Dashboard() {
     (id: string) => {
       if (id === currentWorkflowId) return
 
-      const nextWorkflow = workflows.find(workflow => workflow.id === id)
-      setCurrentWorkflowId(id)
-      setWorkflowDirty(false)
-      setError(null)
-
-      if (nextWorkflow) {
-        const normalized = normalizeWorkflowData(nextWorkflow.data)
-        setWorkflowData(normalized)
-        latestGraphRef.current = normalized
-        lastSavedSnapshotRef.current = serializeSnapshot(
-          { name: nextWorkflow.name, description: nextWorkflow.description ?? null },
-          normalized
-        )
-      } else {
-        const empty = createEmptyGraph()
-        setWorkflowData(empty)
-        latestGraphRef.current = empty
-        lastSavedSnapshotRef.current = serializeSnapshot({ name: '', description: null }, empty)
+      // If current workflow has unsaved changes, prompt before switching
+      if (workflowDirty) {
+        setPendingSwitchId(id)
+        setShowSwitchConfirm(true)
+        return
       }
 
-      pendingSnapshotRef.current = null
+      doSelectWorkflow(id)
     },
-    [currentWorkflowId, workflows, normalizeWorkflowData]
+    [currentWorkflowId, workflows, normalizeWorkflowData, workflowDirty]
   )
+
+  // Internal function to apply the actual switch logic
+  const doSelectWorkflow = useCallback((id: string) => {
+    const nextWorkflow = workflows.find(workflow => workflow.id === id)
+    setCurrentWorkflowId(id)
+    setWorkflowDirty(false)
+    setError(null)
+
+    if (nextWorkflow) {
+      const normalized = normalizeWorkflowData(nextWorkflow.data)
+      setWorkflowData(normalized)
+      latestGraphRef.current = normalized
+      lastSavedSnapshotRef.current = serializeSnapshot(
+        { name: nextWorkflow.name, description: nextWorkflow.description ?? null },
+        normalized
+      )
+    } else {
+      const empty = createEmptyGraph()
+      setWorkflowData(empty)
+      latestGraphRef.current = empty
+      lastSavedSnapshotRef.current = serializeSnapshot({ name: '', description: null }, empty)
+    }
+
+    pendingSnapshotRef.current = null
+  }, [workflows, normalizeWorkflowData])
+
+  // Confirm-to-switch dialog state
+  const [showSwitchConfirm, setShowSwitchConfirm] = useState(false)
+  const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null)
+
+  // After save completes successfully (dirty=false and not saving), perform pending switch
+  useEffect(() => {
+    if (showSwitchConfirm && pendingSwitchId && !isSaving && !workflowDirty) {
+      const target = pendingSwitchId
+      setShowSwitchConfirm(false)
+      setPendingSwitchId(null)
+      doSelectWorkflow(target)
+    }
+  }, [showSwitchConfirm, pendingSwitchId, isSaving, workflowDirty, doSelectWorkflow])
+
+  // Warn on browser tab close/refresh when there are unsaved changes
+  useEffect(() => {
+    const beforeUnload = (e: BeforeUnloadEvent) => {
+      if (workflowDirty && !isSaving) {
+        e.preventDefault()
+        // Some browsers require returnValue to be set
+        e.returnValue = ''
+        return ''
+      }
+      return undefined
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => window.removeEventListener('beforeunload', beforeUnload)
+  }, [workflowDirty, isSaving])
 
   const renameWorkflow = useCallback(
     (id: string, newName: string) => {
@@ -324,6 +366,7 @@ export default function Dashboard() {
         logSnapshotDiff('graphChange', baseline, snapshot)
       }
       setWorkflowDirty(dirty)
+      setIsGraphEmpty((graph?.nodes?.length ?? 0) === 0 && (graph?.edges?.length ?? 0) === 0)
     },
     [currentMeta]
   )
@@ -437,6 +480,10 @@ export default function Dashboard() {
     }
     return { id: currentWorkflow.id, name: currentWorkflow.name, list: workflowOptions }
   }, [currentWorkflow, workflowOptions])
+  const [isGraphEmpty, setIsGraphEmpty] = useState<boolean>(() => {
+    try { return (workflowData?.nodes?.length ?? 0) === 0 && (workflowData?.edges?.length ?? 0) === 0 } catch { return true }
+  })
+  const [templatesOpen, setTemplatesOpen] = useState(false)
 
   function DraggableTile({
     type,
@@ -472,6 +519,21 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+    )
+  }
+  function TemplateButton({ label, description, onClick, disabled }: { label: string; description?: string; onClick: () => void; disabled?: boolean }) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className={`w-full text-left px-3 py-2 rounded-lg border bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-sm ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+      >
+        <div className="flex flex-col">
+          <span className="text-sm font-medium">{label}</span>
+          {description && <span className="text-xs text-zinc-500">{description}</span>}
+        </div>
+      </button>
     )
   }
 
@@ -516,6 +578,161 @@ export default function Dashboard() {
         <DraggableTile type="Trigger" icon={<TriggerIcon />} gradient="from-emerald-500 to-teal-600" />
         <DraggableTile type="Action" icon={<ActionIcon />} gradient="from-indigo-500 to-violet-600" />
         <DraggableTile type="Condition" icon={<ConditionIcon />} gradient="from-amber-500 to-orange-600" />
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setTemplatesOpen(v => !v)}
+            className={`w-full text-left px-3 py-2 rounded-lg border shadow-sm flex items-center justify-between ${
+              isGraphEmpty
+                ? 'bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700'
+                : 'bg-zinc-100 dark:bg-zinc-800/60 text-zinc-400'
+            }`}
+            title={isGraphEmpty ? 'Browse templates' : (templatesOpen ? 'Hide templates' : 'Templates are disabled when the canvas is not empty')}
+          >
+            <span className="text-sm font-medium">Templates</span>
+            <span className="text-xs text-zinc-500">{templatesOpen ? 'Hide' : 'Show'}</span>
+          </button>
+          {templatesOpen && (
+            <div className={`mt-2 max-h-64 overflow-auto pr-1 space-y-2 ${isGraphEmpty ? '' : 'opacity-60'}`}>
+              <TemplateButton
+                label="HTTP Trigger → Webhook"
+                description="Send a webhook when triggered"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 80, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'action-1', type: 'action', position: { x: 320, y: 120 }, data: { label: 'Webhook', expanded: true, actionType: 'http', params: { method: 'POST', url: 'https://example.com/webhook', headers: [{ key: 'Content-Type', value: 'application/json' }], bodyType: 'json', body: '{"event":"example","value":123}' }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [ { id: 'e1', source: 'trigger-1', target: 'action-1', type: 'nodeEdge', data: { edgeType: 'default' } } ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+              <TemplateButton
+                label="Email on Trigger"
+                description="Send an email via SMTP"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 80, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'action-1', type: 'action', position: { x: 320, y: 120 }, data: { label: 'Send Email', expanded: true, actionType: 'Send Email', params: { service: 'SMTP', from: '', to: '', subject: 'Welcome to Dsentr', body: 'This is a sample email from Dsentr.' }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [ { id: 'e1', source: 'trigger-1', target: 'action-1', type: 'nodeEdge', data: { edgeType: 'default' } } ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+              <TemplateButton
+                label="SendGrid Email"
+                description="Send via SendGrid"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 80, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'action-1', type: 'action', position: { x: 320, y: 120 }, data: { label: 'Send Email', expanded: true, actionType: 'Send Email', params: { service: 'SendGrid', from: '', to: '', subject: 'Welcome to Dsentr', body: 'This is a sample email from Dsentr.' }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [ { id: 'e1', source: 'trigger-1', target: 'action-1', type: 'nodeEdge', data: { edgeType: 'default' } } ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+              <TemplateButton
+                label="Amazon SES Email"
+                description="Send via Amazon SES"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 80, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'action-1', type: 'action', position: { x: 320, y: 120 }, data: { label: 'Send Email', expanded: true, actionType: 'Send Email', params: { service: 'Amazon SES', region: 'us-east-1', from: '', to: '', subject: 'Welcome to Dsentr', body: 'This is a sample email from Dsentr.' }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [ { id: 'e1', source: 'trigger-1', target: 'action-1', type: 'nodeEdge', data: { edgeType: 'default' } } ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+              <TemplateButton
+                label="Mailgun Email"
+                description="Send via Mailgun"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 80, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'action-1', type: 'action', position: { x: 320, y: 120 }, data: { label: 'Send Email', expanded: true, actionType: 'Send Email', params: { service: 'Mailgun', region: 'US (api.mailgun.net)', from: '', to: '', subject: 'Welcome to Dsentr', body: 'This is a sample email from Dsentr.' }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [ { id: 'e1', source: 'trigger-1', target: 'action-1', type: 'nodeEdge', data: { edgeType: 'default' } } ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+              <TemplateButton
+                label="Messaging"
+                description="Send a message (SMS/Chat)"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 80, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'action-1', type: 'action', position: { x: 320, y: 120 }, data: { label: 'Message', expanded: true, actionType: 'messaging', params: { platform: 'Slack', channel: '#general', message: 'Hello from Dsentr!', token: '' }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [ { id: 'e1', source: 'trigger-1', target: 'action-1', type: 'nodeEdge', data: { edgeType: 'default' } } ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+              <TemplateButton
+                label="Google Sheets Append"
+                description="Append a row on trigger"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 80, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'action-1', type: 'action', position: { x: 320, y: 120 }, data: { label: 'Google Sheets', expanded: true, actionType: 'sheets', params: { spreadsheetId: '', worksheet: 'Sheet1', columns: [{ key: 'timestamp', value: '{{now}}' }, { key: 'event', value: 'triggered' }] }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [ { id: 'e1', source: 'trigger-1', target: 'action-1', type: 'nodeEdge', data: { edgeType: 'default' } } ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+              <TemplateButton
+                label="Run Code → HTTP"
+                description="Process then call an API"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 60, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'action-1', type: 'action', position: { x: 280, y: 80 }, data: { label: 'Run Code', expanded: true, actionType: 'code', params: { language: 'js', code: '// transform inputs here\n// inputs available in scope: context\n// return an object to pass to next node', inputs: [], outputs: [] }, timeout: 5000, retries: 0, stopOnError: true } },
+                    { id: 'action-2', type: 'action', position: { x: 500, y: 120 }, data: { label: 'HTTP Request', expanded: true, actionType: 'http', params: { method: 'GET', url: 'https://api.example.com/resource', headers: [], body: '' }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [
+                    { id: 'e1', source: 'trigger-1', target: 'action-1', type: 'nodeEdge', data: { edgeType: 'default' } },
+                    { id: 'e2', source: 'action-1', target: 'action-2', type: 'nodeEdge', data: { edgeType: 'default' } },
+                  ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+              <TemplateButton
+                label="Branch by Condition"
+                description="Split flow into two paths"
+                disabled={!isGraphEmpty}
+                onClick={() => {
+                  if (!saveRef.current?.loadGraph || !isGraphEmpty) return
+                  const nodes = [
+                    { id: 'trigger-1', type: 'trigger', position: { x: 40, y: 120 }, data: { label: 'Trigger', expanded: true, inputs: [], triggerType: 'Manual' } },
+                    { id: 'cond-1', type: 'condition', position: { x: 260, y: 120 }, data: { label: 'If price > 100', expanded: true, field: 'price', operator: 'greater than', value: '100' } },
+                    { id: 'action-true', type: 'action', position: { x: 520, y: 60 }, data: { label: 'Send Email (High)', expanded: true, actionType: 'Send Email', params: { service: 'SMTP', from: '', to: '', subject: 'High price detected', body: 'Price exceeded threshold.' }, timeout: 5000, retries: 0, stopOnError: true } },
+                    { id: 'action-false', type: 'action', position: { x: 520, y: 180 }, data: { label: 'Slack Notify (Low)', expanded: true, actionType: 'messaging', params: { platform: 'Slack', channel: '#alerts', message: 'Price within normal range', token: '' }, timeout: 5000, retries: 0, stopOnError: true } },
+                  ]
+                  const edges = [
+                    { id: 'e1', source: 'trigger-1', target: 'cond-1', type: 'nodeEdge', data: { edgeType: 'default' } },
+                    { id: 'e2', source: 'cond-1', sourceHandle: 'cond-true', target: 'action-true', type: 'nodeEdge', data: { edgeType: 'default', outcome: 'true' }, label: 'True' },
+                    { id: 'e3', source: 'cond-1', sourceHandle: 'cond-false', target: 'action-false', type: 'nodeEdge', data: { edgeType: 'default', outcome: 'false' }, label: 'False' },
+                  ]
+                  saveRef.current.loadGraph({ nodes, edges })
+                }}
+              />
+            </div>
+          )}
+        </div>
       </aside>
 
       <div className="flex-1 flex flex-col bg-zinc-50 dark:bg-zinc-900">
@@ -552,6 +769,48 @@ export default function Dashboard() {
         </ReactFlowProvider>
       </div>
       </div>
+
+      {/* Unsaved changes confirm switch dialog */}
+      {showSwitchConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowSwitchConfirm(false); setPendingSwitchId(null) }} />
+          <div className="relative bg-white dark:bg-zinc-900 rounded-xl shadow-xl w-[420px] p-4 border border-zinc-200 dark:border-zinc-700">
+            <h3 className="font-semibold mb-2">Unsaved changes</h3>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-4">Save your current workflow before switching?</p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setShowSwitchConfirm(false); setPendingSwitchId(null) }}
+                className="px-3 py-1 text-sm rounded border"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (!pendingSwitchId) return
+                  // Trigger save; the useEffect will perform the switch after save succeeds
+                  handleSave()
+                }}
+                className="px-3 py-1 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                disabled={isSaving}
+              >
+                {isSaving ? 'Saving…' : 'Save and Switch'}
+              </button>
+              <button
+                onClick={() => {
+                  if (!pendingSwitchId) return
+                  const target = pendingSwitchId
+                  setShowSwitchConfirm(false)
+                  setPendingSwitchId(null)
+                  doSelectWorkflow(target)
+                }}
+                className="px-3 py-1 text-sm rounded bg-red-600 text-white hover:bg-red-700"
+              >
+                Discard and Switch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Settings modal moved to DashboardLayout */}
     </div>

@@ -54,6 +54,7 @@ interface FlowCanvasProps {
     saveAllNodes: () => any[]
     getEdges: () => any[]
     setNodesFromToolbar: (updatedNodes: any[]) => void
+    loadGraph: (graph: { nodes: any[]; edges: any[] }) => void
   }) => void
   workflowId?: string | null
   workflowData?: { nodes: any[]; edges: any[] }
@@ -147,6 +148,16 @@ export default function FlowCanvas({
               return updated ? { ...n, data: { ...n.data, ...updated.data } } : n
             })
           )
+        ,
+        loadGraph: (graph) => {
+          const safeNodes = (graph?.nodes ?? []).map((n: any) => ({
+            ...n,
+            data: { ...(n.data ?? {}), dirty: n.data?.dirty ?? false }
+          }))
+          setNodes(safeNodes)
+          setEdges(graph?.edges ?? [])
+          markWorkflowDirty()
+        }
       })
     }
   }, [edges, saveAllNodes, setSaveRef, setNodes])
@@ -214,12 +225,19 @@ export default function FlowCanvas({
 
   const onConnect = useCallback(
     params => {
+      const outcomeLabel =
+        params?.sourceHandle === 'cond-true'
+          ? 'True'
+          : params?.sourceHandle === 'cond-false'
+          ? 'False'
+          : null
       setEdges(eds =>
         addEdge(
           {
             ...params,
             type: 'nodeEdge',
-            data: { edgeType: 'default' }
+            label: outcomeLabel,
+            data: { edgeType: 'default', outcome: outcomeLabel?.toLowerCase?.() }
           },
           eds
         )
@@ -243,7 +261,7 @@ export default function FlowCanvas({
         position,
         data: {
           label: type,
-          expanded: type.toLowerCase() === 'trigger' || type.toLowerCase() === 'action',
+          expanded: ['trigger', 'action', 'condition'].includes(type.toLowerCase()),
           dirty: true,
           inputs: []
         }

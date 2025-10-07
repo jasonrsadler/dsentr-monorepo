@@ -6,6 +6,7 @@ export default function LogsTab() {
   const [workflowId, setWorkflowId] = useState<string>('')
   const [logs, setLogs] = useState<WorkflowLogEntry[]>([])
   const [loading, setLoading] = useState(false)
+  const [workflowName, setWorkflowName] = useState<string>('')
 
   useEffect(() => {
     listWorkflows().then(ws => {
@@ -15,28 +16,42 @@ export default function LogsTab() {
   }, [])
 
   useEffect(() => {
-    if (!workflowId) { setLogs([]); return }
+    if (!workflowId) { setLogs([]); setWorkflowName(''); return }
     setLoading(true)
-    getWorkflowLogs(workflowId).then(setLogs).finally(() => setLoading(false))
-  }, [workflowId])
+    getWorkflowLogs(workflowId)
+      .then(({ workflow, logs }) => {
+        setLogs(logs)
+        if (workflow?.name) setWorkflowName(workflow.name)
+        else {
+          const w = workflows.find(w => w.id === workflowId)
+          setWorkflowName(w?.name ?? '')
+        }
+      })
+      .finally(() => setLoading(false))
+  }, [workflowId, workflows])
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-start gap-4">
-        <div className="flex items-center gap-2">
-          <label className="text-sm">Workflow</label>
-          <select
-            value={workflowId}
-            onChange={(e) => setWorkflowId(e.target.value)}
-            className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700"
-          >
-            {workflows.map(w => (
-              <option key={w.id} value={w.id}>{w.name}</option>
-            ))}
-          </select>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-sm">Workflow</label>
+            <select
+              value={workflowId}
+              onChange={(e) => setWorkflowId(e.target.value)}
+              className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700"
+            >
+              {workflows.map(w => (
+                <option key={w.id} value={w.id}>{w.name}</option>
+              ))}
+            </select>
+          </div>
+          {workflowName && (
+            <span className="text-sm text-zinc-600 dark:text-zinc-300">Viewing: <span className="font-medium">{workflowName}</span></span>
+          )}
         </div>
         <button
-          className="text-sm underline text-zinc-600 dark:text-zinc-300 ml-2"
+          className="text-sm underline"
           onClick={async () => { if (workflowId) { await clearWorkflowLogs(workflowId); setLogs([]) } }}
           disabled={!workflowId}
         >

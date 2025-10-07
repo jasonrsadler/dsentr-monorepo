@@ -109,12 +109,12 @@ export async function deleteWorkflow(id: string): Promise<{ success: boolean }> 
   return { success: Boolean(data?.success ?? true) }
 }
 
-export async function getWorkflowLogs(workflowId: string): Promise<WorkflowLogEntry[]> {
+export async function getWorkflowLogs(workflowId: string): Promise<{ workflow?: { id: string; name: string }, logs: WorkflowLogEntry[] }> {
   const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/logs`, {
     credentials: 'include',
   })
   const data = await handleJsonResponse(res)
-  return data.logs ?? []
+  return { workflow: data.workflow, logs: data.logs ?? [] }
 }
 
 export async function deleteWorkflowLog(workflowId: string, logId: string): Promise<{ success: boolean }> {

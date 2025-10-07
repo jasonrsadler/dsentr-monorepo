@@ -73,10 +73,38 @@ export default function ConditionNode({
         position={Position.Left}
         style={{ width: 14, height: 14, backgroundColor: "blue", border: "2px solid white" }}
       />
+      {/* True output (top-right) */}
       <Handle
+        id="cond-true"
         type="source"
         position={Position.Right}
-        style={{ width: 14, height: 14, backgroundColor: "green", border: "2px solid white" }}
+        style={{
+          top: 16,
+          right: -7,
+          width: 14,
+          height: 14,
+          backgroundColor: "#16a34a",
+          border: "2px solid white",
+          transform: "none",
+        }}
+        title="True"
+      />
+      {/* False output (bottom-right) */}
+      <Handle
+        id="cond-false"
+        type="source"
+        position={Position.Right}
+        style={{
+          top: "auto",
+          bottom: 16,
+          right: -7,
+          width: 14,
+          height: 14,
+          backgroundColor: "#ef4444",
+          border: "2px solid white",
+          transform: "none",
+        }}
+        title="False"
       />
 
       <div className="p-3">
