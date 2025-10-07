@@ -44,7 +44,7 @@ export default function ActionNode({
   const [actionType, setActionType] = useState(data?.actionType || "Send Email")
   const [params, setParams] = useState(() => ({
     service: "",
-    ...(data?.inputs || {})
+    ...(data?.params || data?.inputs || {})
   }))
   const [timeout, setTimeoutMs] = useState(data?.timeout || 5000)
   const [retries, setRetries] = useState(data?.retries || 0)

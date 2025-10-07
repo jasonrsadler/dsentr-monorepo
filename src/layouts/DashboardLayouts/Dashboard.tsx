@@ -5,11 +5,6 @@ import FlowCanvas from './FlowCanvas'
 import ActionIcon from '@/assets/svg-components/ActionIcon'
 import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
-import SettingsButton from '@/components/Settings/SettingsButton'
-import SettingsModal from '@/components/Settings/SettingsModal'
-import WorkflowsTab from '@/components/Settings/tabs/WorkflowsTab'
-import LogsTab from '@/components/Settings/tabs/LogsTab'
-import PreferencesTab from '@/components/Settings/tabs/PreferencesTab'
 import { useWorkflowLogs } from '@/stores/workflowLogs'
 import {
   listWorkflows,
@@ -128,11 +123,7 @@ export default function Dashboard() {
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isSavingRef = useRef(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [disallowDuplicateNames, setDisallowDuplicateNames] = useState<boolean>(() => {
-    const v = localStorage.getItem('pref_disallow_duplicate_names')
-    return v ? v === '1' : false
-  })
+  // Settings moved to DashboardLayout header
   const addLog = useWorkflowLogs((s) => s.add)
   const saveRef = useRef<{
     saveAllNodes?: () => any[]
@@ -266,16 +257,20 @@ export default function Dashboard() {
   )
 
   const handleNewWorkflow = useCallback(async () => {
+    // Guard against rapid double-clicks while a create is in-flight
+    if (isSavingRef.current || isSaving) return
     try {
+      isSavingRef.current = true
       setIsSaving(true)
       setError(null)
 
       const base = 'New Workflow'
-      const names = new Set(workflows.map(w => w.name))
+      // Always enforce unique, case-insensitive names
+      const existing = new Set(workflows.map(w => (w.name || '').toLowerCase()))
       let unique = base
-      if (disallowDuplicateNames && names.has(unique)) {
-        let i = 2
-        while (names.has(`${base} (${i})`)) i++
+      let i = 1
+      while (existing.has(unique.toLowerCase())) {
+        i += 1
         unique = `${base} (${i})`
       }
 
@@ -306,7 +301,7 @@ export default function Dashboard() {
       setIsSaving(false)
       isSavingRef.current = false
     }
-  }, [normalizeWorkflowData])
+  }, [normalizeWorkflowData, isSaving, workflows])
 
   const handleGraphChange = useCallback(
     (graph: { nodes: any[]; edges: any[] }) => {
@@ -443,33 +438,84 @@ export default function Dashboard() {
     return { id: currentWorkflow.id, name: currentWorkflow.name, list: workflowOptions }
   }, [currentWorkflow, workflowOptions])
 
+  function DraggableTile({
+    type,
+    icon,
+    gradient,
+  }: { type: 'Trigger' | 'Action' | 'Condition'; icon: JSX.Element; gradient: string }) {
+    return (
+      <div
+        draggable
+        onDragStart={e => e.dataTransfer.setData('application/reactflow', type)}
+        role="button"
+        aria-label={`Add ${type}`}
+        className={[
+          'group relative overflow-hidden rounded-xl border shadow-sm cursor-grab active:cursor-grabbing select-none',
+          'bg-gradient-to-br',
+          gradient,
+          'p-3 mb-3 text-white',
+          'transition-transform will-change-transform hover:translate-y-[-1px] hover:shadow-md',
+        ].join(' ')}
+      >
+        <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="relative z-10 flex items-center gap-2">
+          <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-white/15 ring-1 ring-white/20">
+            {icon}
+          </span>
+          <div className="flex flex-col leading-none">
+            <span className="text-sm font-semibold tracking-tight">{type}</span>
+            <span className="text-[11px] opacity-90">
+              {type === 'Trigger' && 'Start your flow'}
+              {type === 'Action' && 'Do something'}
+              {type === 'Condition' && 'Branch logic'}
+            </span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // React to workflow deletions initiated from Settings modal
+  useEffect(() => {
+    function onWorkflowDeleted(e: any) {
+      const deletedId: string | undefined = e?.detail?.id
+      if (!deletedId) return
+      setWorkflows(prev => {
+        const updated = prev.filter(w => w.id !== deletedId)
+        if (currentWorkflowId === deletedId) {
+          if (updated.length > 0) {
+            const next = updated[0]
+            setCurrentWorkflowId(next.id)
+            const normalized = normalizeWorkflowData(next.data)
+            setWorkflowData(normalized)
+            latestGraphRef.current = normalized
+            lastSavedSnapshotRef.current = serializeSnapshot(
+              { name: next.name, description: next.description ?? null },
+              normalized
+            )
+            pendingSnapshotRef.current = null
+            setWorkflowDirty(false)
+          } else {
+            // No workflows left — create a fresh one
+            handleNewWorkflow()
+          }
+        }
+        return updated
+      })
+    }
+    window.addEventListener('workflow-deleted', onWorkflowDeleted as any)
+    return () => window.removeEventListener('workflow-deleted', onWorkflowDeleted as any)
+  }, [currentWorkflowId, normalizeWorkflowData, handleNewWorkflow])
+
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded bg-gradient-to-br from-indigo-500 to-violet-600" />
-          <span className="font-semibold">DSentr</span>
-        </div>
-        <SettingsButton onOpenSettings={() => setSettingsOpen(true)} />
-      </div>
+      {/* Header moved to DashboardLayout */}
       <div className="flex h-full">
-      <aside className="w-64 border-r border-zinc-200 dark:border-zinc-700 p-4 bg-zinc-100 dark:bg-zinc-800">
-        <h2 className="font-semibold mb-4 text-zinc-700 dark:text-zinc-200">Tasks</h2>
-        {[
-          { type: 'Trigger', icon: <TriggerIcon /> },
-          { type: 'Action', icon: <ActionIcon /> },
-          { type: 'Condition', icon: <ConditionIcon /> }
-        ].map(({ type, icon }) => (
-          <div
-            key={type}
-            draggable
-            onDragStart={e => e.dataTransfer.setData('application/reactflow', type)}
-            className="flex items-center justify-center gap-1 p-3 mb-2 rounded-lg shadow bg-white dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-600 cursor-grab transition"
-          >
-            {icon}
-            <span className="text-sm font-medium">{type}</span>
-          </div>
-        ))}
+      <aside className="w-64 border-r border-zinc-200 dark:border-zinc-700 p-4 bg-zinc-50 dark:bg-zinc-900">
+        <h2 className="font-semibold mb-3 text-zinc-700 dark:text-zinc-200">Tasks</h2>
+        <DraggableTile type="Trigger" icon={<TriggerIcon />} gradient="from-emerald-500 to-teal-600" />
+        <DraggableTile type="Action" icon={<ActionIcon />} gradient="from-indigo-500 to-violet-600" />
+        <DraggableTile type="Condition" icon={<ConditionIcon />} gradient="from-amber-500 to-orange-600" />
       </aside>
 
       <div className="flex-1 flex flex-col bg-zinc-50 dark:bg-zinc-900">
@@ -507,42 +553,7 @@ export default function Dashboard() {
       </div>
       </div>
 
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        tabs={[
-          { key: 'workflows', label: 'Workflows' },
-          { key: 'logs', label: 'Logs' },
-          { key: 'preferences', label: 'Preferences' },
-        ]}
-        renderTab={(key) => {
-          if (key === 'workflows') {
-            return (
-              <WorkflowsTab
-                workflows={workflows}
-                onDeleted={(id) => {
-                  setWorkflows((prev) => prev.filter((w) => w.id !== id))
-                  if (currentWorkflowId === id) {
-                    const next = workflows.find((w) => w.id !== id)
-                    setCurrentWorkflowId(next?.id ?? null)
-                    setWorkflowData(createEmptyGraph())
-                  }
-                }}
-              />
-            )
-          }
-          if (key === 'logs') return <LogsTab />
-          return (
-            <PreferencesTab
-              disallowDuplicateNames={disallowDuplicateNames}
-              onToggleDuplicateNames={(v) => {
-                setDisallowDuplicateNames(v)
-                localStorage.setItem('pref_disallow_duplicate_names', v ? '1' : '0')
-              }}
-            />
-          )
-        }}
-      />
+      {/* Settings modal moved to DashboardLayout */}
     </div>
   )
 }

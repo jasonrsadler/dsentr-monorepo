@@ -3,15 +3,29 @@ import { useEffect, useState } from "react"
 export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onRename, dirty, saving = false }) {
   const [editingName, setEditingName] = useState(false)
   const [name, setName] = useState(workflow?.name || "")
+  const [nameError, setNameError] = useState<string | null>(null)
 
   useEffect(() => {
     setName(workflow?.name || "")
   }, [workflow?.id, workflow?.name])
 
   const handleRename = () => {
-    if (name.trim() && name !== workflow?.name) {
-      onRename?.(workflow.id, name.trim())
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setName(workflow?.name || "")
+      setEditingName(false)
+      setNameError(null)
+      return
     }
+    if (trimmed !== workflow?.name) {
+      const exists = (workflow?.list || []).some((w: any) => w.name?.toLowerCase?.() === trimmed.toLowerCase())
+      if (exists) {
+        setNameError('A workflow with this name already exists')
+        return
+      }
+      onRename?.(workflow.id, trimmed)
+    }
+    setNameError(null)
     setEditingName(false)
   }
 
@@ -49,6 +63,10 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
         </button>
       )}
 
+      {nameError && (
+        <span className="text-xs text-red-600 ml-2">{nameError}</span>
+      )}
+
       <button onClick={onNew} className="px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600">
         New Workflow
       </button>
@@ -65,5 +83,4 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
     </div>
   )
 }
-
 

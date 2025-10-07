@@ -17,6 +17,14 @@ export interface WorkflowPayload {
   data: Record<string, any>
 }
 
+export interface WorkflowLogEntry {
+  id: string
+  workflow_id: string
+  user_id: string
+  created_at: string
+  diffs: any
+}
+
 async function handleJsonResponse(response: Response) {
   let body: any = null
 
@@ -97,6 +105,36 @@ export async function deleteWorkflow(id: string): Promise<{ success: boolean }> 
     credentials: 'include',
   })
 
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true) }
+}
+
+export async function getWorkflowLogs(workflowId: string): Promise<WorkflowLogEntry[]> {
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/logs`, {
+    credentials: 'include',
+  })
+  const data = await handleJsonResponse(res)
+  return data.logs ?? []
+}
+
+export async function deleteWorkflowLog(workflowId: string, logId: string): Promise<{ success: boolean }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/logs/${logId}`, {
+    method: 'DELETE',
+    headers: { 'x-csrf-token': csrfToken },
+    credentials: 'include',
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true) }
+}
+
+export async function clearWorkflowLogs(workflowId: string): Promise<{ success: boolean }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/logs`, {
+    method: 'DELETE',
+    headers: { 'x-csrf-token': csrfToken },
+    credentials: 'include',
+  })
   const data = await handleJsonResponse(res)
   return { success: Boolean(data?.success ?? true) }
 }
