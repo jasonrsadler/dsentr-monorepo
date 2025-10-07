@@ -208,6 +208,8 @@ async fn main() {
                 .put(update_workflow)
                 .delete(delete_workflow),
         )
+        .route("/{workflow_id}/logs", get(routes::workflows::list_workflow_logs).delete(routes::workflows::clear_workflow_logs))
+        .route("/{workflow_id}/logs/{log_id}", delete(routes::workflows::delete_workflow_log_entry))
         .layer(csrf_layer.clone());
     let app = Router::new()
         .route("/", get(root))

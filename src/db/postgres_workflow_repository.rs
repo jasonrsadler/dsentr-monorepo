@@ -1,4 +1,4 @@
-use crate::{db::workflow_repository::WorkflowRepository, models::workflow::Workflow};
+use crate::{db::workflow_repository::WorkflowRepository, models::workflow::Workflow, models::workflow_log::WorkflowLog};
 use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -117,5 +117,89 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn insert_workflow_log(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        diffs: serde_json::Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            INSERT INTO workflow_logs (user_id, workflow_id, diffs)
+            VALUES ($1, $2, $3)
+            "#,
+            user_id,
+            workflow_id,
+            diffs
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_workflow_logs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<WorkflowLog>, sqlx::Error> {
+        let rows = sqlx::query_as!(
+            WorkflowLog,
+            r#"
+            SELECT id, user_id, workflow_id, created_at, diffs
+            FROM workflow_logs
+            WHERE user_id = $1 AND workflow_id = $2
+            ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
+            "#,
+            user_id,
+            workflow_id,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn delete_workflow_log(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        log_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        let res = sqlx::query!(
+            r#"
+            DELETE FROM workflow_logs
+            WHERE user_id = $1 AND workflow_id = $2 AND id = $3
+            "#,
+            user_id,
+            workflow_id,
+            log_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn clear_workflow_logs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error> {
+        let res = sqlx::query!(
+            r#"
+            DELETE FROM workflow_logs
+            WHERE user_id = $1 AND workflow_id = $2
+            "#,
+            user_id,
+            workflow_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
     }
 }

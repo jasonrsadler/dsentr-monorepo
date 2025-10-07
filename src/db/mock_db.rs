@@ -178,4 +178,40 @@ impl WorkflowRepository for NoopWorkflowRepository {
     ) -> Result<bool, sqlx::Error> {
         Ok(false)
     }
+
+    async fn insert_workflow_log(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _diffs: serde_json::Value,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn list_workflow_logs(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _limit: i64,
+        _offset: i64,
+    ) -> Result<Vec<crate::models::workflow_log::WorkflowLog>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn delete_workflow_log(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _log_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn clear_workflow_logs(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error> {
+        Ok(0)
+    }
 }
