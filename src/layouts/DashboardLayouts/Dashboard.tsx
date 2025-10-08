@@ -8,9 +8,14 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { useWorkflowLogs } from '@/stores/workflowLogs'
 import {
   listWorkflows,
+  getWorkflow,
   createWorkflow as createWorkflowApi,
   updateWorkflow as updateWorkflowApi,
-  WorkflowRecord
+  WorkflowRecord,
+  startWorkflowRun,
+  getWorkflowRunStatus,
+  type WorkflowRunRecord,
+  type WorkflowNodeRunRecord,
 } from '@/lib/workflowApi'
 
 const TriggerIcon = () => (
@@ -21,7 +26,11 @@ const TriggerIcon = () => (
 
 const createEmptyGraph = () => ({ nodes: [] as any[], edges: [] as any[] })
 function sortById<T extends { id: string }>(arr: T[]): T[] { return [...arr].sort((a, b) => a.id.localeCompare(b.id)) }
-function sanitizeData(data: any) { if (!data || typeof data !== "object") return data; const { dirty, ...rest } = data as any; return rest; }
+function sanitizeData(data: any) {
+  if (!data || typeof data !== 'object') return data
+  const { dirty, wfEpoch, ...rest } = data as any
+  return rest
+}
 
 const serializeSnapshot = (
   meta: { name: string; description: string | null },
@@ -137,10 +146,34 @@ export default function Dashboard() {
   const pendingSnapshotRef = useRef<string | null>(null)
   const latestGraphRef = useRef<{ nodes: any[]; edges: any[] }>(createEmptyGraph())
 
+  // Run state
+  const [runOverlayOpen, setRunOverlayOpen] = useState(false)
+  const [activeRun, setActiveRun] = useState<WorkflowRunRecord | null>(null)
+  const [nodeRuns, setNodeRuns] = useState<WorkflowNodeRunRecord[]>([])
+  const pollTimerRef = useRef<any>(null)
+
   const normalizeWorkflowData = useCallback((data: any) => {
     if (data && typeof data === 'object') {
-      const nodes = Array.isArray((data as any).nodes) ? (data as any).nodes : []
-      const edges = Array.isArray((data as any).edges) ? (data as any).edges : []
+      const rawNodes = Array.isArray((data as any).nodes) ? (data as any).nodes : []
+      const rawEdges = Array.isArray((data as any).edges) ? (data as any).edges : []
+      // Deep-clone to avoid accidental shared references across workflows
+      const nodes = rawNodes.map((n: any) => ({
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data: n.data ? JSON.parse(JSON.stringify(n.data)) : undefined
+      }))
+      const edges = rawEdges.map((e: any) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        type: e.type,
+        data: e.data ? JSON.parse(JSON.stringify(e.data)) : undefined,
+        label: e.label ?? null,
+        animated: Boolean((e as any).animated)
+      }))
       return { nodes, edges }
     }
 
@@ -239,22 +272,39 @@ export default function Dashboard() {
     setWorkflowDirty(false)
     setError(null)
 
-    if (nextWorkflow) {
-      const normalized = normalizeWorkflowData(nextWorkflow.data)
-      setWorkflowData(normalized)
-      latestGraphRef.current = normalized
-      lastSavedSnapshotRef.current = serializeSnapshot(
-        { name: nextWorkflow.name, description: nextWorkflow.description ?? null },
-        normalized
-      )
-    } else {
-      const empty = createEmptyGraph()
-      setWorkflowData(empty)
-      latestGraphRef.current = empty
-      lastSavedSnapshotRef.current = serializeSnapshot({ name: '', description: null }, empty)
-    }
-
-    pendingSnapshotRef.current = null
+    // Always try to fetch fresh data for the selected workflow to avoid shared references/stale state
+    ;(async () => {
+      try {
+        const fresh = await getWorkflow(id)
+        // Update list cache with fresh record
+        setWorkflows(prev => prev.map(w => (w.id === fresh.id ? fresh : w)))
+        const normalized = normalizeWorkflowData(fresh.data)
+        setWorkflowData(normalized)
+        latestGraphRef.current = normalized
+        lastSavedSnapshotRef.current = serializeSnapshot(
+          { name: fresh.name, description: fresh.description ?? null },
+          normalized
+        )
+      } catch (e) {
+        // Fallback to local cache if fetch fails
+        if (nextWorkflow) {
+          const normalized = normalizeWorkflowData(nextWorkflow.data)
+          setWorkflowData(normalized)
+          latestGraphRef.current = normalized
+          lastSavedSnapshotRef.current = serializeSnapshot(
+            { name: nextWorkflow.name, description: nextWorkflow.description ?? null },
+            normalized
+          )
+        } else {
+          const empty = createEmptyGraph()
+          setWorkflowData(empty)
+          latestGraphRef.current = empty
+          lastSavedSnapshotRef.current = serializeSnapshot({ name: '', description: null }, empty)
+        }
+      } finally {
+        pendingSnapshotRef.current = null
+      }
+    })()
   }, [workflows, normalizeWorkflowData])
 
   // Confirm-to-switch dialog state
@@ -370,6 +420,49 @@ export default function Dashboard() {
     },
     [currentMeta]
   )
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+  }, [])
+
+  const pollRun = useCallback(async (workflowId: string, runId: string) => {
+    try {
+      const { run, node_runs } = await getWorkflowRunStatus(workflowId, runId)
+      setActiveRun(run)
+      setNodeRuns(node_runs)
+      if (run.status === 'queued' || run.status === 'running') {
+        pollTimerRef.current = setTimeout(() => pollRun(workflowId, runId), 1000)
+      } else {
+        stopPolling()
+      }
+    } catch (e) {
+      console.error('Polling run failed', e)
+      stopPolling()
+    }
+  }, [stopPolling])
+
+  const handleRunWorkflow = useCallback(async () => {
+    if (!currentWorkflow) return
+    if (workflowDirty) {
+      window.alert('Please save the workflow before running.')
+      return
+    }
+    try {
+      setRunOverlayOpen(true)
+      setActiveRun(null)
+      setNodeRuns([])
+      const run = await startWorkflowRun(currentWorkflow.id)
+      setActiveRun(run)
+      pollRun(currentWorkflow.id, run.id)
+    } catch (e: any) {
+      console.error('Failed to start run', e)
+      setError(e?.message || 'Failed to start run')
+      setRunOverlayOpen(false)
+    }
+  }, [currentWorkflow, workflowDirty, pollRun])
 
   useEffect(() => {
     handleGraphChange(latestGraphRef.current)
@@ -760,6 +853,7 @@ export default function Dashboard() {
               markWorkflowDirty={markWorkflowDirty}
               setSaveRef={ref => (saveRef.current = ref)}
               onGraphChange={handleGraphChange}
+              onRunWorkflow={handleRunWorkflow}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
@@ -813,6 +907,48 @@ export default function Dashboard() {
       )}
 
       {/* Settings modal moved to DashboardLayout */}
+
+      {/* Run overlay */}
+      {runOverlayOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setRunOverlayOpen(false); stopPolling() }} />
+          <div className="relative bg-white dark:bg-zinc-900 rounded-xl shadow-xl w-[560px] max-h-[70vh] p-4 border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold">Run Status</h3>
+              <button className="text-sm px-2 py-1 border rounded" onClick={() => { setRunOverlayOpen(false); stopPolling() }}>Close</button>
+            </div>
+            {!activeRun ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">Starting run…</p>
+            ) : (
+              <div className="space-y-2 text-sm">
+                <div className="flex gap-2 items-center">
+                  <span className="font-medium">Status:</span>
+                  <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">{activeRun.status}</span>
+                  {activeRun.error && <span className="text-red-600 dark:text-red-400">{activeRun.error}</span>}
+                </div>
+                <div className="border rounded p-2 h-[42vh] overflow-auto bg-zinc-50 dark:bg-zinc-950/40">
+                  {nodeRuns.length === 0 ? (
+                    <div className="text-zinc-500">No node events yet…</div>
+                  ) : (
+                    nodeRuns.map(nr => (
+                      <div key={nr.id} className="mb-2 border-b pb-2 last:border-b-0">
+                        <div className="flex gap-2 items-center">
+                          <span className="font-medium">{nr.name || nr.node_type || nr.node_id}</span>
+                          <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">{nr.status}</span>
+                          {nr.error && <span className="text-red-600 dark:text-red-400">{nr.error}</span>}
+                        </div>
+                        {nr.outputs && (
+                          <pre className="mt-1 text-xs whitespace-pre-wrap break-words bg-white/60 dark:bg-black/30 p-2 rounded">{JSON.stringify(nr.outputs, null, 2)}</pre>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

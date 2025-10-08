@@ -61,6 +61,16 @@ export default function ConditionNode({
     }
   }, [data?.dirty])
 
+  // Reset local state when node id changes (e.g., new node or remount on workflow switch)
+  useEffect(() => {
+    setLabel(data?.label || "Condition")
+    setExpanded(data?.expanded ?? true)
+    setField(data?.field || "")
+    setOperator(data?.operator || "equals")
+    setValue(data?.value || "")
+    setDirty(data?.dirty ?? isNewNode)
+  }, [id])
+
   return (
     <motion.div
       layout

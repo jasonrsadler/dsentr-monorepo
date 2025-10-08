@@ -31,6 +31,14 @@ export default function TriggerNode({
     }
   }, [data?.dirty])
 
+  // Reset local state when node id changes (e.g., new node or remount on workflow switch)
+  useEffect(() => {
+    setLabel(data?.label ?? "Trigger")
+    setExpanded(data?.expanded ?? false)
+    setInputs(data?.inputs ?? [])
+    setDirty(data?.dirty ?? isNewNode)
+  }, [id])
+
   useEffect(() => {
     // notify node update; suppress marking workflow dirty if clearing programmatically
     onUpdateNode?.(id, { label, inputs, dirty, expanded }, true)
@@ -102,6 +110,7 @@ export default function TriggerNode({
                 }}
               />
               <KeyValuePair
+                key={`kv-${id}-${data?.wfEpoch ?? ''}`}
                 title="Input Variables"
                 variables={inputs}
                 onChange={(updatedVars, nodeHasErrors, childDirty) => {

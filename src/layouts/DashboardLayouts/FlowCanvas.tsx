@@ -43,7 +43,7 @@ function sortById<T extends { id: string }>(arr: T[]): T[] {
 
 function sanitizeData(data: any) {
   if (!data || typeof data !== 'object') return data;
-  const { dirty, ...rest } = data as any;
+  const { dirty, wfEpoch, ...rest } = data as any;
   return rest;
 }
 
@@ -59,6 +59,7 @@ interface FlowCanvasProps {
   workflowId?: string | null
   workflowData?: { nodes: any[]; edges: any[] }
   onGraphChange?: (graph: { nodes: any[]; edges: any[] }) => void
+  onRunWorkflow?: () => void
 }
 
 export default function FlowCanvas({
@@ -67,23 +68,33 @@ export default function FlowCanvas({
   setSaveRef,
   workflowId,
   workflowData,
-  onGraphChange
+  onGraphChange,
+  onRunWorkflow
 }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
   const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
   const rafRef = useRef<number | null>(null)
+  // Keep a stable callable for run to avoid re-creating nodeTypes
+  const onRunWorkflowRef = useRef(onRunWorkflow)
+  useEffect(() => { onRunWorkflowRef.current = onRunWorkflow }, [onRunWorkflow])
+  const invokeRunWorkflow = useCallback(() => { onRunWorkflowRef.current?.() }, [])
   useEffect(() => {
     if (!workflowId) {
       setNodes([])
       setEdges([])
       return
     }
+    // Deep clone node data to avoid shared references across workflow switches
+    const epoch = Date.now()
     const incomingNodes = (workflowData?.nodes ?? []).map((node: any) => ({
-      ...node,
-      data: { ...(node.data ?? {}), dirty: node.data?.dirty ?? false }
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      data: { ...(node?.data ? JSON.parse(JSON.stringify(node.data)) : {}), dirty: Boolean(node?.data?.dirty), wfEpoch: epoch }
     }))
+    const incomingEdges = (workflowData?.edges ?? []).map((e: any) => ({ ...e }))
     setNodes(incomingNodes)
-    setEdges(workflowData?.edges ?? [])
+    setEdges(incomingEdges)
   }, [workflowId, workflowData, setNodes, setEdges])
   useEffect(() => {
     if (!onGraphChange) return
@@ -150,9 +161,10 @@ export default function FlowCanvas({
           )
         ,
         loadGraph: (graph) => {
+          const epoch = Date.now()
           const safeNodes = (graph?.nodes ?? []).map((n: any) => ({
             ...n,
-            data: { ...(n.data ?? {}), dirty: n.data?.dirty ?? false }
+            data: { ...(n.data ?? {}), dirty: n.data?.dirty ?? false, wfEpoch: epoch }
           }))
           setNodes(safeNodes)
           setEdges(graph?.edges ?? [])
@@ -174,28 +186,31 @@ export default function FlowCanvas({
   const nodeTypes = useMemo(() => ({
     trigger: props => (
       <TriggerNode
+        key={`trigger-${props.id}-${props?.data?.wfEpoch ?? ''}`}
         {...props}
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
         onUpdateNode={updateNodeData}
         onRun={() => {
-          console.log('Run trigger', props.id)
+          invokeRunWorkflow()
         }}
       />
     ),
     action: props => (
       <ActionNode
+        key={`action-${props.id}-${props?.data?.wfEpoch ?? ''}`}
         {...props}
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
         onUpdateNode={updateNodeData}
         onRun={() => {
-          console.log('Run action', props.id)
+          invokeRunWorkflow()
         }}
       />
     ),
     condition: props => (
       <ConditionNode
+        key={`condition-${props.id}-${props?.data?.wfEpoch ?? ''}`}
         {...props}
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
@@ -205,7 +220,7 @@ export default function FlowCanvas({
         }}
       />
     )
-  }), [removeNode, markWorkflowDirty, updateNodeData])
+  }), [removeNode, markWorkflowDirty, updateNodeData, invokeRunWorkflow])
 
   const onNodesChange = useCallback(
     changes => {
@@ -305,6 +320,7 @@ export default function FlowCanvas({
 
   return (
     <ReactFlow
+      key={workflowId || 'no-workflow'}
       nodes={nodes}
       edges={edges}
       onNodesChange={onNodesChange}

@@ -3,7 +3,7 @@ import NodeInputField from "@/components/UI/InputFields/NodeInputField"
 import NodeTextAreaField from "@/components/UI/InputFields/NodeTextAreaField"
 import NodeCheckBoxField from "@/components/UI/InputFields/NodeCheckboxField"
 import KeyValuePair from "@/components/UI/ReactFlow/KeyValuePair"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 interface HttpRequestActionProps {
   url: string
@@ -45,13 +45,15 @@ export default function HttpRequestAction({
   }))
 
   const updateField = (key: keyof HttpRequestActionProps, value: any) => {
-    setParams(prev => {
-      const next = { ...prev, [key]: value }
-      const errors = hasErrors(next)
-      onChange?.(next, Object.keys(errors).length > 0, true)
-      return next
-    })
+    setParams(prev => ({ ...prev, [key]: value }))
   }
+
+  // Notify parent after params change, outside of render/event to avoid parent updates during child render
+  useEffect(() => {
+    const errors = hasErrors(params)
+    onChange?.(params, Object.keys(errors).length > 0, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params])
 
   const hasErrors = (updatedParams: Partial<HttpRequestActionProps>) => {
     const errs: Record<string, string> = {}

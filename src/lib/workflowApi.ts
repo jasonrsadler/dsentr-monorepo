@@ -138,3 +138,76 @@ export async function clearWorkflowLogs(workflowId: string): Promise<{ success: 
   const data = await handleJsonResponse(res)
   return { success: Boolean(data?.success ?? true) }
 }
+
+export async function getWebhookUrl(workflowId: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/webhook-url`, {
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return data.url as string
+}
+
+export async function regenerateWebhookUrl(workflowId: string): Promise<string> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/webhook/regenerate`, {
+    method: 'POST',
+    headers: { 'x-csrf-token': csrfToken },
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return data.url as string
+}
+
+// Runs API
+export interface WorkflowRunRecord {
+  id: string
+  user_id: string
+  workflow_id: string
+  snapshot: any
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
+  error?: string | null
+  idempotency_key?: string | null
+  started_at: string
+  finished_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkflowNodeRunRecord {
+  id: string
+  run_id: string
+  node_id: string
+  name?: string | null
+  node_type?: string | null
+  inputs?: any
+  outputs?: any
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'canceled'
+  error?: string | null
+  started_at: string
+  finished_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export async function startWorkflowRun(workflowId: string, opts?: { idempotencyKey?: string, context?: any }): Promise<WorkflowRunRecord> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-csrf-token': csrfToken
+    },
+    credentials: 'include',
+    body: JSON.stringify(opts ?? {})
+  })
+  const data = await handleJsonResponse(res)
+  return data.run
+}
+
+export async function getWorkflowRunStatus(workflowId: string, runId: string): Promise<{ run: WorkflowRunRecord, node_runs: WorkflowNodeRunRecord[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/runs/${runId}`, {
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return { run: data.run, node_runs: data.node_runs ?? [] }
+}

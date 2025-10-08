@@ -56,6 +56,18 @@ export default function ActionNode({
     setConfig(data || { type: "", params: {} })
   }, [data])
 
+  // Reset local state when node id changes (e.g., new node or remount on workflow switch)
+  useEffect(() => {
+    setLabel(data?.label || "Action")
+    setExpanded(data?.expanded ?? false)
+    setActionType(data?.actionType || "Send Email")
+    setParams(() => ({ service: "", ...(data?.params || data?.inputs || {}) }))
+    setTimeoutMs(data?.timeout || 5000)
+    setRetries(data?.retries || 0)
+    setStopOnError(data?.stopOnError ?? true)
+    setDirty(data?.dirty ?? isNewNode)
+  }, [id])
+
   useEffect(() => {
     if (data?.dirty !== undefined && data.dirty !== dirty) {
       console.log("Sync dirty from parent:", data.dirty)

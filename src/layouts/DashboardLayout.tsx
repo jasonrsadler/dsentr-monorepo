@@ -8,6 +8,7 @@ import SettingsButton from '@/components/Settings/SettingsButton'
 import SettingsModal from '@/components/Settings/SettingsModal'
 import WorkflowsTab from '@/components/Settings/tabs/WorkflowsTab'
 import LogsTab from '@/components/Settings/tabs/LogsTab'
+import WebhooksTab from '@/components/Settings/tabs/WebhooksTab'
 import { DsentrLogo } from '@/components/DsentrLogo'
 
 export default function DashboardLayout() {
@@ -48,10 +49,12 @@ export default function DashboardLayout() {
         tabs={[
           { key: 'workflows', label: 'Workflows' },
           { key: 'logs', label: 'Logs' },
+          { key: 'webhooks', label: 'Webhooks' },
         ]}
         renderTab={(key) => {
           if (key === 'workflows') return <WorkflowsTab />
           if (key === 'logs') return <LogsTab />
+          if (key === 'webhooks') return <WebhooksTab />
           return <div />
         }}
       />
