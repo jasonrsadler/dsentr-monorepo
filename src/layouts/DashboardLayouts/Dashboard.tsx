@@ -588,6 +588,7 @@ export default function Dashboard() {
       return
     }
     setRunOverlayOpen(true)
+    try { window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll')) } catch {}
     // Kick off selection of the appropriate run for this workflow
     ensureOverlayRunForSelected()
   }, [runOverlayOpen, ensureOverlayRunForSelected])
@@ -625,26 +626,52 @@ export default function Dashboard() {
     }
   }, [runOverlayOpen, currentWorkflow, pollRun, stopPolling])
 
-  // Background poll of all active runs to drive toolbar state
+    // Background poll of all active runs to drive toolbar state (adaptive)
   useEffect(() => {
     let cancelled = false
+    const idleStreakRef = { current: 0 }
+    const threshold = 3 // stop after 3 consecutive idle cycles
+
     const tick = async () => {
+      if (cancelled) return
       try {
         const runs = await listActiveRuns(undefined)
         const hasRunning = runs.some(r => r.status === 'running')
         const hasQueued = runs.some(r => r.status === 'queued')
-        setGlobalRunStatus(hasRunning ? 'running' : (hasQueued ? 'queued' : 'idle'))
-      } catch (e) {
-        // ignore transient errors; keep previous state
+        const next = hasRunning ? 'running' : (hasQueued ? 'queued' : 'idle')
+        setGlobalRunStatus(next)
+        if (next === 'idle') idleStreakRef.current += 1
+        else idleStreakRef.current = 0
+      } catch {
+        idleStreakRef.current = 0
       } finally {
-        if (!cancelled) globalRunsTimerRef.current = setTimeout(tick, 2000)
+        if (cancelled) return
+        if (idleStreakRef.current >= threshold) {
+          if (globalRunsTimerRef.current) { clearTimeout(globalRunsTimerRef.current as any); globalRunsTimerRef.current = null }
+        } else {
+          globalRunsTimerRef.current = setTimeout(tick, 2000)
+        }
       }
     }
-    tick()
-    return () => { cancelled = true; if (globalRunsTimerRef.current) { clearTimeout(globalRunsTimerRef.current); globalRunsTimerRef.current = null } }
-  }, [])
 
-  // Derive toolbar status: running beats queued. Only show queued if nothing is running.
+    const resume = () => {
+      if (!cancelled && !globalRunsTimerRef.current) {
+        idleStreakRef.current = 0
+        tick()
+      }
+    }
+    window.addEventListener('dsentr-resume-global-poll', resume as any)
+    const onVis = () => { if (!(document as any).hidden) resume() }
+    document.addEventListener('visibilitychange', onVis)
+
+    tick()
+    return () => {
+      cancelled = true
+      window.removeEventListener('dsentr-resume-global-poll', resume as any)
+      document.removeEventListener('visibilitychange', onVis)
+      if (globalRunsTimerRef.current) { clearTimeout(globalRunsTimerRef.current as any); globalRunsTimerRef.current = null }
+    }
+  }, [])  // Derive toolbar status: running beats queued. Only show queued if nothing is running.
   const toolbarRunStatus = useMemo(() => {
     if (activeRun?.status === 'running') return 'running'
     if (globalRunStatus === 'running') return 'running'
@@ -681,6 +708,7 @@ export default function Dashboard() {
       setActiveRun(run)
       currentPollRunIdRef.current = run.id
       pollRun(currentWorkflow.id, run.id)
+      try { window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll')) } catch {}
     } catch (e: any) {
       console.error('Failed to start run', e)
       setError(e?.message || 'Failed to start run')
@@ -1281,6 +1309,13 @@ export default function Dashboard() {
     </div>
   )
 }
+
+
+
+
+
+
+
 
 
 

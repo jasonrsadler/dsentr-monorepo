@@ -274,6 +274,37 @@ export async function purgeRuns(days?: number): Promise<{ success: boolean, dele
   return { success: Boolean(data?.success ?? true), deleted: data?.deleted ?? 0, days: data?.days ?? days ?? 0 }
 }
 
+export type EgressBlockEvent = { id: string; workflow_id: string; run_id: string; node_id: string; url: string; host: string; rule: string; message: string; created_at: string }
+
+export async function listEgressBlocks(workflowId: string, page = 1, perPage = 20): Promise<EgressBlockEvent[]> {
+  const qs = `?page=${encodeURIComponent(page)}&per_page=${encodeURIComponent(perPage)}`
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/egress/blocks${qs}`, { credentials: 'include' })
+  const data = await handleJsonResponse(res)
+  return data.blocks ?? []
+}
+
+export async function clearEgressBlocks(workflowId: string): Promise<{ success: boolean, deleted: number }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/egress/blocks`, {
+    method: 'DELETE',
+    headers: { 'x-csrf-token': csrfToken },
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true), deleted: data?.deleted ?? 0 }
+}
+
+export async function clearDeadLetters(workflowId: string): Promise<{ success: boolean, deleted: number }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/dead-letters`, {
+    method: 'DELETE',
+    headers: { 'x-csrf-token': csrfToken },
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true), deleted: data?.deleted ?? 0 }
+}
+
 export async function getWorkflowRunStatus(workflowId: string, runId: string): Promise<{ run: WorkflowRunRecord, node_runs: WorkflowNodeRunRecord[] }> {
   const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/runs/${runId}`, {
     credentials: 'include'
@@ -289,4 +320,43 @@ export async function listActiveRuns(workflowId?: string): Promise<WorkflowRunRe
   })
   const data = await handleJsonResponse(res)
   return data.runs ?? []
+}
+
+// Security & Egress config
+export async function getEgressAllowlist(workflowId: string): Promise<string[]> {
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/egress`, { credentials: 'include' })
+  const data = await handleJsonResponse(res)
+  return data.allowlist ?? []
+}
+
+export async function setEgressAllowlistApi(workflowId: string, allowlist: string[]): Promise<{ success: boolean }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/egress`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+    credentials: 'include',
+    body: JSON.stringify({ allowlist })
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true) }
+}
+
+export type WebhookConfig = { require_hmac: boolean; replay_window_sec: number; signing_key: string }
+
+export async function getWebhookConfig(workflowId: string): Promise<WebhookConfig> {
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/webhook/config`, { credentials: 'include' })
+  const data = await handleJsonResponse(res)
+  return { require_hmac: !!data.require_hmac, replay_window_sec: data.replay_window_sec ?? 300, signing_key: data.signing_key ?? '' }
+}
+
+export async function setWebhookConfig(workflowId: string, cfg: { require_hmac: boolean; replay_window_sec: number }): Promise<{ success: boolean }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/webhook/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+    credentials: 'include',
+    body: JSON.stringify(cfg)
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true) }
 }

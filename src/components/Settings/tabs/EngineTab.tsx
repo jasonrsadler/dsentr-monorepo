@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/stores/auth'
-import { listWorkflows, type WorkflowRecord, setConcurrencyLimit, cancelAllRunsForWorkflow, listDeadLetters, requeueDeadLetter, purgeRuns } from '@/lib/workflowApi'
+import { listWorkflows, type WorkflowRecord, setConcurrencyLimit, cancelAllRunsForWorkflow, listDeadLetters, requeueDeadLetter, purgeRuns, getEgressAllowlist, setEgressAllowlistApi, listEgressBlocks, type EgressBlockEvent, clearEgressBlocks, clearDeadLetters } from '@/lib/workflowApi'
 
 export default function EngineTab() {
   const { user } = useAuth()
@@ -29,6 +29,9 @@ export default function EngineTab() {
   const [dlBusyId, setDlBusyId] = useState<string | null>(null)
   const [purgeBusy, setPurgeBusy] = useState(false)
   const [purgeDays, setPurgeDays] = useState('')
+  const [egressText, setEgressText] = useState('')
+  const [egressBusy, setEgressBusy] = useState(false)
+  const [egressBlocks, setEgressBlocks] = useState<EgressBlockEvent[]>([])
 
   async function handleSaveLimit() {
     if (!selected || busy) return
@@ -49,6 +52,23 @@ export default function EngineTab() {
     try { const items = await listDeadLetters(selected.id, 1, 50); setDeadLetters(items) } catch { /* ignore */ }
   }
   useEffect(() => { refreshDeadLetters() }, [selected?.id])
+
+  useEffect(() => {
+    (async () => {
+      if (!selected) { setEgressText(''); return }
+      try {
+        const list = await getEgressAllowlist(selected.id)
+        setEgressText(list.join('\n'))
+      } catch { setEgressText('') }
+    })()
+  }, [selected?.id])
+
+  useEffect(() => {
+    (async () => {
+      if (!selected) { setEgressBlocks([]); return }
+      try { const items = await listEgressBlocks(selected.id, 1, 25); setEgressBlocks(items) } catch { setEgressBlocks([]) }
+    })()
+  }, [selected?.id])
 
   async function handleRequeue(id: string) {
     if (!selected) return
@@ -93,9 +113,39 @@ export default function EngineTab() {
       </div>
 
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
+        <h3 className="font-semibold mb-2">Egress Allowlist</h3>
+        <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-2">One host or wildcard per line (e.g., api.github.com or *.mycorp.com). Global allowlist from server is also applied.</p>
+        <textarea
+          value={egressText}
+          onChange={(e) => setEgressText(e.target.value)}
+          rows={5}
+          className="w-full px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700 font-mono text-xs"
+        />
+        <div className="mt-2">
+          <button
+            onClick={async () => {
+              if (!selected) return
+              try {
+                setEgressBusy(true)
+                const items = egressText.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+                await setEgressAllowlistApi(selected.id, items)
+              } finally { setEgressBusy(false) }
+            }}
+            disabled={!selected || egressBusy}
+            className={`px-3 py-1 rounded ${egressBusy ? 'opacity-60 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+          >
+            Save Allowlist
+          </button>
+        </div>
+      </div>
+
+      <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold mb-2">Dead‑Letter Queue</h3>
-          <button onClick={refreshDeadLetters} className="text-sm underline">Refresh</button>
+          <div className="flex items-center gap-2">
+            <button onClick={refreshDeadLetters} className="text-sm underline">Refresh</button>
+            <button onClick={async ()=>{ if (selected) { try{ await clearDeadLetters(selected.id); await refreshDeadLetters() } catch {} } }} className="text-sm underline text-red-600">Clear All</button>
+          </div>
         </div>
         {deadLetters.length === 0 ? (
           <p className="text-sm text-zinc-600 dark:text-zinc-400">No dead letters</p>
@@ -114,6 +164,29 @@ export default function EngineTab() {
         )}
       </div>
 
+      <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold mb-2">Blocked Egress</h3>
+          <div className="flex items-center gap-2">
+            <button onClick={async ()=>{ if (selected) { try{ const items = await listEgressBlocks(selected.id, 1, 25); setEgressBlocks(items)}catch{} } }} className="text-sm underline">Refresh</button>
+            <button onClick={async ()=>{ if (selected) { try{ await clearEgressBlocks(selected.id); const items = await listEgressBlocks(selected.id, 1, 25); setEgressBlocks(items)}catch{} } }} className="text-sm underline text-red-600">Clear All</button>
+          </div>
+        </div>
+        {egressBlocks.length === 0 ? (
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">No blocked requests recorded.</p>
+        ) : (
+          <div className="space-y-2">
+            {egressBlocks.map(b => (
+              <div key={b.id} className="p-2 rounded border bg-white dark:bg-zinc-800 dark:border-zinc-700">
+                <div className="text-xs text-zinc-500">{new Date(b.created_at).toLocaleString()} • node {b.node_id} • {b.rule}</div>
+                <div className="text-sm"><span className="font-mono">{b.host}</span> — {b.message}</div>
+                <div className="text-xs text-zinc-500 break-words">{b.url}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {isAdmin && (
         <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
           <h3 className="font-semibold mb-2">Maintenance</h3>
@@ -126,4 +199,3 @@ export default function EngineTab() {
     </div>
   )
 }
-
