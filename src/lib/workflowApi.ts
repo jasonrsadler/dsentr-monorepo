@@ -158,6 +158,17 @@ export async function regenerateWebhookUrl(workflowId: string): Promise<string> 
   return data.url as string
 }
 
+export async function cancelRun(workflowId: string, runId: string): Promise<{ success: boolean }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/runs/${runId}/cancel`, {
+    method: 'POST',
+    headers: { 'x-csrf-token': csrfToken },
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true) }
+}
+
 // Runs API
 export interface WorkflowRunRecord {
   id: string
@@ -210,4 +221,13 @@ export async function getWorkflowRunStatus(workflowId: string, runId: string): P
   })
   const data = await handleJsonResponse(res)
   return { run: data.run, node_runs: data.node_runs ?? [] }
+}
+
+export async function listActiveRuns(workflowId?: string): Promise<WorkflowRunRecord[]> {
+  const qs = workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : ''
+  const res = await fetch(`${API_BASE_URL}/api/workflows/runs${qs}`, {
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return data.runs ?? []
 }

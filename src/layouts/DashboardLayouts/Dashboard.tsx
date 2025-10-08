@@ -14,6 +14,8 @@ import {
   WorkflowRecord,
   startWorkflowRun,
   getWorkflowRunStatus,
+  cancelRun,
+  listActiveRuns,
   type WorkflowRunRecord,
   type WorkflowNodeRunRecord,
 } from '@/lib/workflowApi'
@@ -151,6 +153,31 @@ export default function Dashboard() {
   const [activeRun, setActiveRun] = useState<WorkflowRunRecord | null>(null)
   const [nodeRuns, setNodeRuns] = useState<WorkflowNodeRunRecord[]>([])
   const pollTimerRef = useRef<any>(null)
+  const currentPollRunIdRef = useRef<string | null>(null)
+  const overlayWatchTimerRef = useRef<any>(null)
+  const [cancelBusy, setCancelBusy] = useState(false)
+  const [runToast, setRunToast] = useState<string | null>(null)
+  // Global run status aggregator for toolbar (across all workflows)
+  const [globalRunStatus, setGlobalRunStatus] = useState<'idle' | 'queued' | 'running'>('idle')
+  const globalRunsTimerRef = useRef<any>(null)
+  // Runs tab state
+  const [activePane, setActivePane] = useState<'designer' | 'runs'>('designer')
+  const [runsScope, setRunsScope] = useState<'current' | 'all'>('current')
+  const [runQueue, setRunQueue] = useState<WorkflowRunRecord[]>([])
+  const runQueueTimerRef = useRef<any>(null)
+  // Stable execution state identities to avoid unnecessary re-renders
+  const runningIds = useMemo(
+    () => new Set(nodeRuns.filter(n => n.status === 'running').map(n => n.node_id)),
+    [nodeRuns]
+  )
+  const succeededIds = useMemo(
+    () => new Set(nodeRuns.filter(n => n.status === 'succeeded').map(n => n.node_id)),
+    [nodeRuns]
+  )
+  const failedIds = useMemo(
+    () => new Set(nodeRuns.filter(n => n.status === 'failed').map(n => n.node_id)),
+    [nodeRuns]
+  )
 
   const normalizeWorkflowData = useCallback((data: any) => {
     if (data && typeof data === 'object') {
@@ -426,23 +453,220 @@ export default function Dashboard() {
       clearTimeout(pollTimerRef.current)
       pollTimerRef.current = null
     }
+    // Ignore any in-flight responses for previous run ids
+    currentPollRunIdRef.current = null
   }, [])
 
+  const pollBackoffRef = useRef<number>(0)
   const pollRun = useCallback(async (workflowId: string, runId: string) => {
+    // Drop stale polls (e.g., after switching to a different run)
+    if (currentPollRunIdRef.current !== runId) return
     try {
       const { run, node_runs } = await getWorkflowRunStatus(workflowId, runId)
+      // Ignore if this response is for an outdated runId
+      if (currentPollRunIdRef.current !== runId) return
       setActiveRun(run)
       setNodeRuns(node_runs)
+      // reset backoff on success
+      pollBackoffRef.current = 0
       if (run.status === 'queued' || run.status === 'running') {
         pollTimerRef.current = setTimeout(() => pollRun(workflowId, runId), 1000)
       } else {
+        // terminal: clear timer
         stopPolling()
+        // If overlay is open for this workflow, watch for next running or queued run
+        if (runOverlayOpen && currentWorkflow && currentWorkflow.id === workflowId) {
+          if (overlayWatchTimerRef.current) {
+            clearTimeout(overlayWatchTimerRef.current)
+            overlayWatchTimerRef.current = null
+          }
+          const watchTick = async () => {
+            try {
+              const runs = await listActiveRuns(workflowId)
+              const next = runs.find(r => r.status === 'running') || runs.find(r => r.status === 'queued')
+              if (next) {
+                setActiveRun(next)
+                setNodeRuns([])
+                currentPollRunIdRef.current = next.id
+                pollRun(workflowId, next.id)
+                overlayWatchTimerRef.current = null
+                return
+              }
+            } catch {}
+            if (runOverlayOpen && currentWorkflow && currentWorkflow.id === workflowId) {
+              overlayWatchTimerRef.current = setTimeout(watchTick, 1000)
+            }
+          }
+          overlayWatchTimerRef.current = setTimeout(watchTick, 1000)
+        }
       }
     } catch (e) {
       console.error('Polling run failed', e)
-      stopPolling()
+      // Back off and retry instead of stopping, in case of transient 429/Network errors
+      const attempt = pollBackoffRef.current || 0
+      const delay = Math.min(5000, 1000 * Math.pow(2, Math.min(3, attempt)))
+      pollBackoffRef.current = attempt + 1
+      // Only reschedule if this runId is still the intended one
+      if (currentPollRunIdRef.current === runId) {
+        pollTimerRef.current = setTimeout(() => pollRun(workflowId, runId), delay)
+      }
     }
-  }, [stopPolling])
+  }, [stopPolling, runOverlayOpen, currentWorkflow])
+
+  const fetchRunQueue = useCallback(async () => {
+    try {
+      const wid = runsScope === 'current' ? currentWorkflow?.id : undefined
+      const runs = await listActiveRuns(wid)
+      setRunQueue(runs)
+    } catch (e) {
+      console.error('Failed to fetch runs', e)
+    }
+  }, [runsScope, currentWorkflow?.id])
+
+  // Ensure overlay shows only the active run for the currently selected workflow
+  const ensureOverlayRunForSelected = useCallback(async () => {
+    if (!currentWorkflow) {
+      setActiveRun(null)
+      setNodeRuns([])
+      return
+    }
+    const isActiveForSelected =
+      activeRun && activeRun.workflow_id === currentWorkflow.id &&
+      activeRun.status === 'running'
+
+    if (isActiveForSelected) return
+    try {
+      const runs = await listActiveRuns(currentWorkflow.id)
+      // Prefer a running run; otherwise choose a queued run so we can follow it
+      const next = runs.find(r => r.status === 'running') || runs.find(r => r.status === 'queued')
+      if (next) {
+        stopPolling()
+        setActiveRun(next)
+        setNodeRuns([])
+        currentPollRunIdRef.current = next.id
+        pollRun(currentWorkflow.id, next.id)
+      } else {
+        // No running or queued run yet — clear state and keep watching for the next one
+        stopPolling()
+        setActiveRun(null)
+        setNodeRuns([])
+        if (overlayWatchTimerRef.current) {
+          clearTimeout(overlayWatchTimerRef.current)
+          overlayWatchTimerRef.current = null
+        }
+        const watchTick = async () => {
+          try {
+            const runs2 = await listActiveRuns(currentWorkflow.id)
+            const next2 = runs2.find(r => r.status === 'running') || runs2.find(r => r.status === 'queued')
+            if (next2) {
+              setActiveRun(next2)
+              setNodeRuns([])
+              currentPollRunIdRef.current = next2.id
+              pollRun(currentWorkflow.id, next2.id)
+              overlayWatchTimerRef.current = null
+              return
+            }
+          } catch {}
+          if (runOverlayOpen) {
+            overlayWatchTimerRef.current = setTimeout(watchTick, 1000)
+          }
+        }
+        overlayWatchTimerRef.current = setTimeout(watchTick, 1000)
+      }
+    } catch (e) {
+      console.error('Failed to prepare overlay run', e)
+    }
+  }, [currentWorkflow, activeRun, pollRun, stopPolling, runOverlayOpen])
+
+  const handleToggleRunOverlay = useCallback(() => {
+    if (runOverlayOpen) {
+      if (overlayWatchTimerRef.current) {
+        clearTimeout(overlayWatchTimerRef.current)
+        overlayWatchTimerRef.current = null
+      }
+      setRunOverlayOpen(false)
+      return
+    }
+    setRunOverlayOpen(true)
+    // Kick off selection of the appropriate run for this workflow
+    ensureOverlayRunForSelected()
+  }, [runOverlayOpen, ensureOverlayRunForSelected])
+
+  // Keep overlay latched to the selected workflow's next running/queued run.
+  useEffect(() => {
+    if (!runOverlayOpen || !currentWorkflow) return
+    let cancelled = false
+    let intervalId: any = null
+
+    const tick = async () => {
+      if (cancelled) return
+      try {
+        const runs = await listActiveRuns(currentWorkflow.id)
+        const candidate = runs.find(r => r.status === 'running') || runs.find(r => r.status === 'queued')
+        if (candidate && currentPollRunIdRef.current !== candidate.id) {
+          stopPolling()
+          setActiveRun(candidate)
+          setNodeRuns([])
+          currentPollRunIdRef.current = candidate.id
+          pollRun(currentWorkflow.id, candidate.id)
+        }
+      } catch {
+        // ignore transient errors
+      }
+    }
+
+    // Prime immediately then repeat
+    tick()
+    intervalId = setInterval(tick, 1000)
+
+    return () => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+    }
+  }, [runOverlayOpen, currentWorkflow, pollRun, stopPolling])
+
+  // Background poll of all active runs to drive toolbar state
+  useEffect(() => {
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const runs = await listActiveRuns(undefined)
+        const hasRunning = runs.some(r => r.status === 'running')
+        const hasQueued = runs.some(r => r.status === 'queued')
+        setGlobalRunStatus(hasRunning ? 'running' : (hasQueued ? 'queued' : 'idle'))
+      } catch (e) {
+        // ignore transient errors; keep previous state
+      } finally {
+        if (!cancelled) globalRunsTimerRef.current = setTimeout(tick, 2000)
+      }
+    }
+    tick()
+    return () => { cancelled = true; if (globalRunsTimerRef.current) { clearTimeout(globalRunsTimerRef.current); globalRunsTimerRef.current = null } }
+  }, [])
+
+  // Derive toolbar status: running beats queued. Only show queued if nothing is running.
+  const toolbarRunStatus = useMemo(() => {
+    if (activeRun?.status === 'running') return 'running'
+    if (globalRunStatus === 'running') return 'running'
+    if (globalRunStatus === 'queued') return 'queued'
+    if (activeRun?.status === 'queued' && globalRunStatus !== 'running') return 'queued'
+    return 'idle'
+  }, [activeRun?.status, globalRunStatus])
+
+  useEffect(() => {
+    if (activePane !== 'runs') {
+      if (runQueueTimerRef.current) { clearTimeout(runQueueTimerRef.current); runQueueTimerRef.current = null }
+      return
+    }
+    let cancelled = false
+    const tick = async () => {
+      if (cancelled) return
+      await fetchRunQueue()
+      runQueueTimerRef.current = setTimeout(tick, 2000)
+    }
+    tick()
+    return () => { cancelled = true; if (runQueueTimerRef.current) { clearTimeout(runQueueTimerRef.current); runQueueTimerRef.current = null } }
+  }, [activePane, fetchRunQueue])
 
   const handleRunWorkflow = useCallback(async () => {
     if (!currentWorkflow) return
@@ -451,16 +675,15 @@ export default function Dashboard() {
       return
     }
     try {
-      setRunOverlayOpen(true)
       setActiveRun(null)
       setNodeRuns([])
       const run = await startWorkflowRun(currentWorkflow.id)
       setActiveRun(run)
+      currentPollRunIdRef.current = run.id
       pollRun(currentWorkflow.id, run.id)
     } catch (e: any) {
       console.error('Failed to start run', e)
       setError(e?.message || 'Failed to start run')
-      setRunOverlayOpen(false)
     }
   }, [currentWorkflow, workflowDirty, pollRun])
 
@@ -837,7 +1060,40 @@ export default function Dashboard() {
           onRename={renameWorkflow}
           dirty={workflowDirty}
           saving={isSaving}
+          runStatus={toolbarRunStatus}
+          onToggleOverlay={handleToggleRunOverlay}
         />
+
+        {/* Local tabs: Designer | Runs */}
+        <div className="px-3 pt-2 border-b border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 backdrop-blur">
+          <div className="flex items-center gap-2">
+            <button
+              className={`px-3 py-1.5 text-sm rounded-t ${activePane==='designer' ? 'bg-white dark:bg-zinc-900 border border-b-0 border-zinc-200 dark:border-zinc-700' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
+              onClick={() => setActivePane('designer')}
+            >
+              Designer
+            </button>
+            <button
+              className={`px-3 py-1.5 text-sm rounded-t ${activePane==='runs' ? 'bg-white dark:bg-zinc-900 border border-b-0 border-zinc-200 dark:border-zinc-700' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
+              onClick={() => setActivePane('runs')}
+            >
+              Runs
+            </button>
+            {activePane==='runs' && (
+              <div className="ml-auto flex items-center gap-2 text-xs">
+                <span className="text-zinc-500">Scope:</span>
+                <select
+                  value={runsScope}
+                  onChange={e => setRunsScope((e.target.value as any) ?? 'current')}
+                  className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+                >
+                  <option value="current">Current workflow</option>
+                  <option value="all">All workflows</option>
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
 
         {error && (
           <div className="px-4 py-2 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900">
@@ -845,22 +1101,69 @@ export default function Dashboard() {
           </div>
         )}
 
-        <ReactFlowProvider>
-          {currentWorkflow ? (
-            <FlowCanvas
-              workflowId={currentWorkflow.id}
-              workflowData={workflowData}
-              markWorkflowDirty={markWorkflowDirty}
-              setSaveRef={ref => (saveRef.current = ref)}
-              onGraphChange={handleGraphChange}
-              onRunWorkflow={handleRunWorkflow}
-            />
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
-              {loadingWorkflows ? 'Loading workflows...' : 'Create a workflow to get started.'}
-            </div>
-          )}
-        </ReactFlowProvider>
+        {activePane === 'designer' ? (
+          <ReactFlowProvider>
+            {currentWorkflow ? (
+              <FlowCanvas
+                workflowId={currentWorkflow.id}
+                workflowData={workflowData}
+                markWorkflowDirty={markWorkflowDirty}
+                setSaveRef={ref => (saveRef.current = ref)}
+                onGraphChange={handleGraphChange}
+                onRunWorkflow={handleRunWorkflow}
+                runningIds={runningIds}
+                succeededIds={succeededIds}
+                failedIds={failedIds}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
+                {loadingWorkflows ? 'Loading workflows...' : 'Create a workflow to get started.'}
+              </div>
+            )}
+          </ReactFlowProvider>
+        ) : (
+          // Runs pane
+          <div className="flex-1 overflow-auto p-4">
+            {runQueue.length === 0 ? (
+              <div className="text-sm text-zinc-500 dark:text-zinc-400">No queued or running jobs.</div>
+            ) : (
+              <div className="space-y-2">
+                {runQueue.map(run => {
+                  const wf = workflows.find(w => w.id === run.workflow_id)
+                  const canCancel = run.status === 'queued' || run.status === 'running'
+                  return (
+                    <div key={run.id} className="flex items-center justify-between border rounded p-2 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700">
+                      <div className="flex items-center gap-3">
+                        <span className="px-2 py-0.5 text-xs rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">{run.status}</span>
+                        <div>
+                          <div className="text-sm font-medium">{wf?.name || run.workflow_id}</div>
+                          <div className="text-xs text-zinc-500">Started {new Date(run.started_at).toLocaleString()}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {canCancel && (
+                          <button
+                            className="text-xs px-2 py-1 rounded border hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                            onClick={async () => {
+                              try {
+                                await cancelRun(run.workflow_id, run.id)
+                                await fetchRunQueue()
+                              } catch (e) {
+                                console.error('Failed to cancel run', e)
+                              }
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       </div>
 
@@ -911,20 +1214,43 @@ export default function Dashboard() {
       {/* Run overlay */}
       {runOverlayOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { setRunOverlayOpen(false); stopPolling() }} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setRunOverlayOpen(false) }} />
           <div className="relative bg-white dark:bg-zinc-900 rounded-xl shadow-xl w-[560px] max-h-[70vh] p-4 border border-zinc-200 dark:border-zinc-700 overflow-hidden">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold">Run Status</h3>
-              <button className="text-sm px-2 py-1 border rounded" onClick={() => { setRunOverlayOpen(false); stopPolling() }}>Close</button>
+              <button className="text-sm px-2 py-1 border rounded" onClick={() => { setRunOverlayOpen(false) }}>Close</button>
             </div>
-            {!activeRun ? (
-              <p className="text-sm text-zinc-600 dark:text-zinc-300">Starting run…</p>
+            {!activeRun || (currentWorkflow && activeRun.workflow_id !== currentWorkflow.id) || (activeRun && (activeRun.status !== 'running' && activeRun.status !== 'queued')) ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">No active run for selected workflow.</p>
             ) : (
-              <div className="space-y-2 text-sm">
+              <div className="space-y-2 text-sm relative">
+                {runToast && (
+                  <div className="absolute top-0 right-0 translate-y-[-8px] text-xs px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm">
+                    {runToast}
+                  </div>
+                )}
                 <div className="flex gap-2 items-center">
                   <span className="font-medium">Status:</span>
                   <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">{activeRun.status}</span>
                   {activeRun.error && <span className="text-red-600 dark:text-red-400">{activeRun.error}</span>}
+                  {(activeRun.status === 'queued' || activeRun.status === 'running') && currentWorkflow && (
+                    <button
+                      className="ml-2 text-xs px-2 py-0.5 rounded border"
+                      disabled={cancelBusy}
+                      onClick={async () => {
+                        try {
+                          setCancelBusy(true)
+                          await cancelRun(currentWorkflow.id, activeRun.id)
+                          setRunToast('Cancel requested…')
+                          setTimeout(() => setRunToast(null), 2000)
+                        } finally {
+                          setCancelBusy(false)
+                        }
+                      }}
+                    >
+                      {cancelBusy ? 'Canceling…' : 'Cancel'}
+                    </button>
+                  )}
                 </div>
                 <div className="border rounded p-2 h-[42vh] overflow-auto bg-zinc-50 dark:bg-zinc-950/40">
                   {nodeRuns.length === 0 ? (

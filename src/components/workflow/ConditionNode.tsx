@@ -20,6 +20,9 @@ interface ConditionNodeProps {
   onRemove?: (id: string) => void
   onUpdateNode?: (id: string, data: any, suppressDirty?: boolean) => void
   onDirtyChange?: (dirty: boolean, data: any) => void
+  isRunning?: boolean
+  isSucceeded?: boolean
+  isFailed?: boolean
 }
 
 export default function ConditionNode({
@@ -28,7 +31,10 @@ export default function ConditionNode({
   selected,
   onRemove,
   onUpdateNode,
-  onDirtyChange
+  onDirtyChange,
+  isRunning,
+  isSucceeded,
+  isFailed
 }: ConditionNodeProps) {
   const isNewNode = !data?.id
 
@@ -71,11 +77,16 @@ export default function ConditionNode({
     setDirty(data?.dirty ?? isNewNode)
   }, [id])
 
+  const ringClass = isFailed
+    ? 'ring-2 ring-red-500'
+    : isSucceeded
+      ? 'ring-2 ring-emerald-500'
+      : isRunning
+        ? 'ring-2 ring-sky-500'
+        : ''
   return (
     <motion.div
-      layout
-      className={`relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? "ring-2 ring-blue-500" : "border-zinc-300 dark:border-zinc-700"
-        }`}
+      className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? "ring-2 ring-blue-500" : "border-zinc-300 dark:border-zinc-700"} ${ringClass}`}
       style={{ width: expanded ? "auto" : 256, minWidth: 256, maxWidth: 400 }}
     >
       <Handle
@@ -135,7 +146,6 @@ export default function ConditionNode({
           {expanded && (
             <motion.div
               key="expanded-content"
-              layout
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}

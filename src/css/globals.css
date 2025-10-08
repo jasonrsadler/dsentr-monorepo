@@ -118,6 +118,9 @@ input[type=number] {
   -moz-appearance: textfield;
 }
 
+/* Workflow node execution visuals (MVP: simple static rings) */
+.wf-node { position: relative; }
+
 /* Themed scrollbars for modal/content areas */
 .themed-scroll {
   scrollbar-width: thin; /* Firefox */

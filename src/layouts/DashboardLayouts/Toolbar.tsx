@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onRename, dirty, saving = false }) {
+export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onRename, dirty, saving = false, runStatus = 'idle', onToggleOverlay }) {
   const [editingName, setEditingName] = useState(false)
   const [name, setName] = useState(workflow?.name || "")
   const [nameError, setNameError] = useState<string | null>(null)
@@ -30,6 +30,12 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
   }
 
   const isSavingDisabled = !dirty || saving
+  const isRunActive = runStatus === 'queued' || runStatus === 'running'
+  const runBtnClasses = isRunActive
+    ? (runStatus === 'running'
+        ? 'bg-green-500 text-white hover:bg-green-600 animate-pulse'
+        : 'bg-blue-500 text-white hover:bg-blue-600')
+    : 'bg-zinc-300 text-zinc-600 cursor-not-allowed'
 
   return (
     <div className="flex items-center gap-2 p-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
@@ -80,7 +86,15 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
       </button>
 
       {dirty && !saving && <span className="w-2 h-2 rounded-full bg-blue-500" />}
+
+      <button
+        onClick={() => onToggleOverlay?.()}
+        disabled={!isRunActive}
+        className={`ml-2 px-2 py-1 rounded ${runBtnClasses}`}
+        title={isRunActive ? `Run is ${runStatus}` : 'No active run'}
+      >
+        Run Status
+      </button>
     </div>
   )
 }
-

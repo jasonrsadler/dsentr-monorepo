@@ -24,6 +24,9 @@ interface ActionNodeProps {
   onRemove?: (id: string) => void
   onDirtyChange?: (dirty: boolean, data: any) => void
   onUpdateNode?: (id: string, data: any, suppressDirty?: boolean) => void
+  isRunning?: boolean
+  isSucceeded?: boolean
+  isFailed?: boolean
 }
 
 export default function ActionNode({
@@ -33,7 +36,10 @@ export default function ActionNode({
   onRun,
   onRemove,
   onDirtyChange,
-  onUpdateNode
+  onUpdateNode,
+  isRunning,
+  isSucceeded,
+  isFailed
 }: ActionNodeProps) {
   const isNewNode = !data?.id
 
@@ -113,8 +119,15 @@ export default function ActionNode({
     try { await onRun?.(id, params) } finally { setRunning(false) }
   }
 
+  const ringClass = isFailed
+    ? 'ring-2 ring-red-500'
+    : isSucceeded
+      ? 'ring-2 ring-emerald-500'
+      : isRunning
+        ? 'ring-2 ring-sky-500'
+        : ''
   return (
-    <motion.div layout className={`relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? "ring-2 ring-blue-500" : "border-zinc-300 dark:border-zinc-700"}`} style={{ width: expanded ? "auto" : 256, minWidth: expanded ? 256 : undefined, maxWidth: expanded ? 400 : undefined }}>
+    <motion.div className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? "ring-2 ring-blue-500" : "border-zinc-300 dark:border-zinc-700"} ${ringClass}`} style={{ width: expanded ? "auto" : 256, minWidth: expanded ? 256 : undefined, maxWidth: expanded ? 400 : undefined }}>
       <Handle type="target" position={Position.Left} style={{ width: 14, height: 14, backgroundColor: "blue", border: "2px solid white" }} />
       <Handle type="source" position={Position.Right} style={{ width: 14, height: 14, backgroundColor: "green", border: "2px solid white" }} />
       <div className="p-3">
@@ -142,7 +155,7 @@ export default function ActionNode({
 
         <AnimatePresence>
           {expanded && (
-            <motion.div key="expanded-content" layout initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2">
+            <motion.div key="expanded-content" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2">
               <p className="text-xs text-zinc-500">Action Type</p>
               <ActionTypeDropdown value={actionType} onChange={t => { setActionType(t); setDirty(true) }} />
               {actionType === 'webhook' && (

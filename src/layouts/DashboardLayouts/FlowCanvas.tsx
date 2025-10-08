@@ -60,6 +60,9 @@ interface FlowCanvasProps {
   workflowData?: { nodes: any[]; edges: any[] }
   onGraphChange?: (graph: { nodes: any[]; edges: any[] }) => void
   onRunWorkflow?: () => void
+  runningIds?: Set<string>
+  succeededIds?: Set<string>
+  failedIds?: Set<string>
 }
 
 export default function FlowCanvas({
@@ -69,7 +72,10 @@ export default function FlowCanvas({
   workflowId,
   workflowData,
   onGraphChange,
-  onRunWorkflow
+  onRunWorkflow,
+  runningIds = new Set(),
+  succeededIds = new Set(),
+  failedIds = new Set()
 }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
   const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
@@ -111,6 +117,16 @@ export default function FlowCanvas({
       rafRef.current = null
     }
   }, [nodes, edges, onGraphChange])
+
+  // Keep execution state in refs so `nodeTypes` identity stays stable across polls
+  const runningIdsRef = useRef(runningIds)
+  const succeededIdsRef = useRef(succeededIds)
+  const failedIdsRef = useRef(failedIds)
+  useEffect(() => { runningIdsRef.current = runningIds }, [runningIds])
+  useEffect(() => { succeededIdsRef.current = succeededIds }, [succeededIds])
+  useEffect(() => { failedIdsRef.current = failedIds }, [failedIds])
+
+  
   const updateNodeData = useCallback(
     (id: string, newData: any, suppressDirty = false) => {
       setNodes(nds =>
@@ -188,6 +204,9 @@ export default function FlowCanvas({
       <TriggerNode
         key={`trigger-${props.id}-${props?.data?.wfEpoch ?? ''}`}
         {...props}
+        isRunning={runningIdsRef.current.has(props.id)}
+        isSucceeded={succeededIdsRef.current.has(props.id)}
+        isFailed={failedIdsRef.current.has(props.id)}
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
         onUpdateNode={updateNodeData}
@@ -200,6 +219,9 @@ export default function FlowCanvas({
       <ActionNode
         key={`action-${props.id}-${props?.data?.wfEpoch ?? ''}`}
         {...props}
+        isRunning={runningIdsRef.current.has(props.id)}
+        isSucceeded={succeededIdsRef.current.has(props.id)}
+        isFailed={failedIdsRef.current.has(props.id)}
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
         onUpdateNode={updateNodeData}
@@ -212,6 +234,9 @@ export default function FlowCanvas({
       <ConditionNode
         key={`condition-${props.id}-${props?.data?.wfEpoch ?? ''}`}
         {...props}
+        isRunning={runningIdsRef.current.has(props.id)}
+        isSucceeded={succeededIdsRef.current.has(props.id)}
+        isFailed={failedIdsRef.current.has(props.id)}
         onRemove={removeNode}
         onDirtyChange={markWorkflowDirty}
         onUpdateNode={updateNodeData}
