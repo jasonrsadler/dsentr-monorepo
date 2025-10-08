@@ -408,4 +408,27 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _workflow_id: Uuid,
         _dead_id: Uuid,
     ) -> Result<Option<WorkflowRun>, sqlx::Error> { Ok(None) }
+
+    async fn set_egress_allowlist(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _allowlist: &[String],
+    ) -> Result<bool, sqlx::Error> { Ok(true) }
+
+    async fn update_webhook_config(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _require_hmac: bool,
+        _replay_window_sec: i32,
+    ) -> Result<bool, sqlx::Error> { Ok(true) }
+
+    async fn try_record_webhook_signature(
+        &self,
+        _workflow_id: Uuid,
+        _signature: &str,
+    ) -> Result<bool, sqlx::Error> { Ok(true) }
+
+    async fn purge_old_webhook_replays(&self, _older_than_seconds: i64) -> Result<u64, sqlx::Error> { Ok(0) }
 }

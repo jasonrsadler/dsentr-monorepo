@@ -11,6 +11,9 @@ pub struct Workflow {
     pub description: Option<String>,
     pub data: serde_json::Value,
     pub concurrency_limit: i32,
+    pub egress_allowlist: Vec<String>,
+    pub require_hmac: bool,
+    pub hmac_replay_window_sec: i32,
     #[serde(skip_serializing)]
     pub webhook_salt: Uuid,
     #[serde(with = "time::serde::rfc3339")]

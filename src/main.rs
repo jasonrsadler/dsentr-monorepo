@@ -39,6 +39,7 @@ use routes::{
         get_workflow_run_status, start_workflow_run, get_webhook_url, webhook_trigger, regenerate_webhook_token, cancel_workflow_run,
         list_runs_for_workflow, cancel_all_runs_for_workflow, rerun_workflow_run, download_run_json, sse_run_events,
         set_concurrency_limit, list_dead_letters, requeue_dead_letter, rerun_from_failed_node,
+        get_egress_allowlist, set_egress_allowlist, get_webhook_config, set_webhook_config,
     },
     admin::purge_runs,
 };
@@ -267,8 +268,16 @@ async fn main() {
             get(get_webhook_url),
         )
         .route(
+            "/{workflow_id}/webhook/config",
+            get(get_webhook_config).post(set_webhook_config),
+        )
+        .route(
             "/{workflow_id}/webhook/regenerate",
             post(regenerate_webhook_token),
+        )
+        .route(
+            "/{workflow_id}/egress",
+            get(get_egress_allowlist).post(set_egress_allowlist),
         )
         .route(
             "/{workflow_id}/concurrency",

@@ -24,18 +24,17 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         description: Option<&str>,
         data: Value,
     ) -> Result<Workflow, sqlx::Error> {
-        let result = sqlx::query_as!(
-            Workflow,
+        let result = sqlx::query_as::<_, Workflow>(
             r#"
             INSERT INTO workflows (user_id, name, description, data, created_at, updated_at)
             VALUES ($1, $2, $3, $4, now(), now())
-            RETURNING id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
-            "#,
-            user_id,
-            name,
-            description,
-            data
+            RETURNING id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
+            "#
         )
+        .bind(user_id)
+        .bind(name)
+        .bind(description)
+        .bind(data)
         .fetch_one(&self.pool)
         .await?;
 
@@ -43,16 +42,15 @@ impl WorkflowRepository for PostgresWorkflowRepository {
     }
 
     async fn list_workflows_by_user(&self, user_id: Uuid) -> Result<Vec<Workflow>, sqlx::Error> {
-        let results = sqlx::query_as!(
-            Workflow,
+        let results = sqlx::query_as::<_, Workflow>(
             r#"
-            SELECT id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            SELECT id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
             FROM workflows
             WHERE user_id = $1
             ORDER BY updated_at DESC
-            "#,
-            user_id
+            "#
         )
+        .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -64,16 +62,15 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         user_id: Uuid,
         workflow_id: Uuid,
     ) -> Result<Option<Workflow>, sqlx::Error> {
-        let result = sqlx::query_as!(
-            Workflow,
+        let result = sqlx::query_as::<_, Workflow>(
             r#"
-            SELECT id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            SELECT id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
             FROM workflows
             WHERE user_id = $1 AND id = $2
-            "#,
-            user_id,
-            workflow_id
+            "#
         )
+        .bind(user_id)
+        .bind(workflow_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -84,15 +81,14 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         &self,
         workflow_id: Uuid,
     ) -> Result<Option<Workflow>, sqlx::Error> {
-        let result = sqlx::query_as!(
-            Workflow,
+        let result = sqlx::query_as::<_, Workflow>(
             r#"
-            SELECT id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            SELECT id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
             FROM workflows
             WHERE id = $1
-            "#,
-            workflow_id
+            "#
         )
+        .bind(workflow_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -107,8 +103,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         description: Option<&str>,
         data: Value,
     ) -> Result<Option<Workflow>, sqlx::Error> {
-        let result = sqlx::query_as!(
-            Workflow,
+        let result = sqlx::query_as::<_, Workflow>(
             r#"
             UPDATE workflows
             SET name = $3,
@@ -116,14 +111,14 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 data = $5,
                 updated_at = now()
             WHERE user_id = $1 AND id = $2
-            RETURNING id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
-            "#,
-            user_id,
-            workflow_id,
-            name,
-            description,
-            data
+            RETURNING id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
+            "#
         )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(name)
+        .bind(description)
+        .bind(data)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -963,5 +958,82 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             Ok(None)
         }
     }
+
+    async fn set_egress_allowlist(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        allowlist: &[String],
+    ) -> Result<bool, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            UPDATE workflows
+            SET egress_allowlist = $3::text[], updated_at = now()
+            WHERE user_id = $1 AND id = $2
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(allowlist)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn update_webhook_config(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        require_hmac: bool,
+        replay_window_sec: i32,
+    ) -> Result<bool, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            UPDATE workflows
+            SET require_hmac = $3, hmac_replay_window_sec = $4, updated_at = now()
+            WHERE user_id = $1 AND id = $2
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(require_hmac)
+        .bind(replay_window_sec)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn try_record_webhook_signature(
+        &self,
+        workflow_id: Uuid,
+        signature: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            INSERT INTO webhook_replays (workflow_id, signature, created_at)
+            VALUES ($1, $2, now())
+            ON CONFLICT (workflow_id, signature) DO NOTHING
+            "#
+        )
+        .bind(workflow_id)
+        .bind(signature)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn purge_old_webhook_replays(&self, older_than_seconds: i64) -> Result<u64, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            DELETE FROM webhook_replays
+            WHERE created_at < now() - ($1::bigint * INTERVAL '1 second')
+            "#
+        )
+        .bind(older_than_seconds)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
 }
+
 

@@ -103,6 +103,21 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         }
     }
 
+    // Build egress allowlist union (env + per-workflow from snapshot)
+    let allowlist_env = std::env::var("ALLOWED_HTTP_DOMAINS").ok().unwrap_or_default();
+    let mut allowed_hosts: Vec<String> = allowlist_env
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if let Some(arr) = run.snapshot.get("_egress_allowlist").and_then(|v| v.as_array()) {
+        for v in arr {
+            if let Some(s) = v.as_str() { let t = s.trim().to_lowercase(); if !t.is_empty() { allowed_hosts.push(t); } }
+        }
+    }
+    allowed_hosts.sort();
+    allowed_hosts.dedup();
+
     // Traverse from triggers; naive DFS avoiding cycles
     let mut visited: HashSet<String> = HashSet::new();
     // Allow rerun to start from a specific node if provided in snapshot
@@ -176,7 +191,7 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         let execution = match kind {
             "trigger" => execute_trigger(node).await,
             "condition" => execute_condition(node, &context, graph.outgoing(&node_id)).await,
-            "action" => execute_action(node, &context).await,
+            "action" => execute_action(node, &context, &allowed_hosts).await,
             _ => Ok((json!({"skipped": true}), None)),
         };
 
@@ -318,7 +333,7 @@ async fn execute_condition(
     Ok((json!({"result": result}), selected))
 }
 
-async fn execute_action(node: &Node, context: &Value) -> Result<(Value, Option<String>), String> {
+async fn execute_action(node: &Node, context: &Value, allowed_hosts: &[String]) -> Result<(Value, Option<String>), String> {
     let action_type = node
         .data
         .get("actionType")
@@ -326,7 +341,7 @@ async fn execute_action(node: &Node, context: &Value) -> Result<(Value, Option<S
         .unwrap_or("")
         .to_lowercase();
     match action_type.as_str() {
-        "http" => execute_http(node, context).await,
+        "http" => execute_http(node, context, allowed_hosts).await,
         _ => Ok((json!({"skipped": true, "reason": "unsupported actionType"}), None)),
     }
 }
@@ -366,7 +381,28 @@ fn lookup_ctx(path: &str, ctx: &Value) -> Option<String> {
     Some(match cur { Value::String(s) => s.clone(), other => other.to_string() })
 }
 
-async fn execute_http(node: &Node, context: &Value) -> Result<(Value, Option<String>), String> {
+fn mask_json(value: &Value, secrets: &[String]) -> Value {
+    match value {
+        Value::String(s) => {
+            let mut out = s.clone();
+            for sec in secrets {
+                if !sec.is_empty() && sec.len() >= 4 {
+                    out = out.replace(sec, "[REDACTED]");
+                }
+            }
+            Value::String(out)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(|v| mask_json(v, secrets)).collect()),
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in map.iter() { out.insert(k.clone(), mask_json(v, secrets)); }
+            Value::Object(out)
+        }
+        other => other.clone(),
+    }
+}
+
+async fn execute_http(node: &Node, context: &Value, allowed_hosts: &[String]) -> Result<(Value, Option<String>), String> {
     let params = node.data.get("params").cloned().unwrap_or(Value::Null);
     let url_raw = params
         .get("url")
@@ -401,12 +437,7 @@ async fn execute_http(node: &Node, context: &Value) -> Result<(Value, Option<Str
         .unwrap_or("none");
 
     // Egress allowlist
-    let allowlist_env = std::env::var("ALLOWED_HTTP_DOMAINS").ok().unwrap_or_default();
-    let allowed: Vec<String> = allowlist_env
-        .split(',')
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let allowed: Vec<String> = allowed_hosts.to_vec();
 
     let parsed = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
     let scheme_ok = matches!(parsed.scheme(), "http" | "https");
@@ -558,11 +589,14 @@ async fn execute_http(node: &Node, context: &Value) -> Result<(Value, Option<Str
                 } else {
                     Value::String(text)
                 };
-                let outputs = json!({
+                let outputs_raw = json!({
                     "status": status,
                     "headers": header_map,
                     "body": body_value,
                 });
+                let secrets_env = std::env::var("MASK_SECRETS").ok().unwrap_or_default();
+                let secrets: Vec<String> = secrets_env.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                let outputs = mask_json(&outputs_raw, &secrets);
                 return Ok((outputs, None));
             }
             Err(err) => {
