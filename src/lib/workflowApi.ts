@@ -215,6 +215,65 @@ export async function startWorkflowRun(workflowId: string, opts?: { idempotencyK
   return data.run
 }
 
+// Queue & Concurrency helpers
+export async function setConcurrencyLimit(workflowId: string, limit: number): Promise<{ success: boolean, limit: number }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/concurrency`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+    credentials: 'include',
+    body: JSON.stringify({ limit })
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true), limit: data?.limit ?? limit }
+}
+
+export async function cancelAllRunsForWorkflow(workflowId: string): Promise<{ success: boolean, canceled: number }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/runs/cancel-all`, {
+    method: 'POST',
+    headers: { 'x-csrf-token': csrfToken },
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true), canceled: data?.canceled ?? 0 }
+}
+
+export type DeadLetter = { id: string; user_id: string; workflow_id: string; run_id: string; error: string; snapshot: any; created_at: string }
+
+export async function listDeadLetters(workflowId: string, page = 1, perPage = 20): Promise<DeadLetter[]> {
+  const qs = `?page=${encodeURIComponent(page)}&per_page=${encodeURIComponent(perPage)}`
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/dead-letters${qs}`, {
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return data.dead_letters ?? []
+}
+
+export async function requeueDeadLetter(workflowId: string, deadId: string): Promise<{ success: boolean }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/dead-letters/${deadId}/requeue`, {
+    method: 'POST',
+    headers: { 'x-csrf-token': csrfToken },
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true) }
+}
+
+// Admin maintenance
+export async function purgeRuns(days?: number): Promise<{ success: boolean, deleted: number, days: number }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/admin/purge-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+    credentials: 'include',
+    body: JSON.stringify({ days })
+  })
+  const data = await handleJsonResponse(res)
+  return { success: Boolean(data?.success ?? true), deleted: data?.deleted ?? 0, days: data?.days ?? days ?? 0 }
+}
+
 export async function getWorkflowRunStatus(workflowId: string, runId: string): Promise<{ run: WorkflowRunRecord, node_runs: WorkflowNodeRunRecord[] }> {
   const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/runs/${runId}`, {
     credentials: 'include'
