@@ -14,6 +14,10 @@ use crate::{
 use serde::Deserialize;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::convert::Infallible;
+use std::time::Duration;
+use axum::response::sse::{Event, Sse, KeepAlive};
+use async_stream::stream;
 
 fn is_unique_violation(err: &sqlx::Error) -> bool {
     if let sqlx::Error::Database(db_err) = err {
@@ -360,6 +364,7 @@ fn compute_webhook_token(secret: &str, user_id: Uuid, workflow_id: Uuid, salt: U
 pub struct StartWorkflowRunRequest {
     pub idempotency_key: Option<String>,
     pub context: Option<serde_json::Value>,
+    pub priority: Option<i32>,
 }
 
 pub async fn start_workflow_run(
@@ -388,9 +393,9 @@ pub async fn start_workflow_run(
     };
 
     // Extract once to avoid borrow/move conflict
-    let (idempotency_key_owned, trigger_ctx) = match payload {
-        Some(Json(req)) => (req.idempotency_key, req.context),
-        None => (None, None),
+    let (idempotency_key_owned, trigger_ctx, priority) = match payload {
+        Some(Json(req)) => (req.idempotency_key, req.context, req.priority),
+        None => (None, None, None),
     };
     let idempotency_key = idempotency_key_owned.as_deref();
 
@@ -405,14 +410,22 @@ pub async fn start_workflow_run(
         .create_workflow_run(user_id, workflow_id, snapshot, idempotency_key)
         .await
     {
-        Ok(run) => (
-            StatusCode::ACCEPTED,
-            Json(json!({
-                "success": true,
-                "run": run
-            })),
-        )
-            .into_response(),
+        Ok(run) => {
+            if let Some(p) = priority {
+                let _ = app_state
+                    .workflow_repo
+                    .set_run_priority(user_id, workflow_id, run.id, p)
+                    .await;
+            }
+            (
+                StatusCode::ACCEPTED,
+                Json(json!({
+                    "success": true,
+                    "run": run
+                })),
+            )
+                .into_response()
+        }
         Err(e) => {
             eprintln!("DB error creating workflow run: {:?}", e);
             JsonResponse::server_error("Failed to enqueue run").into_response()
@@ -516,6 +529,262 @@ pub async fn list_active_runs(
             JsonResponse::server_error("Failed to list runs").into_response()
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct PagedRunsQuery {
+    pub status: Option<Vec<String>>, // e.g., status=running&status=queued
+    pub page: Option<i64>,           // 1-based
+    pub per_page: Option<i64>,       // default 20
+}
+
+pub async fn list_runs_for_workflow(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+    Query(params): Query<PagedRunsQuery>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
+    let page = params.page.unwrap_or(1).max(1);
+    let offset = (page - 1) * per_page;
+
+    match app_state
+        .workflow_repo
+        .list_runs_paged(user_id, Some(workflow_id), params.status.as_deref(), per_page, offset)
+        .await
+    {
+        Ok(runs) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "runs": runs, "page": page, "per_page": per_page })),
+        )
+            .into_response(),
+        Err(e) => {
+            eprintln!("DB error listing runs: {:?}", e);
+            JsonResponse::server_error("Failed to list runs").into_response()
+        }
+    }
+}
+
+pub async fn cancel_all_runs_for_workflow(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    match app_state
+        .workflow_repo
+        .cancel_all_runs_for_workflow(user_id, workflow_id)
+        .await
+    {
+        Ok(affected) => (
+            StatusCode::OK,
+            Json(json!({"success": true, "canceled": affected })),
+        )
+            .into_response(),
+        Err(e) => {
+            eprintln!("DB error canceling runs: {:?}", e);
+            JsonResponse::server_error("Failed to cancel runs").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RerunRequest {
+    pub idempotency_key: Option<String>,
+    pub context: Option<serde_json::Value>,
+    pub start_from_node_id: Option<String>,
+}
+
+pub async fn rerun_workflow_run(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path((workflow_id, run_id)): Path<(Uuid, Uuid)>,
+    Json(payload): Json<RerunRequest>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    // Fetch the original run to get snapshot
+    let base_run = match app_state
+        .workflow_repo
+        .get_workflow_run(user_id, workflow_id, run_id)
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return JsonResponse::not_found("Run not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error fetching run for rerun: {:?}", e);
+            return JsonResponse::server_error("Failed to rerun").into_response();
+        }
+    };
+
+    let mut snapshot = base_run.snapshot.clone();
+    if let Some(ctx) = payload.context {
+        snapshot["_trigger_context"] = ctx;
+    }
+    if let Some(start_id) = payload.start_from_node_id {
+        snapshot["_start_from_node"] = serde_json::Value::String(start_id);
+    }
+
+    match app_state
+        .workflow_repo
+        .create_workflow_run(
+            user_id,
+            workflow_id,
+            snapshot,
+            payload.idempotency_key.as_deref(),
+        )
+        .await
+    {
+        Ok(run) => (
+            StatusCode::ACCEPTED,
+            Json(json!({"success": true, "run": run})),
+        )
+            .into_response(),
+        Err(e) => {
+            eprintln!("DB error creating rerun: {:?}", e);
+            JsonResponse::server_error("Failed to enqueue rerun").into_response()
+        }
+    }
+}
+
+pub async fn rerun_from_failed_node(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path((workflow_id, run_id)): Path<(Uuid, Uuid)>,
+    Json(mut payload): Json<RerunRequest>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    let nodes = match app_state
+        .workflow_repo
+        .list_workflow_node_runs(user_id, workflow_id, run_id)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => { eprintln!("DB error fetching node runs: {:?}", e); return JsonResponse::server_error("Failed to rerun").into_response(); }
+    };
+    let failed = nodes.iter().rev().find(|n| n.status == "failed").and_then(|n| Some(n.node_id.clone()));
+    if let Some(node_id) = failed {
+        payload.start_from_node_id = Some(node_id);
+        rerun_workflow_run(State(app_state), AuthSession(claims), Path((workflow_id, run_id)), Json(payload)).await
+    } else {
+        JsonResponse::bad_request("No failed node found for this run").into_response()
+    }
+}
+
+// Download run JSON (run + node_runs)
+pub async fn download_run_json(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path((workflow_id, run_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    let run_opt = app_state
+        .workflow_repo
+        .get_workflow_run(user_id, workflow_id, run_id)
+        .await;
+
+    match run_opt {
+        Ok(Some(run)) => {
+            let nodes_res = app_state
+                .workflow_repo
+                .list_workflow_node_runs(user_id, workflow_id, run_id)
+                .await;
+            match nodes_res {
+                Ok(node_runs) => {
+                    let payload = json!({"run": run, "node_runs": node_runs});
+                    let body = axum::Json(payload);
+                    let mut resp = body.into_response();
+                    resp.headers_mut().insert(
+                        axum::http::header::CONTENT_DISPOSITION,
+                        axum::http::HeaderValue::from_static("attachment; filename=run.json"),
+                    );
+                    resp
+                }
+                Err(e) => {
+                    eprintln!("DB error listing node runs: {:?}", e);
+                    JsonResponse::server_error("Failed to download run").into_response()
+                }
+            }
+        }
+        Ok(None) => JsonResponse::not_found("Run not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error fetching run: {:?}", e);
+            JsonResponse::server_error("Failed to download run").into_response()
+        }
+    }
+}
+
+// Server-Sent Events for run + node updates
+pub async fn sse_run_events(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path((workflow_id, run_id)): Path<(Uuid, Uuid)>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let user_id = Uuid::parse_str(&claims.id).ok();
+
+    let state = app_state.clone();
+    let s = stream! {
+        let mut last_run_updated: Option<time::OffsetDateTime> = None;
+        let mut last_node_updated: Option<time::OffsetDateTime> = None;
+        let mut intv = tokio::time::interval(Duration::from_millis(800));
+        loop {
+            intv.tick().await;
+            // If not authorized, emit error once and end
+            if user_id.is_none() {
+                let ev = Event::default().event("error").json_data(json!({"error": "unauthorized"})).unwrap();
+                yield Ok::<Event, Infallible>(ev);
+                break;
+            }
+            let uid = user_id.unwrap();
+            // Send run update if newer
+            if let Ok(Some(run)) = state
+                .workflow_repo
+                .get_workflow_run(uid, workflow_id, run_id)
+                .await
+            {
+                if last_run_updated.map(|t| t < run.updated_at).unwrap_or(true) {
+                    last_run_updated = Some(run.updated_at);
+                    let ev = Event::default().event("run").json_data(&run).unwrap();
+                    yield Ok::<Event, Infallible>(ev);
+                }
+            }
+
+            // Send node runs if any updated
+            if let Ok(nodes) = state
+                .workflow_repo
+                .list_workflow_node_runs(uid, workflow_id, run_id)
+                .await
+            {
+                if let Some(max_upd) = nodes.iter().map(|n| n.updated_at).max() {
+                    if last_node_updated.map(|t| t < max_upd).unwrap_or(true) {
+                        last_node_updated = Some(max_upd);
+                        let ev = Event::default().event("node_runs").json_data(&nodes).unwrap();
+                        yield Ok::<Event, Infallible>(ev);
+                    }
+                }
+            }
+
+            // keep alive tick every ~10s to prevent proxies from closing
+        }
+    };
+
+    Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keepalive"))
 }
 
 // Protected endpoint to fetch a webhook URL for a workflow (for display in UI)
@@ -635,5 +904,57 @@ pub async fn regenerate_webhook_token(
             eprintln!("DB error rotating salt: {:?}", e);
             JsonResponse::server_error("Failed to regenerate").into_response()
         }
+    }
+}
+
+// Concurrency limit setter
+#[derive(Deserialize)]
+pub struct ConcurrencyLimitBody { pub limit: i32 }
+
+pub async fn set_concurrency_limit(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+    Json(body): Json<ConcurrencyLimitBody>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    if body.limit < 1 { return JsonResponse::bad_request("limit must be >= 1").into_response(); }
+    match app_state.workflow_repo.set_workflow_concurrency_limit(user_id, workflow_id, body.limit).await {
+        Ok(true) => Json(json!({"success": true, "limit": body.limit})).into_response(),
+        Ok(false) => JsonResponse::not_found("Workflow not found").into_response(),
+        Err(e) => { eprintln!("DB error setting concurrency: {:?}", e); JsonResponse::server_error("Failed to update").into_response() }
+    }
+}
+
+// Dead letters list
+#[derive(Deserialize)]
+pub struct ListDeadLettersQuery { pub page: Option<i64>, pub per_page: Option<i64> }
+
+pub async fn list_dead_letters(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+    Query(params): Query<ListDeadLettersQuery>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
+    let page = params.page.unwrap_or(1).max(1);
+    let offset = (page - 1) * per_page;
+    match app_state.workflow_repo.list_dead_letters(user_id, workflow_id, per_page, offset).await {
+        Ok(items) => (StatusCode::OK, Json(json!({"success": true, "dead_letters": items, "page": page, "per_page": per_page}))).into_response(),
+        Err(e) => { eprintln!("DB error list dead letters: {:?}", e); JsonResponse::server_error("Failed to fetch").into_response() }
+    }
+}
+
+pub async fn requeue_dead_letter(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path((workflow_id, dead_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    match app_state.workflow_repo.requeue_dead_letter(user_id, workflow_id, dead_id).await {
+        Ok(Some(run)) => (StatusCode::ACCEPTED, Json(json!({"success": true, "run": run}))).into_response(),
+        Ok(None) => JsonResponse::not_found("Dead letter not found").into_response(),
+        Err(e) => { eprintln!("DB error requeue dead letter: {:?}", e); JsonResponse::server_error("Failed to requeue").into_response() }
     }
 }

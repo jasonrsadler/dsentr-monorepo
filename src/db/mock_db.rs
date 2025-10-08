@@ -317,4 +317,81 @@ impl WorkflowRepository for NoopWorkflowRepository {
     ) -> Result<Vec<WorkflowRun>, sqlx::Error> {
         Ok(vec![])
     }
+
+    async fn list_runs_paged(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Option<Uuid>,
+        _statuses: Option<&[String]>,
+        _limit: i64,
+        _offset: i64,
+    ) -> Result<Vec<WorkflowRun>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn cancel_all_runs_for_workflow(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error> {
+        Ok(0)
+    }
+
+    async fn set_run_priority(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _run_id: Uuid,
+        _priority: i32,
+    ) -> Result<bool, sqlx::Error> { Ok(true) }
+
+    async fn set_workflow_concurrency_limit(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _limit: i32,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(true)
+    }
+
+    async fn requeue_expired_leases(&self) -> Result<u64, sqlx::Error> { Ok(0) }
+
+    async fn claim_next_eligible_run(
+        &self,
+        _worker_id: &str,
+        _lease_seconds: i32,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error> { Ok(None) }
+
+    async fn renew_run_lease(
+        &self,
+        _run_id: Uuid,
+        _worker_id: &str,
+        _lease_seconds: i32,
+    ) -> Result<(), sqlx::Error> { Ok(()) }
+
+    async fn purge_old_runs(&self, _retention_days: i32) -> Result<u64, sqlx::Error> { Ok(0) }
+
+    async fn insert_dead_letter(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _run_id: Uuid,
+        _error: &str,
+        _snapshot: Value,
+    ) -> Result<(), sqlx::Error> { Ok(()) }
+
+    async fn list_dead_letters(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _limit: i64,
+        _offset: i64,
+    ) -> Result<Vec<crate::models::workflow_dead_letter::WorkflowDeadLetter>, sqlx::Error> { Ok(vec![]) }
+
+    async fn requeue_dead_letter(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _dead_id: Uuid,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error> { Ok(None) }
 }

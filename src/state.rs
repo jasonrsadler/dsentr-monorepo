@@ -12,4 +12,6 @@ pub struct AppState {
     pub mailer: Arc<dyn Mailer>,
     pub google_oauth: Arc<dyn GoogleOAuthService>,
     pub github_oauth: Arc<dyn GitHubOAuthService + Send + Sync>,
+    pub worker_id: Arc<String>,
+    pub worker_lease_seconds: i32,
 }

@@ -37,6 +37,8 @@ use routes::{
     workflows::{
         create_workflow, delete_workflow, get_workflow, list_workflows, update_workflow,
         get_workflow_run_status, start_workflow_run, get_webhook_url, webhook_trigger, regenerate_webhook_token, cancel_workflow_run,
+        list_runs_for_workflow, cancel_all_runs_for_workflow, rerun_workflow_run, download_run_json, sse_run_events,
+        set_concurrency_limit, list_dead_letters, requeue_dead_letter, rerun_from_failed_node,
     },
 };
 use services::oauth::github::client::GitHubOAuthClient;
@@ -163,6 +165,8 @@ async fn main() {
         mailer,
         google_oauth,
         github_oauth,
+        worker_id: Arc::new(uuid::Uuid::new_v4().to_string()),
+        worker_lease_seconds: std::env::var("WORKER_LEASE_SECONDS").ok().and_then(|v| v.parse::<i32>().ok()).unwrap_or(15),
     };
     let state_for_worker = state.clone();
 
@@ -234,12 +238,48 @@ async fn main() {
             post(cancel_workflow_run),
         )
         .route(
+            "/{workflow_id}/runs",
+            get(list_runs_for_workflow),
+        )
+        .route(
+            "/{workflow_id}/runs/cancel-all",
+            post(cancel_all_runs_for_workflow),
+        )
+        .route(
+            "/{workflow_id}/runs/{run_id}/rerun",
+            post(rerun_workflow_run),
+        )
+        .route(
+            "/{workflow_id}/runs/{run_id}/rerun-from-failed",
+            post(rerun_from_failed_node),
+        )
+        .route(
+            "/{workflow_id}/runs/{run_id}/download",
+            get(download_run_json),
+        )
+        .route(
+            "/{workflow_id}/runs/{run_id}/events",
+            get(sse_run_events),
+        )
+        .route(
             "/{workflow_id}/webhook-url",
             get(get_webhook_url),
         )
         .route(
             "/{workflow_id}/webhook/regenerate",
             post(regenerate_webhook_token),
+        )
+        .route(
+            "/{workflow_id}/concurrency",
+            post(set_concurrency_limit),
+        )
+        .route(
+            "/{workflow_id}/dead-letters",
+            get(list_dead_letters),
+        )
+        .route(
+            "/{workflow_id}/dead-letters/{dead_id}/requeue",
+            post(requeue_dead_letter),
         )
         .route("/{workflow_id}/logs", get(routes::workflows::list_workflow_logs).delete(routes::workflows::clear_workflow_logs))
         .route("/{workflow_id}/logs/{log_id}", delete(routes::workflows::delete_workflow_log_entry))

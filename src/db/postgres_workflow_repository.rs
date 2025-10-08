@@ -4,10 +4,11 @@ use crate::{
     models::workflow_log::WorkflowLog,
     models::workflow_node_run::WorkflowNodeRun,
     models::workflow_run::WorkflowRun,
+    models::workflow_dead_letter::WorkflowDeadLetter,
 };
 use async_trait::async_trait;
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 pub struct PostgresWorkflowRepository {
@@ -370,7 +371,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             FROM sel
             WHERE wr.id = sel.id
             RETURNING wr.id, wr.user_id, wr.workflow_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,
-                      wr.started_at as "started_at!", wr.finished_at, wr.created_at as "created_at!", wr.updated_at as "updated_at!"
+                      wr.started_at, wr.finished_at, wr.created_at, wr.updated_at
             "#
         )
         .fetch_optional(&self.pool)
@@ -539,6 +540,380 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             .fetch_all(&self.pool)
             .await?;
             Ok(rows)
+        }
+    }
+
+    async fn list_runs_paged(
+        &self,
+        user_id: Uuid,
+        workflow_id: Option<Uuid>,
+        statuses: Option<&[String]>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<WorkflowRun>, sqlx::Error> {
+        // Build dynamic WHERE with optional workflow and statuses
+        // For statuses, we use ANY($N)
+        if let Some(wf) = workflow_id {
+            if let Some(sts) = statuses {
+                let rows = sqlx::query_as!(
+                    WorkflowRun,
+                    r#"
+                    SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                           started_at as "started_at!", finished_at,
+                           created_at as "created_at!", updated_at as "updated_at!"
+                    FROM workflow_runs
+                    WHERE user_id = $1 AND workflow_id = $2
+                      AND ($3::text[] IS NULL OR status = ANY($3))
+                    ORDER BY created_at DESC
+                    LIMIT $4 OFFSET $5
+                    "#,
+                    user_id,
+                    wf,
+                    sts,
+                    limit,
+                    offset
+                )
+                .fetch_all(&self.pool)
+                .await?;
+                Ok(rows)
+            } else {
+                let rows = sqlx::query_as!(
+                    WorkflowRun,
+                    r#"
+                    SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                           started_at as "started_at!", finished_at,
+                           created_at as "created_at!", updated_at as "updated_at!"
+                    FROM workflow_runs
+                    WHERE user_id = $1 AND workflow_id = $2
+                    ORDER BY created_at DESC
+                    LIMIT $3 OFFSET $4
+                    "#,
+                    user_id,
+                    wf,
+                    limit,
+                    offset
+                )
+                .fetch_all(&self.pool)
+                .await?;
+                Ok(rows)
+            }
+        } else {
+            if let Some(sts) = statuses {
+                let rows = sqlx::query_as!(
+                    WorkflowRun,
+                    r#"
+                    SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                           started_at as "started_at!", finished_at,
+                           created_at as "created_at!", updated_at as "updated_at!"
+                    FROM workflow_runs
+                    WHERE user_id = $1
+                      AND ($2::text[] IS NULL OR status = ANY($2))
+                    ORDER BY created_at DESC
+                    LIMIT $3 OFFSET $4
+                    "#,
+                    user_id,
+                    sts,
+                    limit,
+                    offset
+                )
+                .fetch_all(&self.pool)
+                .await?;
+                Ok(rows)
+            } else {
+                let rows = sqlx::query_as!(
+                    WorkflowRun,
+                    r#"
+                    SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                           started_at as "started_at!", finished_at,
+                           created_at as "created_at!", updated_at as "updated_at!"
+                    FROM workflow_runs
+                    WHERE user_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                    "#,
+                    user_id,
+                    limit,
+                    offset
+                )
+                .fetch_all(&self.pool)
+                .await?;
+                Ok(rows)
+            }
+        }
+    }
+
+    async fn cancel_all_runs_for_workflow(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error> {
+        let res = sqlx::query!(
+            r#"
+            UPDATE workflow_runs
+            SET status = 'canceled', finished_at = now(), updated_at = now()
+            WHERE user_id = $1 AND workflow_id = $2 AND status IN ('queued','running')
+            "#,
+            user_id,
+            workflow_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
+
+    async fn set_run_priority(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        priority: i32,
+    ) -> Result<bool, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            UPDATE workflow_runs
+            SET queue_priority = $4, updated_at = now()
+            WHERE id = $3 AND user_id = $1 AND workflow_id = $2
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(run_id)
+        .bind(priority)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn set_workflow_concurrency_limit(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i32,
+    ) -> Result<bool, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            UPDATE workflows
+            SET concurrency_limit = $3, updated_at = now()
+            WHERE id = $2 AND user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(limit)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn requeue_expired_leases(&self) -> Result<u64, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            UPDATE workflow_runs
+            SET status = 'queued', leased_by = NULL, lease_expires_at = NULL
+            WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < now()
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
+
+    async fn claim_next_eligible_run(
+        &self,
+        worker_id: &str,
+        lease_seconds: i32,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error> {
+        let row = sqlx::query(
+            r#"
+            WITH sel AS (
+              SELECT wr.id
+              FROM workflow_runs wr
+              JOIN workflows wf ON wf.id = wr.workflow_id
+              WHERE wr.status = 'queued'
+                AND (
+                  SELECT COUNT(*) FROM workflow_runs r2
+                  WHERE r2.workflow_id = wr.workflow_id AND r2.status = 'running'
+                ) < COALESCE(wf.concurrency_limit, 1)
+              ORDER BY COALESCE(wr.queue_priority, 0) DESC, wr.created_at ASC
+              LIMIT 1
+              FOR UPDATE SKIP LOCKED
+            )
+            UPDATE workflow_runs wr
+            SET status = 'running',
+                leased_by = $1,
+                heartbeat_at = now(),
+                lease_expires_at = now() + ($2::int * INTERVAL '1 second'),
+                attempt = COALESCE(wr.attempt, 0) + 1,
+                updated_at = now()
+            FROM sel
+            WHERE wr.id = sel.id
+            RETURNING wr.id, wr.user_id, wr.workflow_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,
+                      wr.started_at, wr.finished_at, wr.created_at, wr.updated_at
+            "#
+        )
+        .bind(worker_id)
+        .bind(lease_seconds)
+        .fetch_optional(&self.pool)
+        .await?;
+        let mapped = row.map(|r| WorkflowRun {
+            id: r.get("id"),
+            user_id: r.get("user_id"),
+            workflow_id: r.get("workflow_id"),
+            snapshot: r.get("snapshot"),
+            status: r.get("status"),
+            error: r.get("error"),
+            idempotency_key: r.get("idempotency_key"),
+            started_at: r.get("started_at"),
+            finished_at: r.get("finished_at"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        });
+        Ok(mapped)
+    }
+
+    async fn renew_run_lease(
+        &self,
+        run_id: Uuid,
+        worker_id: &str,
+        lease_seconds: i32,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE workflow_runs
+            SET heartbeat_at = now(),
+                lease_expires_at = now() + ($3::int * INTERVAL '1 second'),
+                updated_at = now()
+            WHERE id = $1 AND leased_by = $2
+            "#
+        )
+        .bind(run_id)
+        .bind(worker_id)
+        .bind(lease_seconds)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn purge_old_runs(&self, retention_days: i32) -> Result<u64, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            DELETE FROM workflow_runs
+            WHERE status IN ('succeeded','failed','canceled')
+              AND created_at < now() - ($1::int * INTERVAL '1 day')
+            "#
+        )
+        .bind(retention_days)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
+
+    async fn insert_dead_letter(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        error: &str,
+        snapshot: Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO workflow_dead_letters (user_id, workflow_id, run_id, error, snapshot, created_at)
+            VALUES ($1, $2, $3, $4, $5, now())
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(run_id)
+        .bind(error)
+        .bind(snapshot)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_dead_letters(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<WorkflowDeadLetter>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, WorkflowDeadLetter>(
+            r#"
+            SELECT id, user_id, workflow_id, run_id, error, snapshot, created_at
+            FROM workflow_dead_letters
+            WHERE user_id = $1 AND workflow_id = $2
+            ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn requeue_dead_letter(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        dead_id: Uuid,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error> {
+        let maybe = sqlx::query_as::<_, WorkflowDeadLetter>(
+            r#"
+            SELECT id, user_id, workflow_id, run_id, error, snapshot, created_at
+            FROM workflow_dead_letters
+            WHERE id = $1 AND user_id = $2 AND workflow_id = $3
+            "#
+        )
+        .bind(dead_id)
+        .bind(user_id)
+        .bind(workflow_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(dl) = maybe {
+            // Enqueue a new run with stored snapshot
+            let new_run_row = sqlx::query(
+                r#"
+                INSERT INTO workflow_runs (user_id, workflow_id, snapshot, status, started_at, created_at, updated_at)
+                VALUES ($1, $2, $3, 'queued', now(), now(), now())
+                RETURNING id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                          started_at, finished_at, created_at, updated_at
+                "#
+            )
+            .bind(user_id)
+            .bind(workflow_id)
+            .bind(dl.snapshot)
+            .fetch_one(&self.pool)
+            .await?;
+            let new_run = WorkflowRun {
+                id: new_run_row.get("id"),
+                user_id: new_run_row.get("user_id"),
+                workflow_id: new_run_row.get("workflow_id"),
+                snapshot: new_run_row.get("snapshot"),
+                status: new_run_row.get("status"),
+                error: new_run_row.get("error"),
+                idempotency_key: new_run_row.get("idempotency_key"),
+                started_at: new_run_row.get("started_at"),
+                finished_at: new_run_row.get("finished_at"),
+                created_at: new_run_row.get("created_at"),
+                updated_at: new_run_row.get("updated_at"),
+            };
+
+            // Remove dead letter entry
+            let _ = sqlx::query(r#"DELETE FROM workflow_dead_letters WHERE id = $1"#)
+                .bind(dl.id)
+                .execute(&self.pool)
+                .await?;
+
+            Ok(Some(new_run))
+        } else {
+            Ok(None)
         }
     }
 }

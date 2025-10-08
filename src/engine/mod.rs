@@ -105,22 +105,38 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
 
     // Traverse from triggers; naive DFS avoiding cycles
     let mut visited: HashSet<String> = HashSet::new();
-    let mut stack: Vec<String> = graph
-        .nodes
-        .values()
-        .filter(|n| n.kind == "trigger")
-        .map(|n| n.id.clone())
-        .collect();
+    // Allow rerun to start from a specific node if provided in snapshot
+    let start_from = run
+        .snapshot
+        .get("_start_from_node")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-    // If no trigger, start from any node with no incoming edge
-    if stack.is_empty() {
-        if let Some(first) = graph.nodes.keys().next() {
-            stack.push(first.clone());
+    let mut stack: Vec<String> = if let Some(start_id) = start_from {
+        vec![start_id]
+    } else {
+        let mut s: Vec<String> = graph
+            .nodes
+            .values()
+            .filter(|n| n.kind == "trigger")
+            .map(|n| n.id.clone())
+            .collect();
+        // If no trigger, start from any node
+        if s.is_empty() {
+            if let Some(first) = graph.nodes.keys().next() {
+                s.push(first.clone());
+            }
         }
-    }
+        s
+    };
 
     let mut canceled = false;
     while let Some(node_id) = stack.pop() {
+        // Renew lease/heartbeat so this worker retains ownership
+        let _ = state
+            .workflow_repo
+            .renew_run_lease(run.id, &state.worker_id,  state.worker_lease_seconds)
+            .await;
         // Check cancellation before executing next node
         if let Ok(Some(status)) = state.workflow_repo.get_run_status(run.id).await {
             if status == "canceled" {
@@ -206,6 +222,11 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);
                 if stop_on_error || kind != "action" {
+                    // Capture dead letter entry for quick requeue
+                    let _ = state
+                        .workflow_repo
+                        .insert_dead_letter(run.user_id, run.workflow_id, run.id, &err_msg, run.snapshot.clone())
+                        .await;
                     let _ = state
                         .workflow_repo
                         .complete_workflow_run(run.id, "failed", Some(&err_msg))

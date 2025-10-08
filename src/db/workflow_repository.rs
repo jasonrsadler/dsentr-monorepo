@@ -149,4 +149,80 @@ pub trait WorkflowRepository: Send + Sync {
         user_id: Uuid,
         workflow_id: Option<Uuid>,
     ) -> Result<Vec<WorkflowRun>, sqlx::Error>;
+
+    // Paged runs listing with optional status filters and per-workflow scoping
+    async fn list_runs_paged(
+        &self,
+        user_id: Uuid,
+        workflow_id: Option<Uuid>,
+        statuses: Option<&[String]>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<WorkflowRun>, sqlx::Error>;
+
+    // Bulk cancel helper for a workflow (queued or running)
+    async fn cancel_all_runs_for_workflow(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error>;
+
+    async fn set_run_priority(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        priority: i32,
+    ) -> Result<bool, sqlx::Error>;
+
+    // Concurrency & leasing
+    async fn set_workflow_concurrency_limit(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i32,
+    ) -> Result<bool, sqlx::Error>;
+
+    async fn requeue_expired_leases(&self) -> Result<u64, sqlx::Error>;
+
+    async fn claim_next_eligible_run(
+        &self,
+        worker_id: &str,
+        lease_seconds: i32,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error>;
+
+    async fn renew_run_lease(
+        &self,
+        run_id: Uuid,
+        worker_id: &str,
+        lease_seconds: i32,
+    ) -> Result<(), sqlx::Error>;
+
+    // Retention
+    async fn purge_old_runs(&self, retention_days: i32) -> Result<u64, sqlx::Error>;
+
+    // Dead-letter queue
+    async fn insert_dead_letter(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        error: &str,
+        snapshot: Value,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn list_dead_letters(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<crate::models::workflow_dead_letter::WorkflowDeadLetter>, sqlx::Error>;
+
+    async fn requeue_dead_letter(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        dead_id: Uuid,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error>;
 }
