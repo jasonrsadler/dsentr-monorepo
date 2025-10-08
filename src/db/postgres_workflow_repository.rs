@@ -919,7 +919,18 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .await?;
 
         if let Some(dl) = maybe {
-            // Enqueue a new run with stored snapshot
+            // Refresh allowlist in snapshot before requeue
+            let wf_row = sqlx::query!(
+                r#"SELECT egress_allowlist FROM workflows WHERE id = $1"#,
+                workflow_id
+            )
+            .fetch_one(&self.pool)
+            .await?;
+            let mut new_snapshot = dl.snapshot.clone();
+            let v = serde_json::Value::Array(wf_row.egress_allowlist.into_iter().map(serde_json::Value::String).collect());
+                if let serde_json::Value::Object(ref mut map) = new_snapshot {
+                    map.insert("_egress_allowlist".to_string(), v);
+            }
             let new_run_row = sqlx::query(
                 r#"
                 INSERT INTO workflow_runs (user_id, workflow_id, snapshot, status, started_at, created_at, updated_at)
@@ -930,7 +941,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             )
             .bind(user_id)
             .bind(workflow_id)
-            .bind(dl.snapshot)
+            .bind(new_snapshot)
             .fetch_one(&self.pool)
             .await?;
             let new_run = WorkflowRun {
@@ -957,6 +968,24 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         } else {
             Ok(None)
         }
+    }
+
+    async fn clear_dead_letters(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            DELETE FROM workflow_dead_letters
+            WHERE user_id = $1 AND workflow_id = $2
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
     }
 
     async fn set_egress_allowlist(
@@ -1034,6 +1063,83 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .await?;
         Ok(res.rows_affected())
     }
+
+    async fn insert_egress_block_event(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        node_id: &str,
+        url: &str,
+        host: &str,
+        rule: &str,
+        message: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO egress_block_events (user_id, workflow_id, run_id, node_id, url, host, rule, message, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(run_id)
+        .bind(node_id)
+        .bind(url)
+        .bind(host)
+        .bind(rule)
+        .bind(message)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_egress_block_events(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<crate::models::egress_block_event::EgressBlockEvent>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, crate::models::egress_block_event::EgressBlockEvent>(
+            r#"
+            SELECT id, user_id, workflow_id, run_id, node_id, url, host, rule, message, created_at
+            FROM egress_block_events
+            WHERE user_id = $1 AND workflow_id = $2
+            ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn clear_egress_block_events(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error> {
+        let res = sqlx::query(
+            r#"
+            DELETE FROM egress_block_events
+            WHERE user_id = $1 AND workflow_id = $2
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
 }
+
+
+
+
 
 

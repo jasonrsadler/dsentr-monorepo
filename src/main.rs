@@ -40,6 +40,7 @@ use routes::{
         list_runs_for_workflow, cancel_all_runs_for_workflow, rerun_workflow_run, download_run_json, sse_run_events,
         set_concurrency_limit, list_dead_letters, requeue_dead_letter, rerun_from_failed_node,
         get_egress_allowlist, set_egress_allowlist, get_webhook_config, set_webhook_config,
+        list_egress_block_events, clear_egress_block_events, clear_dead_letters_api,
     },
     admin::purge_runs,
 };
@@ -280,13 +281,16 @@ async fn main() {
             get(get_egress_allowlist).post(set_egress_allowlist),
         )
         .route(
+            "/{workflow_id}/egress/blocks",
+            get(routes::workflows::list_egress_block_events).delete(routes::workflows::clear_egress_block_events),
+        )
+        .route(
             "/{workflow_id}/concurrency",
             post(set_concurrency_limit),
         )
         .route(
             "/{workflow_id}/dead-letters",
-            get(list_dead_letters),
-        )
+            get(list_dead_letters).delete(routes::workflows::clear_dead_letters_api))
         .route(
             "/{workflow_id}/dead-letters/{dead_id}/requeue",
             post(requeue_dead_letter),
@@ -370,4 +374,5 @@ async fn establish_connection(database_url: &str) -> PgPool {
     info!("✅ Successfully connected to the database");
     pool
 }
+
 

@@ -409,6 +409,12 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _dead_id: Uuid,
     ) -> Result<Option<WorkflowRun>, sqlx::Error> { Ok(None) }
 
+    async fn clear_dead_letters(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error> { Ok(0) }
+
     async fn set_egress_allowlist(
         &self,
         _user_id: Uuid,
@@ -431,4 +437,30 @@ impl WorkflowRepository for NoopWorkflowRepository {
     ) -> Result<bool, sqlx::Error> { Ok(true) }
 
     async fn purge_old_webhook_replays(&self, _older_than_seconds: i64) -> Result<u64, sqlx::Error> { Ok(0) }
+
+    async fn insert_egress_block_event(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _run_id: Uuid,
+        _node_id: &str,
+        _url: &str,
+        _host: &str,
+        _rule: &str,
+        _message: &str,
+    ) -> Result<(), sqlx::Error> { Ok(()) }
+
+    async fn list_egress_block_events(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _limit: i64,
+        _offset: i64,
+    ) -> Result<Vec<crate::models::egress_block_event::EgressBlockEvent>, sqlx::Error> { Ok(vec![]) }
+
+    async fn clear_egress_block_events(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error> { Ok(0) }
 }

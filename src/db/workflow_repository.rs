@@ -239,6 +239,12 @@ pub trait WorkflowRepository: Send + Sync {
         dead_id: Uuid,
     ) -> Result<Option<WorkflowRun>, sqlx::Error>;
 
+    async fn clear_dead_letters(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error>;
+
     // Security & Egress
     async fn set_egress_allowlist(
         &self,
@@ -262,4 +268,31 @@ pub trait WorkflowRepository: Send + Sync {
     ) -> Result<bool, sqlx::Error>;
 
     async fn purge_old_webhook_replays(&self, older_than_seconds: i64) -> Result<u64, sqlx::Error>;
+
+    // Egress block events
+    async fn insert_egress_block_event(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        node_id: &str,
+        url: &str,
+        host: &str,
+        rule: &str,
+        message: &str,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn list_egress_block_events(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<crate::models::egress_block_event::EgressBlockEvent>, sqlx::Error>;
+
+    async fn clear_egress_block_events(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error>;
 }

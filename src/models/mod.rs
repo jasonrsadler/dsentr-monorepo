@@ -6,3 +6,4 @@ pub mod workflow_log;
 pub mod workflow_run;
 pub mod workflow_node_run;
 pub mod workflow_dead_letter;
+pub mod egress_block_event;

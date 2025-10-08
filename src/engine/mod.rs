@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -118,6 +119,29 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
     allowed_hosts.sort();
     allowed_hosts.dedup();
 
+    // Global disallowed denylist (always takes precedence)
+    let disallow_env = std::env::var("DISALLOWED_HTTP_DOMAINS").ok().unwrap_or_default();
+    let mut disallowed_hosts: Vec<String> = disallow_env
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // Optional hardening: block metadata/private/loopback only in production
+    let is_prod = std::env::var("ENV").ok().map(|v| v.to_lowercase()) == Some("production".to_string());
+    if is_prod {
+        disallowed_hosts.push("metadata.google.internal".to_string());
+        // add more known metadata domains if needed
+    }
+    disallowed_hosts.sort();
+    disallowed_hosts.dedup();
+
+    // Default deny toggle
+    let default_deny = std::env::var("EGRESS_DEFAULT_DENY")
+        .ok()
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
     // Traverse from triggers; naive DFS avoiding cycles
     let mut visited: HashSet<String> = HashSet::new();
     // Allow rerun to start from a specific node if provided in snapshot
@@ -191,7 +215,7 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         let execution = match kind {
             "trigger" => execute_trigger(node).await,
             "condition" => execute_condition(node, &context, graph.outgoing(&node_id)).await,
-            "action" => execute_action(node, &context, &allowed_hosts).await,
+            "action" => execute_action(node, &context, &allowed_hosts, &disallowed_hosts, default_deny, is_prod, &state, &run).await,
             _ => Ok((json!({"skipped": true}), None)),
         };
 
@@ -333,7 +357,16 @@ async fn execute_condition(
     Ok((json!({"result": result}), selected))
 }
 
-async fn execute_action(node: &Node, context: &Value, allowed_hosts: &[String]) -> Result<(Value, Option<String>), String> {
+async fn execute_action(
+    node: &Node,
+    context: &Value,
+    allowed_hosts: &[String],
+    disallowed_hosts: &[String],
+    default_deny: bool,
+    is_prod: bool,
+    state: &AppState,
+    run: &WorkflowRun,
+) -> Result<(Value, Option<String>), String> {
     let action_type = node
         .data
         .get("actionType")
@@ -341,7 +374,7 @@ async fn execute_action(node: &Node, context: &Value, allowed_hosts: &[String]) 
         .unwrap_or("")
         .to_lowercase();
     match action_type.as_str() {
-        "http" => execute_http(node, context, allowed_hosts).await,
+        "http" => execute_http(node, context, allowed_hosts, disallowed_hosts, default_deny, is_prod, state, run).await,
         _ => Ok((json!({"skipped": true, "reason": "unsupported actionType"}), None)),
     }
 }
@@ -402,7 +435,65 @@ fn mask_json(value: &Value, secrets: &[String]) -> Value {
     }
 }
 
-async fn execute_http(node: &Node, context: &Value, allowed_hosts: &[String]) -> Result<(Value, Option<String>), String> {
+fn is_ip_blocked(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            let a = octets[0];
+            let b = octets[1];
+            // 127.0.0.0/8 loopback
+            if a == 127 { return true; }
+            // 10.0.0.0/8
+            if a == 10 { return true; }
+            // 172.16.0.0/12
+            if a == 172 && (16..=31).contains(&b) { return true; }
+            // 192.168.0.0/16
+            if a == 192 && b == 168 { return true; }
+            // 169.254.0.0/16 link-local
+            if a == 169 && b == 254 { return true; }
+            // Common metadata IPs
+            if *v4 == Ipv4Addr::new(169,254,169,254) { return true; }
+            false
+        }
+        IpAddr::V6(v6) => {
+            // ::1 loopback
+            if *v6 == Ipv6Addr::LOCALHOST { return true; }
+            // fc00::/7 Unique local addresses
+            let seg0 = v6.segments()[0];
+            if (seg0 & 0xfe00) == 0xfc00 { return true; }
+            // fe80::/10 link-local
+            if (seg0 & 0xffc0) == 0xfe80 { return true; }
+            false
+        }
+    }
+}
+
+fn is_host_blocked(host: &str, patterns: &[String]) -> bool {
+    let h = host.to_lowercase();
+    for pat in patterns {
+        if let Some(suffix) = pat.strip_prefix("*.") {
+            if h.ends_with(suffix) && h.len() > suffix.len() {
+                if let Some(pos) = h.rfind(suffix) {
+                    if pos > 0 && h.as_bytes()[pos - 1] == b'.' { return true; }
+                }
+            }
+        } else if h == pat.as_str() {
+            return true;
+        }
+    }
+    false
+}
+
+async fn execute_http(
+    node: &Node,
+    context: &Value,
+    allowed_hosts: &[String],
+    disallowed_hosts: &[String],
+    default_deny: bool,
+    is_prod: bool,
+    state: &AppState,
+    run: &WorkflowRun,
+) -> Result<(Value, Option<String>), String> {
     let params = node.data.get("params").cloned().unwrap_or(Value::Null);
     let url_raw = params
         .get("url")
@@ -442,28 +533,62 @@ async fn execute_http(node: &Node, context: &Value, allowed_hosts: &[String]) ->
     let parsed = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
     let scheme_ok = matches!(parsed.scheme(), "http" | "https");
     if !scheme_ok { return Err("Only http/https schemes are allowed".to_string()); }
-    if !allowed.is_empty() {
-        let host = parsed.host_str().unwrap_or("").to_lowercase();
+    let host = parsed.host_str().unwrap_or("").to_lowercase();
+    // Global denylist first
+    if is_host_blocked(&host, disallowed_hosts) {
+        let msg = format!("Outbound HTTP blocked by denylist: {}", host);
+        let _ = state.workflow_repo.insert_egress_block_event(
+            run.user_id, run.workflow_id, run.id, &node.id, &url, &host, "denylist", &msg).await;
+        let detail = json!({"error":"egress_blocked","host":host,"rule":"denylist","message":msg});
+        return Err(detail.to_string());
+    }
+    if let Some(ip) = parsed.host_str().and_then(|h| h.parse::<IpAddr>().ok()) {
+        if is_prod && is_ip_blocked(&ip) {
+            let msg = "Outbound HTTP blocked by SSRF hardening".to_string();
+            let _ = state.workflow_repo.insert_egress_block_event(
+                run.user_id, run.workflow_id, run.id, &node.id, &url, &host, "ssrf_hardening", &msg).await;
+            let detail = json!({"error":"egress_blocked","host":host,"rule":"ssrf_hardening","message":msg});
+            return Err(detail.to_string());
+        }
+    }
+    // Allowlist logic
+    if default_deny {
+        if allowed.is_empty() || !is_host_allowed(&host, &allowed) {
+            let msg = format!("Outbound HTTP not allowed (default-deny): {}", host);
+            let _ = state.workflow_repo.insert_egress_block_event(
+                run.user_id, run.workflow_id, run.id, &node.id, &url, &host, "default_deny", &msg).await;
+            let detail = json!({"error":"egress_blocked","host":host,"rule":"default_deny","message":msg});
+            return Err(detail.to_string());
+        }
+    } else if !allowed.is_empty() {
         if !is_host_allowed(&host, &allowed) {
-            return Err(format!("Outbound HTTP not allowed: {}", host));
+            let msg = format!("Outbound HTTP not allowed: {}", host);
+            let _ = state.workflow_repo.insert_egress_block_event(
+                run.user_id, run.workflow_id, run.id, &node.id, &url, &host, "allowlist_miss", &msg).await;
+            let detail = json!({"error":"egress_blocked","host":host,"rule":"allowlist_miss","message":msg});
+            return Err(detail.to_string());
         }
     }
 
     let redirect_policy = if follow {
         let allowed_clone = allowed.clone();
+        let disallowed_clone = disallowed_hosts.to_vec();
+        let default_deny_local = default_deny;
+        let is_prod_local = is_prod;
         redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() >= 10 {
                 return attempt.stop();
             }
-            if allowed_clone.is_empty() {
-                return attempt.follow();
-            }
             let next = attempt.url();
             let host = next.host_str().unwrap_or("").to_lowercase();
-            if is_host_allowed(&host, &allowed_clone) {
-                attempt.follow()
+            if is_host_blocked(&host, &disallowed_clone) { return attempt.stop(); }
+            if let Some(ip) = next.host_str().and_then(|h| h.parse::<IpAddr>().ok()) {
+                if is_prod_local && is_ip_blocked(&ip) { return attempt.stop(); }
+            }
+            if default_deny_local {
+                if is_host_allowed(&host, &allowed_clone) { attempt.follow() } else { attempt.stop() }
             } else {
-                attempt.stop()
+                if allowed_clone.is_empty() || is_host_allowed(&host, &allowed_clone) { attempt.follow() } else { attempt.stop() }
             }
         })
     } else {
