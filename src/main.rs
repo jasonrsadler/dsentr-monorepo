@@ -223,6 +223,10 @@ async fn main() {
             get(routes::workflows::list_active_runs),
         )
         .route(
+            "/runs/events",
+            get(routes::workflows::sse_global_runs),
+        )
+        .route(
             "/{workflow_id}",
             get(get_workflow)
                 .put(update_workflow)
@@ -263,6 +267,10 @@ async fn main() {
         .route(
             "/{workflow_id}/runs/{run_id}/events",
             get(sse_run_events),
+        )
+        .route(
+            "/{workflow_id}/runs/events-stream",
+            get(routes::workflows::sse_workflow_runs),
         )
         .route(
             "/{workflow_id}/webhook-url",

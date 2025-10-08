@@ -1017,6 +1017,76 @@ pub async fn list_egress_block_events(
     }
 }
 
+// SSE: per-workflow active runs stream
+pub async fn sse_workflow_runs(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => Uuid::nil() };
+    let state = app_state.clone();
+    let s = stream! {
+        let mut last_ids: Option<Vec<(Uuid, String)>> = None;
+        let mut intv = tokio::time::interval(Duration::from_millis(1000));
+        loop {
+            intv.tick().await;
+            if user_id.is_nil() { yield Ok::<Event, Infallible>(Event::default().event("error").data("unauthorized")); break; }
+            match state.workflow_repo.list_active_runs(user_id, Some(workflow_id)).await {
+                Ok(runs) => {
+                    let ids: Vec<(Uuid, String)> = runs.iter().map(|r| (r.id, r.status.clone())).collect();
+                    let changed = last_ids.as_ref().map(|prev| prev != &ids).unwrap_or(true);
+                    if changed {
+                        last_ids = Some(ids);
+                        let ev = Event::default().event("runs").json_data(&runs).unwrap();
+                        yield Ok::<Event, Infallible>(ev);
+                    } else {
+                        yield Ok::<Event, Infallible>(Event::default().event("tick").data("{}"));
+                    }
+                }
+                Err(_) => {
+                    yield Ok::<Event, Infallible>(Event::default().event("error").data("fetch_failed"));
+                }
+            }
+        }
+    };
+    Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keepalive"))
+}
+
+// SSE: global active runs status stream
+pub async fn sse_global_runs(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => Uuid::nil() };
+    let state = app_state.clone();
+    let s = stream! {
+        let mut last: Option<(bool,bool)> = None;
+        let mut intv = tokio::time::interval(Duration::from_millis(1500));
+        loop {
+            intv.tick().await;
+            if user_id.is_nil() { yield Ok::<Event, Infallible>(Event::default().event("error").data("unauthorized")); break; }
+            match state.workflow_repo.list_active_runs(user_id, None).await {
+                Ok(runs) => {
+                    let has_running = runs.iter().any(|r| r.status == "running");
+                    let has_queued = runs.iter().any(|r| r.status == "queued");
+                    let cur = (has_running, has_queued);
+                    if last.map(|p| p != cur).unwrap_or(true) {
+                        last = Some(cur);
+                        let ev = Event::default().event("status").json_data(serde_json::json!({"has_running": has_running, "has_queued": has_queued})).unwrap();
+                        yield Ok::<Event, Infallible>(ev);
+                    } else {
+                        yield Ok::<Event, Infallible>(Event::default().event("tick").data("{}"));
+                    }
+                }
+                Err(_) => {
+                    yield Ok::<Event, Infallible>(Event::default().event("error").data("fetch_failed"));
+                }
+            }
+        }
+    };
+    Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keepalive"))
+}
+
 pub async fn clear_egress_block_events(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
