@@ -5,6 +5,8 @@ mod responses;
 mod routes;
 mod services;
 mod state;
+mod engine;
+mod worker;
 pub mod utils;
 
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -13,7 +15,7 @@ use axum::http::Method;
 use axum::{
     http::HeaderName,
     response::{IntoResponse, Response},
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
     Router,
 };
 use config::Config;
@@ -32,7 +34,10 @@ use routes::{
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
-    workflows::{create_workflow, delete_workflow, get_workflow, list_workflows, update_workflow},
+    workflows::{
+        create_workflow, delete_workflow, get_workflow, list_workflows, update_workflow,
+        get_workflow_run_status, start_workflow_run, get_webhook_url, webhook_trigger, regenerate_webhook_token,
+    },
 };
 use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
@@ -157,6 +162,7 @@ async fn main() {
         google_oauth,
         github_oauth,
     };
+    let state_for_worker = state.clone();
 
     let cors = CorsLayer::new()
         .allow_origin(config.frontend_origin.parse::<HeaderValue>().unwrap())
@@ -200,6 +206,7 @@ async fn main() {
             config: auth_governor_conf.clone(),
         });
 
+    // Protected workflow routes (CSRF layer applied)
     let workflow_routes = Router::new()
         .route("/", post(create_workflow).get(list_workflows))
         .route(
@@ -208,15 +215,38 @@ async fn main() {
                 .put(update_workflow)
                 .delete(delete_workflow),
         )
+        .route(
+            "/{workflow_id}/run",
+            post(start_workflow_run),
+        )
+        .route(
+            "/{workflow_id}/runs/{run_id}",
+            get(get_workflow_run_status),
+        )
+        .route(
+            "/{workflow_id}/webhook-url",
+            get(get_webhook_url),
+        )
+        .route(
+            "/{workflow_id}/webhook/regenerate",
+            post(regenerate_webhook_token),
+        )
         .route("/{workflow_id}/logs", get(routes::workflows::list_workflow_logs).delete(routes::workflows::clear_workflow_logs))
         .route("/{workflow_id}/logs/{log_id}", delete(routes::workflows::delete_workflow_log_entry))
         .layer(csrf_layer.clone());
+
+    // Public webhook route (no CSRF, no auth)
+    let public_workflow_routes = Router::new()
+        .route(
+            "/{workflow_id}/trigger/{token}",
+            post(webhook_trigger),
+        );
     let app = Router::new()
         .route("/", get(root))
         .route("/api/early-access", post(handle_early_access))
         .route("/api/dashboard", get(dashboard_handler))
         .nest("/api/auth", auth_routes) // <-- your auth routes with CSRF selectively applied
-        .nest("/api/workflows", workflow_routes)
+        .nest("/api/workflows", workflow_routes.merge(public_workflow_routes))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(GovernorLayer {
@@ -226,6 +256,9 @@ async fn main() {
 
     let make_service = app.into_make_service_with_connect_info::<SocketAddr>();
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+
+    // Start background workers (simple no-op executor for now)
+    worker::start_background_workers(state_for_worker).await;
     #[cfg(feature = "tls")]
     {
         // TLS: Only run this block when `--features tls` is used

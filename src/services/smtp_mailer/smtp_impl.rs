@@ -94,4 +94,8 @@ impl Mailer for SmtpMailer {
 
         self.send_email(to, "Reset your password", &body).await
     }
+
+    async fn send_email_generic(&self, to: &str, subject: &str, body: &str) -> Result<(), MailError> {
+        self.send_email(to, subject, body).await
+    }
 }

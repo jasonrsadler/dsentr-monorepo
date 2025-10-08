@@ -7,6 +7,8 @@ use super::user_repository::{UserId, UserRepository};
 use crate::db::workflow_repository::WorkflowRepository;
 use crate::models::signup::SignupPayload;
 use crate::models::workflow::Workflow;
+use crate::models::workflow_node_run::WorkflowNodeRun;
+use crate::models::workflow_run::WorkflowRun;
 use serde_json::Value;
 
 #[allow(dead_code)]
@@ -160,6 +162,13 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(None)
     }
 
+    async fn find_workflow_by_id_public(
+        &self,
+        _workflow_id: Uuid,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        Ok(None)
+    }
+
     async fn update_workflow(
         &self,
         _user_id: Uuid,
@@ -213,5 +222,68 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _workflow_id: Uuid,
     ) -> Result<u64, sqlx::Error> {
         Ok(0)
+    }
+
+    async fn create_workflow_run(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _snapshot: Value,
+        _idempotency_key: Option<&str>,
+    ) -> Result<WorkflowRun, sqlx::Error> {
+        Err(sqlx::Error::Protocol("NoopWorkflowRepository not implemented".into()))
+    }
+
+    async fn get_workflow_run(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _run_id: Uuid,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn list_workflow_node_runs(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _run_id: Uuid,
+    ) -> Result<Vec<WorkflowNodeRun>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn claim_next_queued_run(&self) -> Result<Option<WorkflowRun>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn complete_workflow_run(
+        &self,
+        _run_id: Uuid,
+        _status: &str,
+        _error: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn insert_node_run(
+        &self,
+        _run_id: Uuid,
+        _node_id: &str,
+        _name: Option<&str>,
+        _node_type: Option<&str>,
+        _inputs: Option<Value>,
+        _outputs: Option<Value>,
+        _status: &str,
+        _error: Option<&str>,
+    ) -> Result<WorkflowNodeRun, sqlx::Error> {
+        Err(sqlx::Error::Protocol("NoopWorkflowRepository not implemented".into()))
+    }
+
+    async fn rotate_webhook_salt(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
+        Ok(None)
     }
 }

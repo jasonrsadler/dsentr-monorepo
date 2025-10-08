@@ -37,4 +37,8 @@ impl Mailer for MockMailer {
             Ok(())
         }
     }
+
+    async fn send_email_generic(&self, _to: &str, _subject: &str, _body: &str) -> Result<(), MailError> {
+        if self.fail_send { Err(MailError::Other("mock fail".into())) } else { Ok(()) }
+    }
 }

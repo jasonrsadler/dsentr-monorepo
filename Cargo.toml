@@ -41,6 +41,8 @@ tokio-rustls = "0.25"
 axum-server = { version = "0.6", optional = true, features = ["tls-rustls"] }
 reqwest = { version = "0.12.15", features = ["json"] }
 urlencoding = "2"
+hmac = "0.12"
+sha2 = "0.10"
 
 [dev-dependencies]
 hyper = "1"

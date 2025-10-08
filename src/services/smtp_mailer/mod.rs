@@ -52,6 +52,7 @@ impl From<AddressError> for MailError {
 pub trait Mailer: Send + Sync {
     async fn send_verification_email(&self, to: &str, token: &str) -> Result<(), MailError>;
     async fn send_reset_email(&self, to: &str, token: &str) -> Result<(), MailError>;
+    async fn send_email_generic(&self, to: &str, subject: &str, body: &str) -> Result<(), MailError>;
 }
 
 mod mock_mailer;

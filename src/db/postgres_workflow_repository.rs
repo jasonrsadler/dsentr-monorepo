@@ -1,4 +1,10 @@
-use crate::{db::workflow_repository::WorkflowRepository, models::workflow::Workflow, models::workflow_log::WorkflowLog};
+use crate::{
+    db::workflow_repository::WorkflowRepository,
+    models::workflow::Workflow,
+    models::workflow_log::WorkflowLog,
+    models::workflow_node_run::WorkflowNodeRun,
+    models::workflow_run::WorkflowRun,
+};
 use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -22,7 +28,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             r#"
             INSERT INTO workflows (user_id, name, description, data, created_at, updated_at)
             VALUES ($1, $2, $3, $4, now(), now())
-            RETURNING id, user_id, name, description, data, created_at as "created_at!", updated_at as "updated_at!"
+            RETURNING id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             "#,
             user_id,
             name,
@@ -39,7 +45,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         let results = sqlx::query_as!(
             Workflow,
             r#"
-            SELECT id, user_id, name, description, data, created_at as "created_at!", updated_at as "updated_at!"
+            SELECT id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             FROM workflows
             WHERE user_id = $1
             ORDER BY updated_at DESC
@@ -60,11 +66,30 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         let result = sqlx::query_as!(
             Workflow,
             r#"
-            SELECT id, user_id, name, description, data, created_at as "created_at!", updated_at as "updated_at!"
+            SELECT id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             FROM workflows
             WHERE user_id = $1 AND id = $2
             "#,
             user_id,
+            workflow_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result)
+    }
+
+    async fn find_workflow_by_id_public(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        let result = sqlx::query_as!(
+            Workflow,
+            r#"
+            SELECT id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            FROM workflows
+            WHERE id = $1
+            "#,
             workflow_id
         )
         .fetch_optional(&self.pool)
@@ -90,7 +115,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 data = $5,
                 updated_at = now()
             WHERE user_id = $1 AND id = $2
-            RETURNING id, user_id, name, description, data, created_at as "created_at!", updated_at as "updated_at!"
+            RETURNING id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             "#,
             user_id,
             workflow_id,
@@ -201,5 +226,215 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .execute(&self.pool)
         .await?;
         Ok(res.rows_affected())
+    }
+
+    async fn rotate_webhook_salt(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            UPDATE workflows
+            SET webhook_salt = gen_random_uuid(), updated_at = now()
+            WHERE user_id = $1 AND id = $2
+            RETURNING webhook_salt
+            "#,
+            user_id,
+            workflow_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| r.webhook_salt))
+    }
+
+    async fn create_workflow_run(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        snapshot: Value,
+        idempotency_key: Option<&str>,
+    ) -> Result<WorkflowRun, sqlx::Error> {
+        // Try insert; if unique violation on idempotency, fetch existing
+        let insert_res = sqlx::query_as!(
+            WorkflowRun,
+            r#"
+            INSERT INTO workflow_runs (user_id, workflow_id, snapshot, status, idempotency_key, started_at, created_at, updated_at)
+            VALUES ($1, $2, $3, 'queued', $4, now(), now(), now())
+            RETURNING id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                      started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
+            "#,
+            user_id,
+            workflow_id,
+            snapshot,
+            idempotency_key
+        )
+        .fetch_one(&self.pool)
+        .await;
+
+        match insert_res {
+            Ok(run) => Ok(run),
+            Err(e) => {
+                // Check for unique violation (idempotency)
+                let is_unique = matches!(&e, sqlx::Error::Database(db)
+                    if db.code().map(|c| c == "23505").unwrap_or(false));
+                if is_unique {
+                    // Return the existing run for this key
+                    let existing = sqlx::query_as!(
+                        WorkflowRun,
+                        r#"
+                        SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                               started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
+                        FROM workflow_runs
+                        WHERE user_id = $1 AND workflow_id = $2 AND idempotency_key = $3
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        "#,
+                        user_id,
+                        workflow_id,
+                        idempotency_key
+                    )
+                    .fetch_one(&self.pool)
+                    .await?;
+                    Ok(existing)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    async fn get_workflow_run(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error> {
+        let row = sqlx::query_as!(
+            WorkflowRun,
+            r#"
+            SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                   started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
+            FROM workflow_runs
+            WHERE user_id = $1 AND workflow_id = $2 AND id = $3
+            "#,
+            user_id,
+            workflow_id,
+            run_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    async fn list_workflow_node_runs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<Vec<WorkflowNodeRun>, sqlx::Error> {
+        let rows = sqlx::query_as!(
+            WorkflowNodeRun,
+            r#"
+            SELECT nr.id, nr.run_id, nr.node_id, nr.name, nr.node_type, nr.inputs, nr.outputs, nr.status, nr.error,
+                   nr.started_at as "started_at!", nr.finished_at, nr.created_at as "created_at!", nr.updated_at as "updated_at!"
+            FROM workflow_node_runs nr
+            JOIN workflow_runs r ON r.id = nr.run_id
+            WHERE r.user_id = $1 AND r.workflow_id = $2 AND r.id = $3
+            ORDER BY nr.started_at ASC
+            "#,
+            user_id,
+            workflow_id,
+            run_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn claim_next_queued_run(&self) -> Result<Option<WorkflowRun>, sqlx::Error> {
+        // Atomically claim one queued run and mark as running
+        let row = sqlx::query_as!(
+            WorkflowRun,
+            r#"
+            WITH sel AS (
+              SELECT id
+              FROM workflow_runs
+              WHERE status = 'queued'
+              ORDER BY created_at ASC
+              LIMIT 1
+              FOR UPDATE SKIP LOCKED
+            )
+            UPDATE workflow_runs wr
+            SET status = 'running', updated_at = now()
+            FROM sel
+            WHERE wr.id = sel.id
+            RETURNING wr.id, wr.user_id, wr.workflow_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,
+                      wr.started_at as "started_at!", wr.finished_at, wr.created_at as "created_at!", wr.updated_at as "updated_at!"
+            "#
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    async fn complete_workflow_run(
+        &self,
+        run_id: Uuid,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE workflow_runs
+            SET status = $2,
+                error = $3,
+                finished_at = COALESCE(finished_at, now()),
+                updated_at = now()
+            WHERE id = $1
+            "#,
+            run_id,
+            status,
+            error
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_node_run(
+        &self,
+        run_id: Uuid,
+        node_id: &str,
+        name: Option<&str>,
+        node_type: Option<&str>,
+        inputs: Option<Value>,
+        outputs: Option<Value>,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<WorkflowNodeRun, sqlx::Error> {
+        let row = sqlx::query_as!(
+            WorkflowNodeRun,
+            r#"
+            INSERT INTO workflow_node_runs (run_id, node_id, name, node_type, inputs, outputs, status, error, started_at, finished_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                    now(),
+                    CASE WHEN $7 IN ('succeeded','failed','skipped','canceled') THEN now() ELSE NULL END,
+                    now(), now())
+            RETURNING id, run_id, node_id, name, node_type, inputs, outputs, status, error,
+                      started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
+            "#,
+            run_id,
+            node_id,
+            name,
+            node_type,
+            inputs,
+            outputs,
+            status,
+            error
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row)
     }
 }

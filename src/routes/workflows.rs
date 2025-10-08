@@ -4,12 +4,16 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde_json::json;
+use base64::Engine;
 use uuid::Uuid;
 
 use crate::{
     models::workflow::CreateWorkflow, responses::JsonResponse, routes::auth::session::AuthSession,
     state::AppState,
 };
+use serde::Deserialize;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 
 fn is_unique_violation(err: &sqlx::Error) -> bool {
     if let sqlx::Error::Database(db_err) = err {
@@ -45,7 +49,7 @@ fn diff_user_nodes_only(before: &serde_json::Value, after: &serde_json::Value) -
     let mut bf: Vec<(String, serde_json::Value)> = Vec::new();
     let mut af: Vec<(String, serde_json::Value)> = Vec::new();
 
-    let mut extract = |root: &serde_json::Value, out: &mut Vec<(String, serde_json::Value)>| {
+    let extract = |root: &serde_json::Value, out: &mut Vec<(String, serde_json::Value)>| {
         if let Some(nodes) = root.get("nodes").and_then(|v| v.as_array()) {
             for (i, node) in nodes.iter().enumerate() {
                 if let Some(data) = node.get("data") {
@@ -337,6 +341,245 @@ pub async fn delete_workflow(
         Err(e) => {
             eprintln!("DB error deleting workflow: {:?}", e);
             JsonResponse::server_error("Failed to delete workflow").into_response()
+        }
+    }
+}
+
+type HmacSha256 = Hmac<Sha256>;
+
+fn compute_webhook_token(secret: &str, user_id: Uuid, workflow_id: Uuid, salt: Uuid) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+    mac.update(user_id.as_bytes());
+    mac.update(workflow_id.as_bytes());
+    mac.update(salt.as_bytes());
+    let res = mac.finalize().into_bytes();
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(res)
+}
+
+#[derive(Deserialize)]
+pub struct StartWorkflowRunRequest {
+    pub idempotency_key: Option<String>,
+    pub context: Option<serde_json::Value>,
+}
+
+pub async fn start_workflow_run(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+    payload: Option<Json<StartWorkflowRunRequest>>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    // Ensure workflow exists and belongs to user
+    let wf = match app_state
+        .workflow_repo
+        .find_workflow_by_id(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(w)) => w,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error fetching workflow before run: {:?}", e);
+            return JsonResponse::server_error("Failed to start run").into_response();
+        }
+    };
+
+    // Extract once to avoid borrow/move conflict
+    let (idempotency_key_owned, trigger_ctx) = match payload {
+        Some(Json(req)) => (req.idempotency_key, req.context),
+        None => (None, None),
+    };
+    let idempotency_key = idempotency_key_owned.as_deref();
+
+    // Snapshot the graph (immutable)
+    let mut snapshot = wf.data.clone();
+    if let Some(ctx) = trigger_ctx {
+        snapshot["_trigger_context"] = ctx;
+    }
+
+    match app_state
+        .workflow_repo
+        .create_workflow_run(user_id, workflow_id, snapshot, idempotency_key)
+        .await
+    {
+        Ok(run) => (
+            StatusCode::ACCEPTED,
+            Json(json!({
+                "success": true,
+                "run": run
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            eprintln!("DB error creating workflow run: {:?}", e);
+            JsonResponse::server_error("Failed to enqueue run").into_response()
+        }
+    }
+}
+
+pub async fn get_workflow_run_status(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path((workflow_id, run_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    match app_state
+        .workflow_repo
+        .get_workflow_run(user_id, workflow_id, run_id)
+        .await
+    {
+        Ok(Some(run)) => {
+            let nodes_res = app_state
+                .workflow_repo
+                .list_workflow_node_runs(user_id, workflow_id, run_id)
+                .await;
+            match nodes_res {
+                Ok(node_runs) => (
+                    StatusCode::OK,
+                    Json(json!({
+                        "success": true,
+                        "run": run,
+                        "node_runs": node_runs
+                    })),
+                )
+                    .into_response(),
+                Err(e) => {
+                    eprintln!("DB error listing node runs: {:?}", e);
+                    JsonResponse::server_error("Failed to fetch run status").into_response()
+                }
+            }
+        }
+        Ok(None) => JsonResponse::not_found("Run not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error fetching run: {:?}", e);
+            JsonResponse::server_error("Failed to fetch run").into_response()
+        }
+    }
+}
+
+// Protected endpoint to fetch a webhook URL for a workflow (for display in UI)
+pub async fn get_webhook_url(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .find_workflow_by_id(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(wf)) => {
+            let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
+            let token = compute_webhook_token(&secret, wf.user_id, wf.id, wf.webhook_salt);
+            let url = format!("/api/workflows/{}/trigger/{}", wf.id, token);
+            (StatusCode::OK, Json(json!({"success": true, "url": url }))).into_response()
+        }
+        Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error: {:?}", e);
+            JsonResponse::server_error("Failed to get webhook URL").into_response()
+        }
+    }
+}
+
+// Public webhook trigger (no CSRF, no session). Body JSON becomes trigger context
+pub async fn webhook_trigger(
+    State(app_state): State<AppState>,
+    Path((workflow_id, token)): Path<(Uuid, String)>,
+    body: Option<Json<serde_json::Value>>,
+) -> Response {
+    // Fetch workflow without user auth
+    let wf = match app_state
+        .workflow_repo
+        .find_workflow_by_id_public(workflow_id)
+        .await
+    {
+        Ok(Some(w)) => w,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error: {:?}", e);
+            return JsonResponse::server_error("Failed to enqueue").into_response();
+        }
+    };
+
+    // Verify token
+    let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
+    let expected = compute_webhook_token(&secret, wf.user_id, wf.id, wf.webhook_salt);
+    if token != expected {
+        return JsonResponse::unauthorized("Invalid token").into_response();
+    }
+
+    // Snapshot with trigger context
+    let mut snapshot = wf.data.clone();
+    if let Some(Json(ctx)) = body {
+        snapshot["_trigger_context"] = ctx;
+    }
+
+    match app_state
+        .workflow_repo
+        .create_workflow_run(wf.user_id, wf.id, snapshot, None)
+        .await
+    {
+        Ok(run) => (
+            StatusCode::ACCEPTED,
+            Json(json!({"success": true, "run": run})),
+        )
+            .into_response(),
+        Err(e) => {
+            eprintln!("DB error creating run: {:?}", e);
+            JsonResponse::server_error("Failed to enqueue run").into_response()
+        }
+    }
+}
+
+pub async fn regenerate_webhook_token(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .rotate_webhook_salt(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(new_salt)) => {
+            let wf = app_state
+                .workflow_repo
+                .find_workflow_by_id(user_id, workflow_id)
+                .await;
+            match wf {
+                Ok(Some(w)) => {
+                    let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
+                    let token = compute_webhook_token(&secret, w.user_id, w.id, new_salt);
+                    let url = format!("/api/workflows/{}/trigger/{}", w.id, token);
+                    (StatusCode::OK, Json(json!({"success": true, "url": url}))).into_response()
+                }
+                Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
+                Err(e) => {
+                    eprintln!("DB error: {:?}", e);
+                    JsonResponse::server_error("Failed to regenerate").into_response()
+                }
+            }
+        }
+        Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error rotating salt: {:?}", e);
+            JsonResponse::server_error("Failed to regenerate").into_response()
         }
     }
 }

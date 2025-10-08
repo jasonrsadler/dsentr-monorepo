@@ -10,6 +10,8 @@ pub struct Workflow {
     pub name: String,
     pub description: Option<String>,
     pub data: serde_json::Value,
+    #[serde(skip_serializing)]
+    pub webhook_salt: Uuid,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
