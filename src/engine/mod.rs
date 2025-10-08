@@ -153,10 +153,10 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         let kind = node.kind.as_str();
         let mut next_nodes: Vec<String> = vec![];
 
-        // Insert running node_run
-        let running_id = state
+        // Upsert running node_run (idempotent by run_id+node_id)
+        let running = state
             .workflow_repo
-            .insert_node_run(
+            .upsert_node_run(
                 run.id,
                 &node.id,
                 node.data
@@ -171,8 +171,7 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                 None,
             )
             .await
-            .ok()
-            .map(|nr| nr.id);
+            .ok();
 
         let execution = match kind {
             "trigger" => execute_trigger(node).await,
@@ -184,10 +183,10 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         match execution {
             Ok((outputs, selected_next)) => {
                 // Update node run to succeeded
-                if let Some(nid) = running_id {
+                if let Some(nr) = running {
                     let _ = state
                         .workflow_repo
-                        .update_node_run(nid, "succeeded", Some(outputs.clone()), None)
+                        .upsert_node_run(run.id, &node.id, nr.name.as_deref(), nr.node_type.as_deref(), nr.inputs.clone(), Some(outputs.clone()), "succeeded", None)
                         .await;
                 }
 
@@ -208,10 +207,10 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                 }
             }
             Err(err_msg) => {
-                if let Some(nid) = running_id {
+                if let Some(nr) = running {
                     let _ = state
                         .workflow_repo
-                        .update_node_run(nid, "failed", None, Some(&err_msg))
+                        .upsert_node_run(run.id, &node.id, nr.name.as_deref(), nr.node_type.as_deref(), nr.inputs.clone(), None, "failed", Some(&err_msg))
                         .await;
                 }
 

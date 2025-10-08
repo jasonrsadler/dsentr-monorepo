@@ -133,6 +133,19 @@ pub trait WorkflowRepository: Send + Sync {
         error: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
+    // Idempotent per-node writes: insert or update by (run_id, node_id)
+    async fn upsert_node_run(
+        &self,
+        run_id: Uuid,
+        node_id: &str,
+        name: Option<&str>,
+        node_type: Option<&str>,
+        inputs: Option<Value>,
+        outputs: Option<Value>,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<WorkflowNodeRun, sqlx::Error>;
+
     // Cancel + status helpers
     async fn cancel_workflow_run(
         &self,

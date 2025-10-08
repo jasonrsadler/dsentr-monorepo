@@ -29,7 +29,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             r#"
             INSERT INTO workflows (user_id, name, description, data, created_at, updated_at)
             VALUES ($1, $2, $3, $4, now(), now())
-            RETURNING id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            RETURNING id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             "#,
             user_id,
             name,
@@ -46,7 +46,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         let results = sqlx::query_as!(
             Workflow,
             r#"
-            SELECT id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            SELECT id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             FROM workflows
             WHERE user_id = $1
             ORDER BY updated_at DESC
@@ -67,7 +67,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         let result = sqlx::query_as!(
             Workflow,
             r#"
-            SELECT id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            SELECT id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             FROM workflows
             WHERE user_id = $1 AND id = $2
             "#,
@@ -87,7 +87,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         let result = sqlx::query_as!(
             Workflow,
             r#"
-            SELECT id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            SELECT id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             FROM workflows
             WHERE id = $1
             "#,
@@ -116,7 +116,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 data = $5,
                 updated_at = now()
             WHERE user_id = $1 AND id = $2
-            RETURNING id, user_id, name, description, data, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
+            RETURNING id, user_id, name, description, data, concurrency_limit, webhook_salt, created_at as "created_at!", updated_at as "updated_at!"
             "#,
             user_id,
             workflow_id,
@@ -464,6 +464,53 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn upsert_node_run(
+        &self,
+        run_id: Uuid,
+        node_id: &str,
+        name: Option<&str>,
+        node_type: Option<&str>,
+        inputs: Option<Value>,
+        outputs: Option<Value>,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<WorkflowNodeRun, sqlx::Error> {
+        let row = sqlx::query_as::<_, WorkflowNodeRun>(
+            r#"
+            INSERT INTO workflow_node_runs (run_id, node_id, name, node_type, inputs, outputs, status, error, started_at, finished_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                    now(),
+                    CASE WHEN $7 IN ('succeeded','failed','skipped','canceled') THEN now() ELSE NULL END,
+                    now(), now())
+            ON CONFLICT (run_id, node_id) DO UPDATE SET
+                name = COALESCE(EXCLUDED.name, workflow_node_runs.name),
+                node_type = COALESCE(EXCLUDED.node_type, workflow_node_runs.node_type),
+                inputs = COALESCE(EXCLUDED.inputs, workflow_node_runs.inputs),
+                outputs = COALESCE(EXCLUDED.outputs, workflow_node_runs.outputs),
+                status = EXCLUDED.status,
+                error = COALESCE(EXCLUDED.error, workflow_node_runs.error),
+                finished_at = CASE
+                    WHEN EXCLUDED.status IN ('succeeded','failed','skipped','canceled') THEN COALESCE(workflow_node_runs.finished_at, now())
+                    ELSE workflow_node_runs.finished_at
+                END,
+                updated_at = now()
+            RETURNING id, run_id, node_id, name, node_type, inputs, outputs, status, error,
+                      started_at, finished_at, created_at, updated_at
+            "#
+        )
+        .bind(run_id)
+        .bind(node_id)
+        .bind(name)
+        .bind(node_type)
+        .bind(inputs)
+        .bind(outputs)
+        .bind(status)
+        .bind(error)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row)
     }
 
     async fn cancel_workflow_run(
@@ -917,3 +964,4 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         }
     }
 }
+

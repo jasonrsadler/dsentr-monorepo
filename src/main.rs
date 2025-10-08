@@ -40,6 +40,7 @@ use routes::{
         list_runs_for_workflow, cancel_all_runs_for_workflow, rerun_workflow_run, download_run_json, sse_run_events,
         set_concurrency_limit, list_dead_letters, requeue_dead_letter, rerun_from_failed_node,
     },
+    admin::purge_runs,
 };
 use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
@@ -285,6 +286,15 @@ async fn main() {
         .route("/{workflow_id}/logs/{log_id}", delete(routes::workflows::delete_workflow_log_entry))
         .layer(csrf_layer.clone());
 
+    // Admin routes (CSRF + rate limit). Only Admin role may call these handlers.
+    let admin_routes = Router::new()
+        .route(
+            "/purge-runs",
+            post(purge_runs),
+        )
+        .layer(csrf_layer.clone())
+        .layer(GovernorLayer { config: global_governor_conf.clone() });
+
     // Public webhook route (no CSRF, no auth)
     let public_workflow_routes = Router::new()
         .route(
@@ -297,6 +307,7 @@ async fn main() {
         .route("/api/dashboard", get(dashboard_handler))
         .nest("/api/auth", auth_routes) // <-- your auth routes with CSRF selectively applied
         .nest("/api/workflows", workflow_routes.merge(public_workflow_routes))
+        .nest("/api/admin", admin_routes)
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(GovernorLayer {

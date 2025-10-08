@@ -289,6 +289,20 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(())
     }
 
+    async fn upsert_node_run(
+        &self,
+        _run_id: Uuid,
+        _node_id: &str,
+        _name: Option<&str>,
+        _node_type: Option<&str>,
+        _inputs: Option<Value>,
+        _outputs: Option<Value>,
+        _status: &str,
+        _error: Option<&str>,
+    ) -> Result<WorkflowNodeRun, sqlx::Error> {
+        Err(sqlx::Error::Protocol("NoopWorkflowRepository not implemented".into()))
+    }
+
     async fn rotate_webhook_salt(
         &self,
         _user_id: Uuid,
