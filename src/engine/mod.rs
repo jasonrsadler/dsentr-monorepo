@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::redirect;
 use serde_json::{json, Value};
 
 use crate::models::workflow_run::WorkflowRun;
@@ -118,7 +119,15 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         }
     }
 
+    let mut canceled = false;
     while let Some(node_id) = stack.pop() {
+        // Check cancellation before executing next node
+        if let Ok(Some(status)) = state.workflow_repo.get_run_status(run.id).await {
+            if status == "canceled" {
+                canceled = true;
+                break;
+            }
+        }
         if visited.contains(&node_id) {
             continue;
         }
@@ -127,6 +136,27 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         let Some(node) = graph.nodes.get(&node_id) else { continue };
         let kind = node.kind.as_str();
         let mut next_nodes: Vec<String> = vec![];
+
+        // Insert running node_run
+        let running_id = state
+            .workflow_repo
+            .insert_node_run(
+                run.id,
+                &node.id,
+                node.data
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| Some(kind))
+                    .map(|s| s as &str),
+                Some(kind),
+                Some(node.data.clone()),
+                None,
+                "running",
+                None,
+            )
+            .await
+            .ok()
+            .map(|nr| nr.id);
 
         let execution = match kind {
             "trigger" => execute_trigger(node).await,
@@ -137,24 +167,13 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
 
         match execution {
             Ok((outputs, selected_next)) => {
-                // Record node run as succeeded
-                let _ = state
-                    .workflow_repo
-                    .insert_node_run(
-                        run.id,
-                        &node.id,
-                        node.data
-                            .get("label")
-                            .and_then(|v| v.as_str())
-                            .or_else(|| Some(kind))
-                            .map(|s| s as &str),
-                        Some(kind),
-                        Some(node.data.clone()),
-                        Some(outputs.clone()),
-                        "succeeded",
-                        None,
-                    )
-                    .await;
+                // Update node run to succeeded
+                if let Some(nid) = running_id {
+                    let _ = state
+                        .workflow_repo
+                        .update_node_run(nid, "succeeded", Some(outputs.clone()), None)
+                        .await;
+                }
 
                 // Merge outputs into context under node.id
                 if let Some(obj) = context.as_object_mut() {
@@ -173,23 +192,12 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                 }
             }
             Err(err_msg) => {
-                let _ = state
-                    .workflow_repo
-                    .insert_node_run(
-                        run.id,
-                        &node.id,
-                        node.data
-                            .get("label")
-                            .and_then(|v| v.as_str())
-                            .or_else(|| Some(kind))
-                            .map(|s| s as &str),
-                        Some(kind),
-                        Some(node.data.clone()),
-                        None,
-                        "failed",
-                        Some(&err_msg),
-                    )
-                    .await;
+                if let Some(nid) = running_id {
+                    let _ = state
+                        .workflow_repo
+                        .update_node_run(nid, "failed", None, Some(&err_msg))
+                        .await;
+                }
 
                 // stopOnError default true for action; for others stop
                 let stop_on_error = node
@@ -218,11 +226,18 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         }
     }
 
-    // Completed traversal
-    let _ = state
-        .workflow_repo
-        .complete_workflow_run(run.id, "succeeded", None)
-        .await;
+    // Completed traversal or canceled
+    let _ = if canceled {
+        state
+            .workflow_repo
+            .complete_workflow_run(run.id, "canceled", None)
+            .await
+    } else {
+        state
+            .workflow_repo
+            .complete_workflow_run(run.id, "succeeded", None)
+            .await
+    };
 }
 
 async fn execute_trigger(node: &Node) -> Result<(Value, Option<String>), String> {
@@ -333,10 +348,11 @@ fn lookup_ctx(path: &str, ctx: &Value) -> Option<String> {
 
 async fn execute_http(node: &Node, context: &Value) -> Result<(Value, Option<String>), String> {
     let params = node.data.get("params").cloned().unwrap_or(Value::Null);
-    let url = params
+    let url_raw = params
         .get("url")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "HTTP url is required".to_string())?;
+    let url = templ_str(url_raw, context);
     let method = params
         .get("method")
         .and_then(|v| v.as_str())
@@ -364,12 +380,47 @@ async fn execute_http(node: &Node, context: &Value) -> Result<(Value, Option<Str
         .and_then(|v| v.as_str())
         .unwrap_or("none");
 
-    let client = reqwest::Client::builder()
-        .redirect(if follow {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
+    // Egress allowlist
+    let allowlist_env = std::env::var("ALLOWED_HTTP_DOMAINS").ok().unwrap_or_default();
+    let allowed: Vec<String> = allowlist_env
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let parsed = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    let scheme_ok = matches!(parsed.scheme(), "http" | "https");
+    if !scheme_ok { return Err("Only http/https schemes are allowed".to_string()); }
+    if !allowed.is_empty() {
+        let host = parsed.host_str().unwrap_or("").to_lowercase();
+        if !is_host_allowed(&host, &allowed) {
+            return Err(format!("Outbound HTTP not allowed: {}", host));
+        }
+    }
+
+    let redirect_policy = if follow {
+        let allowed_clone = allowed.clone();
+        redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.stop();
+            }
+            if allowed_clone.is_empty() {
+                return attempt.follow();
+            }
+            let next = attempt.url();
+            let host = next.host_str().unwrap_or("").to_lowercase();
+            if is_host_allowed(&host, &allowed_clone) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
         })
+    } else {
+        redirect::Policy::none()
+    };
+
+    let client = reqwest::Client::builder()
+        .redirect(redirect_policy)
         .timeout(Duration::from_millis(timeout_ms))
         .build()
         .map_err(|e| e.to_string())?;
@@ -505,6 +556,24 @@ async fn execute_http(node: &Node, context: &Value) -> Result<(Value, Option<Str
             }
         }
     }
+}
+
+fn is_host_allowed(host: &str, patterns: &[String]) -> bool {
+    if host.is_empty() { return false; }
+    for pat in patterns {
+        if let Some(suffix) = pat.strip_prefix("*.") {
+            if host.ends_with(suffix) && host.len() > suffix.len() {
+                if let Some(pos) = host.rfind(suffix) {
+                    if pos > 0 && host.as_bytes()[pos - 1] == b'.' {
+                        return true;
+                    }
+                }
+            }
+        } else if host == pat.as_str() {
+            return true;
+        }
+    }
+    false
 }
 
 async fn execute_email(node: &Node, context: &Value, state: &AppState) -> Result<(Value, Option<String>), String> {

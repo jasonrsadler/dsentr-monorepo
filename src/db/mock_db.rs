@@ -279,11 +279,42 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Err(sqlx::Error::Protocol("NoopWorkflowRepository not implemented".into()))
     }
 
+    async fn update_node_run(
+        &self,
+        _node_run_id: Uuid,
+        _status: &str,
+        _outputs: Option<Value>,
+        _error: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
     async fn rotate_webhook_salt(
         &self,
         _user_id: Uuid,
         _workflow_id: Uuid,
     ) -> Result<Option<Uuid>, sqlx::Error> {
         Ok(None)
+    }
+
+    async fn cancel_workflow_run(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _run_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn get_run_status(&self, _run_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn list_active_runs(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Option<Uuid>,
+    ) -> Result<Vec<WorkflowRun>, sqlx::Error> {
+        Ok(vec![])
     }
 }

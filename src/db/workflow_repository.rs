@@ -124,4 +124,29 @@ pub trait WorkflowRepository: Send + Sync {
         status: &str,
         error: Option<&str>,
     ) -> Result<WorkflowNodeRun, sqlx::Error>;
+
+    async fn update_node_run(
+        &self,
+        node_run_id: Uuid,
+        status: &str,
+        outputs: Option<Value>,
+        error: Option<&str>,
+    ) -> Result<(), sqlx::Error>;
+
+    // Cancel + status helpers
+    async fn cancel_workflow_run(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<bool, sqlx::Error>;
+
+    async fn get_run_status(&self, run_id: Uuid) -> Result<Option<String>, sqlx::Error>;
+
+    // Active runs listing (queue view)
+    async fn list_active_runs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Option<Uuid>,
+    ) -> Result<Vec<WorkflowRun>, sqlx::Error>;
 }

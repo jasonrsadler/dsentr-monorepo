@@ -36,7 +36,7 @@ use routes::{
     early_access::handle_early_access,
     workflows::{
         create_workflow, delete_workflow, get_workflow, list_workflows, update_workflow,
-        get_workflow_run_status, start_workflow_run, get_webhook_url, webhook_trigger, regenerate_webhook_token,
+        get_workflow_run_status, start_workflow_run, get_webhook_url, webhook_trigger, regenerate_webhook_token, cancel_workflow_run,
     },
 };
 use services::oauth::github::client::GitHubOAuthClient;
@@ -88,11 +88,13 @@ async fn main() {
     let rate_limit_ms: u64 = std::env::var("RATE_LIMITER_MILLISECONDS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(500);
+        // Default: 200ms/token (~5 req/sec)
+        .unwrap_or(200);
     let rate_limit_burst: u32 = std::env::var("RATE_LIMITER_BURST")
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(8);
+        // Default: allow short bursts during client polling
+        .unwrap_or(20);
     let global_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_millisecond(rate_limit_ms)
@@ -210,6 +212,10 @@ async fn main() {
     let workflow_routes = Router::new()
         .route("/", post(create_workflow).get(list_workflows))
         .route(
+            "/runs",
+            get(routes::workflows::list_active_runs),
+        )
+        .route(
             "/{workflow_id}",
             get(get_workflow)
                 .put(update_workflow)
@@ -222,6 +228,10 @@ async fn main() {
         .route(
             "/{workflow_id}/runs/{run_id}",
             get(get_workflow_run_status),
+        )
+        .route(
+            "/{workflow_id}/runs/{run_id}/cancel",
+            post(cancel_workflow_run),
         )
         .route(
             "/{workflow_id}/webhook-url",

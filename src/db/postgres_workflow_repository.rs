@@ -437,4 +437,108 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .await?;
         Ok(row)
     }
+
+    async fn update_node_run(
+        &self,
+        node_run_id: Uuid,
+        status: &str,
+        outputs: Option<Value>,
+        error: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE workflow_node_runs
+            SET status = $2,
+                outputs = $3,
+                error = $4,
+                finished_at = COALESCE(finished_at, now()),
+                updated_at = now()
+            WHERE id = $1
+            "#,
+            node_run_id,
+            status,
+            outputs,
+            error
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn cancel_workflow_run(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        let res = sqlx::query!(
+            r#"
+            UPDATE workflow_runs
+            SET status = 'canceled', finished_at = now(), updated_at = now()
+            WHERE id = $1 AND user_id = $2 AND workflow_id = $3 AND status IN ('queued','running')
+            "#,
+            run_id,
+            user_id,
+            workflow_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn get_run_status(&self, run_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            SELECT status FROM workflow_runs WHERE id = $1
+            "#,
+            run_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| r.status))
+    }
+
+    async fn list_active_runs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Option<Uuid>,
+    ) -> Result<Vec<WorkflowRun>, sqlx::Error> {
+        if let Some(wf) = workflow_id {
+            let rows = sqlx::query_as!(
+                WorkflowRun,
+                r#"
+                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                       started_at as "started_at!", finished_at,
+                       created_at as "created_at!", updated_at as "updated_at!"
+                FROM workflow_runs
+                WHERE user_id = $1
+                  AND workflow_id = $2
+                  AND status IN ('queued','running')
+                ORDER BY started_at ASC
+                "#,
+                user_id,
+                wf
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            Ok(rows)
+        } else {
+            let rows = sqlx::query_as!(
+                WorkflowRun,
+                r#"
+                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                       started_at as "started_at!", finished_at,
+                       created_at as "created_at!", updated_at as "updated_at!"
+                FROM workflow_runs
+                WHERE user_id = $1
+                  AND status IN ('queued','running')
+                ORDER BY started_at ASC
+                "#,
+                user_id
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            Ok(rows)
+        }
+    }
 }

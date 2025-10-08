@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Json, Path, State, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -460,6 +460,60 @@ pub async fn get_workflow_run_status(
         Err(e) => {
             eprintln!("DB error fetching run: {:?}", e);
             JsonResponse::server_error("Failed to fetch run").into_response()
+        }
+    }
+}
+
+pub async fn cancel_workflow_run(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path((workflow_id, run_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .cancel_workflow_run(user_id, workflow_id, run_id)
+        .await
+    {
+        Ok(true) => (StatusCode::OK, Json(json!({"success": true, "status": "canceled" })) ).into_response(),
+        Ok(false) => JsonResponse::bad_request("Run is not cancelable or not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error canceling run: {:?}", e);
+            JsonResponse::server_error("Failed to cancel run").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ListRunsQuery {
+    pub workflow_id: Option<Uuid>,
+}
+
+pub async fn list_active_runs(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Query(params): Query<ListRunsQuery>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .list_active_runs(user_id, params.workflow_id)
+        .await
+    {
+        Ok(runs) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "runs": runs })),
+        )
+            .into_response(),
+        Err(e) => {
+            eprintln!("DB error listing active runs: {:?}", e);
+            JsonResponse::server_error("Failed to list runs").into_response()
         }
     }
 }
