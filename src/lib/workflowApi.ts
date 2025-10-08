@@ -322,6 +322,26 @@ export async function listActiveRuns(workflowId?: string): Promise<WorkflowRunRe
   return data.runs ?? []
 }
 
+// Paged runs for a workflow with optional status filters
+export async function listRunsForWorkflow(
+  workflowId: string,
+  opts?: { status?: string[]; page?: number; perPage?: number }
+): Promise<WorkflowRunRecord[]> {
+  const params: string[] = []
+  if (opts?.status && opts.status.length) {
+    // Backend expects a sequence; bracket notation ensures Vec parsing
+    for (const s of opts.status) params.push(`status[]=${encodeURIComponent(s)}`)
+  }
+  if (opts?.page) params.push(`page=${encodeURIComponent(String(opts.page))}`)
+  if (opts?.perPage) params.push(`per_page=${encodeURIComponent(String(opts.perPage))}`)
+  const qs = params.length ? `?${params.join('&')}` : ''
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/runs${qs}`, {
+    credentials: 'include'
+  })
+  const data = await handleJsonResponse(res)
+  return data.runs ?? []
+}
+
 // Security & Egress config
 export async function getEgressAllowlist(workflowId: string): Promise<string[]> {
   const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/egress`, { credentials: 'include' })

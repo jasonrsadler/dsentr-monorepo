@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/stores/auth'
-import { listWorkflows, type WorkflowRecord, setConcurrencyLimit, cancelAllRunsForWorkflow, listDeadLetters, requeueDeadLetter, purgeRuns, getEgressAllowlist, setEgressAllowlistApi, listEgressBlocks, type EgressBlockEvent, clearEgressBlocks, clearDeadLetters } from '@/lib/workflowApi'
+import { listWorkflows, type WorkflowRecord, setConcurrencyLimit, cancelAllRunsForWorkflow, listDeadLetters, requeueDeadLetter, purgeRuns, getEgressAllowlist, setEgressAllowlistApi, listEgressBlocks, type EgressBlockEvent, clearEgressBlocks, clearDeadLetters, listRunsForWorkflow, getWorkflowRunStatus } from '@/lib/workflowApi'
+import JsonDialog from '@/components/UI/Dialog/JsonDialog'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 
 export default function EngineTab() {
   const { user } = useAuth()
@@ -32,14 +34,26 @@ export default function EngineTab() {
   const [egressText, setEgressText] = useState('')
   const [egressBusy, setEgressBusy] = useState(false)
   const [egressBlocks, setEgressBlocks] = useState<EgressBlockEvent[]>([])
+  const [successfulRuns, setSuccessfulRuns] = useState<any[]>([])
+  const [showSuccessful, setShowSuccessful] = useState(true)
+  const [showDead, setShowDead] = useState(true)
+  const [showBlocked, setShowBlocked] = useState(true)
+  const [jsonOpen, setJsonOpen] = useState(false)
+  const [jsonTitle, setJsonTitle] = useState<string>('')
+  const [jsonBody, setJsonBody] = useState<string>('')
 
   async function handleSaveLimit() {
     if (!selected || busy) return
     const parsed = parseInt(limitInput || '0', 10)
     if (!Number.isFinite(parsed) || parsed < 1) { setError('Limit must be a positive integer'); return }
-    try { setBusy(true); setError(null); const res = await setConcurrencyLimit(selected.id, parsed); if (res.success) {
-      setItems(prev => prev.map(w => w.id === selected.id ? { ...w, concurrency_limit: res.limit } as any : w))
-    } } catch (e: any) { setError(e?.message || 'Failed to set limit') } finally { setBusy(false) }
+    try {
+      setBusy(true)
+      setError(null)
+      const res = await setConcurrencyLimit(selected.id, parsed)
+      if (res.success) {
+        setItems(prev => prev.map(w => w.id === selected.id ? { ...w, concurrency_limit: res.limit } as any : w))
+      }
+    } catch (e: any) { setError(e?.message || 'Failed to set limit') } finally { setBusy(false) }
   }
 
   async function handleCancelAll() {
@@ -52,6 +66,12 @@ export default function EngineTab() {
     try { const items = await listDeadLetters(selected.id, 1, 50); setDeadLetters(items) } catch { /* ignore */ }
   }
   useEffect(() => { refreshDeadLetters() }, [selected?.id])
+
+  async function refreshSuccessfulRuns() {
+    if (!selected) return
+    try { const items = await listRunsForWorkflow(selected.id, { status: ['succeeded'], page: 1, perPage: 20 }); setSuccessfulRuns(items) } catch { setSuccessfulRuns([]) }
+  }
+  useEffect(() => { refreshSuccessfulRuns() }, [selected?.id])
 
   useEffect(() => {
     (async () => {
@@ -83,6 +103,7 @@ export default function EngineTab() {
 
   return (
     <div className="space-y-6">
+      {/* Workflow selector */}
       <div>
         <label className="block text-sm font-medium mb-1">Workflow</label>
         <select
@@ -99,6 +120,7 @@ export default function EngineTab() {
 
       {error && <div className="text-sm text-red-600">{error}</div>}
 
+      {/* Concurrency */}
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
         <h3 className="font-semibold mb-2">Concurrency</h3>
         <div className="flex items-center gap-2">
@@ -107,11 +129,13 @@ export default function EngineTab() {
         </div>
       </div>
 
+      {/* Queue actions */}
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
         <h3 className="font-semibold mb-2">Queue</h3>
         <button onClick={handleCancelAll} disabled={!selected || busy} className={`px-3 py-1 rounded ${busy ? 'opacity-60 cursor-not-allowed' : 'bg-yellow-600 text-white hover:bg-yellow-700'}`}>Cancel All Runs</button>
       </div>
 
+      {/* Egress allowlist config */}
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
         <h3 className="font-semibold mb-2">Egress Allowlist</h3>
         <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-2">One host or wildcard per line (e.g., api.github.com or *.mycorp.com). Global allowlist from server is also applied.</p>
@@ -139,54 +163,130 @@ export default function EngineTab() {
         </div>
       </div>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold mb-2">Dead‑Letter Queue</h3>
+      {/* Successful Runs */}
+      <div className="border rounded-md bg-white dark:bg-zinc-900 dark:border-zinc-700">
+        <div className="flex items-center justify-between px-3 py-2">
+          <button onClick={() => setShowSuccessful(v => !v)} className="flex items-center gap-2 font-semibold">
+            {showSuccessful ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>Successful Runs</span>
+          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={refreshSuccessfulRuns} className="text-sm underline">Refresh</button>
+          </div>
+        </div>
+        {showSuccessful && (
+          <div className="px-3 pb-3">
+            {successfulRuns.length === 0 ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">No successful runs</p>
+            ) : (
+              <div className="space-y-2">
+                {successfulRuns.map((r: any) => {
+                  const started = r.started_at ? new Date(r.started_at) : null
+                  const finished = r.finished_at ? new Date(r.finished_at) : null
+                  const durSec = started && finished ? Math.max(0, (finished.getTime() - started.getTime()) / 1000) : null
+                  return (
+                    <div key={r.id} className="p-2 rounded border bg-white dark:bg-zinc-800 dark:border-zinc-700">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm">
+                          <span className="text-zinc-600 dark:text-zinc-400">{started ? started.toLocaleString() : '-'}</span>
+                          <span className="mx-1">-&gt;</span>
+                          <span className="text-zinc-600 dark:text-zinc-400">{finished ? finished.toLocaleString() : '-'}</span>
+                          <span className="mx-2">-</span>
+                          <span className="text-zinc-700 dark:text-zinc-200">{durSec !== null ? `${durSec.toFixed(1)}s` : '-'}</span>
+                          <span className="mx-2">-</span>
+                          <span className="font-mono text-xs">{r.id}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={async () => {
+                              if (!selected) return
+                              try {
+                                const data = await getWorkflowRunStatus(selected.id, r.id)
+                                setJsonTitle(`Run ${r.id}`)
+                                setJsonBody(JSON.stringify({ run: data.run, node_runs: data.node_runs }, null, 2))
+                                setJsonOpen(true)
+                              } catch {}
+                            }}
+                            className="px-2 py-1 text-xs rounded bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600"
+                          >
+                            View details
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Dead-Letter Queue */}
+      <div className="border rounded-md bg-white dark:bg-zinc-900 dark:border-zinc-700">
+        <div className="flex items-center justify-between px-3 py-2">
+          <button onClick={() => setShowDead(v => !v)} className="flex items-center gap-2 font-semibold">
+            {showDead ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>Dead-Letter Queue</span>
+          </button>
           <div className="flex items-center gap-2">
             <button onClick={refreshDeadLetters} className="text-sm underline">Refresh</button>
             <button onClick={async ()=>{ if (selected) { try{ await clearDeadLetters(selected.id); await refreshDeadLetters() } catch {} } }} className="text-sm underline text-red-600">Clear All</button>
           </div>
         </div>
-        {deadLetters.length === 0 ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">No dead letters</p>
-        ) : (
-          <div className="space-y-2">
-            {deadLetters.map((d) => (
-              <div key={d.id} className="p-2 rounded border bg-white dark:bg-zinc-800 dark:border-zinc-700">
-                <div className="text-xs text-zinc-500">{new Date(d.created_at).toLocaleString()} • run {d.run_id}</div>
-                <div className="text-sm truncate max-w-full" title={d.error}>{d.error}</div>
-                <div className="mt-2 flex gap-2">
-                  <button onClick={() => handleRequeue(d.id)} disabled={dlBusyId === d.id} className={`px-2 py-1 text-xs rounded ${dlBusyId === d.id ? 'opacity-60 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>Requeue</button>
-                </div>
+        {showDead && (
+          <div className="px-3 pb-3">
+            {deadLetters.length === 0 ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">No dead letters</p>
+            ) : (
+              <div className="space-y-2">
+                {deadLetters.map((d) => (
+                  <div key={d.id} className="p-2 rounded border bg-white dark:bg-zinc-800 dark:border-zinc-700">
+                    <div className="text-xs text-zinc-500">{new Date(d.created_at).toLocaleString()} - run {d.run_id}</div>
+                    <div className="text-sm truncate max-w-full" title={d.error}>{d.error}</div>
+                    <div className="mt-2 flex gap-2">
+                      <button onClick={() => handleRequeue(d.id)} disabled={dlBusyId === d.id} className={`px-2 py-1 text-xs rounded ${dlBusyId === d.id ? 'opacity-60 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>Requeue</button>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold mb-2">Blocked Egress</h3>
+      {/* Blocked Egress */}
+      <div className="border rounded-md bg-white dark:bg-zinc-900 dark:border-zinc-700">
+        <div className="flex items-center justify-between px-3 py-2">
+          <button onClick={() => setShowBlocked(v => !v)} className="flex items-center gap-2 font-semibold">
+            {showBlocked ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>Blocked Egress</span>
+          </button>
           <div className="flex items-center gap-2">
             <button onClick={async ()=>{ if (selected) { try{ const items = await listEgressBlocks(selected.id, 1, 25); setEgressBlocks(items)}catch{} } }} className="text-sm underline">Refresh</button>
             <button onClick={async ()=>{ if (selected) { try{ await clearEgressBlocks(selected.id); const items = await listEgressBlocks(selected.id, 1, 25); setEgressBlocks(items)}catch{} } }} className="text-sm underline text-red-600">Clear All</button>
           </div>
         </div>
-        {egressBlocks.length === 0 ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">No blocked requests recorded.</p>
-        ) : (
-          <div className="space-y-2">
-            {egressBlocks.map(b => (
-              <div key={b.id} className="p-2 rounded border bg-white dark:bg-zinc-800 dark:border-zinc-700">
-                <div className="text-xs text-zinc-500">{new Date(b.created_at).toLocaleString()} • node {b.node_id} • {b.rule}</div>
-                <div className="text-sm"><span className="font-mono">{b.host}</span> — {b.message}</div>
-                <div className="text-xs text-zinc-500 break-words">{b.url}</div>
+        {showBlocked && (
+          <div className="px-3 pb-3">
+            {egressBlocks.length === 0 ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">No blocked requests recorded.</p>
+            ) : (
+              <div className="space-y-2">
+                {egressBlocks.map(b => (
+                  <div key={b.id} className="p-2 rounded border bg-white dark:bg-zinc-800 dark:border-zinc-700">
+                    <div className="text-xs text-zinc-500">{new Date(b.created_at).toLocaleString()} - node {b.node_id} - {b.rule}</div>
+                    <div className="text-sm"><span className="font-mono">{b.host}</span> - {b.message}</div>
+                    <div className="text-xs text-zinc-500 break-words">{b.url}</div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
 
+      {/* Maintenance */}
       {isAdmin && (
         <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
           <h3 className="font-semibold mb-2">Maintenance</h3>
@@ -196,6 +296,9 @@ export default function EngineTab() {
           </div>
         </div>
       )}
+
+      <JsonDialog isOpen={jsonOpen} title={jsonTitle} jsonText={jsonBody} onClose={() => setJsonOpen(false)} />
     </div>
   )
 }
+

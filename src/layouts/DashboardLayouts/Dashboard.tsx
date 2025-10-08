@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { API_BASE_URL } from '@/lib/config'
 import '@xyflow/react/dist/style.css'
 import WorkflowToolbar from './Toolbar'
 import FlowCanvas from './FlowCanvas'
@@ -524,6 +525,7 @@ export default function Dashboard() {
   }, [runsScope, currentWorkflow?.id])
 
   // Ensure overlay shows only the active run for the currently selected workflow
+  // Now: no REST polling here; discovery is done via SSE in the effect below.
   const ensureOverlayRunForSelected = useCallback(async () => {
     if (!currentWorkflow) {
       setActiveRun(null)
@@ -532,51 +534,13 @@ export default function Dashboard() {
     }
     const isActiveForSelected =
       activeRun && activeRun.workflow_id === currentWorkflow.id &&
-      activeRun.status === 'running'
-
+      (activeRun.status === 'running' || activeRun.status === 'queued')
     if (isActiveForSelected) return
-    try {
-      const runs = await listActiveRuns(currentWorkflow.id)
-      // Prefer a running run; otherwise choose a queued run so we can follow it
-      const next = runs.find(r => r.status === 'running') || runs.find(r => r.status === 'queued')
-      if (next) {
-        stopPolling()
-        setActiveRun(next)
-        setNodeRuns([])
-        currentPollRunIdRef.current = next.id
-        pollRun(currentWorkflow.id, next.id)
-      } else {
-        // No running or queued run yet — clear state and keep watching for the next one
-        stopPolling()
-        setActiveRun(null)
-        setNodeRuns([])
-        if (overlayWatchTimerRef.current) {
-          clearTimeout(overlayWatchTimerRef.current)
-          overlayWatchTimerRef.current = null
-        }
-        const watchTick = async () => {
-          try {
-            const runs2 = await listActiveRuns(currentWorkflow.id)
-            const next2 = runs2.find(r => r.status === 'running') || runs2.find(r => r.status === 'queued')
-            if (next2) {
-              setActiveRun(next2)
-              setNodeRuns([])
-              currentPollRunIdRef.current = next2.id
-              pollRun(currentWorkflow.id, next2.id)
-              overlayWatchTimerRef.current = null
-              return
-            }
-          } catch {}
-          if (runOverlayOpen) {
-            overlayWatchTimerRef.current = setTimeout(watchTick, 1000)
-          }
-        }
-        overlayWatchTimerRef.current = setTimeout(watchTick, 1000)
-      }
-    } catch (e) {
-      console.error('Failed to prepare overlay run', e)
-    }
-  }, [currentWorkflow, activeRun, pollRun, stopPolling, runOverlayOpen])
+    // Clear and let SSE discovery latch onto the next run
+    stopPolling()
+    setActiveRun(null)
+    setNodeRuns([])
+  }, [currentWorkflow, activeRun, stopPolling])
 
   const handleToggleRunOverlay = useCallback(() => {
     if (runOverlayOpen) {
@@ -593,85 +557,78 @@ export default function Dashboard() {
     ensureOverlayRunForSelected()
   }, [runOverlayOpen, ensureOverlayRunForSelected])
 
-  // Keep overlay latched to the selected workflow's next running/queued run.
+  // Keep overlay latched to the selected workflow's next running/queued run via SSE, with REST fallback
   useEffect(() => {
-    if (!runOverlayOpen || !currentWorkflow) return
-    let cancelled = false
-    let intervalId: any = null
+    if (!runOverlayOpen || !currentWorkflow || activeRun) return
 
-    const tick = async () => {
-      if (cancelled) return
-      try {
-        const runs = await listActiveRuns(currentWorkflow.id)
-        const candidate = runs.find(r => r.status === 'running') || runs.find(r => r.status === 'queued')
-        if (candidate && currentPollRunIdRef.current !== candidate.id) {
-          stopPolling()
-          setActiveRun(candidate)
-          setNodeRuns([])
-          currentPollRunIdRef.current = candidate.id
-          pollRun(currentWorkflow.id, candidate.id)
-        }
-      } catch {
-        // ignore transient errors
+    const base = (API_BASE_URL || '').replace(/\/$/, '')
+    const url = `${base}/api/workflows/${currentWorkflow.id}/runs/events-stream`
+    let es: EventSource | null = null
+    let fallbackTimer: any = null
+    let backoff = 1500
+
+    const pickFrom = (runs: any[]) => {
+      const candidate = runs.find(r => r.status === 'running') || runs.find(r => r.status === 'queued')
+      if (candidate) {
+        setActiveRun(candidate)
+        setNodeRuns([])
+        try { es?.close() } catch {}
+        if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null }
+        return true
       }
+      return false
     }
 
-    // Prime immediately then repeat
-    tick()
-    intervalId = setInterval(tick, 1000)
+    const startFallback = () => {
+      const doFetch = async () => {
+        try {
+          const runs = await listActiveRuns(currentWorkflow.id)
+          if (pickFrom(runs)) return
+        } catch {}
+        // schedule next attempt with capped backoff
+        backoff = Math.min(5000, backoff * 2)
+        fallbackTimer = setTimeout(doFetch, backoff)
+      }
+      doFetch()
+    }
+
+    try { es = new EventSource(url, { withCredentials: true } as EventSourceInit) } catch { es = null }
+    if (!es) { startFallback(); return }
+
+    const onRuns = (e: MessageEvent) => { try { const runs = JSON.parse(e.data); pickFrom(runs) } catch {} }
+    const onError = () => { try { es?.close() } catch {}; if (!fallbackTimer) startFallback() }
+    es.addEventListener('runs', onRuns as any)
+    es.onerror = onError
 
     return () => {
-      cancelled = true
-      if (intervalId) clearInterval(intervalId)
+      try { es?.close() } catch {}
+      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null }
     }
-  }, [runOverlayOpen, currentWorkflow, pollRun, stopPolling])
+  }, [runOverlayOpen, currentWorkflow?.id, activeRun])
 
-    // Background poll of all active runs to drive toolbar state (adaptive)
+  // Global runs SSE to drive toolbar status
   useEffect(() => {
-    let cancelled = false
-    const idleStreakRef = { current: 0 }
-    const threshold = 3 // stop after 3 consecutive idle cycles
-
-    const tick = async () => {
-      if (cancelled) return
+    const base = (API_BASE_URL || '').replace(/\/$/, '')
+    const url = `${base}/api/workflows/runs/events`
+    let es: EventSource | null = null
+    try {
+      es = new EventSource(url, { withCredentials: true } as EventSourceInit)
+    } catch {
+      es = null
+    }
+    if (!es) return
+    const onStatus = (e: MessageEvent) => {
       try {
-        const runs = await listActiveRuns(undefined)
-        const hasRunning = runs.some(r => r.status === 'running')
-        const hasQueued = runs.some(r => r.status === 'queued')
-        const next = hasRunning ? 'running' : (hasQueued ? 'queued' : 'idle')
-        setGlobalRunStatus(next)
-        if (next === 'idle') idleStreakRef.current += 1
-        else idleStreakRef.current = 0
-      } catch {
-        idleStreakRef.current = 0
-      } finally {
-        if (cancelled) return
-        if (idleStreakRef.current >= threshold) {
-          if (globalRunsTimerRef.current) { clearTimeout(globalRunsTimerRef.current as any); globalRunsTimerRef.current = null }
-        } else {
-          globalRunsTimerRef.current = setTimeout(tick, 2000)
-        }
-      }
+        const s = JSON.parse(e.data)
+        if (s.has_running) setGlobalRunStatus('running')
+        else if (s.has_queued) setGlobalRunStatus('queued')
+        else setGlobalRunStatus('idle')
+      } catch {}
     }
-
-    const resume = () => {
-      if (!cancelled && !globalRunsTimerRef.current) {
-        idleStreakRef.current = 0
-        tick()
-      }
-    }
-    window.addEventListener('dsentr-resume-global-poll', resume as any)
-    const onVis = () => { if (!(document as any).hidden) resume() }
-    document.addEventListener('visibilitychange', onVis)
-
-    tick()
-    return () => {
-      cancelled = true
-      window.removeEventListener('dsentr-resume-global-poll', resume as any)
-      document.removeEventListener('visibilitychange', onVis)
-      if (globalRunsTimerRef.current) { clearTimeout(globalRunsTimerRef.current as any); globalRunsTimerRef.current = null }
-    }
-  }, [])  // Derive toolbar status: running beats queued. Only show queued if nothing is running.
+    es.addEventListener('status', onStatus as any)
+    es.onerror = () => { try { es?.close() } catch {} }
+    return () => { try { es?.close() } catch {} }
+  }, [])
   const toolbarRunStatus = useMemo(() => {
     if (activeRun?.status === 'running') return 'running'
     if (globalRunStatus === 'running') return 'running'
@@ -680,20 +637,19 @@ export default function Dashboard() {
     return 'idle'
   }, [activeRun?.status, globalRunStatus])
 
+  // Runs tab: consume SSE of active runs for the selected workflow
   useEffect(() => {
-    if (activePane !== 'runs') {
-      if (runQueueTimerRef.current) { clearTimeout(runQueueTimerRef.current); runQueueTimerRef.current = null }
-      return
-    }
-    let cancelled = false
-    const tick = async () => {
-      if (cancelled) return
-      await fetchRunQueue()
-      runQueueTimerRef.current = setTimeout(tick, 2000)
-    }
-    tick()
-    return () => { cancelled = true; if (runQueueTimerRef.current) { clearTimeout(runQueueTimerRef.current); runQueueTimerRef.current = null } }
-  }, [activePane, fetchRunQueue])
+    if (activePane !== 'runs' || !currentWorkflow) return
+    const base = (API_BASE_URL || '').replace(/\/$/, '')
+    const url = `${base}/api/workflows/${currentWorkflow.id}/runs/events-stream`
+    let es: EventSource | null = null
+    try { es = new EventSource(url, { withCredentials: true } as EventSourceInit) } catch { es = null }
+    if (!es) return
+    const onRuns = (e: MessageEvent) => { try { setRunQueue(JSON.parse(e.data)) } catch {} }
+    es.addEventListener('runs', onRuns as any)
+    es.onerror = () => { try { es?.close() } catch {} }
+    return () => { try { es?.close() } catch {} }
+  }, [activePane, currentWorkflow?.id])
 
   const handleRunWorkflow = useCallback(async () => {
     if (!currentWorkflow) return
@@ -714,6 +670,47 @@ export default function Dashboard() {
       setError(e?.message || 'Failed to start run')
     }
   }, [currentWorkflow, workflowDirty, pollRun])
+
+  // Overlay: subscribe to SSE for active run to reduce client work
+  useEffect(() => {
+    if (!runOverlayOpen || !currentWorkflow || !activeRun) return
+    // Stop any REST polling for this run
+    stopPolling()
+
+    const base = (API_BASE_URL || '').replace(/\/$/, '')
+    const url = `${base}/api/workflows/${currentWorkflow.id}/runs/${activeRun.id}/events`
+    let es: EventSource | null = null
+    try {
+      es = new EventSource(url, { withCredentials: true } as EventSourceInit)
+    } catch {
+      es = null
+    }
+    if (!es) return
+
+    const onRun = (e: MessageEvent) => {
+      try {
+        const run = JSON.parse(e.data)
+        setActiveRun(run)
+        if (run.status !== 'queued' && run.status !== 'running') {
+          es?.close()
+        }
+      } catch {}
+    }
+    const onNodes = (e: MessageEvent) => {
+      try { setNodeRuns(JSON.parse(e.data)) } catch {}
+    }
+    const onError = () => {
+      // Allow adaptive global poll to wake if needed
+      try { window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll')) } catch {}
+      es?.close()
+    }
+
+    es.addEventListener('run', onRun as any)
+    es.addEventListener('node_runs', onNodes as any)
+    es.onerror = onError
+
+    return () => { try { es?.close() } catch {} }
+  }, [runOverlayOpen, currentWorkflow?.id, activeRun?.id, stopPolling])
 
   useEffect(() => {
     // Only recompute dirty state on meta changes while editing in designer.
