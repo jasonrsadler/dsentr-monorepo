@@ -688,8 +688,11 @@ export default function Dashboard() {
   }, [currentWorkflow, workflowDirty, pollRun])
 
   useEffect(() => {
+    // Only recompute dirty state on meta changes while editing in designer.
+    // Avoids marking dirty when switching workflows from the Runs tab.
+    if (activePane !== 'designer') return
     handleGraphChange(latestGraphRef.current)
-  }, [currentMeta, handleGraphChange])
+  }, [currentMeta, handleGraphChange, activePane])
 
   const handleSave = useCallback(async () => {
     if (!saveRef.current || !currentWorkflow || isSaving) {
