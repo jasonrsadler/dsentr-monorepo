@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/stores/auth'
 import { listWorkflows, type WorkflowRecord, setConcurrencyLimit, cancelAllRunsForWorkflow, listDeadLetters, requeueDeadLetter, purgeRuns, getEgressAllowlist, setEgressAllowlistApi, listEgressBlocks, type EgressBlockEvent, clearEgressBlocks, clearDeadLetters, listRunsForWorkflow, getWorkflowRunStatus } from '@/lib/workflowApi'
 import JsonDialog from '@/components/UI/Dialog/JsonDialog'
@@ -34,7 +34,11 @@ export default function EngineTab() {
   const [egressText, setEgressText] = useState('')
   const [egressBusy, setEgressBusy] = useState(false)
   const [egressBlocks, setEgressBlocks] = useState<EgressBlockEvent[]>([])
+  const SUCCESSFUL_RUNS_PER_PAGE = 20
   const [successfulRuns, setSuccessfulRuns] = useState<any[]>([])
+  const [successfulPage, setSuccessfulPage] = useState(1)
+  const [successfulHasMore, setSuccessfulHasMore] = useState(false)
+  const [successfulLoading, setSuccessfulLoading] = useState(false)
   const [showSuccessful, setShowSuccessful] = useState(true)
   const [showDead, setShowDead] = useState(true)
   const [showBlocked, setShowBlocked] = useState(true)
@@ -67,11 +71,35 @@ export default function EngineTab() {
   }
   useEffect(() => { refreshDeadLetters() }, [selected?.id])
 
-  async function refreshSuccessfulRuns() {
-    if (!selected) return
-    try { const items = await listRunsForWorkflow(selected.id, { status: ['succeeded'], page: 1, perPage: 20 }); setSuccessfulRuns(items) } catch { setSuccessfulRuns([]) }
-  }
-  useEffect(() => { refreshSuccessfulRuns() }, [selected?.id])
+  const refreshSuccessfulRuns = useCallback(async (page: number) => {
+    if (!selectedId) {
+      setSuccessfulRuns([])
+      setSuccessfulHasMore(false)
+      setSuccessfulPage(1)
+      return
+    }
+
+    setSuccessfulLoading(true)
+    try {
+      const items = await listRunsForWorkflow(selectedId, { status: ['succeeded'], page, perPage: SUCCESSFUL_RUNS_PER_PAGE })
+      setSuccessfulRuns(items)
+      setSuccessfulHasMore(items.length === SUCCESSFUL_RUNS_PER_PAGE)
+      setSuccessfulPage(page)
+    } catch {
+      if (page === 1) {
+        setSuccessfulRuns([])
+        setSuccessfulHasMore(false)
+        setSuccessfulPage(1)
+      }
+    } finally {
+      setSuccessfulLoading(false)
+    }
+  }, [selectedId])
+
+  useEffect(() => {
+    setSuccessfulPage(1)
+    refreshSuccessfulRuns(1)
+  }, [selectedId, refreshSuccessfulRuns])
 
   useEffect(() => {
     (async () => {
@@ -171,12 +199,41 @@ export default function EngineTab() {
             <span>Successful Runs</span>
           </button>
           <div className="flex items-center gap-2">
-            <button onClick={refreshSuccessfulRuns} className="text-sm underline">Refresh</button>
+            <button
+              onClick={() => refreshSuccessfulRuns(successfulPage)}
+              disabled={successfulLoading}
+              className="text-sm underline disabled:opacity-60"
+            >
+              Refresh
+            </button>
+            {showSuccessful && (
+              <div className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+                <button
+                  onClick={() => refreshSuccessfulRuns(Math.max(1, successfulPage - 1))}
+                  disabled={successfulPage === 1 || successfulLoading}
+                  className="px-2 py-0.5 border rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <span className="px-2 py-0.5 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200">
+                  Page {successfulPage}
+                </span>
+                <button
+                  onClick={() => refreshSuccessfulRuns(successfulPage + 1)}
+                  disabled={!successfulHasMore || successfulLoading}
+                  className="px-2 py-0.5 border rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         </div>
         {showSuccessful && (
           <div className="px-3 pb-3">
-            {successfulRuns.length === 0 ? (
+            {successfulLoading ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading...</p>
+            ) : successfulRuns.length === 0 ? (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">No successful runs</p>
             ) : (
               <div className="space-y-2">
