@@ -1,0 +1,298 @@
+use async_trait::async_trait;
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::models::workflow::Workflow;
+use crate::models::workflow_log::WorkflowLog;
+use crate::models::workflow_node_run::WorkflowNodeRun;
+use crate::models::workflow_run::WorkflowRun;
+
+#[async_trait]
+pub trait WorkflowRepository: Send + Sync {
+    async fn create_workflow(
+        &self,
+        user_id: Uuid,
+        name: &str,
+        description: Option<&str>,
+        data: Value,
+    ) -> Result<Workflow, sqlx::Error>;
+
+    async fn list_workflows_by_user(&self, user_id: Uuid) -> Result<Vec<Workflow>, sqlx::Error>;
+
+    async fn find_workflow_by_id(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<Option<Workflow>, sqlx::Error>;
+
+    async fn find_workflow_by_id_public(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<Workflow>, sqlx::Error>;
+
+    async fn rotate_webhook_salt(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<Option<Uuid>, sqlx::Error>;
+
+    async fn update_workflow(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        name: &str,
+        description: Option<&str>,
+        data: Value,
+    ) -> Result<Option<Workflow>, sqlx::Error>;
+
+    async fn delete_workflow(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<bool, sqlx::Error>;
+
+    // Logging methods
+    async fn insert_workflow_log(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        diffs: serde_json::Value,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn list_workflow_logs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<WorkflowLog>, sqlx::Error>;
+
+    async fn delete_workflow_log(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        log_id: Uuid,
+    ) -> Result<bool, sqlx::Error>;
+
+    async fn clear_workflow_logs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error>;
+
+    // Runs API
+    async fn create_workflow_run(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        snapshot: Value,
+        idempotency_key: Option<&str>,
+    ) -> Result<WorkflowRun, sqlx::Error>;
+
+    async fn get_workflow_run(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error>;
+
+    async fn list_workflow_node_runs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<Vec<WorkflowNodeRun>, sqlx::Error>;
+
+    // Worker helpers
+    async fn claim_next_queued_run(&self) -> Result<Option<WorkflowRun>, sqlx::Error>;
+
+    async fn complete_workflow_run(
+        &self,
+        run_id: Uuid,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn insert_node_run(
+        &self,
+        run_id: Uuid,
+        node_id: &str,
+        name: Option<&str>,
+        node_type: Option<&str>,
+        inputs: Option<Value>,
+        outputs: Option<Value>,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<WorkflowNodeRun, sqlx::Error>;
+
+    async fn update_node_run(
+        &self,
+        node_run_id: Uuid,
+        status: &str,
+        outputs: Option<Value>,
+        error: Option<&str>,
+    ) -> Result<(), sqlx::Error>;
+
+    // Idempotent per-node writes: insert or update by (run_id, node_id)
+    async fn upsert_node_run(
+        &self,
+        run_id: Uuid,
+        node_id: &str,
+        name: Option<&str>,
+        node_type: Option<&str>,
+        inputs: Option<Value>,
+        outputs: Option<Value>,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<WorkflowNodeRun, sqlx::Error>;
+
+    // Cancel + status helpers
+    async fn cancel_workflow_run(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<bool, sqlx::Error>;
+
+    async fn get_run_status(&self, run_id: Uuid) -> Result<Option<String>, sqlx::Error>;
+
+    // Active runs listing (queue view)
+    async fn list_active_runs(
+        &self,
+        user_id: Uuid,
+        workflow_id: Option<Uuid>,
+    ) -> Result<Vec<WorkflowRun>, sqlx::Error>;
+
+    // Paged runs listing with optional status filters and per-workflow scoping
+    async fn list_runs_paged(
+        &self,
+        user_id: Uuid,
+        workflow_id: Option<Uuid>,
+        statuses: Option<&[String]>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<WorkflowRun>, sqlx::Error>;
+
+    // Bulk cancel helper for a workflow (queued or running)
+    async fn cancel_all_runs_for_workflow(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error>;
+
+    async fn set_run_priority(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        priority: i32,
+    ) -> Result<bool, sqlx::Error>;
+
+    // Concurrency & leasing
+    async fn set_workflow_concurrency_limit(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i32,
+    ) -> Result<bool, sqlx::Error>;
+
+    async fn requeue_expired_leases(&self) -> Result<u64, sqlx::Error>;
+
+    async fn claim_next_eligible_run(
+        &self,
+        worker_id: &str,
+        lease_seconds: i32,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error>;
+
+    async fn renew_run_lease(
+        &self,
+        run_id: Uuid,
+        worker_id: &str,
+        lease_seconds: i32,
+    ) -> Result<(), sqlx::Error>;
+
+    // Retention
+    async fn purge_old_runs(&self, retention_days: i32) -> Result<u64, sqlx::Error>;
+
+    // Dead-letter queue
+    async fn insert_dead_letter(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        error: &str,
+        snapshot: Value,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn list_dead_letters(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<crate::models::workflow_dead_letter::WorkflowDeadLetter>, sqlx::Error>;
+
+    async fn requeue_dead_letter(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        dead_id: Uuid,
+    ) -> Result<Option<WorkflowRun>, sqlx::Error>;
+
+    async fn clear_dead_letters(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error>;
+
+    // Security & Egress
+    async fn set_egress_allowlist(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        allowlist: &[String],
+    ) -> Result<bool, sqlx::Error>;
+
+    async fn update_webhook_config(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        require_hmac: bool,
+        replay_window_sec: i32,
+    ) -> Result<bool, sqlx::Error>;
+
+    async fn try_record_webhook_signature(
+        &self,
+        workflow_id: Uuid,
+        signature: &str,
+    ) -> Result<bool, sqlx::Error>;
+
+    async fn purge_old_webhook_replays(&self, older_than_seconds: i64) -> Result<u64, sqlx::Error>;
+
+    // Egress block events
+    async fn insert_egress_block_event(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        run_id: Uuid,
+        node_id: &str,
+        url: &str,
+        host: &str,
+        rule: &str,
+        message: &str,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn list_egress_block_events(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<crate::models::egress_block_event::EgressBlockEvent>, sqlx::Error>;
+
+    async fn clear_egress_block_events(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<u64, sqlx::Error>;
+}
