@@ -1,4 +1,4 @@
-/target
+**/target/*
 .env
 .sqlx
 
@@ -30,3 +30,4 @@ coverage
 *.njsproj
 *.sln
 *.sw?
+backend/target/.rustc_info.json
