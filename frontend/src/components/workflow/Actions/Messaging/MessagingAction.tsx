@@ -33,7 +33,14 @@ export default function MessagingAction({
       childHasErrors || Object.keys(validationErrors).length > 0,
       childDirty
     )
-  }, [params, childParams, childHasErrors, childDirty])
+  }, [
+    params,
+    childParams,
+    childHasErrors,
+    childDirty,
+    validationErrors,
+    onChange
+  ])
 
   const updateField = (key: string, value: any) => {
     setParams((prev) => ({ ...prev, [key]: value }))

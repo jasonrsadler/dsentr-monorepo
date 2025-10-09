@@ -20,7 +20,7 @@ export default function TeamsAction({
     childDirty: boolean
   ) => void
 }) {
-  const [_, setDirty] = useState(false)
+  const [, setDirty] = useState(false)
   const [params, setParams] = useState<Partial<TeamsActionProps>>({ ...args })
 
   const hasErrors = (updatedParams: Partial<TeamsActionProps>) => {
@@ -36,7 +36,7 @@ export default function TeamsAction({
 
   useEffect(() => {
     onChange?.(params, Object.keys(teamsErrors).length > 0, true)
-  }, [params])
+  }, [params, teamsErrors, onChange])
 
   const updateField = (key: keyof TeamsActionProps, value: any) => {
     setDirty(true)

@@ -1,5 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion'
 
+const logError = (context: string, error: unknown) => {
+  console.error(context, error)
+}
+
 interface JsonDialogProps {
   isOpen: boolean
   title?: string
@@ -35,7 +39,9 @@ export default function JsonDialog({
                   onClick={() => {
                     try {
                       navigator.clipboard.writeText(jsonText)
-                    } catch {}
+                    } catch (err) {
+                      logError('Failed to copy JSON payload', err)
+                    }
                   }}
                   className="px-2 py-1 text-xs rounded bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600"
                 >

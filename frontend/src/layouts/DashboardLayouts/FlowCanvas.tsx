@@ -47,6 +47,38 @@ function sanitizeData(data: any) {
   return rest
 }
 
+function areValuesEqual(a: any, b: any): boolean {
+  if (a === b) return true
+
+  if (a instanceof Date && b instanceof Date) {
+    return a.getTime() === b.getTime()
+  }
+  if (a instanceof Date || b instanceof Date) {
+    return false
+  }
+
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i += 1) {
+      if (!areValuesEqual(a[i], b[i])) return false
+    }
+    return true
+  }
+
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const aKeys = Object.keys(a)
+    const bKeys = Object.keys(b)
+    if (aKeys.length !== bKeys.length) return false
+    for (const key of aKeys) {
+      if (!Object.prototype.hasOwnProperty.call(b, key)) return false
+      if (!areValuesEqual(a[key], b[key])) return false
+    }
+    return true
+  }
+
+  return false
+}
+
 interface FlowCanvasProps {
   isDark?: boolean
   markWorkflowDirty: () => void
@@ -144,12 +176,33 @@ export default function FlowCanvas({
 
   const updateNodeData = useCallback(
     (id: string, newData: any, suppressDirty = false) => {
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === id ? { ...n, data: { ...n.data, ...newData } } : n
-        )
-      )
-      if (!suppressDirty) markWorkflowDirty()
+      let didUpdate = false
+
+      setNodes((nds) => {
+        let mutated = false
+        const nextNodes = nds.map((n) => {
+          if (n.id !== id) return n
+
+          const mergedData = { ...n.data, ...newData }
+          if (areValuesEqual(n.data, mergedData)) {
+            return n
+          }
+
+          mutated = true
+          return { ...n, data: mergedData }
+        })
+
+        if (!mutated) {
+          return nds
+        }
+
+        didUpdate = true
+        return nextNodes
+      })
+
+      if (didUpdate && !suppressDirty) {
+        markWorkflowDirty()
+      }
     },
     [setNodes, markWorkflowDirty]
   )
@@ -205,7 +258,7 @@ export default function FlowCanvas({
         }
       })
     }
-  }, [edges, saveAllNodes, setSaveRef, setNodes])
+  }, [edges, saveAllNodes, setSaveRef, setNodes, setEdges, markWorkflowDirty])
 
   const removeNode = useCallback(
     (id) => {

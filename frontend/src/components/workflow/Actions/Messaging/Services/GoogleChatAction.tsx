@@ -20,7 +20,7 @@ export default function GoogleChatAction({
     childDirty: boolean
   ) => void
 }) {
-  const [_, setDirty] = useState(false)
+  const [, setDirty] = useState(false)
   const [params, setParams] = useState<Partial<GoogleChatActionProps>>({
     ...args
   })
@@ -38,7 +38,7 @@ export default function GoogleChatAction({
 
   useEffect(() => {
     onChange?.(params, Object.keys(chatErrors).length > 0, true)
-  }, [params])
+  }, [params, chatErrors, onChange])
 
   const updateField = (key: keyof GoogleChatActionProps, value: any) => {
     setDirty(true)

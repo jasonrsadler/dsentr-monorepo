@@ -21,7 +21,7 @@ export default function SlackAction({
     childDirty: boolean
   ) => void
 }) {
-  const [_, setDirty] = useState(false)
+  const [, setDirty] = useState(false)
   const [params, setParams] = useState<Partial<SlackActionProps>>({ ...args })
 
   const hasErrors = (updatedParams: Partial<SlackActionProps>) => {
@@ -37,7 +37,7 @@ export default function SlackAction({
 
   useEffect(() => {
     onChange?.(params, Object.keys(slackErrors).length > 0, true)
-  }, [params])
+  }, [params, slackErrors, onChange])
 
   const updateField = (key: keyof SlackActionProps, value: any) => {
     setDirty(true)

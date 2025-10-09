@@ -66,14 +66,25 @@ export default function ConditionNode({
     }
     onUpdateNode?.(id, nextData, true)
     if (dirty) onDirtyChange?.(true, nextData)
-  }, [label, field, operator, value, dirty, expanded, hasValidationErrors])
+  }, [
+    label,
+    field,
+    operator,
+    value,
+    dirty,
+    expanded,
+    hasValidationErrors,
+    id,
+    onUpdateNode,
+    onDirtyChange
+  ])
 
   // Sync dirty from parent
   useEffect(() => {
     if (data?.dirty !== undefined && data.dirty !== dirty) {
       setDirty(data.dirty)
     }
-  }, [data?.dirty])
+  }, [data?.dirty, dirty])
 
   // Reset local state when node id changes (e.g., new node or remount on workflow switch)
   useEffect(() => {
@@ -83,7 +94,7 @@ export default function ConditionNode({
     setOperator(data?.operator || 'equals')
     setValue(data?.value || '')
     setDirty(data?.dirty ?? isNewNode)
-  }, [id])
+  }, [id, data, isNewNode])
 
   const ringClass = isFailed
     ? 'ring-2 ring-red-500'

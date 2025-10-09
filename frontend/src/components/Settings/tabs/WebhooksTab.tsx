@@ -9,6 +9,10 @@ import {
 } from '@/lib/workflowApi'
 import { API_BASE_URL } from '@/lib/config'
 
+const logError = (context: string, error: unknown) => {
+  console.error(context, error)
+}
+
 export default function WebhooksTab() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
   const [workflowId, setWorkflowId] = useState<string>('')
@@ -27,7 +31,9 @@ export default function WebhooksTab() {
         setWorkflows(ws)
         if (ws[0]) setWorkflowId(ws[0].id)
       })
-      .catch(() => {})
+      .catch((err) => {
+        logError('Failed to fetch workflows for webhooks tab', err)
+      })
   }, [])
 
   useEffect(() => {
@@ -54,7 +60,9 @@ export default function WebhooksTab() {
         setReplayWindow(cfg.replay_window_sec)
         setSigningKey(cfg.signing_key)
       })
-      .catch(() => {})
+      .catch((err) => {
+        logError('Failed to fetch webhook configuration', err)
+      })
   }, [workflowId])
 
   const selected = useMemo(
@@ -138,7 +146,9 @@ export default function WebhooksTab() {
                   }
                   setCopied(true)
                   setTimeout(() => setCopied(false), 1500)
-                } catch {}
+                } catch (err) {
+                  logError('Failed to copy webhook URL', err)
+                }
               }}
             >
               {copied ? 'Copied!' : 'Copy'}
@@ -223,9 +233,12 @@ export default function WebhooksTab() {
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(curlCopy)
-                  } catch {}
-                  setCopiedCurl(true)
-                  setTimeout(() => setCopiedCurl(false), 1500)
+                    setCopiedCurl(true)
+                    setTimeout(() => setCopiedCurl(false), 1500)
+                  } catch (err) {
+                    logError('Failed to copy curl example', err)
+                    setCopiedCurl(false)
+                  }
                 }}
               >
                 {copiedCurl ? 'Copied!' : 'Copy'}
@@ -246,9 +259,12 @@ export default function WebhooksTab() {
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(psCopy)
-                  } catch {}
-                  setCopiedPS(true)
-                  setTimeout(() => setCopiedPS(false), 1500)
+                    setCopiedPS(true)
+                    setTimeout(() => setCopiedPS(false), 1500)
+                  } catch (err) {
+                    logError('Failed to copy PowerShell example', err)
+                    setCopiedPS(false)
+                  }
                 }}
               >
                 {copiedPS ? 'Copied!' : 'Copy'}
@@ -269,9 +285,12 @@ export default function WebhooksTab() {
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(jsCopy)
-                  } catch {}
-                  setCopiedJS(true)
-                  setTimeout(() => setCopiedJS(false), 1500)
+                    setCopiedJS(true)
+                    setTimeout(() => setCopiedJS(false), 1500)
+                  } catch (err) {
+                    logError('Failed to copy JavaScript example', err)
+                    setCopiedJS(false)
+                  }
                 }}
               >
                 {copiedJS ? 'Copied!' : 'Copy'}
@@ -319,7 +338,9 @@ export default function WebhooksTab() {
                   require_hmac: requireHmac,
                   replay_window_sec: replayWindow
                 })
-              } catch {}
+              } catch (err) {
+                logError('Failed to save webhook configuration', err)
+              }
             }}
           >
             Save
@@ -338,7 +359,9 @@ export default function WebhooksTab() {
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(signingKey)
-                } catch {}
+                } catch (err) {
+                  logError('Failed to copy webhook signing key', err)
+                }
               }}
             >
               Copy
@@ -373,11 +396,13 @@ export default function WebhooksTab() {
                 disabled={regenBusy}
                 onClick={async () => {
                   if (!workflowId) return
+                  setRegenBusy(true)
                   try {
-                    setRegenBusy(true)
                     const newUrl = await regenerateWebhookUrl(workflowId)
                     setUrl(newUrl)
                     setConfirming(false)
+                  } catch (err) {
+                    logError('Failed to regenerate webhook URL', err)
                   } finally {
                     setRegenBusy(false)
                   }

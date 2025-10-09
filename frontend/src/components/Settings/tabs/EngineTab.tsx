@@ -20,6 +20,10 @@ import {
 import JsonDialog from '@/components/UI/Dialog/JsonDialog'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
+const logError = (context: string, error: unknown) => {
+  console.error(context, error)
+}
+
 export default function EngineTab() {
   const { user } = useAuth()
   const isAdmin = (user?.role ?? '').toLowerCase() === 'admin'
@@ -35,9 +39,13 @@ export default function EngineTab() {
       .then((ws) => {
         if (!alive) return
         setItems(ws)
-        if (!selectedId && ws[0]) setSelectedId(ws[0].id)
+        if (ws[0]) {
+          setSelectedId((current) => current ?? ws[0].id)
+        }
       })
-      .catch(() => {})
+      .catch((err) => {
+        logError('Failed to list workflows', err)
+      })
       .finally(() => setLoading(false))
     return () => {
       alive = false
@@ -50,9 +58,10 @@ export default function EngineTab() {
   )
   const [limitInput, setLimitInput] = useState<string>('')
   useEffect(() => {
-    const current = (selected as any)?.concurrency_limit
+    const selectedWorkflow = items.find((w) => w.id === selectedId)
+    const current = (selectedWorkflow as any)?.concurrency_limit
     setLimitInput(typeof current === 'number' ? String(current) : '')
-  }, [selected?.id])
+  }, [items, selectedId])
 
   const [busy, setBusy] = useState(false)
   const [deadLetters, setDeadLetters] = useState<any[]>([])
@@ -114,18 +123,19 @@ export default function EngineTab() {
     }
   }
 
-  async function refreshDeadLetters() {
-    if (!selected) return
+  const refreshDeadLetters = useCallback(async () => {
+    if (!selectedId) return
     try {
-      const items = await listDeadLetters(selected.id, 1, 50)
+      const items = await listDeadLetters(selectedId, 1, 50)
       setDeadLetters(items)
-    } catch {
-      /* ignore */
+    } catch (err) {
+      logError('Failed to refresh dead letters', err)
     }
-  }
+  }, [selectedId])
+
   useEffect(() => {
     refreshDeadLetters()
-  }, [selected?.id])
+  }, [refreshDeadLetters])
 
   const refreshSuccessfulRuns = useCallback(
     async (page: number) => {
@@ -146,7 +156,8 @@ export default function EngineTab() {
         setSuccessfulRuns(items)
         setSuccessfulHasMore(items.length === SUCCESSFUL_RUNS_PER_PAGE)
         setSuccessfulPage(page)
-      } catch {
+      } catch (err) {
+        logError('Failed to fetch successful runs', err)
         if (page === 1) {
           setSuccessfulRuns([])
           setSuccessfulHasMore(false)
@@ -166,39 +177,41 @@ export default function EngineTab() {
 
   useEffect(() => {
     ;(async () => {
-      if (!selected) {
+      if (!selectedId) {
         setEgressText('')
         return
       }
       try {
-        const list = await getEgressAllowlist(selected.id)
+        const list = await getEgressAllowlist(selectedId)
         setEgressText(list.join('\n'))
-      } catch {
+      } catch (err) {
+        logError('Failed to load egress allow list', err)
         setEgressText('')
       }
     })()
-  }, [selected?.id])
+  }, [selectedId])
 
   useEffect(() => {
     ;(async () => {
-      if (!selected) {
+      if (!selectedId) {
         setEgressBlocks([])
         return
       }
       try {
-        const items = await listEgressBlocks(selected.id, 1, 25)
+        const items = await listEgressBlocks(selectedId, 1, 25)
         setEgressBlocks(items)
-      } catch {
+      } catch (err) {
+        logError('Failed to load egress blocks', err)
         setEgressBlocks([])
       }
     })()
-  }, [selected?.id])
+  }, [selectedId])
 
   async function handleRequeue(id: string) {
-    if (!selected) return
+    if (!selectedId) return
     try {
       setDlBusyId(id)
-      await requeueDeadLetter(selected.id, id)
+      await requeueDeadLetter(selectedId, id)
       await refreshDeadLetters()
     } finally {
       setDlBusyId(null)
@@ -423,7 +436,12 @@ export default function EngineTab() {
                                   )
                                 )
                                 setJsonOpen(true)
-                              } catch {}
+                              } catch (err) {
+                                logError(
+                                  'Failed to open workflow run details',
+                                  err
+                                )
+                              }
                             }}
                             className="px-2 py-1 text-xs rounded bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600"
                           >
@@ -460,7 +478,9 @@ export default function EngineTab() {
                   try {
                     await clearDeadLetters(selected.id)
                     await refreshDeadLetters()
-                  } catch {}
+                  } catch (err) {
+                    logError('Failed to clear all dead letters', err)
+                  }
                 }
               }}
               className="text-sm underline text-red-600"
@@ -525,7 +545,9 @@ export default function EngineTab() {
                   try {
                     const items = await listEgressBlocks(selected.id, 1, 25)
                     setEgressBlocks(items)
-                  } catch {}
+                  } catch (err) {
+                    logError('Failed to refresh blocked egress entries', err)
+                  }
                 }
               }}
               className="text-sm underline"
@@ -539,7 +561,9 @@ export default function EngineTab() {
                     await clearEgressBlocks(selected.id)
                     const items = await listEgressBlocks(selected.id, 1, 25)
                     setEgressBlocks(items)
-                  } catch {}
+                  } catch (err) {
+                    logError('Failed to clear blocked egress entries', err)
+                  }
                 }
               }}
               className="text-sm underline text-red-600"

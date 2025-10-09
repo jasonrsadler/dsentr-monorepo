@@ -95,7 +95,7 @@ export default function WebhookAction({
 
   useEffect(() => {
     onChange?.(params, Object.keys(hasErrors(params)).length > 0, true)
-  }, [params])
+  }, [params, onChange])
 
   const updateField = (key: keyof WebhookActionProps, value: any) => {
     setDirty(true)

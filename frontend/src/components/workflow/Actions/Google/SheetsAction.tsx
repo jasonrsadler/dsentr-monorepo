@@ -28,7 +28,7 @@ export default function SheetsAction({
     dirty: boolean
   ) => void
 }) {
-  const [_, setDirty] = useState(false)
+  const [, setDirty] = useState(false)
   const [params, setParams] = useState<Partial<SheetsActionProps>>({
     ...args,
     spreadsheetId: args.spreadsheetId || '',
@@ -51,7 +51,7 @@ export default function SheetsAction({
 
   useEffect(() => {
     onChange?.(params, Object.keys(validationErrors).length > 0, true)
-  }, [params])
+  }, [params, validationErrors, onChange])
 
   const updateField = (key: keyof SheetsActionProps, value: any) => {
     setDirty(true)

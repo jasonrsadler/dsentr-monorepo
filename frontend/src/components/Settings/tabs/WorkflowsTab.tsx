@@ -5,6 +5,10 @@ import {
   WorkflowRecord
 } from '@/lib/workflowApi'
 
+const logError = (context: string, error: unknown) => {
+  console.error(context, error)
+}
+
 type Props = {
   workflows?: WorkflowRecord[]
   onDeleted?: (id: string) => void
@@ -22,9 +26,11 @@ export default function WorkflowsTab({
     if (!propWorkflows || propWorkflows.length === 0) {
       listWorkflows()
         .then(setItems)
-        .catch(() => {})
+        .catch((err) => {
+          logError('Failed to list workflows', err)
+        })
     }
-  }, [])
+  }, [propWorkflows])
 
   const [selectedId, setSelectedId] = useState<string | null>(
     items[0]?.id ?? null
@@ -44,8 +50,8 @@ export default function WorkflowsTab({
 
   async function handleDelete() {
     if (!selected || !canDelete) return
+    setBusy(true)
     try {
-      setBusy(true)
       await deleteWorkflow(selected.id)
       if (onDeleted) onDeleted(selected.id)
       setItems((prev) => prev.filter((w) => w.id !== selected.id))
@@ -57,7 +63,11 @@ export default function WorkflowsTab({
         window.dispatchEvent(
           new CustomEvent('workflow-deleted', { detail: { id: selected.id } })
         )
-      } catch {}
+      } catch (err) {
+        logError('Failed to dispatch workflow-deleted event', err)
+      }
+    } catch (err) {
+      logError('Failed to delete workflow', err)
     } finally {
       setBusy(false)
       setConfirming(false)

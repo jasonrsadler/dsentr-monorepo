@@ -29,7 +29,7 @@ export default function RunCustomCodeAction({
   const [inputs, setInputs] = useState(args.inputs || [])
   const [outputs, setOutputs] = useState(args.outputs || [])
   const [hasErrors, setHasErrors] = useState(false)
-  const [_, setDirty] = useState(false)
+  const [, setDirty] = useState(false)
 
   useEffect(() => {
     let error = false
@@ -40,7 +40,7 @@ export default function RunCustomCodeAction({
     }
     setHasErrors(error)
     onChange?.({ code, language, inputs, outputs }, error, true)
-  }, [code, language, inputs, outputs])
+  }, [code, language, inputs, outputs, onChange])
 
   return (
     <div className="flex flex-col gap-2">

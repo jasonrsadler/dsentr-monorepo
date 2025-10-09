@@ -21,6 +21,10 @@ import {
   type WorkflowNodeRunRecord
 } from '@/lib/workflowApi'
 
+const logError = (context: string, error: unknown) => {
+  console.error(context, error)
+}
+
 const TriggerIcon = () => (
   <svg
     className="w-4 h-4 mr-1"
@@ -111,8 +115,8 @@ function logSnapshotDiff(
     diffs.forEach((d) => console.log(d))
 
     console.groupEnd()
-  } catch {
-    console.warn('[workflow-dirty] diff failed')
+  } catch (err) {
+    console.warn('[workflow-dirty] diff failed', err)
   }
 }
 
@@ -313,27 +317,6 @@ export default function Dashboard() {
     fetchWorkflows()
   }, [normalizeWorkflowData])
 
-  const markWorkflowDirty = useCallback(() => {
-    setError(null)
-  }, [])
-
-  const selectWorkflow = useCallback(
-    (id: string) => {
-      if (id === currentWorkflowId) return
-
-      // If current workflow has unsaved changes, prompt before switching
-      if (workflowDirty) {
-        setPendingSwitchId(id)
-        setShowSwitchConfirm(true)
-        return
-      }
-
-      doSelectWorkflow(id)
-    },
-    [currentWorkflowId, workflows, normalizeWorkflowData, workflowDirty]
-  )
-
-  // Internal function to apply the actual switch logic
   const doSelectWorkflow = useCallback(
     (id: string) => {
       const nextWorkflow = workflows.find((workflow) => workflow.id === id)
@@ -384,6 +367,26 @@ export default function Dashboard() {
       })()
     },
     [workflows, normalizeWorkflowData]
+  )
+
+  const markWorkflowDirty = useCallback(() => {
+    setError(null)
+  }, [])
+
+  const selectWorkflow = useCallback(
+    (id: string) => {
+      if (id === currentWorkflowId) return
+
+      // If current workflow has unsaved changes, prompt before switching
+      if (workflowDirty) {
+        setPendingSwitchId(id)
+        setShowSwitchConfirm(true)
+        return
+      }
+
+      doSelectWorkflow(id)
+    },
+    [currentWorkflowId, workflowDirty, doSelectWorkflow]
   )
 
   // Confirm-to-switch dialog state
@@ -502,7 +505,8 @@ export default function Dashboard() {
         const baselineObj = JSON.parse(baseline)
         const currentObj = JSON.parse(snapshot)
         dirty = !deepEqual(baselineObj, currentObj)
-      } catch {
+      } catch (err) {
+        logError('Failed to parse workflow snapshot for diffing', err)
         dirty = snapshot !== baseline
       }
       if (dirty) {
@@ -570,7 +574,9 @@ export default function Dashboard() {
                   overlayWatchTimerRef.current = null
                   return
                 }
-              } catch {}
+              } catch (err) {
+                logError('Failed to watch for next active run', err)
+              }
               if (
                 runOverlayOpen &&
                 currentWorkflow &&
@@ -641,7 +647,9 @@ export default function Dashboard() {
     setRunOverlayOpen(true)
     try {
       window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
-    } catch {}
+    } catch (err) {
+      logError('Failed to dispatch resume-global-poll event', err)
+    }
     // Kick off selection of the appropriate run for this workflow
     ensureOverlayRunForSelected()
   }, [runOverlayOpen, ensureOverlayRunForSelected])
@@ -665,7 +673,9 @@ export default function Dashboard() {
         setNodeRuns([])
         try {
           es?.close()
-        } catch {}
+        } catch (err) {
+          logError('Failed to close EventSource after selecting run', err)
+        }
         if (fallbackTimer) {
           clearTimeout(fallbackTimer)
           fallbackTimer = null
@@ -680,7 +690,9 @@ export default function Dashboard() {
         try {
           const runs = await listActiveRuns(currentWorkflow.id)
           if (pickFrom(runs)) return
-        } catch {}
+        } catch (err) {
+          logError('Fallback run discovery failed', err)
+        }
         // schedule next attempt with capped backoff
         backoff = Math.min(5000, backoff * 2)
         fallbackTimer = setTimeout(doFetch, backoff)
@@ -690,7 +702,8 @@ export default function Dashboard() {
 
     try {
       es = new EventSource(url, { withCredentials: true } as EventSourceInit)
-    } catch {
+    } catch (err) {
+      logError('Failed to start EventSource for run events', err)
       es = null
     }
     if (!es) {
@@ -702,12 +715,16 @@ export default function Dashboard() {
       try {
         const runs = JSON.parse(e.data)
         pickFrom(runs)
-      } catch {}
+      } catch (err) {
+        logError('Failed to process run events payload', err)
+      }
     }
     const onError = () => {
       try {
         es?.close()
-      } catch {}
+      } catch (err) {
+        logError('Failed to close EventSource after error', err)
+      }
       if (!fallbackTimer) startFallback()
     }
     es.addEventListener('runs', onRuns as any)
@@ -716,13 +733,15 @@ export default function Dashboard() {
     return () => {
       try {
         es?.close()
-      } catch {}
+      } catch (err) {
+        logError('Failed to close EventSource on cleanup', err)
+      }
       if (fallbackTimer) {
         clearTimeout(fallbackTimer)
         fallbackTimer = null
       }
     }
-  }, [runOverlayOpen, currentWorkflow?.id, activeRun])
+  }, [runOverlayOpen, currentWorkflow, activeRun])
 
   // Global runs SSE to drive toolbar status
   useEffect(() => {
@@ -731,7 +750,8 @@ export default function Dashboard() {
     let es: EventSource | null = null
     try {
       es = new EventSource(url, { withCredentials: true } as EventSourceInit)
-    } catch {
+    } catch (err) {
+      logError('Failed to open global runs EventSource', err)
       es = null
     }
     if (!es) return
@@ -741,18 +761,24 @@ export default function Dashboard() {
         if (s.has_running) setGlobalRunStatus('running')
         else if (s.has_queued) setGlobalRunStatus('queued')
         else setGlobalRunStatus('idle')
-      } catch {}
+      } catch (err) {
+        logError('Failed to process global run status payload', err)
+      }
     }
     es.addEventListener('status', onStatus as any)
     es.onerror = () => {
       try {
         es?.close()
-      } catch {}
+      } catch (err) {
+        logError('Failed to close global runs EventSource after error', err)
+      }
     }
     return () => {
       try {
         es?.close()
-      } catch {}
+      } catch (err) {
+        logError('Failed to close global runs EventSource on cleanup', err)
+      }
     }
   }, [])
   const toolbarRunStatus = useMemo(() => {
@@ -772,27 +798,34 @@ export default function Dashboard() {
     let es: EventSource | null = null
     try {
       es = new EventSource(url, { withCredentials: true } as EventSourceInit)
-    } catch {
+    } catch (err) {
+      logError('Failed to open workflow-specific run EventSource', err)
       es = null
     }
     if (!es) return
     const onRuns = (e: MessageEvent) => {
       try {
         setRunQueue(JSON.parse(e.data))
-      } catch {}
+      } catch (err) {
+        logError('Failed to process workflow run queue payload', err)
+      }
     }
     es.addEventListener('runs', onRuns as any)
     es.onerror = () => {
       try {
         es?.close()
-      } catch {}
+      } catch (err) {
+        logError('Failed to close workflow run EventSource after error', err)
+      }
     }
     return () => {
       try {
         es?.close()
-      } catch {}
+      } catch (err) {
+        logError('Failed to close workflow run EventSource on cleanup', err)
+      }
     }
-  }, [activePane, currentWorkflow?.id])
+  }, [activePane, currentWorkflow])
 
   const handleRunWorkflow = useCallback(async () => {
     if (!currentWorkflow) return
@@ -809,7 +842,12 @@ export default function Dashboard() {
       pollRun(currentWorkflow.id, run.id)
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
-      } catch {}
+      } catch (err) {
+        logError(
+          'Failed to dispatch resume-global-poll after starting run',
+          err
+        )
+      }
     } catch (e: any) {
       console.error('Failed to start run', e)
       setError(e?.message || 'Failed to start run')
@@ -827,7 +865,8 @@ export default function Dashboard() {
     let es: EventSource | null = null
     try {
       es = new EventSource(url, { withCredentials: true } as EventSourceInit)
-    } catch {
+    } catch (err) {
+      logError('Failed to open run overlay EventSource', err)
       es = null
     }
     if (!es) return
@@ -839,18 +878,27 @@ export default function Dashboard() {
         if (run.status !== 'queued' && run.status !== 'running') {
           es?.close()
         }
-      } catch {}
+      } catch (err) {
+        logError('Failed to process run overlay payload', err)
+      }
     }
     const onNodes = (e: MessageEvent) => {
       try {
         setNodeRuns(JSON.parse(e.data))
-      } catch {}
+      } catch (err) {
+        logError('Failed to process node run payload', err)
+      }
     }
     const onError = () => {
       // Allow adaptive global poll to wake if needed
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
-      } catch {}
+      } catch (err) {
+        logError(
+          'Failed to dispatch resume-global-poll after overlay error',
+          err
+        )
+      }
       es?.close()
     }
 
@@ -861,9 +909,11 @@ export default function Dashboard() {
     return () => {
       try {
         es?.close()
-      } catch {}
+      } catch (err) {
+        logError('Failed to close run overlay EventSource', err)
+      }
     }
-  }, [runOverlayOpen, currentWorkflow?.id, activeRun?.id, stopPolling])
+  }, [runOverlayOpen, currentWorkflow, activeRun, stopPolling])
 
   useEffect(() => {
     // Only recompute dirty state on meta changes while editing in designer.
@@ -967,7 +1017,9 @@ export default function Dashboard() {
             diffs
           })
         }
-      } catch {}
+      } catch (err) {
+        logError('Failed to compute workflow diff log entry', err)
+      }
 
       lastSavedSnapshotRef.current = savedSnapshot
       pendingSnapshotRef.current = null
@@ -982,7 +1034,13 @@ export default function Dashboard() {
       setIsSaving(false)
       isSavingRef.current = false
     }
-  }, [currentWorkflow, isSaving, normalizeWorkflowData, handleGraphChange])
+  }, [
+    currentWorkflow,
+    isSaving,
+    normalizeWorkflowData,
+    handleGraphChange,
+    addLog
+  ])
 
   const toolbarWorkflow = useMemo(() => {
     if (!currentWorkflow) {
@@ -1000,7 +1058,8 @@ export default function Dashboard() {
         (workflowData?.nodes?.length ?? 0) === 0 &&
         (workflowData?.edges?.length ?? 0) === 0
       )
-    } catch {
+    } catch (err) {
+      logError('Failed to determine initial graph empty state', err)
       return true
     }
   })

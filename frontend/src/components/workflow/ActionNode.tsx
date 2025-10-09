@@ -16,6 +16,20 @@ import SheetsAction from './Actions/Google/SheetsAction'
 import HttpRequestAction from './Actions/HttpRequestAction'
 import RunCustomCodeAction from './Actions/RunCustomCodeAction'
 
+function shallowEqualParams(
+  a: Record<string, any>,
+  b: Record<string, any>
+): boolean {
+  if (a === b) return true
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false
+  }
+  return true
+}
+
 interface ActionNodeProps {
   id: string
   data: any
@@ -55,30 +69,45 @@ export default function ActionNode({
   const [timeout, setTimeoutMs] = useState(data?.timeout || 5000)
   const [retries, setRetries] = useState(data?.retries || 0)
   const [stopOnError, setStopOnError] = useState(data?.stopOnError ?? true)
-  const [_, setConfig] = useState(() => data || { type: '', params: {} })
   const [label, setLabel] = useState(data?.label || 'Action')
-
-  useEffect(() => {
-    setConfig(data || { type: '', params: {} })
-  }, [data])
 
   // Reset local state when node id changes (e.g., new node or remount on workflow switch)
   useEffect(() => {
-    setLabel(data?.label || 'Action')
-    setExpanded(data?.expanded ?? false)
-    setActionType(data?.actionType || 'Send Email')
-    setParams(() => ({ service: '', ...(data?.params || data?.inputs || {}) }))
-    setTimeoutMs(data?.timeout || 5000)
-    setRetries(data?.retries || 0)
-    setStopOnError(data?.stopOnError ?? true)
-    setDirty(data?.dirty ?? isNewNode)
-  }, [id])
+    const nextLabel = data?.label || 'Action'
+    setLabel((prev) => (prev === nextLabel ? prev : nextLabel))
+
+    const nextExpanded = data?.expanded ?? false
+    setExpanded((prev) => (prev === nextExpanded ? prev : nextExpanded))
+
+    const nextActionType = data?.actionType || 'Send Email'
+    setActionType((prev) => (prev === nextActionType ? prev : nextActionType))
+
+    const nextParams = {
+      service: '',
+      ...(data?.params || data?.inputs || {})
+    }
+    setParams((prev) =>
+      shallowEqualParams(prev, nextParams) ? prev : nextParams
+    )
+
+    const nextTimeout = data?.timeout || 5000
+    setTimeoutMs((prev) => (prev === nextTimeout ? prev : nextTimeout))
+
+    const nextRetries = data?.retries || 0
+    setRetries((prev) => (prev === nextRetries ? prev : nextRetries))
+
+    const nextStopOnError = data?.stopOnError ?? true
+    setStopOnError((prev) =>
+      prev === nextStopOnError ? prev : nextStopOnError
+    )
+
+    const nextDirty = data?.dirty ?? isNewNode
+    setDirty((prev) => (prev === nextDirty ? prev : nextDirty))
+  }, [id, data, isNewNode])
 
   useEffect(() => {
-    if (data?.dirty !== undefined && data.dirty !== dirty) {
-      console.log('Sync dirty from parent:', data.dirty)
-      setDirty(data.dirty)
-    }
+    if (data?.dirty === undefined) return
+    setDirty((prev) => (prev === data.dirty ? prev : data.dirty))
   }, [data?.dirty])
 
   const [prevService, setPrevService] = useState(params.service || '')
@@ -141,7 +170,10 @@ export default function ActionNode({
     stopOnError,
     dirty,
     expanded,
-    hasValidationErrors
+    hasValidationErrors,
+    id,
+    onDirtyChange,
+    onUpdateNode
   ])
 
   const handleRun = async () => {

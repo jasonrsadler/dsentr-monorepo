@@ -8,7 +8,10 @@ export const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 export const hoursList = Array.from({ length: 24 }, (_, index) => index)
 export const minutesList = Array.from({ length: 60 }, (_, index) => index)
 
-export function normalizeCalendarMonth(month: number, year: number): CalendarMonth {
+export function normalizeCalendarMonth(
+  month: number,
+  year: number
+): CalendarMonth {
   const normalized = new Date(Date.UTC(year, month, 1))
   return {
     year: normalized.getUTCFullYear(),
@@ -18,7 +21,9 @@ export function normalizeCalendarMonth(month: number, year: number): CalendarMon
 
 export function parseISODate(value?: string | null) {
   if (!value) return undefined
-  const [year, month, day] = value.split('-').map((part) => Number.parseInt(part, 10))
+  const [year, month, day] = value
+    .split('-')
+    .map((part) => Number.parseInt(part, 10))
   if (
     !Number.isFinite(year) ||
     !Number.isFinite(month) ||
@@ -113,7 +118,9 @@ export function formatDisplayDate(value: string | undefined) {
 
 export function parseTime(value?: string | null) {
   if (!value) return undefined
-  const [hours, minutes] = value.split(':').map((part) => Number.parseInt(part, 10))
+  const [hours, minutes] = value
+    .split(':')
+    .map((part) => Number.parseInt(part, 10))
   if (
     !Number.isFinite(hours) ||
     !Number.isFinite(minutes) ||
