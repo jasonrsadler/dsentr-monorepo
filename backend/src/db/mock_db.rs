@@ -9,6 +9,7 @@ use crate::models::signup::SignupPayload;
 use crate::models::workflow::Workflow;
 use crate::models::workflow_node_run::WorkflowNodeRun;
 use crate::models::workflow_run::WorkflowRun;
+use crate::models::workflow_schedule::WorkflowSchedule;
 use serde_json::Value;
 
 #[allow(dead_code)]
@@ -231,7 +232,9 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _snapshot: Value,
         _idempotency_key: Option<&str>,
     ) -> Result<WorkflowRun, sqlx::Error> {
-        Err(sqlx::Error::Protocol("NoopWorkflowRepository not implemented".into()))
+        Err(sqlx::Error::Protocol(
+            "NoopWorkflowRepository not implemented".into(),
+        ))
     }
 
     async fn get_workflow_run(
@@ -276,7 +279,9 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _status: &str,
         _error: Option<&str>,
     ) -> Result<WorkflowNodeRun, sqlx::Error> {
-        Err(sqlx::Error::Protocol("NoopWorkflowRepository not implemented".into()))
+        Err(sqlx::Error::Protocol(
+            "NoopWorkflowRepository not implemented".into(),
+        ))
     }
 
     async fn update_node_run(
@@ -300,7 +305,9 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _status: &str,
         _error: Option<&str>,
     ) -> Result<WorkflowNodeRun, sqlx::Error> {
-        Err(sqlx::Error::Protocol("NoopWorkflowRepository not implemented".into()))
+        Err(sqlx::Error::Protocol(
+            "NoopWorkflowRepository not implemented".into(),
+        ))
     }
 
     async fn rotate_webhook_salt(
@@ -357,7 +364,9 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _workflow_id: Uuid,
         _run_id: Uuid,
         _priority: i32,
-    ) -> Result<bool, sqlx::Error> { Ok(true) }
+    ) -> Result<bool, sqlx::Error> {
+        Ok(true)
+    }
 
     async fn set_workflow_concurrency_limit(
         &self,
@@ -368,22 +377,64 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(true)
     }
 
-    async fn requeue_expired_leases(&self) -> Result<u64, sqlx::Error> { Ok(0) }
+    async fn requeue_expired_leases(&self) -> Result<u64, sqlx::Error> {
+        Ok(0)
+    }
+
+    async fn upsert_workflow_schedule(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _config: Value,
+        _next_run_at: Option<OffsetDateTime>,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn disable_workflow_schedule(&self, _workflow_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn get_schedule_for_workflow(
+        &self,
+        _workflow_id: Uuid,
+    ) -> Result<Option<WorkflowSchedule>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn list_due_schedules(&self, _limit: i64) -> Result<Vec<WorkflowSchedule>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn mark_schedule_run(
+        &self,
+        _schedule_id: Uuid,
+        _last_run_at: OffsetDateTime,
+        _next_run_at: Option<OffsetDateTime>,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 
     async fn claim_next_eligible_run(
         &self,
         _worker_id: &str,
         _lease_seconds: i32,
-    ) -> Result<Option<WorkflowRun>, sqlx::Error> { Ok(None) }
+    ) -> Result<Option<WorkflowRun>, sqlx::Error> {
+        Ok(None)
+    }
 
     async fn renew_run_lease(
         &self,
         _run_id: Uuid,
         _worker_id: &str,
         _lease_seconds: i32,
-    ) -> Result<(), sqlx::Error> { Ok(()) }
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 
-    async fn purge_old_runs(&self, _retention_days: i32) -> Result<u64, sqlx::Error> { Ok(0) }
+    async fn purge_old_runs(&self, _retention_days: i32) -> Result<u64, sqlx::Error> {
+        Ok(0)
+    }
 
     async fn insert_dead_letter(
         &self,
@@ -392,7 +443,9 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _run_id: Uuid,
         _error: &str,
         _snapshot: Value,
-    ) -> Result<(), sqlx::Error> { Ok(()) }
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 
     async fn list_dead_letters(
         &self,
@@ -400,27 +453,35 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _workflow_id: Uuid,
         _limit: i64,
         _offset: i64,
-    ) -> Result<Vec<crate::models::workflow_dead_letter::WorkflowDeadLetter>, sqlx::Error> { Ok(vec![]) }
+    ) -> Result<Vec<crate::models::workflow_dead_letter::WorkflowDeadLetter>, sqlx::Error> {
+        Ok(vec![])
+    }
 
     async fn requeue_dead_letter(
         &self,
         _user_id: Uuid,
         _workflow_id: Uuid,
         _dead_id: Uuid,
-    ) -> Result<Option<WorkflowRun>, sqlx::Error> { Ok(None) }
+    ) -> Result<Option<WorkflowRun>, sqlx::Error> {
+        Ok(None)
+    }
 
     async fn clear_dead_letters(
         &self,
         _user_id: Uuid,
         _workflow_id: Uuid,
-    ) -> Result<u64, sqlx::Error> { Ok(0) }
+    ) -> Result<u64, sqlx::Error> {
+        Ok(0)
+    }
 
     async fn set_egress_allowlist(
         &self,
         _user_id: Uuid,
         _workflow_id: Uuid,
         _allowlist: &[String],
-    ) -> Result<bool, sqlx::Error> { Ok(true) }
+    ) -> Result<bool, sqlx::Error> {
+        Ok(true)
+    }
 
     async fn update_webhook_config(
         &self,
@@ -428,15 +489,24 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _workflow_id: Uuid,
         _require_hmac: bool,
         _replay_window_sec: i32,
-    ) -> Result<bool, sqlx::Error> { Ok(true) }
+    ) -> Result<bool, sqlx::Error> {
+        Ok(true)
+    }
 
     async fn try_record_webhook_signature(
         &self,
         _workflow_id: Uuid,
         _signature: &str,
-    ) -> Result<bool, sqlx::Error> { Ok(true) }
+    ) -> Result<bool, sqlx::Error> {
+        Ok(true)
+    }
 
-    async fn purge_old_webhook_replays(&self, _older_than_seconds: i64) -> Result<u64, sqlx::Error> { Ok(0) }
+    async fn purge_old_webhook_replays(
+        &self,
+        _older_than_seconds: i64,
+    ) -> Result<u64, sqlx::Error> {
+        Ok(0)
+    }
 
     async fn insert_egress_block_event(
         &self,
@@ -448,7 +518,9 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _host: &str,
         _rule: &str,
         _message: &str,
-    ) -> Result<(), sqlx::Error> { Ok(()) }
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 
     async fn list_egress_block_events(
         &self,
@@ -456,11 +528,15 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _workflow_id: Uuid,
         _limit: i64,
         _offset: i64,
-    ) -> Result<Vec<crate::models::egress_block_event::EgressBlockEvent>, sqlx::Error> { Ok(vec![]) }
+    ) -> Result<Vec<crate::models::egress_block_event::EgressBlockEvent>, sqlx::Error> {
+        Ok(vec![])
+    }
 
     async fn clear_egress_block_events(
         &self,
         _user_id: Uuid,
         _workflow_id: Uuid,
-    ) -> Result<u64, sqlx::Error> { Ok(0) }
+    ) -> Result<u64, sqlx::Error> {
+        Ok(0)
+    }
 }

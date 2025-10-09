@@ -6,6 +6,8 @@ use crate::models::workflow::Workflow;
 use crate::models::workflow_log::WorkflowLog;
 use crate::models::workflow_node_run::WorkflowNodeRun;
 use crate::models::workflow_run::WorkflowRun;
+use crate::models::workflow_schedule::WorkflowSchedule;
+use time::OffsetDateTime;
 
 #[async_trait]
 pub trait WorkflowRepository: Send + Sync {
@@ -45,11 +47,7 @@ pub trait WorkflowRepository: Send + Sync {
         data: Value,
     ) -> Result<Option<Workflow>, sqlx::Error>;
 
-    async fn delete_workflow(
-        &self,
-        user_id: Uuid,
-        workflow_id: Uuid,
-    ) -> Result<bool, sqlx::Error>;
+    async fn delete_workflow(&self, user_id: Uuid, workflow_id: Uuid) -> Result<bool, sqlx::Error>;
 
     // Logging methods
     async fn insert_workflow_log(
@@ -197,6 +195,30 @@ pub trait WorkflowRepository: Send + Sync {
     ) -> Result<bool, sqlx::Error>;
 
     async fn requeue_expired_leases(&self) -> Result<u64, sqlx::Error>;
+
+    async fn upsert_workflow_schedule(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        config: Value,
+        next_run_at: Option<OffsetDateTime>,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn disable_workflow_schedule(&self, workflow_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn get_schedule_for_workflow(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<WorkflowSchedule>, sqlx::Error>;
+
+    async fn list_due_schedules(&self, limit: i64) -> Result<Vec<WorkflowSchedule>, sqlx::Error>;
+
+    async fn mark_schedule_run(
+        &self,
+        schedule_id: Uuid,
+        last_run_at: OffsetDateTime,
+        next_run_at: Option<OffsetDateTime>,
+    ) -> Result<(), sqlx::Error>;
 
     async fn claim_next_eligible_run(
         &self,

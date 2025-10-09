@@ -1,23 +1,27 @@
 use axum::{
-    extract::{Json, Path, State, Query},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde_json::json;
 use base64::Engine;
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
-    models::workflow::CreateWorkflow, responses::JsonResponse, routes::auth::session::AuthSession,
+    models::workflow::{CreateWorkflow, Workflow},
+    responses::JsonResponse,
+    routes::auth::session::AuthSession,
     state::AppState,
+    utils::schedule::{compute_next_run, offset_to_utc, parse_schedule_config, utc_to_offset},
 };
-use serde::Deserialize;
+use async_stream::stream;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use chrono::Utc;
 use hmac::{Hmac, Mac};
+use serde::Deserialize;
 use sha2::Sha256;
 use std::convert::Infallible;
 use std::time::Duration;
-use axum::response::sse::{Event, Sse, KeepAlive};
-use async_stream::stream;
 
 fn is_unique_violation(err: &sqlx::Error) -> bool {
     if let sqlx::Error::Database(db_err) = err {
@@ -28,14 +32,22 @@ fn is_unique_violation(err: &sqlx::Error) -> bool {
     false
 }
 
-fn flatten_user_data(prefix: &str, value: &serde_json::Value, out: &mut Vec<(String, serde_json::Value)>) {
+fn flatten_user_data(
+    prefix: &str,
+    value: &serde_json::Value,
+    out: &mut Vec<(String, serde_json::Value)>,
+) {
     match value {
         serde_json::Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort();
             for k in keys {
                 let v = &map[k];
-                let p = if prefix.is_empty() { k.to_string() } else { format!("{prefix}.{k}") };
+                let p = if prefix.is_empty() {
+                    k.to_string()
+                } else {
+                    format!("{prefix}.{k}")
+                };
                 flatten_user_data(&p, v, out);
             }
         }
@@ -49,7 +61,10 @@ fn flatten_user_data(prefix: &str, value: &serde_json::Value, out: &mut Vec<(Str
     }
 }
 
-fn diff_user_nodes_only(before: &serde_json::Value, after: &serde_json::Value) -> serde_json::Value {
+fn diff_user_nodes_only(
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+) -> serde_json::Value {
     let mut bf: Vec<(String, serde_json::Value)> = Vec::new();
     let mut af: Vec<(String, serde_json::Value)> = Vec::new();
 
@@ -66,9 +81,13 @@ fn diff_user_nodes_only(before: &serde_json::Value, after: &serde_json::Value) -
     extract(after, &mut af);
 
     let mut map_b = std::collections::BTreeMap::new();
-    for (k, v) in bf { map_b.insert(k, v); }
+    for (k, v) in bf {
+        map_b.insert(k, v);
+    }
     let mut map_a = std::collections::BTreeMap::new();
-    for (k, v) in af { map_a.insert(k, v); }
+    for (k, v) in af {
+        map_a.insert(k, v);
+    }
 
     let mut diffs = vec![];
     let keys: std::collections::BTreeSet<_> = map_b.keys().chain(map_a.keys()).cloned().collect();
@@ -84,6 +103,95 @@ fn diff_user_nodes_only(before: &serde_json::Value, after: &serde_json::Value) -
         }
     }
     serde_json::Value::Array(diffs)
+}
+
+fn extract_schedule_config(graph: &serde_json::Value) -> Option<serde_json::Value> {
+    let nodes = graph.get("nodes")?.as_array()?;
+    for node in nodes {
+        if node.get("type")?.as_str()? != "trigger" {
+            continue;
+        }
+        let data = node.get("data")?;
+        let trigger_type = data
+            .get("triggerType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Manual");
+        if !trigger_type.eq_ignore_ascii_case("schedule") {
+            continue;
+        }
+        if let Some(cfg) = data.get("scheduleConfig") {
+            return Some(cfg.clone());
+        }
+    }
+    None
+}
+
+async fn sync_workflow_schedule(state: &AppState, workflow: &Workflow) {
+    if let Err(err) = sync_workflow_schedule_inner(state, workflow).await {
+        eprintln!(
+            "Failed to sync schedule for workflow {}: {:?}",
+            workflow.id, err
+        );
+    }
+}
+
+async fn sync_workflow_schedule_inner(
+    state: &AppState,
+    workflow: &Workflow,
+) -> Result<(), sqlx::Error> {
+    let schedule_value = extract_schedule_config(&workflow.data);
+    let existing = state
+        .workflow_repo
+        .get_schedule_for_workflow(workflow.id)
+        .await?;
+
+    match schedule_value {
+        Some(cfg_value) => {
+            if let Some(cfg) = parse_schedule_config(&cfg_value) {
+                let last_run = existing
+                    .as_ref()
+                    .and_then(|s| s.last_run_at)
+                    .and_then(offset_to_utc);
+                let now = Utc::now();
+                if let Some(next_dt) = compute_next_run(&cfg, last_run, now) {
+                    if let Some(next_offset) = utc_to_offset(next_dt) {
+                        state
+                            .workflow_repo
+                            .upsert_workflow_schedule(
+                                workflow.user_id,
+                                workflow.id,
+                                cfg_value,
+                                Some(next_offset),
+                            )
+                            .await?;
+                    } else {
+                        state
+                            .workflow_repo
+                            .disable_workflow_schedule(workflow.id)
+                            .await?;
+                    }
+                } else {
+                    state
+                        .workflow_repo
+                        .disable_workflow_schedule(workflow.id)
+                        .await?;
+                }
+            } else {
+                state
+                    .workflow_repo
+                    .disable_workflow_schedule(workflow.id)
+                    .await?;
+            }
+        }
+        None => {
+            state
+                .workflow_repo
+                .disable_workflow_schedule(workflow.id)
+                .await?;
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn create_workflow(
@@ -108,14 +216,17 @@ pub async fn create_workflow(
         .await;
 
     match result {
-        Ok(workflow) => (
-            StatusCode::CREATED,
-            Json(json!({
-                "success": true,
-                "workflow": workflow
-            })),
-        )
-            .into_response(),
+        Ok(workflow) => {
+            sync_workflow_schedule(&app_state, &workflow).await;
+            (
+                StatusCode::CREATED,
+                Json(json!({
+                    "success": true,
+                    "workflow": workflow
+                })),
+            )
+                .into_response()
+        }
         Err(e) => {
             eprintln!("DB error creating workflow: {:?}", e);
             if is_unique_violation(&e) {
@@ -215,6 +326,7 @@ pub async fn update_workflow(
         .await
     {
         Ok(Some(workflow)) => {
+            sync_workflow_schedule(&app_state, &workflow).await;
             if let Ok(Some(before_wf)) = before {
                 let diffs = diff_user_nodes_only(&before_wf.data, &workflow.data);
                 if let Err(e) = app_state
@@ -352,7 +464,8 @@ pub async fn delete_workflow(
 type HmacSha256 = Hmac<Sha256>;
 
 fn compute_webhook_token(secret: &str, user_id: Uuid, workflow_id: Uuid, salt: Uuid) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(user_id.as_bytes());
     mac.update(workflow_id.as_bytes());
     mac.update(salt.as_bytes());
@@ -360,8 +473,14 @@ fn compute_webhook_token(secret: &str, user_id: Uuid, workflow_id: Uuid, salt: U
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(res)
 }
 
-fn compute_webhook_signing_key(secret: &str, user_id: Uuid, workflow_id: Uuid, salt: Uuid) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+fn compute_webhook_signing_key(
+    secret: &str,
+    user_id: Uuid,
+    workflow_id: Uuid,
+    salt: Uuid,
+) -> String {
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(user_id.as_bytes());
     mac.update(workflow_id.as_bytes());
     mac.update(salt.as_bytes());
@@ -415,7 +534,13 @@ pub async fn start_workflow_run(
         snapshot["_trigger_context"] = ctx;
     }
     // Attach per-workflow egress allowlist for engine
-    snapshot["_egress_allowlist"] = serde_json::Value::Array(wf.egress_allowlist.iter().cloned().map(serde_json::Value::String).collect());
+    snapshot["_egress_allowlist"] = serde_json::Value::Array(
+        wf.egress_allowlist
+            .iter()
+            .cloned()
+            .map(serde_json::Value::String)
+            .collect(),
+    );
 
     match app_state
         .workflow_repo
@@ -503,8 +628,14 @@ pub async fn cancel_workflow_run(
         .cancel_workflow_run(user_id, workflow_id, run_id)
         .await
     {
-        Ok(true) => (StatusCode::OK, Json(json!({"success": true, "status": "canceled" })) ).into_response(),
-        Ok(false) => JsonResponse::bad_request("Run is not cancelable or not found").into_response(),
+        Ok(true) => (
+            StatusCode::OK,
+            Json(json!({"success": true, "status": "canceled" })),
+        )
+            .into_response(),
+        Ok(false) => {
+            JsonResponse::bad_request("Run is not cancelable or not found").into_response()
+        }
         Err(e) => {
             eprintln!("DB error canceling run: {:?}", e);
             JsonResponse::server_error("Failed to cancel run").into_response()
@@ -567,7 +698,13 @@ pub async fn list_runs_for_workflow(
 
     match app_state
         .workflow_repo
-        .list_runs_paged(user_id, Some(workflow_id), params.status.as_deref(), per_page, offset)
+        .list_runs_paged(
+            user_id,
+            Some(workflow_id),
+            params.status.as_deref(),
+            per_page,
+            offset,
+        )
         .await
     {
         Ok(runs) => (
@@ -677,19 +814,35 @@ pub async fn rerun_from_failed_node(
     Path((workflow_id, run_id)): Path<(Uuid, Uuid)>,
     Json(mut payload): Json<RerunRequest>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
     let nodes = match app_state
         .workflow_repo
         .list_workflow_node_runs(user_id, workflow_id, run_id)
         .await
     {
         Ok(v) => v,
-        Err(e) => { eprintln!("DB error fetching node runs: {:?}", e); return JsonResponse::server_error("Failed to rerun").into_response(); }
+        Err(e) => {
+            eprintln!("DB error fetching node runs: {:?}", e);
+            return JsonResponse::server_error("Failed to rerun").into_response();
+        }
     };
-    let failed = nodes.iter().rev().find(|n| n.status == "failed").and_then(|n| Some(n.node_id.clone()));
+    let failed = nodes
+        .iter()
+        .rev()
+        .find(|n| n.status == "failed")
+        .and_then(|n| Some(n.node_id.clone()));
     if let Some(node_id) = failed {
         payload.start_from_node_id = Some(node_id);
-        rerun_workflow_run(State(app_state), AuthSession(claims), Path((workflow_id, run_id)), Json(payload)).await
+        rerun_workflow_run(
+            State(app_state),
+            AuthSession(claims),
+            Path((workflow_id, run_id)),
+            Json(payload),
+        )
+        .await
     } else {
         JsonResponse::bad_request("No failed node found for this run").into_response()
     }
@@ -796,7 +949,11 @@ pub async fn sse_run_events(
         }
     };
 
-    Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keepalive"))
+    Sse::new(s).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    )
 }
 
 // Protected endpoint to fetch a webhook URL for a workflow (for display in UI)
@@ -859,7 +1016,8 @@ pub async fn webhook_trigger(
     if wf.require_hmac {
         // timestamp window check
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let signing_key_b64 = compute_webhook_signing_key(&secret, wf.user_id, wf.id, wf.webhook_salt);
+        let signing_key_b64 =
+            compute_webhook_signing_key(&secret, wf.user_id, wf.id, wf.webhook_salt);
 
         // Extract headers via http::request extensions is not available here; use a workaround: require timestamp/signature in body under _meta if header not present.
         // For now, accept either headers (preferred, via Proxy) or fields in JSON: _dsentr_ts, _dsentr_sig
@@ -870,8 +1028,16 @@ pub async fn webhook_trigger(
             if ts.is_some() && sg.is_some() {
                 (ts.unwrap(), sg.unwrap())
             } else if let Some(Json(ref b)) = body {
-                let ts_v = b.get("_dsentr_ts").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let sg_v = b.get("_dsentr_sig").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let ts_v = b
+                    .get("_dsentr_ts")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let sg_v = b
+                    .get("_dsentr_sig")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 (ts_v, sg_v)
             } else {
                 (String::new(), String::new())
@@ -886,19 +1052,30 @@ pub async fn webhook_trigger(
             return JsonResponse::unauthorized("Stale or invalid timestamp").into_response();
         }
         // payload to sign: `${ts}.${raw_body}` where raw_body is compact JSON or empty
-        let raw_body = body.as_ref().map(|Json(v)| v.to_string()).unwrap_or_else(|| String::from(""));
+        let raw_body = body
+            .as_ref()
+            .map(|Json(v)| v.to_string())
+            .unwrap_or_else(|| String::from(""));
         let payload = format!("{}.{}", ts_str, raw_body);
         // verify
-        let key_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(signing_key_b64.as_bytes()).unwrap_or_default();
+        let key_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(signing_key_b64.as_bytes())
+            .unwrap_or_default();
         let mut mac = HmacSha256::new_from_slice(&key_bytes).expect("HMAC");
         mac.update(payload.as_bytes());
         let expected = hex::encode(mac.finalize().into_bytes());
         let provided = sig_str.strip_prefix("v1=").unwrap_or(sig_str.as_str());
-        if subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), provided.as_bytes()).unwrap_u8() == 0u8 {
+        if subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), provided.as_bytes()).unwrap_u8()
+            == 0u8
+        {
             return JsonResponse::unauthorized("Invalid HMAC signature").into_response();
         }
         // Replay protection
-        if let Ok(false) = app_state.workflow_repo.try_record_webhook_signature(wf.id, provided).await {
+        if let Ok(false) = app_state
+            .workflow_repo
+            .try_record_webhook_signature(wf.id, provided)
+            .await
+        {
             return JsonResponse::unauthorized("Replay detected").into_response();
         }
     }
@@ -909,7 +1086,13 @@ pub async fn webhook_trigger(
         snapshot["_trigger_context"] = ctx;
     }
     // Attach per-workflow egress allowlist for engine
-    snapshot["_egress_allowlist"] = serde_json::Value::Array(wf.egress_allowlist.iter().cloned().map(serde_json::Value::String).collect());
+    snapshot["_egress_allowlist"] = serde_json::Value::Array(
+        wf.egress_allowlist
+            .iter()
+            .cloned()
+            .map(serde_json::Value::String)
+            .collect(),
+    );
 
     match app_state
         .workflow_repo
@@ -929,16 +1112,29 @@ pub async fn webhook_trigger(
 }
 
 #[derive(Deserialize)]
-pub struct UpdateEgressBody { pub allowlist: Vec<String> }
+pub struct UpdateEgressBody {
+    pub allowlist: Vec<String>,
+}
 
 pub async fn get_egress_allowlist(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
-    match app_state.workflow_repo.find_workflow_by_id(user_id, workflow_id).await {
-        Ok(Some(wf)) => (StatusCode::OK, Json(json!({"success": true, "allowlist": wf.egress_allowlist }))).into_response(),
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .find_workflow_by_id(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(wf)) => (
+            StatusCode::OK,
+            Json(json!({"success": true, "allowlist": wf.egress_allowlist })),
+        )
+            .into_response(),
         Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
         Err(_) => JsonResponse::server_error("Failed").into_response(),
     }
@@ -950,8 +1146,15 @@ pub async fn set_egress_allowlist(
     Path(workflow_id): Path<Uuid>,
     Json(body): Json<UpdateEgressBody>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
-    match app_state.workflow_repo.set_egress_allowlist(user_id, workflow_id, &body.allowlist).await {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .set_egress_allowlist(user_id, workflow_id, &body.allowlist)
+        .await
+    {
         Ok(true) => (StatusCode::OK, Json(json!({"success": true }))).into_response(),
         Ok(false) => JsonResponse::not_found("Workflow not found").into_response(),
         Err(_) => JsonResponse::server_error("Failed to update allowlist").into_response(),
@@ -959,24 +1162,39 @@ pub async fn set_egress_allowlist(
 }
 
 #[derive(Deserialize)]
-pub struct WebhookConfigBody { pub require_hmac: bool, pub replay_window_sec: i32 }
+pub struct WebhookConfigBody {
+    pub require_hmac: bool,
+    pub replay_window_sec: i32,
+}
 
 pub async fn get_webhook_config(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
-    match app_state.workflow_repo.find_workflow_by_id(user_id, workflow_id).await {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .find_workflow_by_id(user_id, workflow_id)
+        .await
+    {
         Ok(Some(wf)) => {
             let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
-            let signing_key = compute_webhook_signing_key(&secret, wf.user_id, wf.id, wf.webhook_salt);
-            (StatusCode::OK, Json(json!({
-                "success": true,
-                "require_hmac": wf.require_hmac,
-                "replay_window_sec": wf.hmac_replay_window_sec,
-                "signing_key": signing_key
-            }))).into_response()
+            let signing_key =
+                compute_webhook_signing_key(&secret, wf.user_id, wf.id, wf.webhook_salt);
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "success": true,
+                    "require_hmac": wf.require_hmac,
+                    "replay_window_sec": wf.hmac_replay_window_sec,
+                    "signing_key": signing_key
+                })),
+            )
+                .into_response()
         }
         Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
         Err(_) => JsonResponse::server_error("Failed").into_response(),
@@ -989,9 +1207,16 @@ pub async fn set_webhook_config(
     Path(workflow_id): Path<Uuid>,
     Json(body): Json<WebhookConfigBody>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
     let replay = body.replay_window_sec.clamp(60, 3600);
-    match app_state.workflow_repo.update_webhook_config(user_id, workflow_id, body.require_hmac, replay).await {
+    match app_state
+        .workflow_repo
+        .update_webhook_config(user_id, workflow_id, body.require_hmac, replay)
+        .await
+    {
         Ok(true) => (StatusCode::OK, Json(json!({"success": true }))).into_response(),
         Ok(false) => JsonResponse::not_found("Workflow not found").into_response(),
         Err(_) => JsonResponse::server_error("Failed to update").into_response(),
@@ -999,7 +1224,10 @@ pub async fn set_webhook_config(
 }
 
 #[derive(Deserialize)]
-pub struct ListEgressBlocksQuery { pub page: Option<i64>, pub per_page: Option<i64> }
+pub struct ListEgressBlocksQuery {
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
 
 pub async fn list_egress_block_events(
     State(app_state): State<AppState>,
@@ -1007,12 +1235,23 @@ pub async fn list_egress_block_events(
     Path(workflow_id): Path<Uuid>,
     Query(params): Query<ListEgressBlocksQuery>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
     let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
     let page = params.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
-    match app_state.workflow_repo.list_egress_block_events(user_id, workflow_id, per_page, offset).await {
-        Ok(items) => (StatusCode::OK, Json(json!({"success": true, "blocks": items, "page": page, "per_page": per_page }))).into_response(),
+    match app_state
+        .workflow_repo
+        .list_egress_block_events(user_id, workflow_id, per_page, offset)
+        .await
+    {
+        Ok(items) => (
+            StatusCode::OK,
+            Json(json!({"success": true, "blocks": items, "page": page, "per_page": per_page })),
+        )
+            .into_response(),
         Err(_) => JsonResponse::server_error("Failed to fetch blocks").into_response(),
     }
 }
@@ -1023,7 +1262,10 @@ pub async fn sse_workflow_runs(
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => Uuid::nil() };
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => Uuid::nil(),
+    };
     let state = app_state.clone();
     let s = stream! {
         let mut last_ids: Option<Vec<(Uuid, String)>> = None;
@@ -1049,7 +1291,11 @@ pub async fn sse_workflow_runs(
             }
         }
     };
-    Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keepalive"))
+    Sse::new(s).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    )
 }
 
 // SSE: global active runs status stream
@@ -1057,7 +1303,10 @@ pub async fn sse_global_runs(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => Uuid::nil() };
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => Uuid::nil(),
+    };
     let state = app_state.clone();
     let s = stream! {
         let mut last: Option<(bool,bool)> = None;
@@ -1084,7 +1333,11 @@ pub async fn sse_global_runs(
             }
         }
     };
-    Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keepalive"))
+    Sse::new(s).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    )
 }
 
 pub async fn clear_egress_block_events(
@@ -1092,9 +1345,20 @@ pub async fn clear_egress_block_events(
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
-    match app_state.workflow_repo.clear_egress_block_events(user_id, workflow_id).await {
-        Ok(count) => (StatusCode::OK, Json(json!({"success": true, "deleted": count }))).into_response(),
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .clear_egress_block_events(user_id, workflow_id)
+        .await
+    {
+        Ok(count) => (
+            StatusCode::OK,
+            Json(json!({"success": true, "deleted": count })),
+        )
+            .into_response(),
         Err(_) => JsonResponse::server_error("Failed to clear blocks").into_response(),
     }
 }
@@ -1104,9 +1368,20 @@ pub async fn clear_dead_letters_api(
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
-    match app_state.workflow_repo.clear_dead_letters(user_id, workflow_id).await {
-        Ok(count) => (StatusCode::OK, Json(json!({"success": true, "deleted": count }))).into_response(),
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .clear_dead_letters(user_id, workflow_id)
+        .await
+    {
+        Ok(count) => (
+            StatusCode::OK,
+            Json(json!({"success": true, "deleted": count })),
+        )
+            .into_response(),
         Err(_) => JsonResponse::server_error("Failed to clear dead letters").into_response(),
     }
 }
@@ -1132,7 +1407,8 @@ pub async fn regenerate_webhook_token(
                 .await;
             match wf {
                 Ok(Some(w)) => {
-                    let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
+                    let secret =
+                        std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
                     let token = compute_webhook_token(&secret, w.user_id, w.id, new_salt);
                     let url = format!("/api/workflows/{}/trigger/{}", w.id, token);
                     (StatusCode::OK, Json(json!({"success": true, "url": url}))).into_response()
@@ -1154,7 +1430,9 @@ pub async fn regenerate_webhook_token(
 
 // Concurrency limit setter
 #[derive(Deserialize)]
-pub struct ConcurrencyLimitBody { pub limit: i32 }
+pub struct ConcurrencyLimitBody {
+    pub limit: i32,
+}
 
 pub async fn set_concurrency_limit(
     State(app_state): State<AppState>,
@@ -1162,18 +1440,33 @@ pub async fn set_concurrency_limit(
     Path(workflow_id): Path<Uuid>,
     Json(body): Json<ConcurrencyLimitBody>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
-    if body.limit < 1 { return JsonResponse::bad_request("limit must be >= 1").into_response(); }
-    match app_state.workflow_repo.set_workflow_concurrency_limit(user_id, workflow_id, body.limit).await {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if body.limit < 1 {
+        return JsonResponse::bad_request("limit must be >= 1").into_response();
+    }
+    match app_state
+        .workflow_repo
+        .set_workflow_concurrency_limit(user_id, workflow_id, body.limit)
+        .await
+    {
         Ok(true) => Json(json!({"success": true, "limit": body.limit})).into_response(),
         Ok(false) => JsonResponse::not_found("Workflow not found").into_response(),
-        Err(e) => { eprintln!("DB error setting concurrency: {:?}", e); JsonResponse::server_error("Failed to update").into_response() }
+        Err(e) => {
+            eprintln!("DB error setting concurrency: {:?}", e);
+            JsonResponse::server_error("Failed to update").into_response()
+        }
     }
 }
 
 // Dead letters list
 #[derive(Deserialize)]
-pub struct ListDeadLettersQuery { pub page: Option<i64>, pub per_page: Option<i64> }
+pub struct ListDeadLettersQuery {
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
 
 pub async fn list_dead_letters(
     State(app_state): State<AppState>,
@@ -1181,13 +1474,29 @@ pub async fn list_dead_letters(
     Path(workflow_id): Path<Uuid>,
     Query(params): Query<ListDeadLettersQuery>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
     let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
     let page = params.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
-    match app_state.workflow_repo.list_dead_letters(user_id, workflow_id, per_page, offset).await {
-        Ok(items) => (StatusCode::OK, Json(json!({"success": true, "dead_letters": items, "page": page, "per_page": per_page}))).into_response(),
-        Err(e) => { eprintln!("DB error list dead letters: {:?}", e); JsonResponse::server_error("Failed to fetch").into_response() }
+    match app_state
+        .workflow_repo
+        .list_dead_letters(user_id, workflow_id, per_page, offset)
+        .await
+    {
+        Ok(items) => (
+            StatusCode::OK,
+            Json(
+                json!({"success": true, "dead_letters": items, "page": page, "per_page": per_page}),
+            ),
+        )
+            .into_response(),
+        Err(e) => {
+            eprintln!("DB error list dead letters: {:?}", e);
+            JsonResponse::server_error("Failed to fetch").into_response()
+        }
     }
 }
 
@@ -1196,10 +1505,24 @@ pub async fn requeue_dead_letter(
     AuthSession(claims): AuthSession,
     Path((workflow_id, dead_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
-    match app_state.workflow_repo.requeue_dead_letter(user_id, workflow_id, dead_id).await {
-        Ok(Some(run)) => (StatusCode::ACCEPTED, Json(json!({"success": true, "run": run}))).into_response(),
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    match app_state
+        .workflow_repo
+        .requeue_dead_letter(user_id, workflow_id, dead_id)
+        .await
+    {
+        Ok(Some(run)) => (
+            StatusCode::ACCEPTED,
+            Json(json!({"success": true, "run": run})),
+        )
+            .into_response(),
         Ok(None) => JsonResponse::not_found("Dead letter not found").into_response(),
-        Err(e) => { eprintln!("DB error requeue dead letter: {:?}", e); JsonResponse::server_error("Failed to requeue").into_response() }
+        Err(e) => {
+            eprintln!("DB error requeue dead letter: {:?}", e);
+            JsonResponse::server_error("Failed to requeue").into_response()
+        }
     }
 }

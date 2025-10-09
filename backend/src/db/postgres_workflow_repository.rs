@@ -1,14 +1,13 @@
 use crate::{
-    db::workflow_repository::WorkflowRepository,
-    models::workflow::Workflow,
-    models::workflow_log::WorkflowLog,
-    models::workflow_node_run::WorkflowNodeRun,
-    models::workflow_run::WorkflowRun,
-    models::workflow_dead_letter::WorkflowDeadLetter,
+    db::workflow_repository::WorkflowRepository, models::workflow::Workflow,
+    models::workflow_dead_letter::WorkflowDeadLetter, models::workflow_log::WorkflowLog,
+    models::workflow_node_run::WorkflowNodeRun, models::workflow_run::WorkflowRun,
+    models::workflow_schedule::WorkflowSchedule,
 };
 use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::{PgPool, Row};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub struct PostgresWorkflowRepository {
@@ -715,7 +714,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             UPDATE workflow_runs
             SET queue_priority = $4, updated_at = now()
             WHERE id = $3 AND user_id = $1 AND workflow_id = $2
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(workflow_id)
@@ -753,7 +752,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             UPDATE workflow_runs
             SET status = 'queued', leased_by = NULL, lease_expires_at = NULL
             WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < now()
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -826,7 +825,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 lease_expires_at = now() + ($3::int * INTERVAL '1 second'),
                 updated_at = now()
             WHERE id = $1 AND leased_by = $2
-            "#
+            "#,
         )
         .bind(run_id)
         .bind(worker_id)
@@ -842,7 +841,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             DELETE FROM workflow_runs
             WHERE status IN ('succeeded','failed','canceled')
               AND created_at < now() - ($1::int * INTERVAL '1 day')
-            "#
+            "#,
         )
         .bind(retention_days)
         .execute(&self.pool)
@@ -888,7 +887,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             WHERE user_id = $1 AND workflow_id = $2
             ORDER BY created_at DESC
             LIMIT $3 OFFSET $4
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(workflow_id)
@@ -910,7 +909,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             SELECT id, user_id, workflow_id, run_id, error, snapshot, created_at
             FROM workflow_dead_letters
             WHERE id = $1 AND user_id = $2 AND workflow_id = $3
-            "#
+            "#,
         )
         .bind(dead_id)
         .bind(user_id)
@@ -927,9 +926,15 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             .fetch_one(&self.pool)
             .await?;
             let mut new_snapshot = dl.snapshot.clone();
-            let v = serde_json::Value::Array(wf_row.egress_allowlist.into_iter().map(serde_json::Value::String).collect());
-                if let serde_json::Value::Object(ref mut map) = new_snapshot {
-                    map.insert("_egress_allowlist".to_string(), v);
+            let v = serde_json::Value::Array(
+                wf_row
+                    .egress_allowlist
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            );
+            if let serde_json::Value::Object(ref mut map) = new_snapshot {
+                map.insert("_egress_allowlist".to_string(), v);
             }
             let new_run_row = sqlx::query(
                 r#"
@@ -979,7 +984,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             r#"
             DELETE FROM workflow_dead_letters
             WHERE user_id = $1 AND workflow_id = $2
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(workflow_id)
@@ -999,7 +1004,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             UPDATE workflows
             SET egress_allowlist = $3::text[], updated_at = now()
             WHERE user_id = $1 AND id = $2
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(workflow_id)
@@ -1021,7 +1026,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             UPDATE workflows
             SET require_hmac = $3, hmac_replay_window_sec = $4, updated_at = now()
             WHERE user_id = $1 AND id = $2
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(workflow_id)
@@ -1042,7 +1047,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             INSERT INTO webhook_replays (workflow_id, signature, created_at)
             VALUES ($1, $2, now())
             ON CONFLICT (workflow_id, signature) DO NOTHING
-            "#
+            "#,
         )
         .bind(workflow_id)
         .bind(signature)
@@ -1056,7 +1061,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             r#"
             DELETE FROM webhook_replays
             WHERE created_at < now() - ($1::bigint * INTERVAL '1 second')
-            "#
+            "#,
         )
         .bind(older_than_seconds)
         .execute(&self.pool)
@@ -1108,7 +1113,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             WHERE user_id = $1 AND workflow_id = $2
             ORDER BY created_at DESC
             LIMIT $3 OFFSET $4
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(workflow_id)
@@ -1128,7 +1133,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             r#"
             DELETE FROM egress_block_events
             WHERE user_id = $1 AND workflow_id = $2
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(workflow_id)
@@ -1136,10 +1141,109 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .await?;
         Ok(res.rows_affected())
     }
+
+    async fn upsert_workflow_schedule(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        config: serde_json::Value,
+        next_run_at: Option<OffsetDateTime>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            INSERT INTO workflow_schedules (workflow_id, user_id, config, next_run_at, enabled)
+            VALUES ($1, $2, $3, $4, true)
+            ON CONFLICT (workflow_id)
+            DO UPDATE SET
+                config = EXCLUDED.config,
+                next_run_at = EXCLUDED.next_run_at,
+                enabled = EXCLUDED.enabled,
+                updated_at = now()
+            "#,
+            workflow_id,
+            user_id,
+            config,
+            next_run_at
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn disable_workflow_schedule(&self, workflow_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE workflow_schedules
+            SET enabled = false,
+                next_run_at = NULL,
+                updated_at = now()
+            WHERE workflow_id = $1
+            "#,
+            workflow_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_schedule_for_workflow(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<WorkflowSchedule>, sqlx::Error> {
+        let row = sqlx::query_as::<_, WorkflowSchedule>(
+            r#"
+            SELECT id, workflow_id, user_id, config, next_run_at, last_run_at, enabled, created_at, updated_at
+            FROM workflow_schedules
+            WHERE workflow_id = $1
+            "#,
+        )
+        .bind(workflow_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    async fn list_due_schedules(&self, limit: i64) -> Result<Vec<WorkflowSchedule>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, WorkflowSchedule>(
+            r#"
+            SELECT id, workflow_id, user_id, config, next_run_at, last_run_at, enabled, created_at, updated_at
+            FROM workflow_schedules
+            WHERE enabled = true
+              AND next_run_at IS NOT NULL
+              AND next_run_at <= now()
+            ORDER BY next_run_at ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn mark_schedule_run(
+        &self,
+        schedule_id: Uuid,
+        last_run_at: OffsetDateTime,
+        next_run_at: Option<OffsetDateTime>,
+    ) -> Result<(), sqlx::Error> {
+        let should_enable = next_run_at.is_some();
+        sqlx::query!(
+            r#"
+            UPDATE workflow_schedules
+            SET last_run_at = $2,
+                next_run_at = $3,
+                enabled = $4,
+                updated_at = now()
+            WHERE id = $1
+            "#,
+            schedule_id,
+            last_run_at,
+            next_run_at,
+            should_enable
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
-
-
-
-
-
-
