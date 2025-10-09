@@ -1,0 +1,158 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Light mode (default) */
+body {
+  @apply bg-white text-gray-900 transition-colors duration-300;
+}
+
+/* Dark mode */
+.dark body {
+  @apply bg-gray-900 text-gray-100;
+}
+
+/* Example link styling */
+a {
+  @apply text-blue-600 underline;
+}
+
+.dark a {
+  @apply text-blue-400;
+}
+
+/* Headings */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  @apply font-bold text-gray-800;
+}
+
+.dark h1,
+.dark h2,
+.dark h3,
+.dark h4,
+.dark h5,
+.dark h6 {
+  @apply text-gray-100;
+}
+
+/* Optional: some utility classes for containers or cards */
+.container {
+  @apply max-w-4xl mx-auto px-4 py-6;
+}
+
+.card {
+  @apply rounded-lg shadow-md bg-white text-gray-900 p-6;
+}
+
+.dark .card {
+  @apply bg-gray-800 text-gray-100;
+}
+
+.btn {
+  @apply px-4 py-2 rounded font-medium transition-colors duration-200;
+}
+
+.btn-secondary {
+  @apply bg-gray-200 text-gray-900 hover:bg-gray-300;
+}
+
+.dark .btn-secondary {
+  @apply bg-gray-700 text-gray-100 hover:bg-gray-600;
+}
+
+@keyframes colorShift {
+  0% {
+    filter: hue-rotate(0deg) brightness(1);
+  }
+
+  50% {
+    filter: hue-rotate(20deg) brightness(1.2);
+  }
+
+  100% {
+    filter: hue-rotate(0deg) brightness(1);
+  }
+}
+
+.modular-animation-wrapper {
+  animation: colorShift 3s ease-in-out infinite;
+}
+
+@layer utilities {
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-out;
+  }
+}
+
+.react-flow__controls-button svg {
+  stroke: currentColor;
+}
+
+.dark .react-flow__controls {
+  color: white;
+}
+
+/* Chrome, Edge, Safari */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* Workflow node execution visuals (MVP: simple static rings) */
+.wf-node { position: relative; }
+
+/* Themed scrollbars for modal/content areas */
+.themed-scroll {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #9ca3af #e5e7eb; /* thumb track */
+}
+.dark .themed-scroll {
+  scrollbar-color: #71717a #18181b; /* thumb track */
+}
+
+/* WebKit-based browsers */
+.themed-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.themed-scroll::-webkit-scrollbar-track {
+  background: #e5e7eb; /* zinc-200 */
+}
+.dark .themed-scroll::-webkit-scrollbar-track {
+  background: #18181b; /* zinc-900-ish */
+}
+.themed-scroll::-webkit-scrollbar-thumb {
+  background-color: #9ca3af; /* zinc-400 */
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.themed-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #6b7280; /* zinc-500 */
+}
+.dark .themed-scroll::-webkit-scrollbar-thumb {
+  background-color: #71717a; /* zinc-500 */
+}
+.dark .themed-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #a1a1aa; /* zinc-400 */
+}
