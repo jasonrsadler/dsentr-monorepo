@@ -17,7 +17,7 @@ type WorkflowLogsState = {
 
 export const useWorkflowLogs = create<WorkflowLogsState>((set) => ({
   entries: [],
-  add: (entry) => set((s) => ({ entries: [entry, ...s.entries].slice(0, 100) })),
-  clear: () => set({ entries: [] }),
+  add: (entry) =>
+    set((s) => ({ entries: [entry, ...s.entries].slice(0, 100) })),
+  clear: () => set({ entries: [] })
 }))
-

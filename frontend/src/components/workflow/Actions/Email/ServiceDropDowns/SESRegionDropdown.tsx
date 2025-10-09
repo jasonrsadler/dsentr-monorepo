@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState } from 'react'
 
 interface SESRegionDropdownProps {
   value: string
@@ -6,19 +6,22 @@ interface SESRegionDropdownProps {
 }
 
 const regions = [
-  "us-east-1",
-  "us-east-2",
-  "us-west-1",
-  "us-west-2",
-  "eu-west-1",
-  "eu-west-2",
-  "eu-central-1",
-  "ap-southeast-1",
-  "ap-southeast-2",
-  "ap-northeast-1"
+  'us-east-1',
+  'us-east-2',
+  'us-west-1',
+  'us-west-2',
+  'eu-west-1',
+  'eu-west-2',
+  'eu-central-1',
+  'ap-southeast-1',
+  'ap-southeast-2',
+  'ap-northeast-1'
 ]
 
-export default function SESRegionDropdown({ value, onChange }: SESRegionDropdownProps) {
+export default function SESRegionDropdown({
+  value,
+  onChange
+}: SESRegionDropdownProps) {
   const [open, setOpen] = useState(false)
 
   const handleSelect = (region: string) => {
@@ -33,21 +36,25 @@ export default function SESRegionDropdown({ value, onChange }: SESRegionDropdown
         onClick={() => setOpen(!open)}
         className="relative w-full text-left px-2 py-1 border rounded bg-zinc-50 dark:bg-zinc-800"
       >
-        {value || "Select Region"}
+        {value || 'Select Region'}
         <svg
-          className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
           viewBox="0 0 24 24"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
         </svg>
       </button>
 
       {open && (
         <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-40 overflow-auto">
-          {regions.map(region => (
+          {regions.map((region) => (
             <li
               key={region}
               onClick={() => handleSelect(region)}

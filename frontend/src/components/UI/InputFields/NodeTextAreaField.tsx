@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef } from 'react'
 
 interface NodeTextAreaFieldProps {
   placeholder?: string
@@ -10,8 +10,8 @@ interface NodeTextAreaFieldProps {
 }
 
 export default function NodeTextAreaField({
-  placeholder = "",
-  value = "",
+  placeholder = '',
+  value = '',
   onChange,
   className,
   maxchars,
@@ -34,14 +34,14 @@ export default function NodeTextAreaField({
   }
 
   const textAreaClass =
-    "text-xs p-1 w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 placeholder-zinc-400 dark:placeholder-zinc-500 nodrag"
+    'text-xs p-1 w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 placeholder-zinc-400 dark:placeholder-zinc-500 nodrag'
 
   return (
     <textarea
       placeholder={placeholder}
       className={className ?? textAreaClass}
       value={internalValue}
-      onChange={e => handleChange(e.target.value)}
+      onChange={(e) => handleChange(e.target.value)}
       rows={rows}
     />
   )

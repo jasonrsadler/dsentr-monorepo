@@ -1,24 +1,24 @@
-import { useState } from "react";
+import { useState } from 'react'
 
 const actionTypes = [
-  { id: "email", label: "Send Email" },
-  { id: "webhook", label: "POST Webhook" },
-  { id: "messaging", label: "Messaging" },
-  { id: "sheets", label: "Create Google Sheet Row" },
-  { id: "http", label: "HTTP Request" },
-  { id: "code", label: "Run Custom Code" },
-];
+  { id: 'email', label: 'Send Email' },
+  { id: 'webhook', label: 'POST Webhook' },
+  { id: 'messaging', label: 'Messaging' },
+  { id: 'sheets', label: 'Create Google Sheet Row' },
+  { id: 'http', label: 'HTTP Request' },
+  { id: 'code', label: 'Run Custom Code' }
+]
 
 export default function ActionTypeDropdown({ value, onChange }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(false)
 
   const selectedLabel =
-    actionTypes.find((a) => a.id === value)?.label || "Select Action";
+    actionTypes.find((a) => a.id === value)?.label || 'Select Action'
 
   const handleSelect = (id) => {
-    onChange(id);
-    setOpen(false);
-  };
+    onChange(id)
+    setOpen(false)
+  }
 
   return (
     <div className="relative inline-block w-full text-xs">
@@ -29,13 +29,17 @@ export default function ActionTypeDropdown({ value, onChange }) {
       >
         {selectedLabel}
         <svg
-          className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
           viewBox="0 0 24 24"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
         </svg>
       </button>
 
@@ -53,5 +57,5 @@ export default function ActionTypeDropdown({ value, onChange }) {
         </ul>
       )}
     </div>
-  );
+  )
 }

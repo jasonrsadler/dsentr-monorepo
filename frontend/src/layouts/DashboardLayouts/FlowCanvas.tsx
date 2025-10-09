@@ -18,13 +18,13 @@ function normalizeNode(n: any) {
     id: n.id,
     type: n.type,
     position: n.position,
-    data: sanitizeData(n.data),
-  };
+    data: sanitizeData(n.data)
+  }
 }
 function normalizeEdge(e: any) {
   // Coalesce potentially undefined fields to stable values so snapshots match
-  const label = (e as any).label ?? null;
-  const animated = Boolean((e as any).animated);
+  const label = (e as any).label ?? null
+  const animated = Boolean((e as any).animated)
   return {
     id: e.id,
     source: e.source,
@@ -34,17 +34,17 @@ function normalizeEdge(e: any) {
     type: e.type,
     data: e.data,
     label,
-    animated,
-  };
+    animated
+  }
 }
 function sortById<T extends { id: string }>(arr: T[]): T[] {
-  return [...arr].sort((a, b) => a.id.localeCompare(b.id));
+  return [...arr].sort((a, b) => a.id.localeCompare(b.id))
 }
 
 function sanitizeData(data: any) {
-  if (!data || typeof data !== 'object') return data;
-  const { dirty, wfEpoch, ...rest } = data as any;
-  return rest;
+  if (!data || typeof data !== 'object') return data
+  const { dirty, wfEpoch, ...rest } = data as any
+  return rest
 }
 
 interface FlowCanvasProps {
@@ -82,8 +82,12 @@ export default function FlowCanvas({
   const rafRef = useRef<number | null>(null)
   // Keep a stable callable for run to avoid re-creating nodeTypes
   const onRunWorkflowRef = useRef(onRunWorkflow)
-  useEffect(() => { onRunWorkflowRef.current = onRunWorkflow }, [onRunWorkflow])
-  const invokeRunWorkflow = useCallback(() => { onRunWorkflowRef.current?.() }, [])
+  useEffect(() => {
+    onRunWorkflowRef.current = onRunWorkflow
+  }, [onRunWorkflow])
+  const invokeRunWorkflow = useCallback(() => {
+    onRunWorkflowRef.current?.()
+  }, [])
   useEffect(() => {
     if (!workflowId) {
       setNodes([])
@@ -96,9 +100,15 @@ export default function FlowCanvas({
       id: node.id,
       type: node.type,
       position: node.position,
-      data: { ...(node?.data ? JSON.parse(JSON.stringify(node.data)) : {}), dirty: Boolean(node?.data?.dirty), wfEpoch: epoch }
+      data: {
+        ...(node?.data ? JSON.parse(JSON.stringify(node.data)) : {}),
+        dirty: Boolean(node?.data?.dirty),
+        wfEpoch: epoch
+      }
     }))
-    const incomingEdges = (workflowData?.edges ?? []).map((e: any) => ({ ...e }))
+    const incomingEdges = (workflowData?.edges ?? []).map((e: any) => ({
+      ...e
+    }))
     setNodes(incomingNodes)
     setEdges(incomingEdges)
   }, [workflowId, workflowData, setNodes, setEdges])
@@ -122,18 +132,21 @@ export default function FlowCanvas({
   const runningIdsRef = useRef(runningIds)
   const succeededIdsRef = useRef(succeededIds)
   const failedIdsRef = useRef(failedIds)
-  useEffect(() => { runningIdsRef.current = runningIds }, [runningIds])
-  useEffect(() => { succeededIdsRef.current = succeededIds }, [succeededIds])
-  useEffect(() => { failedIdsRef.current = failedIds }, [failedIds])
+  useEffect(() => {
+    runningIdsRef.current = runningIds
+  }, [runningIds])
+  useEffect(() => {
+    succeededIdsRef.current = succeededIds
+  }, [succeededIds])
+  useEffect(() => {
+    failedIdsRef.current = failedIds
+  }, [failedIds])
 
-  
   const updateNodeData = useCallback(
     (id: string, newData: any, suppressDirty = false) => {
-      setNodes(nds =>
-        nds.map(n =>
-          n.id === id
-            ? { ...n, data: { ...n.data, ...newData } }
-            : n
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === id ? { ...n, data: { ...n.data, ...newData } } : n
         )
       )
       if (!suppressDirty) markWorkflowDirty()
@@ -142,14 +155,13 @@ export default function FlowCanvas({
   )
 
   const saveAllNodes = useCallback(() => {
-    const clearedNodes = nodes.map(n => {
-      const keys = n.data?.inputs?.map(i => i.key.trim()) || []
-      const values = n.data?.inputs?.map(i => i.value.trim()) || []
+    const clearedNodes = nodes.map((n) => {
+      const keys = n.data?.inputs?.map((i) => i.key.trim()) || []
+      const values = n.data?.inputs?.map((i) => i.value.trim()) || []
 
       const hasDuplicateKeys =
-        new Set(keys.filter(k => k)).size !== keys.filter(k => k).length
-      const hasInvalidInputs =
-        keys.some(k => !k) || values.some(v => !v)
+        new Set(keys.filter((k) => k)).size !== keys.filter((k) => k).length
+      const hasInvalidInputs = keys.some((k) => !k) || values.some((v) => !v)
 
       const newDirty = hasDuplicateKeys || hasInvalidInputs
 
@@ -168,19 +180,24 @@ export default function FlowCanvas({
       setSaveRef({
         saveAllNodes,
         getEdges: () => edges,
-        setNodesFromToolbar: updatedNodes =>
-          setNodes(nds =>
-            nds.map(n => {
-              const updated = updatedNodes.find(u => u.id === n.id)
-              return updated ? { ...n, data: { ...n.data, ...updated.data } } : n
+        setNodesFromToolbar: (updatedNodes) =>
+          setNodes((nds) =>
+            nds.map((n) => {
+              const updated = updatedNodes.find((u) => u.id === n.id)
+              return updated
+                ? { ...n, data: { ...n.data, ...updated.data } }
+                : n
             })
-          )
-        ,
+          ),
         loadGraph: (graph) => {
           const epoch = Date.now()
           const safeNodes = (graph?.nodes ?? []).map((n: any) => ({
             ...n,
-            data: { ...(n.data ?? {}), dirty: n.data?.dirty ?? false, wfEpoch: epoch }
+            data: {
+              ...(n.data ?? {}),
+              dirty: n.data?.dirty ?? false,
+              wfEpoch: epoch
+            }
           }))
           setNodes(safeNodes)
           setEdges(graph?.edges ?? [])
@@ -191,64 +208,67 @@ export default function FlowCanvas({
   }, [edges, saveAllNodes, setSaveRef, setNodes])
 
   const removeNode = useCallback(
-    id => {
-      setNodes(nds => nds.filter(n => n.id !== id))
-      setEdges(eds => eds.filter(e => e.source !== id && e.target !== id))
+    (id) => {
+      setNodes((nds) => nds.filter((n) => n.id !== id))
+      setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
       markWorkflowDirty()
     },
     [setNodes, setEdges, markWorkflowDirty]
   )
 
-  const nodeTypes = useMemo(() => ({
-    trigger: props => (
-      <TriggerNode
-        key={`trigger-${props.id}-${props?.data?.wfEpoch ?? ''}`}
-        {...props}
-        isRunning={runningIdsRef.current.has(props.id)}
-        isSucceeded={succeededIdsRef.current.has(props.id)}
-        isFailed={failedIdsRef.current.has(props.id)}
-        onRemove={removeNode}
-        onDirtyChange={markWorkflowDirty}
-        onUpdateNode={updateNodeData}
-        onRun={() => {
-          invokeRunWorkflow()
-        }}
-      />
-    ),
-    action: props => (
-      <ActionNode
-        key={`action-${props.id}-${props?.data?.wfEpoch ?? ''}`}
-        {...props}
-        isRunning={runningIdsRef.current.has(props.id)}
-        isSucceeded={succeededIdsRef.current.has(props.id)}
-        isFailed={failedIdsRef.current.has(props.id)}
-        onRemove={removeNode}
-        onDirtyChange={markWorkflowDirty}
-        onUpdateNode={updateNodeData}
-        onRun={() => {
-          invokeRunWorkflow()
-        }}
-      />
-    ),
-    condition: props => (
-      <ConditionNode
-        key={`condition-${props.id}-${props?.data?.wfEpoch ?? ''}`}
-        {...props}
-        isRunning={runningIdsRef.current.has(props.id)}
-        isSucceeded={succeededIdsRef.current.has(props.id)}
-        isFailed={failedIdsRef.current.has(props.id)}
-        onRemove={removeNode}
-        onDirtyChange={markWorkflowDirty}
-        onUpdateNode={updateNodeData}
-        onRun={() => {
-          console.log('Run Condition', props.id)
-        }}
-      />
-    )
-  }), [removeNode, markWorkflowDirty, updateNodeData, invokeRunWorkflow])
+  const nodeTypes = useMemo(
+    () => ({
+      trigger: (props) => (
+        <TriggerNode
+          key={`trigger-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+          onRemove={removeNode}
+          onDirtyChange={markWorkflowDirty}
+          onUpdateNode={updateNodeData}
+          onRun={() => {
+            invokeRunWorkflow()
+          }}
+        />
+      ),
+      action: (props) => (
+        <ActionNode
+          key={`action-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+          onRemove={removeNode}
+          onDirtyChange={markWorkflowDirty}
+          onUpdateNode={updateNodeData}
+          onRun={() => {
+            invokeRunWorkflow()
+          }}
+        />
+      ),
+      condition: (props) => (
+        <ConditionNode
+          key={`condition-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+          onRemove={removeNode}
+          onDirtyChange={markWorkflowDirty}
+          onUpdateNode={updateNodeData}
+          onRun={() => {
+            console.log('Run Condition', props.id)
+          }}
+        />
+      )
+    }),
+    [removeNode, markWorkflowDirty, updateNodeData, invokeRunWorkflow]
+  )
 
   const onNodesChange = useCallback(
-    changes => {
+    (changes) => {
       markWorkflowDirty()
       onNodesChangeInternal(changes)
     },
@@ -256,7 +276,7 @@ export default function FlowCanvas({
   )
 
   const onEdgesChange = useCallback(
-    changes => {
+    (changes) => {
       markWorkflowDirty()
       onEdgesChangeInternal(changes)
     },
@@ -264,20 +284,23 @@ export default function FlowCanvas({
   )
 
   const onConnect = useCallback(
-    params => {
+    (params) => {
       const outcomeLabel =
         params?.sourceHandle === 'cond-true'
           ? 'True'
           : params?.sourceHandle === 'cond-false'
-          ? 'False'
-          : null
-      setEdges(eds =>
+            ? 'False'
+            : null
+      setEdges((eds) =>
         addEdge(
           {
             ...params,
             type: 'nodeEdge',
             label: outcomeLabel,
-            data: { edgeType: 'default', outcome: outcomeLabel?.toLowerCase?.() }
+            data: {
+              edgeType: 'default',
+              outcome: outcomeLabel?.toLowerCase?.()
+            }
           },
           eds
         )
@@ -287,13 +310,16 @@ export default function FlowCanvas({
   )
 
   const onDrop = useCallback(
-    event => {
+    (event) => {
       event.preventDefault()
       const type = event.dataTransfer.getData('application/reactflow')
       if (!type) return
 
       const bounds = event.currentTarget.getBoundingClientRect()
-      const position = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+      const position = {
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top
+      }
 
       const newNode = {
         id: `${type}-${+new Date()}`,
@@ -301,43 +327,51 @@ export default function FlowCanvas({
         position,
         data: {
           label: type,
-          expanded: ['trigger', 'action', 'condition'].includes(type.toLowerCase()),
+          expanded: ['trigger', 'action', 'condition'].includes(
+            type.toLowerCase()
+          ),
           dirty: true,
           inputs: []
         }
       }
 
-      setNodes(nds => [...nds, newNode])
+      setNodes((nds) => [...nds, newNode])
       markWorkflowDirty()
     },
     [setNodes, markWorkflowDirty]
   )
 
-  const onDragOver = useCallback(event => {
+  const onDragOver = useCallback((event) => {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
   const handleEdgeTypeChange = useCallback(
     (edgeId, newType) => {
-      setEdges(eds =>
-        eds.map(e => (e.id === edgeId ? { ...e, data: { ...e.data, edgeType: newType } } : e))
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId ? { ...e, data: { ...e.data, edgeType: newType } } : e
+        )
       )
     },
     [setEdges]
   )
 
   const handleEdgeDelete = useCallback(
-    edgeId => {
-      setEdges(eds => eds.filter(e => e.id !== edgeId))
+    (edgeId) => {
+      setEdges((eds) => eds.filter((e) => e.id !== edgeId))
     },
     [setEdges]
   )
 
   const edgeTypes = useMemo(
     () => ({
-      nodeEdge: edgeProps => (
-        <NodeEdge {...edgeProps} onDelete={handleEdgeDelete} onChangeType={handleEdgeTypeChange} />
+      nodeEdge: (edgeProps) => (
+        <NodeEdge
+          {...edgeProps}
+          onDelete={handleEdgeDelete}
+          onChangeType={handleEdgeTypeChange}
+        />
       )
     }),
     [handleEdgeDelete, handleEdgeTypeChange]
@@ -358,26 +392,18 @@ export default function FlowCanvas({
       fitView
       proOptions={{ hideAttribution: true }}
       nodesDraggable
-      className='flex-1'
+      className="flex-1"
     >
       <Background gap={16} size={1} />
       <div className={isDark ? 'text-white' : 'text-black'}>
         <CustomControls />
         <MiniMap
-          nodeColor={node => (node.type === 'trigger' ? '#10B981' : '#6366F1')}
+          nodeColor={(node) =>
+            node.type === 'trigger' ? '#10B981' : '#6366F1'
+          }
           style={{ background: 'transparent' }}
         />
       </div>
     </ReactFlow>
   )
 }
-
-
-
-
-
-
-
-
-
-

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react"
-import KeyValuePair from "@/components/UI/ReactFlow/KeyValuePair"
-import NodeInputField from "@/components/UI/InputFields/NodeInputField"
-import NodeTextAreaField from "@/components/UI/InputFields/NodeTextAreaField"
+import { useEffect, useMemo, useState } from 'react'
+import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 
 interface SendGridActionProps {
   apiKey: string
@@ -16,8 +16,19 @@ interface SendGridActionProps {
   setDirty: (dirty: boolean) => void
 }
 
-export default function SendGridAction({ args, onChange }: { args: SendGridActionProps, onChange?: (args: Partial<SendGridActionProps>, hasErrors: boolean, dirty: boolean) => void }) {
-  const inputClass = "text-xs p-1 w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 placeholder-zinc-400 dark:placeholder-zinc-500 nodrag"
+export default function SendGridAction({
+  args,
+  onChange
+}: {
+  args: SendGridActionProps
+  onChange?: (
+    args: Partial<SendGridActionProps>,
+    hasErrors: boolean,
+    dirty: boolean
+  ) => void
+}) {
+  const inputClass =
+    'text-xs p-1 w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 placeholder-zinc-400 dark:placeholder-zinc-500 nodrag'
 
   const [_, setDirty] = useState(false)
   const [params, setParams] = useState({
@@ -31,22 +42,27 @@ export default function SendGridAction({ args, onChange }: { args: SendGridActio
 
   const hasErrors = (updatedParams: Partial<SendGridActionProps>) => {
     const errors: Partial<SendGridActionProps> = {}
-    if (!updatedParams.apiKey?.trim()) errors.apiKey = "API key is required"
-    if (!updatedParams.from?.trim()) errors.from = "From email is required"
+    if (!updatedParams.apiKey?.trim()) errors.apiKey = 'API key is required'
+    if (!updatedParams.from?.trim()) errors.from = 'From email is required'
 
     if (!updatedParams.to?.trim()) {
-      errors.to = "Recipient email(s) required"
+      errors.to = 'Recipient email(s) required'
     } else {
-      const recipients = updatedParams.to.split(",").map(r => r.trim()).filter(Boolean)
+      const recipients = updatedParams.to
+        .split(',')
+        .map((r) => r.trim())
+        .filter(Boolean)
       const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (recipients.length === 0) errors.to = "Recipient email(s) required"
-      else if (recipients.some(r => !emailRx.test(r))) errors.to = "One or more recipient emails are invalid"
-      else if (new Set(recipients).size !== recipients.length) errors.to = "Duplicate recipient emails are not allowed"
+      if (recipients.length === 0) errors.to = 'Recipient email(s) required'
+      else if (recipients.some((r) => !emailRx.test(r)))
+        errors.to = 'One or more recipient emails are invalid'
+      else if (new Set(recipients).size !== recipients.length)
+        errors.to = 'Duplicate recipient emails are not allowed'
     }
 
     if (!updatedParams.templateId?.trim()) {
-      if (!updatedParams.subject?.trim()) errors.subject = "Subject is required"
-      if (!updatedParams.body?.trim()) errors.body = "Message body is required"
+      if (!updatedParams.subject?.trim()) errors.subject = 'Subject is required'
+      if (!updatedParams.body?.trim()) errors.body = 'Message body is required'
     }
 
     return errors
@@ -56,7 +72,7 @@ export default function SendGridAction({ args, onChange }: { args: SendGridActio
 
   const updateField = (key: string, value: string) => {
     setDirty(true)
-    setParams(prev => ({ ...prev, [key]: value }))
+    setParams((prev) => ({ ...prev, [key]: value }))
   }
 
   return (
@@ -65,24 +81,28 @@ export default function SendGridAction({ args, onChange }: { args: SendGridActio
         placeholder="SendGrid API Key"
         className={inputClass}
         value={params.apiKey}
-        onChange={val => updateField("apiKey", val)}
+        onChange={(val) => updateField('apiKey', val)}
         type="password"
       />
-      {sendGridErrors.apiKey && <p className="text-xs text-red-500">{sendGridErrors.apiKey}</p>}
+      {sendGridErrors.apiKey && (
+        <p className="text-xs text-red-500">{sendGridErrors.apiKey}</p>
+      )}
 
       <NodeInputField
         type="email"
         placeholder="From Email"
-        value={params.from || ""}
-        onChange={val => updateField("from", val)}
+        value={params.from || ''}
+        onChange={(val) => updateField('from', val)}
       />
-      {sendGridErrors.from && <p className="text-xs text-red-500">{sendGridErrors.from}</p>}
+      {sendGridErrors.from && (
+        <p className="text-xs text-red-500">{sendGridErrors.from}</p>
+      )}
 
       <NodeInputField
         type="text"
         placeholder="Template ID (optional)"
-        value={params.templateId || ""}
-        onChange={val => updateField("templateId", val)}
+        value={params.templateId || ''}
+        onChange={(val) => updateField('templateId', val)}
       />
 
       {params.templateId && (
@@ -90,9 +110,13 @@ export default function SendGridAction({ args, onChange }: { args: SendGridActio
           title="Substitution Variables"
           variables={params.substitutions || []}
           onChange={(updatedVars, nodeHasErrors, childDirty) => {
-            setParams(prev => ({ ...prev, substitutions: updatedVars }))
-            setDirty(prev => prev || childDirty)
-            onChange?.({ ...params, substitutions: updatedVars }, nodeHasErrors, childDirty)
+            setParams((prev) => ({ ...prev, substitutions: updatedVars }))
+            setDirty((prev) => prev || childDirty)
+            onChange?.(
+              { ...params, substitutions: updatedVars },
+              nodeHasErrors,
+              childDirty
+            )
           }}
         />
       )}
@@ -101,26 +125,32 @@ export default function SendGridAction({ args, onChange }: { args: SendGridActio
         type="email"
         placeholder="Recipient Email(s)"
         value={params.to}
-        onChange={val => updateField("to", val)}
+        onChange={(val) => updateField('to', val)}
       />
-      {sendGridErrors.to && <p className="text-xs text-red-500">{sendGridErrors.to}</p>}
+      {sendGridErrors.to && (
+        <p className="text-xs text-red-500">{sendGridErrors.to}</p>
+      )}
 
       {!params.templateId && (
         <>
           <NodeInputField
             placeholder="Subject"
-            value={params.subject || ""}
-            onChange={val => updateField("subject", val)}
+            value={params.subject || ''}
+            onChange={(val) => updateField('subject', val)}
           />
-          {sendGridErrors.subject && <p className="text-xs text-red-500">{sendGridErrors.subject}</p>}
+          {sendGridErrors.subject && (
+            <p className="text-xs text-red-500">{sendGridErrors.subject}</p>
+          )}
 
           <NodeTextAreaField
             placeholder="Message Body"
-            value={params.body || ""}
+            value={params.body || ''}
             rows={4}
-            onChange={val => updateField("body", val)}
+            onChange={(val) => updateField('body', val)}
           />
-          {sendGridErrors.body && <p className="text-xs text-red-500">{sendGridErrors.body}</p>}
+          {sendGridErrors.body && (
+            <p className="text-xs text-red-500">{sendGridErrors.body}</p>
+          )}
         </>
       )}
     </div>

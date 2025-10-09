@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef } from 'react'
 
 interface NodeTitleInputFieldProps {
   label: string
@@ -33,18 +33,19 @@ export default function NodeTitleInputField({
     }, 750)
   }
 
-  const inputClass = "text-sm font-semibold bg-transparent border-b border-zinc-400 focus:outline-none w-full"
-  const labelClass = "text-sm font-semibold cursor-pointer relative"
+  const inputClass =
+    'text-sm font-semibold bg-transparent border-b border-zinc-400 focus:outline-none w-full'
+  const labelClass = 'text-sm font-semibold cursor-pointer relative'
 
   return (
     <>
       {editing ? (
         <input
           value={internalLabel}
-          onChange={e => handleChange(e.target.value)}
+          onChange={(e) => handleChange(e.target.value)}
           onBlur={() => setEditing(false)}
-          onKeyDown={e => {
-            if (e.key === "Enter") {
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
               e.preventDefault()
               e.currentTarget.blur()
             }

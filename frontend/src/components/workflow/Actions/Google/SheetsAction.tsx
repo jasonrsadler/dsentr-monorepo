@@ -1,6 +1,6 @@
-import NodeInputField from "@/components/UI/InputFields/NodeInputField"
-import KeyValuePair from "@/components/UI/ReactFlow/KeyValuePair"
-import { useEffect, useMemo, useState } from "react"
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import { useEffect, useMemo, useState } from 'react'
 
 interface SheetsActionProps {
   spreadsheetId: string
@@ -22,22 +22,28 @@ export default function SheetsAction({
   onChange
 }: {
   args: SheetsActionProps
-  onChange?: (args: Partial<SheetsActionProps>, hasErrors: boolean, dirty: boolean) => void
+  onChange?: (
+    args: Partial<SheetsActionProps>,
+    hasErrors: boolean,
+    dirty: boolean
+  ) => void
 }) {
   const [_, setDirty] = useState(false)
   const [params, setParams] = useState<Partial<SheetsActionProps>>({
     ...args,
-    spreadsheetId: args.spreadsheetId || "",
-    worksheet: args.worksheet || "",
+    spreadsheetId: args.spreadsheetId || '',
+    worksheet: args.worksheet || '',
     columns: args.columns || []
   })
 
   const hasErrors = (updatedParams: Partial<SheetsActionProps>) => {
     const errors: Partial<SheetsActionErrorProps> = {}
-    if (!updatedParams.spreadsheetId?.trim()) errors.spreadsheetIdError = "Spreadsheet ID is required"
-    if (!updatedParams.worksheet?.trim()) errors.worksheetError = "Worksheet name is required"
+    if (!updatedParams.spreadsheetId?.trim())
+      errors.spreadsheetIdError = 'Spreadsheet ID is required'
+    if (!updatedParams.worksheet?.trim())
+      errors.worksheetError = 'Worksheet name is required'
     if (!updatedParams.columns || updatedParams.columns.length === 0)
-      errors.columnsError = "At least one column mapping is required"
+      errors.columnsError = 'At least one column mapping is required'
     return errors
   }
 
@@ -49,37 +55,47 @@ export default function SheetsAction({
 
   const updateField = (key: keyof SheetsActionProps, value: any) => {
     setDirty(true)
-    setParams(prev => ({ ...prev, [key]: value }))
+    setParams((prev) => ({ ...prev, [key]: value }))
   }
 
-  const errorClass = "text-xs text-red-500"
+  const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="flex flex-col gap-2">
       <NodeInputField
         placeholder="Spreadsheet ID"
-        value={params.spreadsheetId || ""}
-        onChange={val => updateField("spreadsheetId", val)}
+        value={params.spreadsheetId || ''}
+        onChange={(val) => updateField('spreadsheetId', val)}
       />
-      {validationErrors.spreadsheetIdError && <p className={errorClass}>{validationErrors.spreadsheetIdError}</p>}
+      {validationErrors.spreadsheetIdError && (
+        <p className={errorClass}>{validationErrors.spreadsheetIdError}</p>
+      )}
 
       <NodeInputField
         placeholder="Worksheet Name"
-        value={params.worksheet || ""}
-        onChange={val => updateField("worksheet", val)}
+        value={params.worksheet || ''}
+        onChange={(val) => updateField('worksheet', val)}
       />
-      {validationErrors.worksheetError && <p className={errorClass}>{validationErrors.worksheetError}</p>}
+      {validationErrors.worksheetError && (
+        <p className={errorClass}>{validationErrors.worksheetError}</p>
+      )}
 
       <KeyValuePair
         title="Column Mappings"
         variables={params.columns || []}
         onChange={(updatedVars, nodeHasErrors, childDirty) => {
-          setParams(prev => ({ ...prev, columns: updatedVars }))
-          setDirty(prev => prev || childDirty)
-          onChange?.({ ...params, columns: updatedVars }, nodeHasErrors, childDirty)
+          setParams((prev) => ({ ...prev, columns: updatedVars }))
+          setDirty((prev) => prev || childDirty)
+          onChange?.(
+            { ...params, columns: updatedVars },
+            nodeHasErrors,
+            childDirty
+          )
         }}
       />
-      {validationErrors.columnsError && <p className={errorClass}>{validationErrors.columnsError}</p>}
+      {validationErrors.columnsError && (
+        <p className={errorClass}>{validationErrors.columnsError}</p>
+      )}
     </div>
   )
 }

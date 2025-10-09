@@ -1,8 +1,8 @@
-import NodeInputField from "@/components/UI/InputFields/NodeInputField"
-import NodeTextAreaField from "@/components/UI/InputFields/NodeTextAreaField"
-import KeyValuePair from "@/components/UI/ReactFlow/KeyValuePair"
-import { useEffect, useMemo, useState } from "react"
-import SESRegionDropdown from "../ServiceDropDowns/SESRegionDropdown"
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import { useEffect, useMemo, useState } from 'react'
+import SESRegionDropdown from '../ServiceDropDowns/SESRegionDropdown'
 
 interface AmazonSESActionProps {
   awsAccessKey: string
@@ -13,10 +13,20 @@ interface AmazonSESActionProps {
   subject: string
   body: string
   template?: string
-  templateVariables?: { key: string, value: string }[]
+  templateVariables?: { key: string; value: string }[]
 }
 
-export default function AmazonSESAction({ args, onChange }: { args: AmazonSESActionProps, onChange?: (args: Partial<AmazonSESActionProps>, hasErrors: boolean, dirty: boolean) => void }) {
+export default function AmazonSESAction({
+  args,
+  onChange
+}: {
+  args: AmazonSESActionProps
+  onChange?: (
+    args: Partial<AmazonSESActionProps>,
+    hasErrors: boolean,
+    dirty: boolean
+  ) => void
+}) {
   const [_, setDirty] = useState(false)
   const [params, setParams] = useState<Partial<AmazonSESActionProps>>({
     ...args
@@ -28,22 +38,32 @@ export default function AmazonSESAction({ args, onChange }: { args: AmazonSESAct
 
   const hasErrors = (updatedParams: Partial<AmazonSESActionProps>) => {
     const errors: Partial<AmazonSESActionProps> = {}
-    if (!updatedParams.awsAccessKey?.trim()) errors.awsAccessKey = "Access Key is required"
-    if (!updatedParams.awsSecretKey?.trim()) errors.awsSecretKey = "Secret Key is required"
-    if (!updatedParams.awsRegion?.trim()) errors.awsRegion = "Region is required"
-    if (!updatedParams.fromEmail?.trim()) errors.fromEmail = "From email is required"
+    if (!updatedParams.awsAccessKey?.trim())
+      errors.awsAccessKey = 'Access Key is required'
+    if (!updatedParams.awsSecretKey?.trim())
+      errors.awsSecretKey = 'Secret Key is required'
+    if (!updatedParams.awsRegion?.trim())
+      errors.awsRegion = 'Region is required'
+    if (!updatedParams.fromEmail?.trim())
+      errors.fromEmail = 'From email is required'
     if (!updatedParams.toEmail?.trim()) {
-      errors.toEmail = "Recipient email(s) required"
+      errors.toEmail = 'Recipient email(s) required'
     } else {
-      const recipients = updatedParams.toEmail.split(",").map(r => r.trim()).filter(Boolean)
+      const recipients = updatedParams.toEmail
+        .split(',')
+        .map((r) => r.trim())
+        .filter(Boolean)
       const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (recipients.length === 0) errors.toEmail = "Recipient email(s) required"
-      else if (recipients.some(r => !emailRx.test(r))) errors.toEmail = "One or more recipient emails are invalid"
-      else if (new Set(recipients).size !== recipients.length) errors.toEmail = "Duplicate recipient emails are not allowed"
+      if (recipients.length === 0)
+        errors.toEmail = 'Recipient email(s) required'
+      else if (recipients.some((r) => !emailRx.test(r)))
+        errors.toEmail = 'One or more recipient emails are invalid'
+      else if (new Set(recipients).size !== recipients.length)
+        errors.toEmail = 'Duplicate recipient emails are not allowed'
     }
     if (!updatedParams.template?.trim()) {
-      if (!updatedParams.subject?.trim()) errors.subject = "Subject is required"
-      if (!updatedParams.body?.trim()) errors.body = "Message body is required"
+      if (!updatedParams.subject?.trim()) errors.subject = 'Subject is required'
+      if (!updatedParams.body?.trim()) errors.body = 'Message body is required'
     }
     return errors
   }
@@ -52,78 +72,94 @@ export default function AmazonSESAction({ args, onChange }: { args: AmazonSESAct
 
   const updateField = (key: keyof AmazonSESActionProps, value: any) => {
     setDirty(true)
-    setParams(prev => ({ ...prev, [key]: value }))
+    setParams((prev) => ({ ...prev, [key]: value }))
   }
 
-  const errorClass = "text-xs text-red-500"
+  const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="space-y-2">
       <p className="text-xs text-zinc-500">Amazon SES Settings</p>
       <NodeInputField
         placeholder="AWS Access Key ID"
-        value={params.awsAccessKey || ""}
-        onChange={val => updateField("awsAccessKey", val)}
+        value={params.awsAccessKey || ''}
+        onChange={(val) => updateField('awsAccessKey', val)}
       />
-      {amazonSESErrors.awsAccessKey && <p className={errorClass}>{amazonSESErrors.awsAccessKey}</p>}
+      {amazonSESErrors.awsAccessKey && (
+        <p className={errorClass}>{amazonSESErrors.awsAccessKey}</p>
+      )}
       <NodeInputField
         placeholder="AWS Secret Access Key"
-        value={params.awsSecretKey || ""}
-        onChange={val => updateField("awsSecretKey", val)}
+        value={params.awsSecretKey || ''}
+        onChange={(val) => updateField('awsSecretKey', val)}
         type="password"
       />
-      {amazonSESErrors.awsSecretKey && <p className={errorClass}>{amazonSESErrors.awsSecretKey}</p>}
+      {amazonSESErrors.awsSecretKey && (
+        <p className={errorClass}>{amazonSESErrors.awsSecretKey}</p>
+      )}
       <SESRegionDropdown
-        value={params.awsRegion || ""}
-        onChange={(val: string) => updateField("awsRegion", val)}
+        value={params.awsRegion || ''}
+        onChange={(val: string) => updateField('awsRegion', val)}
       />
-      {amazonSESErrors.awsRegion && <p className={errorClass}>{amazonSESErrors.awsRegion}</p>}
+      {amazonSESErrors.awsRegion && (
+        <p className={errorClass}>{amazonSESErrors.awsRegion}</p>
+      )}
       <NodeInputField
         placeholder="From"
-        value={params.fromEmail || ""}
-        onChange={val => updateField("fromEmail", val)}
+        value={params.fromEmail || ''}
+        onChange={(val) => updateField('fromEmail', val)}
       />
-      {amazonSESErrors.fromEmail && <p className={errorClass}>{amazonSESErrors.fromEmail}</p>}
+      {amazonSESErrors.fromEmail && (
+        <p className={errorClass}>{amazonSESErrors.fromEmail}</p>
+      )}
       <NodeInputField
         placeholder="To (comma separated)"
-        value={params.toEmail || ""}
-        onChange={val => updateField("toEmail", val)}
+        value={params.toEmail || ''}
+        onChange={(val) => updateField('toEmail', val)}
       />
-      {amazonSESErrors.toEmail && <p className={errorClass}>{amazonSESErrors.toEmail}</p>}
+      {amazonSESErrors.toEmail && (
+        <p className={errorClass}>{amazonSESErrors.toEmail}</p>
+      )}
       <NodeInputField
         placeholder="Template Name (optional)"
-        value={params.template || ""}
-        onChange={val => updateField("template", val)}
+        value={params.template || ''}
+        onChange={(val) => updateField('template', val)}
       />
 
       {params.template?.trim() && (
         <KeyValuePair
           title="Template Variables"
           variables={params.templateVariables || []}
-          onChange={
-            (updatedVars, nodeHasErrors, childDirty) => {
-              setParams(prev => ({ ...prev, variables: updatedVars }))
-              setDirty(prev => prev || childDirty)
-              onChange?.({ ...params, templateVariables: updatedVars }, nodeHasErrors, childDirty)
-            }
-          }
+          onChange={(updatedVars, nodeHasErrors, childDirty) => {
+            setParams((prev) => ({ ...prev, variables: updatedVars }))
+            setDirty((prev) => prev || childDirty)
+            onChange?.(
+              { ...params, templateVariables: updatedVars },
+              nodeHasErrors,
+              childDirty
+            )
+          }}
         />
       )}
       {!params.template?.trim() && (
         <>
           <NodeInputField
             placeholder="Subject"
-            value={params.subject || ""}
-            onChange={val => updateField("subject", val)}
+            value={params.subject || ''}
+            onChange={(val) => updateField('subject', val)}
           />
-          {amazonSESErrors.subject && <p className={errorClass}>{amazonSESErrors.subject}</p>}
+          {amazonSESErrors.subject && (
+            <p className={errorClass}>{amazonSESErrors.subject}</p>
+          )}
           <NodeTextAreaField
             placeholder="Body (plain text or HTML)"
-            value={params.body || ""}
+            value={params.body || ''}
             rows={4}
-            onChange={val => updateField("body", val)}
+            onChange={(val) => updateField('body', val)}
           />
-          {amazonSESErrors.body && <p className={errorClass}>{amazonSESErrors.body}</p>}
+          {amazonSESErrors.body && (
+            <p className={errorClass}>{amazonSESErrors.body}</p>
+          )}
         </>
       )}
     </div>

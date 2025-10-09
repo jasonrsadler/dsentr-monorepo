@@ -8,7 +8,13 @@ type Props = {
   initialTab?: string
 }
 
-export default function SettingsModal({ open, onClose, tabs, renderTab, initialTab }: Props) {
+export default function SettingsModal({
+  open,
+  onClose,
+  tabs,
+  renderTab,
+  initialTab
+}: Props) {
   const [active, setActive] = useState(initialTab ?? tabs[0]?.key)
   if (!open) return null
 
@@ -33,7 +39,12 @@ export default function SettingsModal({ open, onClose, tabs, renderTab, initialT
         <section className="flex-1 p-4 overflow-auto themed-scroll">
           {renderTab(active)}
         </section>
-        <button className="absolute top-2 right-3 text-sm text-zinc-600 dark:text-zinc-300 hover:underline" onClick={onClose}>Close</button>
+        <button
+          className="absolute top-2 right-3 text-sm text-zinc-600 dark:text-zinc-300 hover:underline"
+          onClick={onClose}
+        >
+          Close
+        </button>
       </div>
     </div>
   )

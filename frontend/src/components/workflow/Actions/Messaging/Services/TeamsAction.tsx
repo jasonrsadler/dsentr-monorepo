@@ -1,5 +1,5 @@
-import NodeInputField from "@/components/UI/InputFields/NodeInputField"
-import { useEffect, useMemo, useState } from "react"
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import { useEffect, useMemo, useState } from 'react'
 
 interface TeamsActionProps {
   webhookUrl: string
@@ -14,15 +14,21 @@ export default function TeamsAction({
   onChange
 }: {
   args: TeamsActionProps
-  onChange?: (args: Partial<TeamsActionProps>, nodeHasErrors: boolean, childDirty: boolean) => void
+  onChange?: (
+    args: Partial<TeamsActionProps>,
+    nodeHasErrors: boolean,
+    childDirty: boolean
+  ) => void
 }) {
   const [_, setDirty] = useState(false)
   const [params, setParams] = useState<Partial<TeamsActionProps>>({ ...args })
 
   const hasErrors = (updatedParams: Partial<TeamsActionProps>) => {
     const errors: Partial<TeamsActionProps> = {}
-    if (!updatedParams.webhookUrl?.trim()) errors.webhookUrl = "Webhook URL is required"
-    if (!updatedParams.message?.trim()) errors.message = "Message cannot be empty"
+    if (!updatedParams.webhookUrl?.trim())
+      errors.webhookUrl = 'Webhook URL is required'
+    if (!updatedParams.message?.trim())
+      errors.message = 'Message cannot be empty'
     return errors
   }
 
@@ -34,26 +40,30 @@ export default function TeamsAction({
 
   const updateField = (key: keyof TeamsActionProps, value: any) => {
     setDirty(true)
-    setParams(prev => ({ ...prev, [key]: value }))
+    setParams((prev) => ({ ...prev, [key]: value }))
   }
 
-  const errorClass = "text-xs text-red-500"
+  const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="flex flex-col gap-2">
       <NodeInputField
         placeholder="Webhook URL"
-        value={params.webhookUrl || ""}
-        onChange={val => updateField("webhookUrl", val)}
+        value={params.webhookUrl || ''}
+        onChange={(val) => updateField('webhookUrl', val)}
       />
-      {teamsErrors.webhookUrl && <p className={errorClass}>{teamsErrors.webhookUrl}</p>}
+      {teamsErrors.webhookUrl && (
+        <p className={errorClass}>{teamsErrors.webhookUrl}</p>
+      )}
 
       <NodeInputField
         placeholder="Message"
-        value={params.message || ""}
-        onChange={val => updateField("message", val)}
+        value={params.message || ''}
+        onChange={(val) => updateField('message', val)}
       />
-      {teamsErrors.message && <p className={errorClass}>{teamsErrors.message}</p>}
+      {teamsErrors.message && (
+        <p className={errorClass}>{teamsErrors.message}</p>
+      )}
     </div>
   )
 }

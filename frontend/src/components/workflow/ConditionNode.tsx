@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { Handle, Position } from "@xyflow/react"
-import NodeInputField from "@/components/UI/InputFields/NodeInputField"
-import NodeDropdownField from "@/components/UI/InputFields/NodeDropdownField"
-import NodeHeader from "@/components/UI/ReactFlow/NodeHeader"
+import { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Handle, Position } from '@xyflow/react'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
+import NodeHeader from '@/components/UI/ReactFlow/NodeHeader'
 
 interface ConditionNodeProps {
   id: string
@@ -43,10 +43,10 @@ export default function ConditionNode({
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [hasValidationErrors, setHasValidationErrors] = useState(false)
 
-  const [field, setField] = useState(data?.field || "")
-  const [operator, setOperator] = useState(data?.operator || "equals")
-  const [value, setValue] = useState(data?.value || "")
-  const [label, setLabel] = useState(data?.label || "Condition")
+  const [field, setField] = useState(data?.field || '')
+  const [operator, setOperator] = useState(data?.operator || 'equals')
+  const [value, setValue] = useState(data?.value || '')
+  const [label, setLabel] = useState(data?.label || 'Condition')
 
   // Sync validation
   useEffect(() => {
@@ -55,7 +55,15 @@ export default function ConditionNode({
 
   // Sync node data to parent
   useEffect(() => {
-    const nextData = { label, field, operator, value, dirty, expanded, hasValidationErrors }
+    const nextData = {
+      label,
+      field,
+      operator,
+      value,
+      dirty,
+      expanded,
+      hasValidationErrors
+    }
     onUpdateNode?.(id, nextData, true)
     if (dirty) onDirtyChange?.(true, nextData)
   }, [label, field, operator, value, dirty, expanded, hasValidationErrors])
@@ -69,11 +77,11 @@ export default function ConditionNode({
 
   // Reset local state when node id changes (e.g., new node or remount on workflow switch)
   useEffect(() => {
-    setLabel(data?.label || "Condition")
+    setLabel(data?.label || 'Condition')
     setExpanded(data?.expanded ?? true)
-    setField(data?.field || "")
-    setOperator(data?.operator || "equals")
-    setValue(data?.value || "")
+    setField(data?.field || '')
+    setOperator(data?.operator || 'equals')
+    setValue(data?.value || '')
     setDirty(data?.dirty ?? isNewNode)
   }, [id])
 
@@ -86,13 +94,18 @@ export default function ConditionNode({
         : ''
   return (
     <motion.div
-      className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? "ring-2 ring-blue-500" : "border-zinc-300 dark:border-zinc-700"} ${ringClass}`}
-      style={{ width: expanded ? "auto" : 256, minWidth: 256, maxWidth: 400 }}
+      className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
+      style={{ width: expanded ? 'auto' : 256, minWidth: 256, maxWidth: 400 }}
     >
       <Handle
         type="target"
         position={Position.Left}
-        style={{ width: 14, height: 14, backgroundColor: "blue", border: "2px solid white" }}
+        style={{
+          width: 14,
+          height: 14,
+          backgroundColor: 'blue',
+          border: '2px solid white'
+        }}
       />
       {/* True output (top-right) */}
       <Handle
@@ -104,9 +117,9 @@ export default function ConditionNode({
           right: -7,
           width: 14,
           height: 14,
-          backgroundColor: "#16a34a",
-          border: "2px solid white",
-          transform: "none",
+          backgroundColor: '#16a34a',
+          border: '2px solid white',
+          transform: 'none'
         }}
         title="True"
       />
@@ -116,14 +129,14 @@ export default function ConditionNode({
         type="source"
         position={Position.Right}
         style={{
-          top: "auto",
+          top: 'auto',
           bottom: 16,
           right: -7,
           width: 14,
           height: 14,
-          backgroundColor: "#ef4444",
-          border: "2px solid white",
-          transform: "none",
+          backgroundColor: '#ef4444',
+          border: '2px solid white',
+          transform: 'none'
         }}
         title="False"
       />
@@ -134,11 +147,11 @@ export default function ConditionNode({
           dirty={dirty}
           hasValidationErrors={hasValidationErrors}
           expanded={expanded}
-          onLabelChange={val => {
+          onLabelChange={(val) => {
             setLabel(val)
             setDirty(true)
           }}
-          onExpanded={() => setExpanded(prev => !prev)}
+          onExpanded={() => setExpanded((prev) => !prev)}
           onConfirmingDelete={() => setConfirmingDelete(true)}
         />
 
@@ -147,23 +160,31 @@ export default function ConditionNode({
             <motion.div
               key="expanded-content"
               initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
+              animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
             >
               <NodeInputField
                 placeholder="Field name"
                 value={field}
-                onChange={val => {
+                onChange={(val) => {
                   setField(val)
                   setDirty(true)
                 }}
               />
-              {hasValidationErrors && !field && (<p className="text-red-500 text-xs mt-1">Field is required</p>)}
+              {hasValidationErrors && !field && (
+                <p className="text-red-500 text-xs mt-1">Field is required</p>
+              )}
               <NodeDropdownField
-                options={["equals", "not equals", "greater than", "less than", "contains"]}
+                options={[
+                  'equals',
+                  'not equals',
+                  'greater than',
+                  'less than',
+                  'contains'
+                ]}
                 value={operator}
-                onChange={val => {
+                onChange={(val) => {
                   setOperator(val)
                   setDirty(true)
                 }}
@@ -172,12 +193,14 @@ export default function ConditionNode({
               <NodeInputField
                 placeholder="Comparison value"
                 value={value}
-                onChange={val => {
+                onChange={(val) => {
                   setValue(val)
                   setDirty(true)
                 }}
               />
-              {hasValidationErrors && !value && (<p className="text-red-500 text-xs mt-1">Value is required</p>)}
+              {hasValidationErrors && !value && (
+                <p className="text-red-500 text-xs mt-1">Value is required</p>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

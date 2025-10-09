@@ -25,7 +25,10 @@ export default function PublicLayout() {
             <span className="text-sm text-zinc-600 dark:text-zinc-300 leading-none">
               {user.first_name} {user.last_name}
             </span>
-            <NavigateButton to="/logout" className="px-3 py-2 text-sm leading-none h-9">
+            <NavigateButton
+              to="/logout"
+              className="px-3 py-2 text-sm leading-none h-9"
+            >
               Log out
             </NavigateButton>
             <ThemeToggle />
@@ -33,10 +36,16 @@ export default function PublicLayout() {
         ) : (
           <div className="hidden md:flex gap-4 items-center">
             <NavLinks />
-            <NavigateButton to="/login" className="px-3 py-2 text-sm leading-none h-9">
+            <NavigateButton
+              to="/login"
+              className="px-3 py-2 text-sm leading-none h-9"
+            >
               Log in
             </NavigateButton>
-            <NavigateButton to="/signup" className="px-3 py-2 text-sm leading-none h-9">
+            <NavigateButton
+              to="/signup"
+              className="px-3 py-2 text-sm leading-none h-9"
+            >
               Sign Up
             </NavigateButton>
             <ThemeToggle />

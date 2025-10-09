@@ -1,18 +1,21 @@
-import { useState, useEffect, useMemo } from "react"
-import NodeDropdownField from "@/components/UI/InputFields/NodeDropdownField"
-import SlackAction from "./Services/SlackAction"
-import TeamsAction from "./Services/TeamsAction"
-import GoogleChatAction from "./Services/GoogleChatAction"
+import { useState, useEffect, useMemo } from 'react'
+import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
+import SlackAction from './Services/SlackAction'
+import TeamsAction from './Services/TeamsAction'
+import GoogleChatAction from './Services/GoogleChatAction'
 
 interface MessagingActionProps {
   args: any
   onChange?: (args: any, nodeHasErrors: boolean, childDirty: boolean) => void
 }
 
-export default function MessagingAction({ args, onChange }: MessagingActionProps) {
+export default function MessagingAction({
+  args,
+  onChange
+}: MessagingActionProps) {
   const [params, setParams] = useState({
     ...args,
-    platform: args?.platform || "Slack"
+    platform: args?.platform || 'Slack'
   })
   const [childParams, setChildParams] = useState(args || {})
   const [childHasErrors, setChildHasErrors] = useState(false)
@@ -20,7 +23,7 @@ export default function MessagingAction({ args, onChange }: MessagingActionProps
 
   const validationErrors = useMemo(() => {
     const errors: Record<string, string> = {}
-    if (!params.platform) errors.platform = "Platform is required"
+    if (!params.platform) errors.platform = 'Platform is required'
     return errors
   }, [params])
 
@@ -33,33 +36,39 @@ export default function MessagingAction({ args, onChange }: MessagingActionProps
   }, [params, childParams, childHasErrors, childDirty])
 
   const updateField = (key: string, value: any) => {
-    setParams(prev => ({ ...prev, [key]: value }))
+    setParams((prev) => ({ ...prev, [key]: value }))
   }
 
-  const handleChildChange = (updated: any, hasErrors: boolean, isDirty: boolean) => {
+  const handleChildChange = (
+    updated: any,
+    hasErrors: boolean,
+    isDirty: boolean
+  ) => {
     setChildParams(updated)
     setChildHasErrors(hasErrors)
     setChildDirty(isDirty)
   }
 
-  const errorClass = "text-xs text-red-500"
+  const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="flex flex-col gap-3">
       <NodeDropdownField
-        options={["Slack", "Teams", "Google Chat"]}
+        options={['Slack', 'Teams', 'Google Chat']}
         value={params.platform}
-        onChange={val => updateField("platform", val)}
+        onChange={(val) => updateField('platform', val)}
       />
-      {validationErrors.platform && <p className={errorClass}>{validationErrors.platform}</p>}
+      {validationErrors.platform && (
+        <p className={errorClass}>{validationErrors.platform}</p>
+      )}
 
-      {params.platform === "Slack" && (
+      {params.platform === 'Slack' && (
         <SlackAction args={childParams} onChange={handleChildChange} />
       )}
-      {params.platform === "Teams" && (
+      {params.platform === 'Teams' && (
         <TeamsAction args={childParams} onChange={handleChildChange} />
       )}
-      {params.platform === "Google Chat" && (
+      {params.platform === 'Google Chat' && (
         <GoogleChatAction args={childParams} onChange={handleChildChange} />
       )}
     </div>

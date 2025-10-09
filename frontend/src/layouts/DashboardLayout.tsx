@@ -31,7 +31,10 @@ export default function DashboardLayout() {
             <span className="text-sm text-zinc-600 dark:text-zinc-300 leading-none">
               {user.first_name} {user.last_name}
             </span>
-            <NavigateButton to="/logout" className="px-3 py-2 text-sm leading-none h-9">
+            <NavigateButton
+              to="/logout"
+              className="px-3 py-2 text-sm leading-none h-9"
+            >
               Log out
             </NavigateButton>
             <ThemeToggle />
@@ -51,7 +54,7 @@ export default function DashboardLayout() {
           { key: 'workflows', label: 'Workflows' },
           { key: 'logs', label: 'Logs' },
           { key: 'webhooks', label: 'Webhooks' },
-          { key: 'engine', label: 'Engine' },
+          { key: 'engine', label: 'Engine' }
         ]}
         renderTab={(key) => {
           if (key === 'workflows') return <WorkflowsTab />

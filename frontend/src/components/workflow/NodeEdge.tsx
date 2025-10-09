@@ -1,5 +1,5 @@
-import { BaseEdge, getBezierPath } from "@xyflow/react";
-import { Trash2 } from "lucide-react";
+import { BaseEdge, getBezierPath } from '@xyflow/react'
+import { Trash2 } from 'lucide-react'
 
 export default function NodeEdge({
   id,
@@ -14,7 +14,7 @@ export default function NodeEdge({
   data,
   markerEnd,
   onDelete,
-  onChangeType,
+  onChangeType
 }) {
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -22,10 +22,10 @@ export default function NodeEdge({
     sourcePosition,
     targetX,
     targetY,
-    targetPosition,
-  });
+    targetPosition
+  })
 
-  const edgeType = data?.edgeType || "default";
+  const edgeType = data?.edgeType || 'default'
 
   return (
     <>
@@ -33,8 +33,8 @@ export default function NodeEdge({
         path={edgePath}
         style={{
           ...style,
-          strokeWidth: edgeType === "bold" ? 3 : 1,
-          strokeDasharray: edgeType === "dashed" ? "4 4" : "0",
+          strokeWidth: edgeType === 'bold' ? 3 : 1,
+          strokeDasharray: edgeType === 'dashed' ? '4 4' : '0'
         }}
         markerEnd={markerEnd}
       />
@@ -48,7 +48,10 @@ export default function NodeEdge({
             >
               <Trash2 size={18} className="text-red-600" />
             </button>
-            <span className="text-xs text-zinc-700 dark:text-zinc-300">Type:</span><select
+            <span className="text-xs text-zinc-700 dark:text-zinc-300">
+              Type:
+            </span>
+            <select
               title="Edge Type"
               value={edgeType}
               onChange={(e) => onChangeType?.(id, e.target.value)}
@@ -62,5 +65,5 @@ export default function NodeEdge({
         </foreignObject>
       )}
     </>
-  );
+  )
 }

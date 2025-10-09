@@ -1,21 +1,25 @@
-import { useState, useEffect, useRef } from "react"
-import { Trash2, Plus } from "lucide-react"
-import NodeInputField from "../InputFields/NodeInputField";
+import { useState, useEffect, useRef } from 'react'
+import { Trash2, Plus } from 'lucide-react'
+import NodeInputField from '../InputFields/NodeInputField'
 
 interface KeyValuePairProps {
   title?: string
   variables?: { key: string; value: string }[]
-  onChange?: (variables: { key: string; value: string }[], hasErrors: boolean, dirty: boolean) => void
+  onChange?: (
+    variables: { key: string; value: string }[],
+    hasErrors: boolean,
+    dirty: boolean
+  ) => void
   placeholderKey?: string
   placeholderValue?: string
 }
 
 export default function KeyValuePair({
-  title = "Variables",
+  title = 'Variables',
   variables = [],
   onChange,
-  placeholderKey = "key",
-  placeholderValue = "value"
+  placeholderKey = 'key',
+  placeholderValue = 'value'
 }: KeyValuePairProps) {
   const [vars, setVars] = useState(variables || [])
   const [_, setDirty] = useState(false)
@@ -31,13 +35,13 @@ export default function KeyValuePair({
     }
   }, [variables])
 
-  const checkVars = (vars: { key: string, value: string }[] = []) => {
-    const normalized = vars.map(v => ({
-      key: v?.key?.toString() || "",
-      value: v?.value?.toString() || ""
+  const checkVars = (vars: { key: string; value: string }[] = []) => {
+    const normalized = vars.map((v) => ({
+      key: v?.key?.toString() || '',
+      value: v?.value?.toString() || ''
     }))
-    const keys = normalized.map(v => v.key.trim()).filter(Boolean)
-    const anyBlank = normalized.some(v => !v.key.trim() || !v.value.trim())
+    const keys = normalized.map((v) => v.key.trim()).filter(Boolean)
+    const anyBlank = normalized.some((v) => !v.key.trim() || !v.value.trim())
     const hasDuplicateKeys = new Set(keys).size !== keys.length
     return anyBlank || hasDuplicateKeys
   }
@@ -51,7 +55,9 @@ export default function KeyValuePair({
   }
 
   const updateVar = (index: number, field: string, value: string) => {
-    const updated = vars.map((v, i) => i === index ? { ...v, [field]: value } : v)
+    const updated = vars.map((v, i) =>
+      i === index ? { ...v, [field]: value } : v
+    )
     handleUpdate(updated)
   }
 
@@ -60,7 +66,7 @@ export default function KeyValuePair({
   }
 
   const addVar = () => {
-    handleUpdate([...vars, { key: "", value: "" }])
+    handleUpdate([...vars, { key: '', value: '' }])
   }
 
   const hasErrors = checkVars(vars)
@@ -73,22 +79,32 @@ export default function KeyValuePair({
           <NodeInputField
             placeholder={placeholderKey}
             value={v.key}
-            onChange={val => updateVar(index, "key", val)}
+            onChange={(val) => updateVar(index, 'key', val)}
           />
           <NodeInputField
             placeholder={placeholderValue}
             value={v.value}
-            onChange={val => updateVar(index, "value", val)}
+            onChange={(val) => updateVar(index, 'value', val)}
           />
-          <button onClick={() => removeVar(index)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded">
+          <button
+            onClick={() => removeVar(index)}
+            className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded"
+          >
             <Trash2 size={14} className="text-red-500" />
           </button>
         </div>
       ))}
-      <button onClick={addVar} className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline">
+      <button
+        onClick={addVar}
+        className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+      >
         <Plus size={14} /> Add variable
       </button>
-      {hasErrors && <p className="text-xs text-red-500 mt-1">Variables must have unique, non-empty keys and values</p>}
+      {hasErrors && (
+        <p className="text-xs text-red-500 mt-1">
+          Variables must have unique, non-empty keys and values
+        </p>
+      )}
     </div>
   )
 }

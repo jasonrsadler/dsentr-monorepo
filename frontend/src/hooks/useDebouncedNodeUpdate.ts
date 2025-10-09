@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react"
+import { useRef, useCallback } from 'react'
 
 export function useDebouncedNodeUpdate<T>(
   onUpdate: (data: T) => void,
@@ -6,10 +6,13 @@ export function useDebouncedNodeUpdate<T>(
 ) {
   const debounceRef = useRef<NodeJS.Timeout | null>(null)
 
-  return useCallback((data: T) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      onUpdate(data)
-    }, delay)
-  }, [onUpdate, delay])
+  return useCallback(
+    (data: T) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => {
+        onUpdate(data)
+      }, delay)
+    },
+    [onUpdate, delay]
+  )
 }

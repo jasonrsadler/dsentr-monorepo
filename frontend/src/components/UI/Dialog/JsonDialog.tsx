@@ -7,7 +7,12 @@ interface JsonDialogProps {
   onClose: () => void
 }
 
-export default function JsonDialog({ isOpen, title = 'Details', jsonText, onClose }: JsonDialogProps) {
+export default function JsonDialog({
+  isOpen,
+  title = 'Details',
+  jsonText,
+  onClose
+}: JsonDialogProps) {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -28,7 +33,9 @@ export default function JsonDialog({ isOpen, title = 'Details', jsonText, onClos
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
-                    try { navigator.clipboard.writeText(jsonText) } catch {}
+                    try {
+                      navigator.clipboard.writeText(jsonText)
+                    } catch {}
                   }}
                   className="px-2 py-1 text-xs rounded bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600"
                 >
@@ -44,7 +51,7 @@ export default function JsonDialog({ isOpen, title = 'Details', jsonText, onClos
             </div>
             <div className="flex-1 overflow-auto">
               <pre className="text-xs whitespace-pre-wrap break-words bg-white/80 dark:bg-black/30 p-2 rounded border border-zinc-200 dark:border-zinc-700">
-{jsonText}
+                {jsonText}
               </pre>
             </div>
           </motion.div>
@@ -53,4 +60,3 @@ export default function JsonDialog({ isOpen, title = 'Details', jsonText, onClos
     </AnimatePresence>
   )
 }
-

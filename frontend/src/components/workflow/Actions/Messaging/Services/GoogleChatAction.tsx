@@ -1,5 +1,5 @@
-import NodeInputField from "@/components/UI/InputFields/NodeInputField"
-import { useEffect, useMemo, useState } from "react"
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import { useEffect, useMemo, useState } from 'react'
 
 interface GoogleChatActionProps {
   webhookUrl: string
@@ -14,15 +14,23 @@ export default function GoogleChatAction({
   onChange
 }: {
   args: GoogleChatActionProps
-  onChange?: (args: Partial<GoogleChatActionProps>, nodeHasErrors: boolean, childDirty: boolean) => void
+  onChange?: (
+    args: Partial<GoogleChatActionProps>,
+    nodeHasErrors: boolean,
+    childDirty: boolean
+  ) => void
 }) {
   const [_, setDirty] = useState(false)
-  const [params, setParams] = useState<Partial<GoogleChatActionProps>>({ ...args })
+  const [params, setParams] = useState<Partial<GoogleChatActionProps>>({
+    ...args
+  })
 
   const hasErrors = (updatedParams: Partial<GoogleChatActionProps>) => {
     const errors: Partial<GoogleChatActionProps> = {}
-    if (!updatedParams.webhookUrl?.trim()) errors.webhookUrl = "Webhook URL is required"
-    if (!updatedParams.message?.trim()) errors.message = "Message cannot be empty"
+    if (!updatedParams.webhookUrl?.trim())
+      errors.webhookUrl = 'Webhook URL is required'
+    if (!updatedParams.message?.trim())
+      errors.message = 'Message cannot be empty'
     return errors
   }
 
@@ -34,24 +42,26 @@ export default function GoogleChatAction({
 
   const updateField = (key: keyof GoogleChatActionProps, value: any) => {
     setDirty(true)
-    setParams(prev => ({ ...prev, [key]: value }))
+    setParams((prev) => ({ ...prev, [key]: value }))
   }
 
-  const errorClass = "text-xs text-red-500"
+  const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="flex flex-col gap-2">
       <NodeInputField
         placeholder="Webhook URL"
-        value={params.webhookUrl || ""}
-        onChange={val => updateField("webhookUrl", val)}
+        value={params.webhookUrl || ''}
+        onChange={(val) => updateField('webhookUrl', val)}
       />
-      {chatErrors.webhookUrl && <p className={errorClass}>{chatErrors.webhookUrl}</p>}
+      {chatErrors.webhookUrl && (
+        <p className={errorClass}>{chatErrors.webhookUrl}</p>
+      )}
 
       <NodeInputField
         placeholder="Message"
-        value={params.message || ""}
-        onChange={val => updateField("message", val)}
+        value={params.message || ''}
+        onChange={(val) => updateField('message', val)}
       />
       {chatErrors.message && <p className={errorClass}>{chatErrors.message}</p>}
     </div>

@@ -1,5 +1,5 @@
-import NodeInputField from "@/components/UI/InputFields/NodeInputField"
-import { useEffect, useMemo, useState } from "react"
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import { useEffect, useMemo, useState } from 'react'
 
 interface SlackActionProps {
   channel: string
@@ -15,16 +15,21 @@ export default function SlackAction({
   onChange
 }: {
   args: SlackActionProps
-  onChange?: (args: Partial<SlackActionProps>, nodeHasErrors: boolean, childDirty: boolean) => void
+  onChange?: (
+    args: Partial<SlackActionProps>,
+    nodeHasErrors: boolean,
+    childDirty: boolean
+  ) => void
 }) {
   const [_, setDirty] = useState(false)
   const [params, setParams] = useState<Partial<SlackActionProps>>({ ...args })
 
   const hasErrors = (updatedParams: Partial<SlackActionProps>) => {
     const errors: Partial<SlackActionProps> = {}
-    if (!updatedParams.channel?.trim()) errors.channel = "Channel is required"
-    if (!updatedParams.message?.trim()) errors.message = "Message cannot be empty"
-    if (!updatedParams.token?.trim()) errors.token = "Slack token is required"
+    if (!updatedParams.channel?.trim()) errors.channel = 'Channel is required'
+    if (!updatedParams.message?.trim())
+      errors.message = 'Message cannot be empty'
+    if (!updatedParams.token?.trim()) errors.token = 'Slack token is required'
     return errors
   }
 
@@ -36,34 +41,38 @@ export default function SlackAction({
 
   const updateField = (key: keyof SlackActionProps, value: any) => {
     setDirty(true)
-    setParams(prev => ({ ...prev, [key]: value }))
+    setParams((prev) => ({ ...prev, [key]: value }))
   }
 
-  const errorClass = "text-xs text-red-500"
+  const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="flex flex-col gap-2">
       <NodeInputField
         placeholder="Channel (e.g. #general)"
-        value={params.channel || ""}
-        onChange={val => updateField("channel", val)}
+        value={params.channel || ''}
+        onChange={(val) => updateField('channel', val)}
       />
-      {slackErrors.channel && <p className={errorClass}>{slackErrors.channel}</p>}
+      {slackErrors.channel && (
+        <p className={errorClass}>{slackErrors.channel}</p>
+      )}
 
       <NodeInputField
         placeholder="Token"
         type="password"
-        value={params.token || ""}
-        onChange={val => updateField("token", val)}
+        value={params.token || ''}
+        onChange={(val) => updateField('token', val)}
       />
       {slackErrors.token && <p className={errorClass}>{slackErrors.token}</p>}
 
       <NodeInputField
         placeholder="Message"
-        value={params.message || ""}
-        onChange={val => updateField("message", val)}
+        value={params.message || ''}
+        onChange={(val) => updateField('message', val)}
       />
-      {slackErrors.message && <p className={errorClass}>{slackErrors.message}</p>}
+      {slackErrors.message && (
+        <p className={errorClass}>{slackErrors.message}</p>
+      )}
     </div>
   )
 }

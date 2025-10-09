@@ -1,24 +1,36 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState } from 'react'
 
-export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onRename, dirty, saving = false, runStatus = 'idle', onToggleOverlay }) {
+export default function WorkflowToolbar({
+  workflow,
+  onSave,
+  onNew,
+  onSelect,
+  onRename,
+  dirty,
+  saving = false,
+  runStatus = 'idle',
+  onToggleOverlay
+}) {
   const [editingName, setEditingName] = useState(false)
-  const [name, setName] = useState(workflow?.name || "")
+  const [name, setName] = useState(workflow?.name || '')
   const [nameError, setNameError] = useState<string | null>(null)
 
   useEffect(() => {
-    setName(workflow?.name || "")
+    setName(workflow?.name || '')
   }, [workflow?.id, workflow?.name])
 
   const handleRename = () => {
     const trimmed = name.trim()
     if (!trimmed) {
-      setName(workflow?.name || "")
+      setName(workflow?.name || '')
       setEditingName(false)
       setNameError(null)
       return
     }
     if (trimmed !== workflow?.name) {
-      const exists = (workflow?.list || []).some((w: any) => w.name?.toLowerCase?.() === trimmed.toLowerCase())
+      const exists = (workflow?.list || []).some(
+        (w: any) => w.name?.toLowerCase?.() === trimmed.toLowerCase()
+      )
       if (exists) {
         setNameError('A workflow with this name already exists')
         return
@@ -32,9 +44,9 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
   const isSavingDisabled = !dirty || saving
   const isRunActive = runStatus === 'queued' || runStatus === 'running'
   const runBtnClasses = isRunActive
-    ? (runStatus === 'running'
-        ? 'bg-green-500 text-white hover:bg-green-600 animate-pulse'
-        : 'bg-blue-500 text-white hover:bg-blue-600')
+    ? runStatus === 'running'
+      ? 'bg-green-500 text-white hover:bg-green-600 animate-pulse'
+      : 'bg-blue-500 text-white hover:bg-blue-600'
     : 'bg-zinc-300 text-zinc-600 cursor-not-allowed'
 
   return (
@@ -45,7 +57,11 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
         className="px-2 py-1 border rounded bg-white text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-600"
       >
         {workflow?.list?.map((wf) => (
-          <option key={wf.id} value={wf.id} className="bg-white dark:bg-zinc-800">
+          <option
+            key={wf.id}
+            value={wf.id}
+            className="bg-white dark:bg-zinc-800"
+          >
             {wf.name}
           </option>
         ))}
@@ -56,7 +72,7 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={handleRename}
-          onKeyDown={(e) => e.key === "Enter" && handleRename()}
+          onKeyDown={(e) => e.key === 'Enter' && handleRename()}
           className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-600"
           autoFocus
         />
@@ -73,19 +89,24 @@ export default function WorkflowToolbar({ workflow, onSave, onNew, onSelect, onR
         <span className="text-xs text-red-600 ml-2">{nameError}</span>
       )}
 
-      <button onClick={onNew} className="px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600">
+      <button
+        onClick={onNew}
+        className="px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600"
+      >
         New Workflow
       </button>
 
       <button
         onClick={onSave}
         disabled={isSavingDisabled}
-        className={`px-2 py-1 rounded ${isSavingDisabled ? "bg-zinc-300 text-zinc-600 cursor-not-allowed" : "bg-green-500 text-white hover:bg-green-600"}`}
+        className={`px-2 py-1 rounded ${isSavingDisabled ? 'bg-zinc-300 text-zinc-600 cursor-not-allowed' : 'bg-green-500 text-white hover:bg-green-600'}`}
       >
-        {saving ? "Saving..." : "Save"}
+        {saving ? 'Saving...' : 'Save'}
       </button>
 
-      {dirty && !saving && <span className="w-2 h-2 rounded-full bg-blue-500" />}
+      {dirty && !saving && (
+        <span className="w-2 h-2 rounded-full bg-blue-500" />
+      )}
 
       <button
         onClick={() => onToggleOverlay?.()}
