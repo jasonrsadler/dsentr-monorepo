@@ -81,26 +81,27 @@ export default function ActionNode({
     }
   }, [data?.dirty])
 
-  const [prevService, setPrevService] = useState(params.service || '')
+  const [prevService, setPrevService] = useState('')
 
   const [hasValidationErrors, setHasValidationErrors] = useState(false)
 
   useEffect(() => {
     if (params.service !== prevService) {
-      let defaultRegion = ''
-      switch (params.service.toLowerCase()) {
-        case 'mailgun':
-          defaultRegion = 'US (api.mailgun.net)'
-          break
-        case 'amazon ses':
-          defaultRegion = 'us-east-1'
-          break
-        default:
-          defaultRegion = ''
-      }
-
-      setParams((prev) => ({ ...prev, region: defaultRegion }))
-      setPrevService(params.service)
+      setParams((prev) => {
+        switch (params.service.toLowerCase()) {
+          case 'mailgun':
+            return { ...prev, region: prev.region || 'US (api.mailgun.net)' }
+          case 'amazon ses':
+            return {
+              ...prev,
+              awsRegion: prev.awsRegion || 'us-east-1',
+              sesVersion: prev.sesVersion || 'v2'
+            }
+          default:
+            return prev
+        }
+      })
+      setPrevService(params.service || '')
     }
   }, [params.service, prevService])
 

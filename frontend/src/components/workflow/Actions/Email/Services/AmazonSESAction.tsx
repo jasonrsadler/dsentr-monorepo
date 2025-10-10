@@ -1,13 +1,15 @@
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import SESRegionDropdown from '../ServiceDropDowns/SESRegionDropdown'
+import SESVersionDropdown from '../ServiceDropDowns/SESVersionDropdown'
 
 interface AmazonSESActionProps {
   awsAccessKey: string
   awsSecretKey: string
   awsRegion: string
+  sesVersion: string
   fromEmail: string
   toEmail: string
   subject: string
@@ -28,13 +30,29 @@ export default function AmazonSESAction({
   ) => void
 }) {
   const [_, setDirty] = useState(false)
-  const [params, setParams] = useState<Partial<AmazonSESActionProps>>({
-    ...args
-  })
+  const [templateVarsHaveErrors, setTemplateVarsHaveErrors] = useState(false)
+  const [params, setParams] = useState<Partial<AmazonSESActionProps>>(() => ({
+    ...args,
+    sesVersion: args.sesVersion || 'v2'
+  }))
+  const onChangeRef = useRef(onChange)
+
   useEffect(() => {
-    onChange?.(params, Object.keys(hasErrors(params)).length > 0, true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params])
+    onChangeRef.current = onChange
+  }, [onChange])
+
+  useEffect(() => {
+    if (!params.template?.trim() && templateVarsHaveErrors) {
+      setTemplateVarsHaveErrors(false)
+    }
+  }, [params.template, templateVarsHaveErrors])
+
+  useEffect(() => {
+    const computedErrors = hasErrors(params)
+    const hasAnyErrors =
+      templateVarsHaveErrors || Object.keys(computedErrors).length > 0
+    onChangeRef.current?.(params, hasAnyErrors, true)
+  }, [params, templateVarsHaveErrors])
 
   const hasErrors = (updatedParams: Partial<AmazonSESActionProps>) => {
     const errors: Partial<AmazonSESActionProps> = {}
@@ -42,6 +60,8 @@ export default function AmazonSESAction({
       errors.awsAccessKey = 'Access Key is required'
     if (!updatedParams.awsSecretKey?.trim())
       errors.awsSecretKey = 'Secret Key is required'
+    if (!updatedParams.sesVersion?.trim())
+      errors.sesVersion = 'SES version is required'
     if (!updatedParams.awsRegion?.trim())
       errors.awsRegion = 'Region is required'
     if (!updatedParams.fromEmail?.trim())
@@ -97,6 +117,13 @@ export default function AmazonSESAction({
       {amazonSESErrors.awsSecretKey && (
         <p className={errorClass}>{amazonSESErrors.awsSecretKey}</p>
       )}
+      <SESVersionDropdown
+        value={params.sesVersion || ''}
+        onChange={(val: string) => updateField('sesVersion', val)}
+      />
+      {amazonSESErrors.sesVersion && (
+        <p className={errorClass}>{amazonSESErrors.sesVersion}</p>
+      )}
       <SESRegionDropdown
         value={params.awsRegion || ''}
         onChange={(val: string) => updateField('awsRegion', val)}
@@ -131,13 +158,9 @@ export default function AmazonSESAction({
           title="Template Variables"
           variables={params.templateVariables || []}
           onChange={(updatedVars, nodeHasErrors, childDirty) => {
-            setParams((prev) => ({ ...prev, variables: updatedVars }))
+            setTemplateVarsHaveErrors(nodeHasErrors)
+            setParams((prev) => ({ ...prev, templateVariables: updatedVars }))
             setDirty((prev) => prev || childDirty)
-            onChange?.(
-              { ...params, templateVariables: updatedVars },
-              nodeHasErrors,
-              childDirty
-            )
           }}
         />
       )}

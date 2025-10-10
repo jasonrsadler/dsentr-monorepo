@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 
+use chrono::Utc;
+use hmac::{Hmac, Mac};
+use reqwest::Url;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::engine::graph::Node;
 use crate::engine::templating::templ_str;
@@ -46,6 +50,123 @@ fn parse_recipient_list(raw: &str) -> Result<Vec<String>, String> {
         return Err("Recipient email(s) required".to_string());
     }
     Ok(recipients)
+}
+
+type HmacSha256 = Hmac<Sha256>;
+
+struct AwsSignature {
+    authorization: String,
+    amz_date: String,
+    payload_hash: String,
+}
+
+fn derive_aws_signing_key(
+    secret_key: &str,
+    date_stamp: &str,
+    region: &str,
+    service: &str,
+) -> Result<Vec<u8>, String> {
+    let mut mac = HmacSha256::new_from_slice(format!("AWS4{}", secret_key).as_bytes())
+        .map_err(|_| "Invalid AWS secret key".to_string())?;
+    mac.update(date_stamp.as_bytes());
+    let k_date = mac.finalize().into_bytes();
+
+    let mut mac = HmacSha256::new_from_slice(k_date.as_slice())
+        .map_err(|_| "Invalid AWS signing key (date)".to_string())?;
+    mac.update(region.as_bytes());
+    let k_region = mac.finalize().into_bytes();
+
+    let mut mac = HmacSha256::new_from_slice(k_region.as_slice())
+        .map_err(|_| "Invalid AWS signing key (region)".to_string())?;
+    mac.update(service.as_bytes());
+    let k_service = mac.finalize().into_bytes();
+
+    let mut mac = HmacSha256::new_from_slice(k_service.as_slice())
+        .map_err(|_| "Invalid AWS signing key (service)".to_string())?;
+    mac.update(b"aws4_request");
+    Ok(mac.finalize().into_bytes().to_vec())
+}
+
+fn sign_aws_request(
+    access_key: &str,
+    secret_key: &str,
+    region: &str,
+    service: &str,
+    method: &str,
+    canonical_uri: &str,
+    canonical_query: &str,
+    host: &str,
+    payload: &[u8],
+) -> Result<AwsSignature, String> {
+    let now = Utc::now();
+    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let date_stamp = now.format("%Y%m%d").to_string();
+
+    let mut payload_hasher = Sha256::new();
+    payload_hasher.update(payload);
+    let payload_hash = hex::encode(payload_hasher.finalize());
+
+    let canonical_headers = format!(
+        "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
+        host.to_lowercase(),
+        payload_hash,
+        amz_date
+    );
+    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+
+    let canonical_request = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}",
+        method, canonical_uri, canonical_query, canonical_headers, signed_headers, payload_hash
+    );
+
+    let mut canonical_hasher = Sha256::new();
+    canonical_hasher.update(canonical_request.as_bytes());
+    let canonical_hash = hex::encode(canonical_hasher.finalize());
+
+    let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        amz_date, credential_scope, canonical_hash
+    );
+
+    let signing_key = derive_aws_signing_key(secret_key, &date_stamp, region, service)?;
+    let mut mac = HmacSha256::new_from_slice(&signing_key)
+        .map_err(|_| "Failed to derive AWS signature".to_string())?;
+    mac.update(string_to_sign.as_bytes());
+    let signature = hex::encode(mac.finalize().into_bytes());
+
+    let authorization = format!(
+        "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
+        access_key, credential_scope, signed_headers, signature
+    );
+
+    Ok(AwsSignature {
+        authorization,
+        amz_date,
+        payload_hash,
+    })
+}
+
+fn determine_ses_endpoint(region: &str) -> Result<(String, String), String> {
+    let default = format!("https://email.{}.amazonaws.com", region);
+    let base = std::env::var("AWS_SES_ENDPOINT")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or(default);
+
+    let trimmed = base.trim_end_matches('/');
+    let url = Url::parse(trimmed).map_err(|_| "Invalid AWS SES endpoint".to_string())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Invalid AWS SES endpoint host".to_string())?;
+    let host = if let Some(port) = url.port() {
+        format!("{}:{}", host, port)
+    } else {
+        host.to_string()
+    };
+
+    Ok((trimmed.to_string(), host))
 }
 
 pub(crate) async fn execute_email(
@@ -383,6 +504,305 @@ pub(crate) async fn execute_email(
                 message_id,
             ))
         }
+        "amazon ses" => {
+            let access_key = params
+                .get("awsAccessKey")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "AWS access key is required".to_string())?
+                .to_string();
+
+            let secret_key = params
+                .get("awsSecretKey")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "AWS secret key is required".to_string())?
+                .to_string();
+
+            let aws_region = params
+                .get("awsRegion")
+                .or_else(|| params.get("region"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "AWS region is required".to_string())?
+                .to_string();
+
+            let ses_version_raw = params
+                .get("sesVersion")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_lowercase());
+            let ses_version = match ses_version_raw.as_deref() {
+                Some("v1") | Some("ses v1") | Some("ses-v1") | Some("classic") => "v1",
+                Some("v2") | Some("ses v2") | Some("ses-v2") | Some("api") => "v2",
+                Some(other) => {
+                    return Err(format!("Unsupported Amazon SES version: {}", other));
+                }
+                None => "v2",
+            };
+
+            let from_email = params
+                .get("fromEmail")
+                .or_else(|| params.get("from"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "From email is required".to_string())?;
+            if !is_valid_email_address(from_email) {
+                return Err("Invalid from email address".to_string());
+            }
+            let from_email = from_email.to_string();
+
+            let to_raw = params
+                .get("toEmail")
+                .or_else(|| params.get("to"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Recipient email(s) required".to_string())?;
+            let recipients = parse_recipient_list(to_raw)?;
+
+            let subject_raw = params.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+            let body_raw = params.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            let subject = templ_str(subject_raw, context);
+            let body = templ_str(body_raw, context);
+
+            let template = params
+                .get("template")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+
+            let mut template_data = serde_json::Map::new();
+            if let Some(vars) = params.get("templateVariables").and_then(|v| v.as_array()) {
+                for pair in vars {
+                    let Some(key) = pair.get("key").and_then(|v| v.as_str()).map(|s| s.trim())
+                    else {
+                        continue;
+                    };
+                    if key.is_empty() {
+                        continue;
+                    }
+                    let value_raw = pair.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                    let resolved = templ_str(value_raw, context);
+                    template_data.insert(key.to_string(), Value::String(resolved));
+                }
+            }
+
+            if template.is_none() {
+                if subject.trim().is_empty() {
+                    return Err(
+                        "Subject is required for Amazon SES emails without a template".to_string(),
+                    );
+                }
+                if body.trim().is_empty() {
+                    return Err(
+                        "Message body is required for Amazon SES emails without a template"
+                            .to_string(),
+                    );
+                }
+            }
+
+            let (base_url, host) = determine_ses_endpoint(&aws_region)?;
+            let client = reqwest::Client::new();
+
+            match ses_version {
+                "v1" => {
+                    let mut form_fields: Vec<(String, String)> = Vec::new();
+                    form_fields.push((
+                        "Action".to_string(),
+                        if template.is_some() {
+                            "SendTemplatedEmail".to_string()
+                        } else {
+                            "SendEmail".to_string()
+                        },
+                    ));
+                    form_fields.push(("Version".to_string(), "2010-12-01".to_string()));
+                    form_fields.push(("Source".to_string(), from_email.clone()));
+                    for (idx, email) in recipients.iter().enumerate() {
+                        form_fields.push((
+                            format!("Destination.ToAddresses.member.{}", idx + 1),
+                            email.clone(),
+                        ));
+                    }
+
+                    if let Some(tpl) = &template {
+                        form_fields.push(("Template".to_string(), tpl.clone()));
+                        let data = if template_data.is_empty() {
+                            "{}".to_string()
+                        } else {
+                            serde_json::to_string(&Value::Object(template_data.clone()))
+                                .map_err(|e| e.to_string())?
+                        };
+                        form_fields.push(("TemplateData".to_string(), data));
+                    } else {
+                        form_fields.push(("Message.Subject.Data".to_string(), subject.clone()));
+                        form_fields.push(("Message.Body.Text.Data".to_string(), body.clone()));
+                        form_fields.push(("Message.Body.Html.Data".to_string(), body.clone()));
+                    }
+
+                    let encoded = form_fields
+                        .into_iter()
+                        .map(|(k, v)| {
+                            format!("{}={}", urlencoding::encode(&k), urlencoding::encode(&v))
+                        })
+                        .collect::<Vec<_>>()
+                        .join("&");
+                    let payload = encoded.into_bytes();
+
+                    let signature = sign_aws_request(
+                        &access_key,
+                        &secret_key,
+                        &aws_region,
+                        "ses",
+                        "POST",
+                        "/",
+                        "",
+                        &host,
+                        &payload,
+                    )?;
+
+                    let url = format!("{}/", base_url.trim_end_matches('/'));
+                    let resp = client
+                        .post(url)
+                        .header(
+                            "content-type",
+                            "application/x-www-form-urlencoded; charset=utf-8",
+                        )
+                        .header("x-amz-date", signature.amz_date.clone())
+                        .header("x-amz-content-sha256", signature.payload_hash.clone())
+                        .header("authorization", signature.authorization.clone())
+                        .body(payload)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+
+                    let status = resp.status();
+                    let text = resp.text().await.map_err(|e| e.to_string())?;
+
+                    if !status.is_success() {
+                        return Err(format!(
+                            "Amazon SES request failed (status {}): {}",
+                            status.as_u16(),
+                            text
+                        ));
+                    }
+
+                    let message_id = text
+                        .split("<MessageId>")
+                        .nth(1)
+                        .and_then(|rest| rest.split("</MessageId>").next())
+                        .map(|s| s.to_string());
+
+                    Ok((
+                        json!({
+                            "sent": true,
+                            "service": "Amazon SES",
+                            "status": status.as_u16(),
+                            "message_id": message_id.clone(),
+                            "version": "v1"
+                        }),
+                        message_id,
+                    ))
+                }
+                _ => {
+                    let request_body = if let Some(tpl) = &template {
+                        let data = if template_data.is_empty() {
+                            "{}".to_string()
+                        } else {
+                            serde_json::to_string(&Value::Object(template_data.clone()))
+                                .map_err(|e| e.to_string())?
+                        };
+                        json!({
+                            "FromEmailAddress": from_email,
+                            "Destination": {
+                                "ToAddresses": recipients,
+                            },
+                            "Content": {
+                                "Template": {
+                                    "TemplateName": tpl,
+                                    "TemplateData": data
+                                }
+                            }
+                        })
+                    } else {
+                        json!({
+                            "FromEmailAddress": from_email,
+                            "Destination": {
+                                "ToAddresses": recipients,
+                            },
+                            "Content": {
+                                "Simple": {
+                                    "Subject": { "Data": subject },
+                                    "Body": {
+                                        "Text": { "Data": body },
+                                        "Html": { "Data": body }
+                                    }
+                                }
+                            }
+                        })
+                    };
+
+                    let payload = serde_json::to_vec(&request_body).map_err(|e| e.to_string())?;
+
+                    let signature = sign_aws_request(
+                        &access_key,
+                        &secret_key,
+                        &aws_region,
+                        "ses",
+                        "POST",
+                        "/v2/email/outbound-emails",
+                        "",
+                        &host,
+                        &payload,
+                    )?;
+
+                    let url = format!(
+                        "{}/v2/email/outbound-emails",
+                        base_url.trim_end_matches('/')
+                    );
+                    let resp = client
+                        .post(url)
+                        .header("content-type", "application/json")
+                        .header("x-amz-date", signature.amz_date.clone())
+                        .header("x-amz-content-sha256", signature.payload_hash.clone())
+                        .header("authorization", signature.authorization.clone())
+                        .body(payload)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+
+                    let status = resp.status();
+                    let text = resp.text().await.map_err(|e| e.to_string())?;
+
+                    if !status.is_success() {
+                        return Err(format!(
+                            "Amazon SES request failed (status {}): {}",
+                            status.as_u16(),
+                            text
+                        ));
+                    }
+
+                    let message_id = serde_json::from_str::<Value>(&text).ok().and_then(|v| {
+                        v.get("MessageId")
+                            .and_then(|m| m.as_str())
+                            .map(|s| s.to_string())
+                    });
+
+                    Ok((
+                        json!({
+                            "sent": true,
+                            "service": "Amazon SES",
+                            "status": status.as_u16(),
+                            "message_id": message_id.clone(),
+                            "version": "v2"
+                        }),
+                        message_id,
+                    ))
+                }
+            }
+        }
         _ => Err("Unsupported email service".to_string()),
     }
 }
@@ -546,6 +966,39 @@ mod tests {
         let handle = tokio::spawn(async move {
             if let Err(err) = server.await {
                 eprintln!("mailgun stub server exited with error: {err}");
+            }
+        });
+
+        (addr, rx, handle)
+    }
+
+    async fn spawn_ses_stub_server<F>(
+        response_factory: F,
+    ) -> (
+        SocketAddr,
+        UnboundedReceiver<RecordedRequest>,
+        JoinHandle<()>,
+    )
+    where
+        F: Fn() -> Response<Body> + Send + Sync + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = unbounded_channel();
+        let state = StubState {
+            tx,
+            response_factory: Arc::new(response_factory),
+        };
+
+        let app = Router::new()
+            .route("/", post(stub_handler::<F>))
+            .route("/v2/email/outbound-emails", post(stub_handler::<F>))
+            .with_state(state);
+
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move {
+            if let Err(err) = server.await {
+                eprintln!("ses stub server exited with error: {err}");
             }
         });
 
@@ -955,5 +1408,316 @@ mod tests {
             .await
             .expect_err("missing subject should fail");
         assert!(err.contains("Subject is required"));
+    }
+
+    #[tokio::test]
+    async fn aws_ses_v2_plain_email_succeeds() {
+        let (addr, mut rx, handle) = spawn_ses_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"MessageId":"0001"}"#))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set("AWS_SES_ENDPOINT", format!("http://{}", addr));
+        let state = test_state();
+        let node = Node {
+            id: "action-ses-v2-1".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "Amazon SES",
+                    "awsAccessKey": "AKIAFAKE",
+                    "awsSecretKey": "secret",
+                    "awsRegion": "us-east-1",
+                    "sesVersion": "v2",
+                    "fromEmail": "sender@example.com",
+                    "toEmail": "recipient@example.com",
+                    "subject": "Hello {{ user.name }}",
+                    "body": "Body for {{ user.name }}"
+                }
+            }),
+        };
+
+        let context = json!({ "user": { "name": "Riley" } });
+        let (output, next) = execute_email(&node, &context, &state)
+            .await
+            .expect("ses v2 email should succeed");
+
+        assert_eq!(output["service"], "Amazon SES");
+        assert_eq!(output["status"], 200);
+        assert_eq!(output["version"], "v2");
+        assert_eq!(output["message_id"], "0001");
+        assert_eq!(next, Some("0001".to_string()));
+
+        let req = rx.recv().await.expect("request should be recorded");
+        handle.abort();
+
+        assert_eq!(req.uri.path(), "/v2/email/outbound-emails");
+        assert!(req.headers.contains_key("authorization"));
+        assert!(req.headers.contains_key("x-amz-date"));
+
+        let body: Value = serde_json::from_slice(&req.body).expect("valid json body");
+        assert_eq!(
+            body["Destination"]["ToAddresses"][0],
+            "recipient@example.com"
+        );
+        assert_eq!(body["Content"]["Simple"]["Subject"]["Data"], "Hello Riley");
+        assert_eq!(
+            body["Content"]["Simple"]["Body"]["Text"]["Data"],
+            "Body for Riley"
+        );
+    }
+
+    #[tokio::test]
+    async fn aws_ses_v2_template_email_uses_template_data() {
+        let (addr, mut rx, handle) = spawn_ses_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"MessageId":"tmpl-200"}"#))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set("AWS_SES_ENDPOINT", format!("http://{}", addr));
+        let state = test_state();
+        let node = Node {
+            id: "action-ses-v2-2".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "Amazon SES",
+                    "awsAccessKey": "AKIAFAKE",
+                    "awsSecretKey": "secret",
+                    "awsRegion": "us-east-1",
+                    "sesVersion": "v2",
+                    "fromEmail": "sender@example.com",
+                    "toEmail": "recipient@example.com",
+                    "template": "welcome-email",
+                    "templateVariables": [
+                        { "key": "firstName", "value": "{{ user.first }}" },
+                        { "key": "account", "value": "{{ account.id }}" }
+                    ]
+                }
+            }),
+        };
+
+        let context = json!({
+            "user": { "first": "Jamie" },
+            "account": { "id": "ACC-9" }
+        });
+
+        let (output, _) = execute_email(&node, &context, &state)
+            .await
+            .expect("ses v2 template email should succeed");
+
+        assert_eq!(output["version"], "v2");
+
+        let req = rx.recv().await.expect("request should be recorded");
+        handle.abort();
+
+        let body: Value = serde_json::from_slice(&req.body).expect("valid json body");
+        assert_eq!(body["Content"]["Template"]["TemplateName"], "welcome-email");
+        let template_data = body["Content"]["Template"]["TemplateData"]
+            .as_str()
+            .expect("template data string");
+        let data_json: Value = serde_json::from_str(template_data).expect("valid template data");
+        assert_eq!(data_json["firstName"], "Jamie");
+        assert_eq!(data_json["account"], "ACC-9");
+    }
+
+    #[tokio::test]
+    async fn aws_ses_v1_plain_email_succeeds() {
+        let (addr, mut rx, handle) = spawn_ses_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/xml")
+                .body(Body::from(
+                    "<SendEmailResponse><SendEmailResult><MessageId>m-123</MessageId></SendEmailResult></SendEmailResponse>",
+                ))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set("AWS_SES_ENDPOINT", format!("http://{}", addr));
+        let state = test_state();
+        let node = Node {
+            id: "action-ses-v1-1".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "Amazon SES",
+                    "awsAccessKey": "AKIAFAKE",
+                    "awsSecretKey": "secret",
+                    "awsRegion": "us-east-1",
+                    "sesVersion": "v1",
+                    "fromEmail": "sender@example.com",
+                    "toEmail": "recipient@example.com",
+                    "subject": "Hello {{ user.name }}",
+                    "body": "Plain body"
+                }
+            }),
+        };
+
+        let context = json!({ "user": { "name": "Sam" } });
+        let (output, next) = execute_email(&node, &context, &state)
+            .await
+            .expect("ses v1 email should succeed");
+
+        assert_eq!(output["version"], "v1");
+        assert_eq!(output["message_id"], "m-123");
+        assert_eq!(next, Some("m-123".to_string()));
+
+        let req = rx.recv().await.expect("request should be recorded");
+        handle.abort();
+
+        assert_eq!(req.uri.path(), "/");
+        let form = parse_form_body(&req.body);
+        assert_eq!(
+            form.get("Action").and_then(|v| v.first()),
+            Some(&"SendEmail".to_string())
+        );
+        assert_eq!(
+            form.get("Message.Subject.Data").and_then(|v| v.first()),
+            Some(&"Hello Sam".to_string())
+        );
+        assert_eq!(
+            form.get("Message.Body.Text.Data").and_then(|v| v.first()),
+            Some(&"Plain body".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn aws_ses_v1_template_email_includes_template_data() {
+        let (addr, mut rx, handle) = spawn_ses_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/xml")
+                .body(Body::from(
+                    "<SendTemplatedEmailResponse><SendTemplatedEmailResult><MessageId>m-tmpl</MessageId></SendTemplatedEmailResult></SendTemplatedEmailResponse>",
+                ))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set("AWS_SES_ENDPOINT", format!("http://{}", addr));
+        let state = test_state();
+        let node = Node {
+            id: "action-ses-v1-2".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "Amazon SES",
+                    "awsAccessKey": "AKIAFAKE",
+                    "awsSecretKey": "secret",
+                    "awsRegion": "us-east-1",
+                    "sesVersion": "v1",
+                    "fromEmail": "sender@example.com",
+                    "toEmail": "recipient@example.com",
+                    "template": "welcome",
+                    "templateVariables": [
+                        { "key": "name", "value": "{{ user.name }}" }
+                    ]
+                }
+            }),
+        };
+
+        let context = json!({ "user": { "name": "Skyler" } });
+        let (output, _) = execute_email(&node, &context, &state)
+            .await
+            .expect("ses v1 templated email should succeed");
+
+        assert_eq!(output["version"], "v1");
+
+        let req = rx.recv().await.expect("request should be recorded");
+        handle.abort();
+
+        let form = parse_form_body(&req.body);
+        assert_eq!(
+            form.get("Action").and_then(|v| v.first()),
+            Some(&"SendTemplatedEmail".to_string())
+        );
+        assert_eq!(
+            form.get("Template").and_then(|v| v.first()),
+            Some(&"welcome".to_string())
+        );
+        let data = form
+            .get("TemplateData")
+            .and_then(|v| v.first())
+            .expect("template data present");
+        let data_json: Value = serde_json::from_str(data).expect("valid template data json");
+        assert_eq!(data_json["name"], "Skyler");
+    }
+
+    #[tokio::test]
+    async fn aws_ses_missing_version_defaults_to_v2() {
+        let (addr, mut rx, handle) = spawn_ses_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{\"MessageId\":\"m-456\"}"))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set("AWS_SES_ENDPOINT", format!("http://{}", addr));
+        let state = test_state();
+        let node = Node {
+            id: "action-ses-default-version".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "Amazon SES",
+                    "awsAccessKey": "AKIAFAKE",
+                    "awsSecretKey": "secret",
+                    "awsRegion": "us-east-1",
+                    "fromEmail": "sender@example.com",
+                    "toEmail": "recipient@example.com",
+                    "subject": "Hello",
+                    "body": "Body"
+                }
+            }),
+        };
+
+        let (output, _) = execute_email(&node, &Value::Null, &state)
+            .await
+            .expect("ses should default to v2");
+
+        assert_eq!(output["version"], "v2");
+
+        let req = rx.recv().await.expect("request should be recorded");
+        handle.abort();
+        assert_eq!(req.uri.path(), "/v2/email/outbound-emails");
+    }
+
+    #[tokio::test]
+    async fn aws_ses_invalid_version_is_rejected() {
+        let state = test_state();
+        let node = Node {
+            id: "action-ses-invalid-version".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "Amazon SES",
+                    "awsAccessKey": "AKIAFAKE",
+                    "awsSecretKey": "secret",
+                    "awsRegion": "us-east-1",
+                    "sesVersion": "v3",
+                    "fromEmail": "sender@example.com",
+                    "toEmail": "recipient@example.com",
+                    "subject": "Hello",
+                    "body": "Body"
+                }
+            }),
+        };
+
+        let err = execute_email(&node, &Value::Null, &state)
+            .await
+            .expect_err("invalid version should error");
+
+        assert!(err.contains("Unsupported Amazon SES version: v3"));
     }
 }
