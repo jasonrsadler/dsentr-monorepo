@@ -37,6 +37,7 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
+      'no-unused-vars': 'off',
       'prettier/prettier': 'error', // Integrates Prettier into ESLint
     },
   }

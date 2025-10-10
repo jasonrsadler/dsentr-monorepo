@@ -570,7 +570,9 @@ export default function Dashboard() {
                   overlayWatchTimerRef.current = null
                   return
                 }
-              } catch {}
+              } catch (e) {
+                console.error(e.message)
+              }
               if (
                 runOverlayOpen &&
                 currentWorkflow &&
@@ -641,7 +643,9 @@ export default function Dashboard() {
     setRunOverlayOpen(true)
     try {
       window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
-    } catch {}
+    } catch (e) {
+      console.error(e.message)
+    }
     // Kick off selection of the appropriate run for this workflow
     ensureOverlayRunForSelected()
   }, [runOverlayOpen, ensureOverlayRunForSelected])
@@ -665,7 +669,9 @@ export default function Dashboard() {
         setNodeRuns([])
         try {
           es?.close()
-        } catch {}
+        } catch (e) {
+          console.error(e.message)
+        }
         if (fallbackTimer) {
           clearTimeout(fallbackTimer)
           fallbackTimer = null
@@ -680,7 +686,9 @@ export default function Dashboard() {
         try {
           const runs = await listActiveRuns(currentWorkflow.id)
           if (pickFrom(runs)) return
-        } catch {}
+        } catch (e) {
+          console.error(e.message)
+        }
         // schedule next attempt with capped backoff
         backoff = Math.min(5000, backoff * 2)
         fallbackTimer = setTimeout(doFetch, backoff)
@@ -702,12 +710,16 @@ export default function Dashboard() {
       try {
         const runs = JSON.parse(e.data)
         pickFrom(runs)
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
     const onError = () => {
       try {
         es?.close()
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
       if (!fallbackTimer) startFallback()
     }
     es.addEventListener('runs', onRuns as any)
@@ -716,7 +728,9 @@ export default function Dashboard() {
     return () => {
       try {
         es?.close()
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
       if (fallbackTimer) {
         clearTimeout(fallbackTimer)
         fallbackTimer = null
@@ -741,18 +755,24 @@ export default function Dashboard() {
         if (s.has_running) setGlobalRunStatus('running')
         else if (s.has_queued) setGlobalRunStatus('queued')
         else setGlobalRunStatus('idle')
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
     es.addEventListener('status', onStatus as any)
     es.onerror = () => {
       try {
         es?.close()
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
     return () => {
       try {
         es?.close()
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
   }, [])
   const toolbarRunStatus = useMemo(() => {
@@ -779,18 +799,24 @@ export default function Dashboard() {
     const onRuns = (e: MessageEvent) => {
       try {
         setRunQueue(JSON.parse(e.data))
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
     es.addEventListener('runs', onRuns as any)
     es.onerror = () => {
       try {
         es?.close()
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
     return () => {
       try {
         es?.close()
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
   }, [activePane, currentWorkflow?.id])
 
@@ -809,7 +835,9 @@ export default function Dashboard() {
       pollRun(currentWorkflow.id, run.id)
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     } catch (e: any) {
       console.error('Failed to start run', e)
       setError(e?.message || 'Failed to start run')
@@ -839,18 +867,24 @@ export default function Dashboard() {
         if (run.status !== 'queued' && run.status !== 'running') {
           es?.close()
         }
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
     const onNodes = (e: MessageEvent) => {
       try {
         setNodeRuns(JSON.parse(e.data))
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
     const onError = () => {
       // Allow adaptive global poll to wake if needed
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
       es?.close()
     }
 
@@ -861,7 +895,9 @@ export default function Dashboard() {
     return () => {
       try {
         es?.close()
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     }
   }, [runOverlayOpen, currentWorkflow?.id, activeRun?.id, stopPolling])
 
@@ -967,7 +1003,9 @@ export default function Dashboard() {
             diffs
           })
         }
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
 
       lastSavedSnapshotRef.current = savedSnapshot
       pendingSnapshotRef.current = null

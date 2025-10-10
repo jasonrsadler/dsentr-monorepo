@@ -518,10 +518,7 @@ export default function TriggerNode({
                     <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                       Start Date
                     </label>
-                    <div
-                      ref={datePickerContainerRef}
-                      className="relative mt-2"
-                    >
+                    <div ref={datePickerContainerRef} className="relative mt-2">
                       <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
                       <button
                         type="button"
@@ -547,7 +544,9 @@ export default function TriggerNode({
                               month={datePickerMonth}
                               selectedDate={scheduleConfig.startDate}
                               todayISO={todayISO}
-                              onMonthChange={(nextMonth) => setDatePickerMonth(nextMonth)}
+                              onMonthChange={(nextMonth) =>
+                                setDatePickerMonth(nextMonth)
+                              }
                               onSelectDate={(isoDate) => {
                                 updateSchedule((prev) => ({
                                   ...prev,
@@ -566,7 +565,10 @@ export default function TriggerNode({
                       <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                         Start Time
                       </label>
-                      <div ref={timePickerContainerRef} className="relative mt-2">
+                      <div
+                        ref={timePickerContainerRef}
+                        className="relative mt-2"
+                      >
                         <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
                         <button
                           type="button"
@@ -579,28 +581,28 @@ export default function TriggerNode({
                         >
                           {formatDisplayTime(scheduleConfig.startTime)}
                         </button>
-                      <AnimatePresence>
-                        {timePickerOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                            transition={{ duration: 0.15 }}
-                            className="absolute left-0 right-0 z-20 mt-2"
-                          >
-                            <ScheduleTimePicker
-                              selectedTime={selectedTime}
-                              onSelect={(time) => {
-                                updateSchedule((prev) => ({
-                                  ...prev,
-                                  startTime: time
-                                }))
-                              }}
-                              onClose={() => setTimePickerOpen(false)}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                        <AnimatePresence>
+                          {timePickerOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                              transition={{ duration: 0.15 }}
+                              className="absolute left-0 right-0 z-20 mt-2"
+                            >
+                              <ScheduleTimePicker
+                                selectedTime={selectedTime}
+                                onSelect={(time) => {
+                                  updateSchedule((prev) => ({
+                                    ...prev,
+                                    startTime: time
+                                  }))
+                                }}
+                                onClose={() => setTimePickerOpen(false)}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
                     <div>
@@ -623,31 +625,33 @@ export default function TriggerNode({
                         >
                           {scheduleConfig.timezone || 'Select timezone'}
                         </button>
-                      <AnimatePresence>
-                        {timezonePickerOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                            transition={{ duration: 0.15 }}
-                            className="absolute left-0 z-30 mt-2"
-                          >
-                            <ScheduleTimezonePicker
-                              options={filteredTimezoneOptions}
-                              selectedTimezone={scheduleConfig.timezone}
-                              search={timezoneSearch}
-                              onSearchChange={(value) => setTimezoneSearch(value)}
-                              onSelect={(timezone) => {
-                                updateSchedule((prev) => ({
-                                  ...prev,
-                                  timezone
-                                }))
-                                setTimezonePickerOpen(false)
-                              }}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                        <AnimatePresence>
+                          {timezonePickerOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                              transition={{ duration: 0.15 }}
+                              className="absolute left-0 z-30 mt-2"
+                            >
+                              <ScheduleTimezonePicker
+                                options={filteredTimezoneOptions}
+                                selectedTimezone={scheduleConfig.timezone}
+                                search={timezoneSearch}
+                                onSearchChange={(value) =>
+                                  setTimezoneSearch(value)
+                                }
+                                onSelect={(timezone) => {
+                                  updateSchedule((prev) => ({
+                                    ...prev,
+                                    timezone
+                                  }))
+                                  setTimezonePickerOpen(false)
+                                }}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
                   </div>
@@ -686,37 +690,37 @@ export default function TriggerNode({
                             min={1}
                             value={scheduleConfig.repeat?.every ?? 1}
                             onChange={(e) => {
-                          const parsed = Number.parseInt(e.target.value, 10)
-                          const every =
-                            Number.isFinite(parsed) && parsed > 0
-                              ? parsed
-                              : 1
-                          updateSchedule((prev) => ({
-                            ...prev,
-                            repeat: {
-                              every,
-                              unit: prev.repeat?.unit ?? 'days'
-                            }
-                          }))
-                        }}
+                              const parsed = Number.parseInt(e.target.value, 10)
+                              const every =
+                                Number.isFinite(parsed) && parsed > 0
+                                  ? parsed
+                                  : 1
+                              updateSchedule((prev) => ({
+                                ...prev,
+                                repeat: {
+                                  every,
+                                  unit: prev.repeat?.unit ?? 'days'
+                                }
+                              }))
+                            }}
                             className="h-10 w-24 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
                           />
                         </div>
                         <select
                           value={scheduleConfig.repeat?.unit ?? 'days'}
                           onChange={(e) => {
-                          const rawValue = e.target.value as RepeatUnit
-                          const unit = repeatUnits.includes(rawValue)
-                            ? rawValue
-                            : 'days'
-                          updateSchedule((prev) => ({
-                            ...prev,
-                            repeat: {
-                              every: prev.repeat?.every ?? 1,
-                              unit
-                            }
-                          }))
-                        }}
+                            const rawValue = e.target.value as RepeatUnit
+                            const unit = repeatUnits.includes(rawValue)
+                              ? rawValue
+                              : 'days'
+                            updateSchedule((prev) => ({
+                              ...prev,
+                              repeat: {
+                                every: prev.repeat?.every ?? 1,
+                                unit
+                              }
+                            }))
+                          }}
                           className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pr-8 text-sm font-semibold capitalize text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 sm:w-40"
                         >
                           {repeatUnits.map((unit) => (

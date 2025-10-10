@@ -15,7 +15,7 @@ type User = {
 type AuthState = {
   user: User | null
   isLoading: boolean
-  // eslint-disable-next-line no-unused-vars
+
   login: (user: User) => void
   logout: () => void
   checkAuth: () => Promise<void>

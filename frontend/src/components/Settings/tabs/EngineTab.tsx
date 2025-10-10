@@ -423,7 +423,9 @@ export default function EngineTab() {
                                   )
                                 )
                                 setJsonOpen(true)
-                              } catch {}
+                              } catch (e) {
+                                console.error(e.message)
+                              }
                             }}
                             className="px-2 py-1 text-xs rounded bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600"
                           >
@@ -460,7 +462,9 @@ export default function EngineTab() {
                   try {
                     await clearDeadLetters(selected.id)
                     await refreshDeadLetters()
-                  } catch {}
+                  } catch (e) {
+                    console.error(e.message)
+                  }
                 }
               }}
               className="text-sm underline text-red-600"
@@ -525,7 +529,9 @@ export default function EngineTab() {
                   try {
                     const items = await listEgressBlocks(selected.id, 1, 25)
                     setEgressBlocks(items)
-                  } catch {}
+                  } catch (e) {
+                    console.error(e.message)
+                  }
                 }
               }}
               className="text-sm underline"
@@ -539,7 +545,9 @@ export default function EngineTab() {
                     await clearEgressBlocks(selected.id)
                     const items = await listEgressBlocks(selected.id, 1, 25)
                     setEgressBlocks(items)
-                  } catch {}
+                  } catch (e) {
+                    console.error(e.message)
+                  }
                 }
               }}
               className="text-sm underline text-red-600"

@@ -35,7 +35,9 @@ export default function JsonDialog({
                   onClick={() => {
                     try {
                       navigator.clipboard.writeText(jsonText)
-                    } catch {}
+                    } catch (e) {
+                      console.error(e.message)
+                    }
                   }}
                   className="px-2 py-1 text-xs rounded bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600"
                 >

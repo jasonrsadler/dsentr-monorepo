@@ -52,7 +52,9 @@ export function ScheduleTimezonePicker({
             )
           })
         ) : (
-          <p className="px-3 py-6 text-center text-xs text-zinc-500 dark:text-zinc-400">No matches found.</p>
+          <p className="px-3 py-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
+            No matches found.
+          </p>
         )}
       </div>
     </div>

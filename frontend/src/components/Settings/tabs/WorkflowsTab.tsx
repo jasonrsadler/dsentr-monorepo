@@ -57,7 +57,9 @@ export default function WorkflowsTab({
         window.dispatchEvent(
           new CustomEvent('workflow-deleted', { detail: { id: selected.id } })
         )
-      } catch {}
+      } catch (e) {
+        console.error(e.message)
+      }
     } finally {
       setBusy(false)
       setConfirming(false)

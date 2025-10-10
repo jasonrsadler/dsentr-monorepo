@@ -30,7 +30,9 @@ export function ScheduleCalendar({
       <div className="flex items-center justify-between text-sm font-semibold text-zinc-700 dark:text-zinc-200">
         <button
           type="button"
-          onClick={() => onMonthChange(normalizeCalendarMonth(month.month - 1, month.year))}
+          onClick={() =>
+            onMonthChange(normalizeCalendarMonth(month.month - 1, month.year))
+          }
           className="rounded-md p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           aria-label="Previous month"
         >
@@ -44,7 +46,9 @@ export function ScheduleCalendar({
         </span>
         <button
           type="button"
-          onClick={() => onMonthChange(normalizeCalendarMonth(month.month + 1, month.year))}
+          onClick={() =>
+            onMonthChange(normalizeCalendarMonth(month.month + 1, month.year))
+          }
           className="rounded-md p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           aria-label="Next month"
         >
@@ -58,7 +62,11 @@ export function ScheduleCalendar({
       </div>
       <div className="mt-1 grid grid-cols-7 gap-1 text-sm">
         {calendarCells.map((cell) => {
-          const isoDate = toISODateString(cell.date.year, cell.date.month, cell.date.day)
+          const isoDate = toISODateString(
+            cell.date.year,
+            cell.date.month,
+            cell.date.day
+          )
           const isSelected = selectedDate === isoDate
           const isToday = todayISO === isoDate
           return (
@@ -70,14 +78,17 @@ export function ScheduleCalendar({
                 isSelected
                   ? 'border-blue-500 bg-blue-500 text-white shadow'
                   : cell.inCurrentMonth
-                  ? 'border-transparent text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800'
-                  : 'border-transparent text-zinc-400 hover:bg-zinc-100/70 dark:text-zinc-600 dark:hover:bg-zinc-800/60'
+                    ? 'border-transparent text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800'
+                    : 'border-transparent text-zinc-400 hover:bg-zinc-100/70 dark:text-zinc-600 dark:hover:bg-zinc-800/60'
               }`}
             >
               <span className="inline-flex h-full w-full items-center justify-center">
                 {cell.day}
                 {isToday && !isSelected && (
-                  <span className="ml-1 inline-flex h-1.5 w-1.5 rounded-full bg-blue-500" aria-hidden="true" />
+                  <span
+                    className="ml-1 inline-flex h-1.5 w-1.5 rounded-full bg-blue-500"
+                    aria-hidden="true"
+                  />
                 )}
               </span>
             </button>
