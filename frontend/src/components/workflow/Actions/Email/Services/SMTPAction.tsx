@@ -1,14 +1,48 @@
-import NodeCheckBoxField from '@/components/UI/InputFields/NodeCheckboxField'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import { useEffect, useMemo, useState } from 'react'
+
+type TlsMode = 'starttls' | 'implicit_tls' | 'none'
+
+const TLS_MODE_OPTIONS: { value: TlsMode; label: string; helper?: string }[] = [
+  {
+    value: 'starttls',
+    label: 'TLS - Use STARTTLS (recommended)',
+    helper: 'Upgrades a plaintext connection to TLS on ports like 587.'
+  },
+  {
+    value: 'implicit_tls',
+    label: 'TLS/SSL - Use Implicit TLS/SSL (legacy - not recommended)',
+    helper: 'Connects with TLS immediately (commonly port 465).'
+  },
+  {
+    value: 'none',
+    label: 'Do not use TLS (insecure - only if required)',
+    helper: 'Only choose this when your SMTP server requires plaintext access.'
+  }
+]
+
+const isTlsMode = (value: unknown): value is TlsMode =>
+  value === 'starttls' || value === 'implicit_tls' || value === 'none'
+
+const defaultPortForMode = (mode: TlsMode): number => {
+  switch (mode) {
+    case 'implicit_tls':
+      return 465
+    case 'none':
+      return 25
+    default:
+      return 587
+  }
+}
 
 interface SMTPActionProps {
   smtpHost: string
   smtpPort: number | string
   smtpUser: string
   smtpPassword: string
-  smtpTls: boolean
+  smtpTls?: boolean
+  smtpTlsMode?: TlsMode
   from: string
   to: string
   subject: string
@@ -30,10 +64,31 @@ export default function SMTPAction({
   ) => void
 }) {
   const [_, setDirty] = useState(false)
+  const initialPort = (() => {
+    if (typeof args.smtpPort === 'number' && args.smtpPort > 0)
+      return args.smtpPort
+    if (typeof args.smtpPort === 'string') {
+      const trimmed = args.smtpPort.trim()
+      if (trimmed) {
+        const parsed = Number(trimmed)
+        if (!Number.isNaN(parsed) && parsed > 0) return parsed
+      }
+    }
+    return 587
+  })()
+  const initialTlsMode: TlsMode = (() => {
+    if (isTlsMode(args.smtpTlsMode)) return args.smtpTlsMode
+    const tlsEnabled = typeof args.smtpTls === 'boolean' ? args.smtpTls : true
+    if (!tlsEnabled) return 'none'
+    if (initialPort === 465) return 'implicit_tls'
+    return 'starttls'
+  })()
+
   const [params, setParams] = useState<Partial<SMTPActionProps>>({
     ...args,
-    smtpPort: 587,
-    smtpTls: true
+    smtpPort: initialPort,
+    smtpTlsMode: initialTlsMode,
+    smtpTls: initialTlsMode !== 'none'
   })
   useEffect(() => {
     onChange?.(params, Object.keys(hasErrors(params)).length > 0, true)
@@ -71,6 +126,40 @@ export default function SMTPAction({
     return errors
   }
   const smtpErrors = useMemo(() => hasErrors(params), [params])
+  const selectedTlsMode = isTlsMode(params.smtpTlsMode)
+    ? params.smtpTlsMode
+    : initialTlsMode
+
+  const handleTlsModeChange = (mode: TlsMode) => {
+    setDirty(true)
+    setParams((prev) => {
+      const previousMode = isTlsMode(prev.smtpTlsMode)
+        ? prev.smtpTlsMode
+        : initialTlsMode
+      const prevPortValue =
+        typeof prev.smtpPort === 'number'
+          ? prev.smtpPort
+          : Number(prev.smtpPort)
+      const hasValidPort =
+        prev.smtpPort !== undefined &&
+        prev.smtpPort !== '' &&
+        Number.isFinite(prevPortValue) &&
+        prevPortValue > 0
+      const prevDefault = defaultPortForMode(previousMode)
+      const nextDefault = defaultPortForMode(mode)
+      const shouldSnapPort =
+        !hasValidPort ||
+        prevPortValue === prevDefault ||
+        prevPortValue === nextDefault
+
+      return {
+        ...prev,
+        smtpTlsMode: mode,
+        smtpTls: mode !== 'none',
+        smtpPort: shouldSnapPort ? nextDefault : prev.smtpPort
+      }
+    })
+  }
 
   const updateField = (key: keyof SMTPActionProps, value: any) => {
     setDirty(true)
@@ -92,8 +181,15 @@ export default function SMTPAction({
       <NodeInputField
         placeholder="SMTP Port"
         type="number"
-        value={params.smtpPort?.toString() || ''}
-        onChange={(val) => updateField('smtpPort', Number(val))}
+        value={
+          typeof params.smtpPort === 'number'
+            ? params.smtpPort.toString()
+            : params.smtpPort?.toString() || ''
+        }
+        onChange={(val) => {
+          const parsed = val ? Number(val) : ''
+          updateField('smtpPort', parsed === '' ? '' : parsed)
+        }}
       />
       {smtpErrors.smtpPort && (
         <p className={errorClass}>{smtpErrors.smtpPort}</p>
@@ -115,25 +211,28 @@ export default function SMTPAction({
       {smtpErrors.smtpPassword && (
         <p className={errorClass}>{smtpErrors.smtpPassword}</p>
       )}
-      <NodeCheckBoxField
-        checked={params.smtpTls ?? true}
-        onChange={(val) => {
-          const checked = Boolean(val)
-          setParams((prev) => ({
-            ...prev,
-            smtpTls: checked,
-            smtpPort:
-              prev.smtpPort === 25 || prev.smtpPort === 587
-                ? checked
-                  ? 587
-                  : 25
-                : prev.smtpPort
-          }))
-          setDirty(true)
-        }}
-      >
-        Use TLS
-      </NodeCheckBoxField>
+      <fieldset className="flex flex-col gap-1 text-xs">
+        <legend className="font-medium">Encryption</legend>
+        {TLS_MODE_OPTIONS.map((option) => (
+          <label key={option.value} className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="smtp-tls-mode"
+              value={option.value}
+              checked={selectedTlsMode === option.value}
+              onChange={() => handleTlsModeChange(option.value)}
+            />
+            <span>
+              {option.label}
+              {option.helper && (
+                <span className="block text-[10px] text-slate-400">
+                  {option.helper}
+                </span>
+              )}
+            </span>
+          </label>
+        ))}
+      </fieldset>
       <NodeInputField
         type="email"
         placeholder="Sender Email"

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
 use chrono::Utc;
 use hmac::{Hmac, Mac};
@@ -8,7 +9,9 @@ use sha2::{Digest, Sha256};
 
 use crate::engine::graph::Node;
 use crate::engine::templating::templ_str;
+use crate::services::smtp_mailer::{SmtpConfig, TlsMode};
 use crate::state::AppState;
+use tokio::time::timeout;
 
 fn is_valid_email_address(value: &str) -> bool {
     let trimmed = value.trim();
@@ -183,20 +186,143 @@ pub(crate) async fn execute_email(
 
     match service.as_str() {
         "smtp" => {
-            let to = params
+            let timeout_ms = node
+                .data
+                .get("timeout")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30_000);
+
+            let host = params
+                .get("smtpHost")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "SMTP Host is required".to_string())?;
+
+            let port_value = params
+                .get("smtpPort")
+                .ok_or_else(|| "Valid SMTP Port is required".to_string())?;
+
+            let port = match port_value {
+                Value::Number(n) => n
+                    .as_u64()
+                    .and_then(|n| u16::try_from(n).ok())
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| "Valid SMTP Port is required".to_string())?,
+                Value::String(s) => s
+                    .trim()
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| "Valid SMTP Port is required".to_string())?,
+                _ => return Err("Valid SMTP Port is required".to_string()),
+            };
+
+            let username = params
+                .get("smtpUser")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "SMTP User is required".to_string())?;
+
+            let password = params
+                .get("smtpPassword")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "SMTP Password is required".to_string())?;
+
+            let from_email = params
+                .get("from")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "From email is required".to_string())?;
+
+            if !is_valid_email_address(from_email) {
+                return Err("Invalid from email address".to_string());
+            }
+
+            let to_raw = params
                 .get("to")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| "Missing 'to'".to_string())?;
+                .ok_or_else(|| "Recipient email(s) required".to_string())?;
+            let recipients = parse_recipient_list(to_raw)?;
+
             let subject_raw = params.get("subject").and_then(|v| v.as_str()).unwrap_or("");
             let body_raw = params.get("body").and_then(|v| v.as_str()).unwrap_or("");
             let subject = templ_str(subject_raw, context);
             let body = templ_str(body_raw, context);
-            state
-                .mailer
-                .send_email_generic(to, &subject, &body)
-                .await
-                .map_err(|e| e.to_string())?;
-            Ok((json!({"sent": true, "service": "SMTP"}), None))
+
+            if subject.trim().is_empty() {
+                return Err("Subject is required".to_string());
+            }
+            if body.trim().is_empty() {
+                return Err("Message body is required".to_string());
+            }
+
+            let parse_tls_mode = |value: &str| -> Result<TlsMode, String> {
+                match value.to_lowercase().as_str() {
+                    "starttls" => Ok(TlsMode::StartTls),
+                    "implicit_tls" | "implicit" | "wrapper" => Ok(TlsMode::Implicit),
+                    "none" | "plaintext" => Ok(TlsMode::None),
+                    other => Err(format!("Unsupported SMTP TLS mode: {}", other)),
+                }
+            };
+
+            let tls_mode = match params.get("smtpTlsMode").and_then(|v| v.as_str()) {
+                Some(mode) => parse_tls_mode(mode)?,
+                None => {
+                    let tls_enabled = params
+                        .get("smtpTls")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    if !tls_enabled {
+                        TlsMode::None
+                    } else if port == 465 {
+                        TlsMode::Implicit
+                    } else {
+                        TlsMode::StartTls
+                    }
+                }
+            };
+
+            let config = SmtpConfig {
+                host: host.to_string(),
+                port,
+                username: Some(username.to_string()),
+                password: Some(password.to_string()),
+                from: from_email.to_string(),
+                tls_mode,
+            };
+
+            let tls_label = config.tls_mode.to_string();
+
+            match timeout(
+                Duration::from_millis(timeout_ms),
+                state
+                    .mailer
+                    .send_email_with_config(&config, &recipients, &subject, &body),
+            )
+            .await
+            {
+                Ok(result) => result.map_err(|e| e.to_string())?,
+                Err(_) => {
+                    return Err(format!(
+                        "SMTP send timed out after {}ms (host: {}:{}, tls: {})",
+                        timeout_ms, config.host, config.port, tls_label
+                    ));
+                }
+            }
+
+            Ok((
+                json!({
+                    "sent": true,
+                    "service": "SMTP",
+                    "recipient_count": recipients.len(),
+                }),
+                None,
+            ))
         }
         "sendgrid" => {
             let api_key = params
@@ -813,8 +939,9 @@ mod tests {
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
-    use crate::services::smtp_mailer::MockMailer;
+    use crate::services::smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig, TlsMode};
     use crate::state::AppState;
+    use async_trait::async_trait;
     use axum::body::{Body, Bytes};
     use axum::extract::State;
     use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
@@ -827,6 +954,7 @@ mod tests {
     use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::sync::Arc;
+    use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
     use tokio::task::JoinHandle;
@@ -849,16 +977,286 @@ mod tests {
         }
     }
 
-    fn test_state() -> AppState {
+    fn test_state_with_mailer(mailer: Arc<dyn Mailer>) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-            mailer: Arc::new(MockMailer::default()),
+            mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             worker_id: Arc::new("worker".to_string()),
             worker_lease_seconds: 30,
         }
+    }
+
+    fn test_state() -> AppState {
+        test_state_with_mailer(Arc::new(MockMailer::default()))
+    }
+
+    #[derive(Clone)]
+    struct HangingMailer {
+        delay: Duration,
+    }
+
+    #[async_trait]
+    impl Mailer for HangingMailer {
+        async fn send_verification_email(&self, _to: &str, _token: &str) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_reset_email(&self, _to: &str, _token: &str) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_email_generic(
+            &self,
+            _to: &str,
+            _subject: &str,
+            _body: &str,
+        ) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_email_with_config(
+            &self,
+            _config: &SmtpConfig,
+            _recipients: &[String],
+            _subject: &str,
+            _body: &str,
+        ) -> Result<(), MailError> {
+            tokio::time::sleep(self.delay).await;
+            Ok(())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[tokio::test]
+    async fn smtp_email_uses_custom_configuration_and_templates() {
+        let state = test_state();
+        let node = Node {
+            id: "action-smtp".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "SMTP",
+                    "smtpHost": "smtp.example.com",
+                    "smtpPort": 2525,
+                    "smtpUser": "user@example.com",
+                    "smtpPassword": "secret",
+                    "smtpTls": false,
+                    "from": "sender@example.com",
+                    "to": "alice@example.com, bob@example.com",
+                    "subject": "Hello {{ user.name }}",
+                    "body": "Body for {{ user.name }}"
+                }
+            }),
+        };
+
+        let context = json!({ "user": { "name": "Alice" } });
+
+        let (output, _) = execute_email(&node, &context, &state)
+            .await
+            .expect("smtp send should succeed");
+
+        assert_eq!(output["sent"], true);
+        assert_eq!(output["service"], "SMTP");
+        assert_eq!(output["recipient_count"], 2);
+
+        let mailer = state
+            .mailer
+            .as_any()
+            .downcast_ref::<MockMailer>()
+            .expect("mock mailer available");
+        let records = mailer.sent_smtp_emails.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.config.host, "smtp.example.com");
+        assert_eq!(record.config.port, 2525);
+        assert_eq!(record.config.tls_mode, TlsMode::None);
+        assert_eq!(record.config.username.as_deref(), Some("user@example.com"));
+        assert_eq!(record.config.from, "sender@example.com");
+        assert_eq!(
+            record.recipients,
+            vec!["alice@example.com", "bob@example.com"]
+        );
+        assert_eq!(record.subject, "Hello Alice");
+        assert_eq!(record.body, "Body for Alice");
+    }
+
+    #[tokio::test]
+    async fn smtp_email_defaults_to_tls_when_flag_omitted() {
+        let state = test_state();
+        let node = Node {
+            id: "action-smtp-default".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "SMTP",
+                    "smtpHost": "smtp.example.com",
+                    "smtpPort": 587,
+                    "smtpUser": "user@example.com",
+                    "smtpPassword": "secret",
+                    "from": "sender@example.com",
+                    "to": "recipient@example.com",
+                    "subject": "Hi",
+                    "body": "Body"
+                }
+            }),
+        };
+
+        let (output, _) = execute_email(&node, &Value::Null, &state)
+            .await
+            .expect("smtp send should succeed");
+
+        assert_eq!(output["sent"], true);
+
+        let mailer = state
+            .mailer
+            .as_any()
+            .downcast_ref::<MockMailer>()
+            .expect("mock mailer available");
+        let records = mailer.sent_smtp_emails.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].config.tls_mode, TlsMode::StartTls);
+    }
+
+    #[tokio::test]
+    async fn smtp_email_infers_implicit_tls_for_port_465_when_mode_omitted() {
+        let state = test_state();
+        let node = Node {
+            id: "action-smtp-implicit".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "SMTP",
+                    "smtpHost": "smtp.example.com",
+                    "smtpPort": 465,
+                    "smtpUser": "user@example.com",
+                    "smtpPassword": "secret",
+                    "from": "sender@example.com",
+                    "to": "recipient@example.com",
+                    "subject": "Hi",
+                    "body": "Body"
+                }
+            }),
+        };
+
+        let (output, _) = execute_email(&node, &Value::Null, &state)
+            .await
+            .expect("smtp send should succeed");
+
+        assert_eq!(output["sent"], true);
+
+        let mailer = state
+            .mailer
+            .as_any()
+            .downcast_ref::<MockMailer>()
+            .expect("mock mailer available");
+        let records = mailer.sent_smtp_emails.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].config.tls_mode, TlsMode::Implicit);
+    }
+
+    #[tokio::test]
+    async fn smtp_email_accepts_explicit_tls_mode_configuration() {
+        let state = test_state();
+        let node = Node {
+            id: "action-smtp-explicit".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "SMTP",
+                    "smtpHost": "smtp.example.com",
+                    "smtpPort": 465,
+                    "smtpUser": "user@example.com",
+                    "smtpPassword": "secret",
+                    "smtpTlsMode": "implicit_tls",
+                    "from": "sender@example.com",
+                    "to": "recipient@example.com",
+                    "subject": "Hi",
+                    "body": "Body"
+                }
+            }),
+        };
+
+        let (output, _) = execute_email(&node, &Value::Null, &state)
+            .await
+            .expect("smtp send should succeed");
+
+        assert_eq!(output["sent"], true);
+
+        let mailer = state
+            .mailer
+            .as_any()
+            .downcast_ref::<MockMailer>()
+            .expect("mock mailer available");
+        let records = mailer.sent_smtp_emails.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].config.tls_mode, TlsMode::Implicit);
+    }
+
+    #[tokio::test]
+    async fn smtp_email_respects_node_timeout() {
+        let state = test_state_with_mailer(Arc::new(HangingMailer {
+            delay: Duration::from_millis(200),
+        }));
+
+        let node = Node {
+            id: "action-smtp-timeout".into(),
+            kind: "action".into(),
+            data: json!({
+                "timeout": 25,
+                "params": {
+                    "service": "SMTP",
+                    "smtpHost": "smtp.example.com",
+                    "smtpPort": 2525,
+                    "smtpUser": "user@example.com",
+                    "smtpPassword": "secret",
+                    "from": "sender@example.com",
+                    "to": "recipient@example.com",
+                    "subject": "Hi",
+                    "body": "Body"
+                }
+            }),
+        };
+
+        let err = execute_email(&node, &Value::Null, &state)
+            .await
+            .expect_err("smtp send should respect timeout");
+
+        assert!(err.contains("timed out"), "unexpected error: {err}");
+        assert!(err.contains("smtp.example.com"), "missing host: {err}");
+    }
+
+    #[tokio::test]
+    async fn smtp_email_rejects_invalid_from_address() {
+        let state = test_state();
+        let node = Node {
+            id: "action-smtp-invalid".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "SMTP",
+                    "smtpHost": "smtp.example.com",
+                    "smtpPort": "587",
+                    "smtpUser": "user@example.com",
+                    "smtpPassword": "secret",
+                    "from": "invalid-from",
+                    "to": "alice@example.com",
+                    "subject": "Hi",
+                    "body": "Body"
+                }
+            }),
+        };
+
+        let err = execute_email(&node, &Value::Null, &state)
+            .await
+            .expect_err("invalid from should error");
+
+        assert!(err.contains("Invalid from email address"));
     }
 
     #[derive(Debug)]

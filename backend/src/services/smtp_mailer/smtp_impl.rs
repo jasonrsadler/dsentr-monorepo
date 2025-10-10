@@ -10,7 +10,7 @@ use lettre::{
 };
 use std::sync::Arc;
 
-use crate::services::smtp_mailer::Mailer;
+use crate::services::smtp_mailer::{Mailer, SmtpConfig, TlsMode};
 
 use super::MailError;
 
@@ -95,7 +95,119 @@ impl Mailer for SmtpMailer {
         self.send_email(to, "Reset your password", &body).await
     }
 
-    async fn send_email_generic(&self, to: &str, subject: &str, body: &str) -> Result<(), MailError> {
+    async fn send_email_generic(
+        &self,
+        to: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<(), MailError> {
         self.send_email(to, subject, body).await
+    }
+
+    async fn send_email_with_config(
+        &self,
+        config: &SmtpConfig,
+        recipients: &[String],
+        subject: &str,
+        body: &str,
+    ) -> Result<(), MailError> {
+        let from_mailbox: Mailbox = config.from.parse()?;
+        let mut builder = Message::builder().from(from_mailbox);
+
+        for recipient in recipients {
+            let mailbox: Mailbox = recipient.parse()?;
+            builder = builder.to(mailbox);
+        }
+
+        let email = builder.subject(subject).body(body.to_string())?;
+
+        let transport = build_dynamic_transport(config)?;
+
+        transport.send(email).await.map(|_| ()).map_err(|e| {
+            MailError::SendError(format!(
+                "{} (host: {}:{}, tls: {}, auth: {})",
+                e,
+                config.host,
+                config.port,
+                config.tls_mode,
+                if config.username.is_some() {
+                    "set"
+                } else {
+                    "not set"
+                }
+            ))
+        })
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+fn build_dynamic_transport(
+    config: &SmtpConfig,
+) -> Result<AsyncSmtpTransport<Tokio1Executor>, MailError> {
+    let mut builder = match config.tls_mode {
+        TlsMode::StartTls => {
+            let tls = TlsParameters::new(config.host.clone())?;
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)?
+                .port(config.port)
+                .tls(Tls::Required(tls))
+        }
+        TlsMode::Implicit => {
+            let tls = TlsParameters::new(config.host.clone())?;
+            AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)?
+                .port(config.port)
+                .tls(Tls::Wrapper(tls))
+        }
+        TlsMode::None => {
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host).port(config.port)
+        }
+    };
+
+    if let (Some(username), Some(password)) = (config.username.as_ref(), config.password.as_ref()) {
+        builder = builder.credentials(Credentials::new(username.clone(), password.clone()));
+    }
+
+    Ok(builder.build())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_config() -> SmtpConfig {
+        SmtpConfig {
+            host: "smtp.example.com".to_string(),
+            port: 587,
+            username: Some("user".to_string()),
+            password: Some("pass".to_string()),
+            from: "sender@example.com".to_string(),
+            tls_mode: TlsMode::StartTls,
+        }
+    }
+
+    #[tokio::test]
+    async fn build_dynamic_transport_prefers_starttls_on_standard_ports() {
+        let config = base_config();
+        let transport = build_dynamic_transport(&config);
+        assert!(transport.is_ok());
+    }
+
+    #[tokio::test]
+    async fn build_dynamic_transport_supports_wrapper_tls_on_port_465() {
+        let mut config = base_config();
+        config.port = 465;
+        config.tls_mode = TlsMode::Implicit;
+        let transport = build_dynamic_transport(&config);
+        assert!(transport.is_ok());
+    }
+
+    #[tokio::test]
+    async fn build_dynamic_transport_allows_plaintext_when_disabled() {
+        let mut config = base_config();
+        config.tls_mode = TlsMode::None;
+        let transport = build_dynamic_transport(&config);
+        assert!(transport.is_ok());
     }
 }

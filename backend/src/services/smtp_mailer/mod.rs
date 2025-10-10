@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+use std::any::Any;
+use std::fmt;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -8,8 +10,6 @@ pub enum MailError {
     SendError(String),
     EnvVarMissing(String),
 }
-
-use std::fmt;
 
 impl fmt::Display for MailError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -52,7 +52,20 @@ impl From<AddressError> for MailError {
 pub trait Mailer: Send + Sync {
     async fn send_verification_email(&self, to: &str, token: &str) -> Result<(), MailError>;
     async fn send_reset_email(&self, to: &str, token: &str) -> Result<(), MailError>;
-    async fn send_email_generic(&self, to: &str, subject: &str, body: &str) -> Result<(), MailError>;
+    async fn send_email_generic(
+        &self,
+        to: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<(), MailError>;
+    async fn send_email_with_config(
+        &self,
+        config: &SmtpConfig,
+        recipients: &[String],
+        subject: &str,
+        body: &str,
+    ) -> Result<(), MailError>;
+    fn as_any(&self) -> &dyn Any;
 }
 
 mod mock_mailer;
@@ -62,3 +75,36 @@ use lettre::address::AddressError;
 #[allow(unused_imports)]
 pub use mock_mailer::MockMailer;
 pub use smtp_impl::SmtpMailer;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TlsMode {
+    StartTls,
+    Implicit,
+    None,
+}
+
+impl TlsMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TlsMode::StartTls => "starttls",
+            TlsMode::Implicit => "implicit_tls",
+            TlsMode::None => "none",
+        }
+    }
+}
+
+impl fmt::Display for TlsMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub from: String,
+    pub tls_mode: TlsMode,
+}
