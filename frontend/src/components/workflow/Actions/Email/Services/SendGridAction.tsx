@@ -122,7 +122,7 @@ export default function SendGridAction({
       )}
 
       <NodeInputField
-        type="email"
+        type="text"
         placeholder="Recipient Email(s)"
         value={params.to}
         onChange={(val) => updateField('to', val)}

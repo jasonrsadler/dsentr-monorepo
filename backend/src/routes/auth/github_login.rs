@@ -249,6 +249,8 @@ mod tests {
             mailer,
             google_oauth,
             github_oauth,
+            worker_id: Arc::new("test-worker".to_string()),
+            worker_lease_seconds: 30,
         };
 
         let params = GitHubCallback {
@@ -318,6 +320,8 @@ mod tests {
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(FailingGitHubOAuth),
+            worker_id: Arc::new("test-worker".to_string()),
+            worker_lease_seconds: 30,
         };
 
         let params = GitHubCallback {

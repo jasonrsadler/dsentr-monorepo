@@ -208,6 +208,8 @@ mod tests {
             mailer: Arc::new(MockMailer::default()), // Not used in these tests
             google_oauth: Arc::new(MockGoogleOAuth::default()), // Not used in these tests
             github_oauth: Arc::new(MockGitHubOAuth::default()), // Not used in these tests
+            worker_id: Arc::new("test-worker".to_string()),
+            worker_lease_seconds: 30,
         };
 
         Router::new()

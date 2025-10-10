@@ -286,6 +286,8 @@ mod tests {
             mailer,
             google_oauth,
             github_oauth,
+            worker_id: Arc::new("test-worker".to_string()),
+            worker_lease_seconds: 30,
         };
 
         let code = "dummy";
@@ -355,6 +357,8 @@ mod tests {
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(FailingGoogleOAuth),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
+            worker_id: Arc::new("test-worker".to_string()),
+            worker_lease_seconds: 30,
         };
 
         let code = "dummy";

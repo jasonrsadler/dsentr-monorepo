@@ -88,7 +88,10 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        db::user_repository::{UserId, UserRepository},
+        db::{
+            mock_db::NoopWorkflowRepository,
+            user_repository::{UserId, UserRepository},
+        },
         models::{
             signup::SignupPayload,
             user::{OauthProvider, PublicUser, User, UserRole},
@@ -231,6 +234,8 @@ mod tests {
             mailer: Arc::new(crate::services::smtp_mailer::MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
+            worker_id: Arc::new("test-worker".to_string()),
+            worker_lease_seconds: 30,
         };
 
         Router::new()
