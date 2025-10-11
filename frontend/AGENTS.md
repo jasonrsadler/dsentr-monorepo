@@ -12,3 +12,10 @@ few moments so patience is required for them to finish
 - When altering canvas nodes, edges, or shared hooks, audit for dependency cycles and ensure state setters are wrapped (e.g., `u
 seCallback`, `useMemo`) to prevent infinite renders.
 - Follow the established ESLint + Prettier formatting rules; avoid disabling lint rules unless necessary and documented.
+- React Flow safe patterns (must be used and commented in code):
+  - Initialize local state from props once using useRef mounted flag.
+  - No state changes during render.
+  - useEffect with correct dependency arrays.
+  - useCallback for handlers.
+  - Only call parent onUpdate when deep-equality shows change.
+  - Debounce inputs that propagate to parent.
