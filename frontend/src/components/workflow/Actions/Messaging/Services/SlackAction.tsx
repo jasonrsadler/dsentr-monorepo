@@ -1,45 +1,60 @@
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import { useEffect, useMemo, useState } from 'react'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+
+export interface SlackActionValues {
+  channel?: string
+  message?: string
+  token?: string
+}
 
 interface SlackActionProps {
-  channel: string
-  message: string
-  token: string
-  dirty: boolean
-  setParams: (params: Partial<SlackActionProps>) => void
-  setDirty: (dirty: boolean) => void
+  args: SlackActionValues
+  initialDirty?: boolean
+  onChange?: (
+    args: SlackActionValues,
+    nodeHasErrors: boolean,
+    childDirty: boolean
+  ) => void
 }
 
 export default function SlackAction({
   args,
+  initialDirty = false,
   onChange
-}: {
-  args: SlackActionProps
-  onChange?: (
-    args: Partial<SlackActionProps>,
-    nodeHasErrors: boolean,
-    childDirty: boolean
-  ) => void
-}) {
-  const [_, setDirty] = useState(false)
-  const [params, setParams] = useState<Partial<SlackActionProps>>({ ...args })
-
-  const hasErrors = (updatedParams: Partial<SlackActionProps>) => {
-    const errors: Partial<SlackActionProps> = {}
-    if (!updatedParams.channel?.trim()) errors.channel = 'Channel is required'
-    if (!updatedParams.message?.trim())
-      errors.message = 'Message cannot be empty'
-    if (!updatedParams.token?.trim()) errors.token = 'Slack token is required'
-    return errors
-  }
-
-  const slackErrors = useMemo(() => hasErrors(params), [params])
+}: SlackActionProps) {
+  const [params, setParams] = useState<SlackActionValues>({ ...args })
+  const [dirty, setDirty] = useState(initialDirty)
 
   useEffect(() => {
-    onChange?.(params, Object.keys(slackErrors).length > 0, true)
+    const next = { ...args }
+    if (
+      (params.channel ?? '') !== (next.channel ?? '') ||
+      (params.message ?? '') !== (next.message ?? '') ||
+      (params.token ?? '') !== (next.token ?? '')
+    ) {
+      setParams(next)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [args?.channel, args?.message, args?.token])
+
+  useEffect(() => {
+    setDirty(initialDirty)
+  }, [initialDirty])
+
+  const validationErrors = useMemo(() => {
+    const errors: Record<string, string> = {}
+    if (!params.channel?.trim()) errors.channel = 'Channel is required'
+    if (!params.message?.trim()) errors.message = 'Message cannot be empty'
+    if (!params.token?.trim()) errors.token = 'Slack token is required'
+    return errors
   }, [params])
 
-  const updateField = (key: keyof SlackActionProps, value: any) => {
+  useEffect(() => {
+    onChange?.(params, Object.keys(validationErrors).length > 0, dirty)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, validationErrors, dirty])
+
+  const updateField = (key: keyof SlackActionValues, value: string) => {
     setDirty(true)
     setParams((prev) => ({ ...prev, [key]: value }))
   }
@@ -53,8 +68,8 @@ export default function SlackAction({
         value={params.channel || ''}
         onChange={(val) => updateField('channel', val)}
       />
-      {slackErrors.channel && (
-        <p className={errorClass}>{slackErrors.channel}</p>
+      {validationErrors.channel && (
+        <p className={errorClass}>{validationErrors.channel}</p>
       )}
 
       <NodeInputField
@@ -63,15 +78,17 @@ export default function SlackAction({
         value={params.token || ''}
         onChange={(val) => updateField('token', val)}
       />
-      {slackErrors.token && <p className={errorClass}>{slackErrors.token}</p>}
+      {validationErrors.token && (
+        <p className={errorClass}>{validationErrors.token}</p>
+      )}
 
       <NodeInputField
         placeholder="Message"
         value={params.message || ''}
         onChange={(val) => updateField('message', val)}
       />
-      {slackErrors.message && (
-        <p className={errorClass}>{slackErrors.message}</p>
+      {validationErrors.message && (
+        <p className={errorClass}>{validationErrors.message}</p>
       )}
     </div>
   )

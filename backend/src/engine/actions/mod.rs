@@ -1,5 +1,6 @@
 mod email;
 mod http;
+mod messaging;
 
 use serde_json::{json, Value};
 
@@ -101,6 +102,7 @@ pub(crate) async fn execute_action(
             .await
         }
         "email" => email::execute_email(node, context, state).await,
+        "messaging" => messaging::execute_messaging(node, context).await,
         _ => Ok((
             json!({"skipped": true, "reason": "unsupported actionType"}),
             None,

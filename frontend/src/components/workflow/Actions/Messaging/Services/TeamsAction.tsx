@@ -1,44 +1,58 @@
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import { useEffect, useMemo, useState } from 'react'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+
+export interface TeamsActionValues {
+  webhookUrl?: string
+  message?: string
+}
 
 interface TeamsActionProps {
-  webhookUrl: string
-  message: string
-  dirty: boolean
-  setParams: (params: Partial<TeamsActionProps>) => void
-  setDirty: (dirty: boolean) => void
+  args: TeamsActionValues
+  initialDirty?: boolean
+  onChange?: (
+    args: TeamsActionValues,
+    nodeHasErrors: boolean,
+    childDirty: boolean
+  ) => void
 }
 
 export default function TeamsAction({
   args,
+  initialDirty = false,
   onChange
-}: {
-  args: TeamsActionProps
-  onChange?: (
-    args: Partial<TeamsActionProps>,
-    nodeHasErrors: boolean,
-    childDirty: boolean
-  ) => void
-}) {
-  const [_, setDirty] = useState(false)
-  const [params, setParams] = useState<Partial<TeamsActionProps>>({ ...args })
-
-  const hasErrors = (updatedParams: Partial<TeamsActionProps>) => {
-    const errors: Partial<TeamsActionProps> = {}
-    if (!updatedParams.webhookUrl?.trim())
-      errors.webhookUrl = 'Webhook URL is required'
-    if (!updatedParams.message?.trim())
-      errors.message = 'Message cannot be empty'
-    return errors
-  }
-
-  const teamsErrors = useMemo(() => hasErrors(params), [params])
+}: TeamsActionProps) {
+  const [params, setParams] = useState<TeamsActionValues>({ ...args })
+  const [dirty, setDirty] = useState(initialDirty)
 
   useEffect(() => {
-    onChange?.(params, Object.keys(teamsErrors).length > 0, true)
+    const next = { ...args }
+    if (
+      (params.webhookUrl ?? '') !== (next.webhookUrl ?? '') ||
+      (params.message ?? '') !== (next.message ?? '')
+    ) {
+      setParams(next)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [args?.webhookUrl, args?.message])
+
+  useEffect(() => {
+    setDirty(initialDirty)
+  }, [initialDirty])
+
+  const validationErrors = useMemo(() => {
+    const errors: Record<string, string> = {}
+    if (!params.webhookUrl?.trim())
+      errors.webhookUrl = 'Webhook URL is required'
+    if (!params.message?.trim()) errors.message = 'Message cannot be empty'
+    return errors
   }, [params])
 
-  const updateField = (key: keyof TeamsActionProps, value: any) => {
+  useEffect(() => {
+    onChange?.(params, Object.keys(validationErrors).length > 0, dirty)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, validationErrors, dirty])
+
+  const updateField = (key: keyof TeamsActionValues, value: string) => {
     setDirty(true)
     setParams((prev) => ({ ...prev, [key]: value }))
   }
@@ -52,8 +66,8 @@ export default function TeamsAction({
         value={params.webhookUrl || ''}
         onChange={(val) => updateField('webhookUrl', val)}
       />
-      {teamsErrors.webhookUrl && (
-        <p className={errorClass}>{teamsErrors.webhookUrl}</p>
+      {validationErrors.webhookUrl && (
+        <p className={errorClass}>{validationErrors.webhookUrl}</p>
       )}
 
       <NodeInputField
@@ -61,8 +75,8 @@ export default function TeamsAction({
         value={params.message || ''}
         onChange={(val) => updateField('message', val)}
       />
-      {teamsErrors.message && (
-        <p className={errorClass}>{teamsErrors.message}</p>
+      {validationErrors.message && (
+        <p className={errorClass}>{validationErrors.message}</p>
       )}
     </div>
   )

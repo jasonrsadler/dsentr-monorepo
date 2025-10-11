@@ -1,46 +1,58 @@
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import { useEffect, useMemo, useState } from 'react'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+
+export interface GoogleChatActionValues {
+  webhookUrl?: string
+  message?: string
+}
 
 interface GoogleChatActionProps {
-  webhookUrl: string
-  message: string
-  dirty: boolean
-  setParams: (params: Partial<GoogleChatActionProps>) => void
-  setDirty: (dirty: boolean) => void
+  args: GoogleChatActionValues
+  initialDirty?: boolean
+  onChange?: (
+    args: GoogleChatActionValues,
+    nodeHasErrors: boolean,
+    childDirty: boolean
+  ) => void
 }
 
 export default function GoogleChatAction({
   args,
+  initialDirty = false,
   onChange
-}: {
-  args: GoogleChatActionProps
-  onChange?: (
-    args: Partial<GoogleChatActionProps>,
-    nodeHasErrors: boolean,
-    childDirty: boolean
-  ) => void
-}) {
-  const [_, setDirty] = useState(false)
-  const [params, setParams] = useState<Partial<GoogleChatActionProps>>({
-    ...args
-  })
-
-  const hasErrors = (updatedParams: Partial<GoogleChatActionProps>) => {
-    const errors: Partial<GoogleChatActionProps> = {}
-    if (!updatedParams.webhookUrl?.trim())
-      errors.webhookUrl = 'Webhook URL is required'
-    if (!updatedParams.message?.trim())
-      errors.message = 'Message cannot be empty'
-    return errors
-  }
-
-  const chatErrors = useMemo(() => hasErrors(params), [params])
+}: GoogleChatActionProps) {
+  const [params, setParams] = useState<GoogleChatActionValues>({ ...args })
+  const [dirty, setDirty] = useState(initialDirty)
 
   useEffect(() => {
-    onChange?.(params, Object.keys(chatErrors).length > 0, true)
+    const next = { ...args }
+    if (
+      (params.webhookUrl ?? '') !== (next.webhookUrl ?? '') ||
+      (params.message ?? '') !== (next.message ?? '')
+    ) {
+      setParams(next)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [args?.webhookUrl, args?.message])
+
+  useEffect(() => {
+    setDirty(initialDirty)
+  }, [initialDirty])
+
+  const validationErrors = useMemo(() => {
+    const errors: Record<string, string> = {}
+    if (!params.webhookUrl?.trim())
+      errors.webhookUrl = 'Webhook URL is required'
+    if (!params.message?.trim()) errors.message = 'Message cannot be empty'
+    return errors
   }, [params])
 
-  const updateField = (key: keyof GoogleChatActionProps, value: any) => {
+  useEffect(() => {
+    onChange?.(params, Object.keys(validationErrors).length > 0, dirty)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, validationErrors, dirty])
+
+  const updateField = (key: keyof GoogleChatActionValues, value: string) => {
     setDirty(true)
     setParams((prev) => ({ ...prev, [key]: value }))
   }
@@ -54,8 +66,8 @@ export default function GoogleChatAction({
         value={params.webhookUrl || ''}
         onChange={(val) => updateField('webhookUrl', val)}
       />
-      {chatErrors.webhookUrl && (
-        <p className={errorClass}>{chatErrors.webhookUrl}</p>
+      {validationErrors.webhookUrl && (
+        <p className={errorClass}>{validationErrors.webhookUrl}</p>
       )}
 
       <NodeInputField
@@ -63,7 +75,9 @@ export default function GoogleChatAction({
         value={params.message || ''}
         onChange={(val) => updateField('message', val)}
       />
-      {chatErrors.message && <p className={errorClass}>{chatErrors.message}</p>}
+      {validationErrors.message && (
+        <p className={errorClass}>{validationErrors.message}</p>
+      )}
     </div>
   )
 }
