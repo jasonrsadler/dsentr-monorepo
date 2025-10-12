@@ -10,7 +10,20 @@ type PlatformParams = Record<string, string>
 
 const allowedKeys: Record<MessagingPlatform, string[]> = {
   Slack: ['channel', 'message', 'token'],
-  Teams: ['webhookUrl', 'message'],
+  Teams: [
+    'deliveryMethod',
+    'webhookType',
+    'webhookUrl',
+    'title',
+    'summary',
+    'themeColor',
+    'message',
+    'cardJson',
+    'workflowOption',
+    'workflowRawJson',
+    'workflowHeaderName',
+    'workflowHeaderSecret'
+  ],
   'Google Chat': ['webhookUrl', 'message']
 }
 
@@ -19,13 +32,20 @@ const sanitizeParams = (
   params: Record<string, any>
 ): PlatformParams => {
   const keys = allowedKeys[platform]
-  return keys.reduce<PlatformParams>((acc, key) => {
+  const sanitized = keys.reduce<PlatformParams>((acc, key) => {
     const value = params?.[key]
     if (typeof value === 'string') acc[key] = value
     else if (value === undefined || value === null) acc[key] = ''
     else acc[key] = String(value)
     return acc
   }, {} as PlatformParams)
+
+  if (platform === 'Teams') {
+    if (!sanitized.deliveryMethod) sanitized.deliveryMethod = 'Incoming Webhook'
+    if (!sanitized.webhookType) sanitized.webhookType = 'Connector'
+  }
+
+  return sanitized
 }
 
 interface MessagingActionProps {

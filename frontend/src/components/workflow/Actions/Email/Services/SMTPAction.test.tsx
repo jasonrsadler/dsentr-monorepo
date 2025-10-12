@@ -66,7 +66,9 @@ describe('SMTPAction', () => {
     const portField = screen.getByPlaceholderText(
       'SMTP Port'
     ) as HTMLInputElement
-    const startTlsOption = screen.getByLabelText('TLS - Use STARTTLS (recommended)')
+    const startTlsOption = screen.getByLabelText(
+      'TLS - Use STARTTLS (recommended)'
+    )
     const implicitOption = screen.getByLabelText(
       'TLS/SSL - Use Implicit TLS/SSL (legacy - not recommended)'
     )

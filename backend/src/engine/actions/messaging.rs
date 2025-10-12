@@ -1,8 +1,10 @@
-use reqwest::Url;
-use serde_json::{json, Value};
-
 use crate::engine::graph::Node;
 use crate::engine::templating::templ_str;
+use reqwest::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    Url,
+};
+use serde_json::{json, Map, Value};
 
 pub(crate) async fn execute_messaging(
     node: &Node,
@@ -24,7 +26,7 @@ pub(crate) async fn execute_messaging(
 
     match normalized.as_str() {
         "slack" => send_slack(&params, context).await,
-        "teams" => send_teams(&params, context).await,
+        "teams" => send_teams(node, &params, context).await,
         "googlechat" | "google" | "googlechatapp" => send_google_chat(&params, context).await,
         other => Err(format!("Unsupported messaging platform: {}", other)),
     }
@@ -131,8 +133,28 @@ async fn send_slack(params: &Value, context: &Value) -> Result<(Value, Option<St
     Ok((output, None))
 }
 
-async fn send_teams(params: &Value, context: &Value) -> Result<(Value, Option<String>), String> {
-    send_webhook_message(params, context, "Teams").await
+async fn send_teams(
+    node: &Node,
+    params: &Value,
+    context: &Value,
+) -> Result<(Value, Option<String>), String> {
+    let sanitized = sanitize_teams_params(params);
+
+    let delivery_method = sanitized
+        .get("deliveryMethod")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "Incoming Webhook".to_string());
+
+    match normalize_identifier(&delivery_method).as_str() {
+        "incomingwebhook" => send_teams_incoming_webhook(&sanitized, context).await,
+        _ => Err(format!(
+            "Teams delivery method '{}' is not supported yet",
+            delivery_method
+        )),
+    }
 }
 
 async fn send_google_chat(
@@ -155,6 +177,272 @@ async fn send_webhook_message(
         return Err("Message is required".to_string());
     }
 
+    post_webhook_payload(webhook_raw, json!({ "text": message }), service, None).await
+}
+
+fn normalize_identifier(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_' && *c != '/')
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+async fn send_teams_incoming_webhook(
+    params: &Value,
+    context: &Value,
+) -> Result<(Value, Option<String>), String> {
+    let webhook_type = params
+        .get("webhookType")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "Connector".to_string());
+
+    match normalize_identifier(&webhook_type).as_str() {
+        "connector" => send_teams_connector_webhook(params, context).await,
+        "workflowpowerautomate" | "workflow" | "powerautomate" => {
+            send_teams_workflow_webhook(params, context).await
+        }
+        _ => Err(format!(
+            "Teams webhook type '{}' is not supported",
+            webhook_type
+        )),
+    }
+}
+
+fn extract_optional_templated_string(params: &Value, key: &str, context: &Value) -> Option<String> {
+    params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| templ_str(s, context))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+async fn send_teams_connector_webhook(
+    params: &Value,
+    context: &Value,
+) -> Result<(Value, Option<String>), String> {
+    let webhook_raw = extract_required_str(params, "webhookUrl", "Webhook URL")?;
+    let message_raw = extract_required_str(params, "message", "Message")?;
+
+    let message = templ_str(message_raw, context);
+    if message.trim().is_empty() {
+        return Err("Message is required".to_string());
+    }
+
+    let title = extract_optional_templated_string(params, "title", context);
+    let summary = extract_optional_templated_string(params, "summary", context)
+        .unwrap_or_else(|| message.clone());
+
+    let theme_color = extract_optional_templated_string(params, "themeColor", context)
+        .map(|color| color.trim_start_matches('#').to_string())
+        .map(|color| color.to_uppercase());
+
+    if let Some(ref color) = theme_color {
+        let is_valid = color.len() == 6 && color.chars().all(|c| c.is_ascii_hexdigit());
+        if !is_valid {
+            return Err("Theme color must be a 6-digit hex value".to_string());
+        }
+    }
+
+    let mut payload = json!({
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": summary,
+        "text": message,
+    });
+
+    if let Some(title) = title {
+        payload["title"] = Value::String(title);
+    }
+
+    if let Some(color) = theme_color {
+        payload["themeColor"] = Value::String(color);
+    }
+
+    post_webhook_payload(webhook_raw, payload, "Teams", None).await
+}
+
+async fn send_teams_workflow_webhook(
+    params: &Value,
+    context: &Value,
+) -> Result<(Value, Option<String>), String> {
+    let workflow_option = params
+        .get("workflowOption")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Basic (Raw JSON)");
+
+    let workflow_option_normalized = normalize_identifier(workflow_option);
+
+    let webhook_url_raw = extract_required_str(params, "webhookUrl", "Webhook URL")?;
+    let webhook_url = webhook_url_raw.trim();
+    if webhook_url.is_empty() {
+        return Err("Webhook URL is required".to_string());
+    }
+
+    let raw_payload = extract_required_str(params, "workflowRawJson", "Raw JSON payload")?;
+    let templated = templ_str(raw_payload, context);
+    if templated.trim().is_empty() {
+        return Err("Raw JSON payload is required".to_string());
+    }
+    let payload = serde_json::from_str::<Value>(&templated)
+        .map_err(|e| format!("Raw JSON payload is invalid: {e}"))?;
+
+    let mut headers = HeaderMap::new();
+
+    match workflow_option_normalized.as_str() {
+        "headersecretauth" => {
+            let header_name_raw =
+                extract_required_str(params, "workflowHeaderName", "Header name")?;
+            let header_value_raw =
+                extract_required_str(params, "workflowHeaderSecret", "Header secret")?;
+
+            let header_name = templ_str(header_name_raw, context);
+            let trimmed_name = header_name.trim();
+            if trimmed_name.is_empty() {
+                return Err("Header name is required".to_string());
+            }
+
+            let header_name = HeaderName::from_bytes(trimmed_name.as_bytes())
+                .map_err(|_| "Header name is invalid".to_string())?;
+
+            let header_value = templ_str(header_value_raw, context);
+            if header_value.trim().is_empty() {
+                return Err("Header secret is required".to_string());
+            }
+
+            let header_value = HeaderValue::from_str(header_value.as_str())
+                .map_err(|_| "Header secret contains invalid characters".to_string())?;
+
+            headers.insert(header_name, header_value);
+        }
+        _ => {}
+    }
+
+    let headers = if headers.is_empty() {
+        None
+    } else {
+        Some(headers)
+    };
+
+    post_webhook_payload(webhook_url, payload, "Teams", headers).await
+}
+
+fn optional_string(params: &Value, key: &str) -> Option<String> {
+    params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .and_then(|s| if s.trim().is_empty() { None } else { Some(s) })
+}
+
+fn sanitize_teams_params(params: &Value) -> Value {
+    let mut map = Map::new();
+
+    let delivery_method = params
+        .get("deliveryMethod")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Incoming Webhook");
+
+    map.insert(
+        "deliveryMethod".to_string(),
+        Value::String(delivery_method.to_string()),
+    );
+
+    let normalized_delivery = normalize_identifier(delivery_method);
+
+    if normalized_delivery != "incomingwebhook" {
+        return Value::Object(map);
+    }
+
+    let webhook_type = params
+        .get("webhookType")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Connector");
+
+    map.insert(
+        "webhookType".to_string(),
+        Value::String(webhook_type.to_string()),
+    );
+
+    let webhook_url = optional_string(params, "webhookUrl");
+
+    match normalize_identifier(webhook_type).as_str() {
+        "connector" => {
+            if let Some(url) = webhook_url {
+                map.insert("webhookUrl".to_string(), Value::String(url));
+            }
+            if let Some(title) = optional_string(params, "title") {
+                map.insert("title".to_string(), Value::String(title));
+            }
+            if let Some(summary) = optional_string(params, "summary") {
+                map.insert("summary".to_string(), Value::String(summary));
+            }
+            if let Some(theme_color) = optional_string(params, "themeColor") {
+                map.insert("themeColor".to_string(), Value::String(theme_color));
+            }
+            if let Some(message) = optional_string(params, "message") {
+                map.insert("message".to_string(), Value::String(message));
+            }
+        }
+        "workflowpowerautomate" | "workflow" | "powerautomate" => {
+            let requested_option = params
+                .get("workflowOption")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Basic (Raw JSON)");
+
+            let normalized_option = normalize_identifier(requested_option);
+            let coerced_option = if normalized_option == "headersecretauth" {
+                "Header Secret Auth"
+            } else {
+                "Basic (Raw JSON)"
+            };
+
+            map.insert(
+                "workflowOption".to_string(),
+                Value::String(coerced_option.to_string()),
+            );
+
+            if let Some(raw) = optional_string(params, "workflowRawJson") {
+                map.insert("workflowRawJson".to_string(), Value::String(raw));
+            }
+
+            if let Some(url) = webhook_url.clone() {
+                map.insert("webhookUrl".to_string(), Value::String(url));
+            }
+
+            if normalized_option == "headersecretauth" {
+                if let Some(name) = optional_string(params, "workflowHeaderName") {
+                    map.insert("workflowHeaderName".to_string(), Value::String(name));
+                }
+                if let Some(secret) = optional_string(params, "workflowHeaderSecret") {
+                    map.insert("workflowHeaderSecret".to_string(), Value::String(secret));
+                }
+            }
+        }
+        _ => {}
+    }
+
+    Value::Object(map)
+}
+
+async fn post_webhook_payload(
+    webhook_raw: &str,
+    payload: Value,
+    service: &str,
+    extra_headers: Option<HeaderMap>,
+) -> Result<(Value, Option<String>), String> {
     let parsed_url =
         Url::parse(webhook_raw).map_err(|_| format!("Invalid webhook URL for {}", service))?;
     match parsed_url.scheme() {
@@ -163,9 +451,13 @@ async fn send_webhook_message(
     }
 
     let client = reqwest::Client::new();
-    let response = client
-        .post(parsed_url)
-        .json(&json!({ "text": message }))
+    let mut request = client.post(parsed_url).json(&payload);
+
+    if let Some(headers) = extra_headers {
+        request = request.headers(headers);
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| format!("{} webhook request failed: {e}", service))?;
@@ -447,8 +739,13 @@ mod tests {
             data: json!({
                 "params": {
                     "platform": "Teams",
+                    "deliveryMethod": "Incoming Webhook",
+                    "webhookType": "Connector",
                     "webhookUrl": format!("http://{addr}/teams"),
-                    "message": "Alert: {{ incident.id }}"
+                    "message": "Alert: {{ incident.id }}",
+                    "title": "Incident {{ incident.id }}",
+                    "summary": "Summary for {{ incident.id }}",
+                    "themeColor": "#00ff99"
                 }
             }),
         };
@@ -466,7 +763,11 @@ mod tests {
         let req = rx.recv().await.expect("recorded request");
         handle.abort();
         let body: Value = serde_json::from_slice(&req.body).expect("json body");
+        assert_eq!(body["@type"], "MessageCard");
         assert_eq!(body["text"], "Alert: INC-1");
+        assert_eq!(body["title"], "Incident INC-1");
+        assert_eq!(body["summary"], "Summary for INC-1");
+        assert_eq!(body["themeColor"], "00FF99");
     }
 
     #[tokio::test]
@@ -485,6 +786,8 @@ mod tests {
             data: json!({
                 "params": {
                     "platform": "Teams",
+                    "deliveryMethod": "Incoming Webhook",
+                    "webhookType": "Connector",
                     "webhookUrl": format!("http://{addr}/teams"),
                     "message": "Alert"
                 }
@@ -497,6 +800,182 @@ mod tests {
         handle.abort();
         assert!(err.contains("bad payload"));
         assert!(err.contains("400"));
+    }
+
+    #[tokio::test]
+    async fn teams_workflow_webhook_ignores_legacy_fields() {
+        let (addr, mut rx, handle) = spawn_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap()
+        })
+        .await;
+
+        let node = Node {
+            id: "action-7".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Teams",
+                    "deliveryMethod": "Incoming Webhook",
+                    "webhookType": "Workflow/Power Automate",
+                    "webhookUrl": format!("http://{addr}/workflow"),
+                    "message": "Workflow alert",
+                    "summary": "Workflow summary",
+                    "cardJson": "{\"type\":\"AdaptiveCard\"}",
+                    "workflowOption": "Basic (Raw JSON)",
+                    "workflowRawJson": r#"{
+                        "type": "message",
+                        "text": "payload text",
+                        "summary": "payload summary"
+                    }"#
+                }
+            }),
+        };
+
+        let (output, _) = execute_messaging(&node, &Value::Null)
+            .await
+            .expect("workflow webhook succeeds");
+
+        assert_eq!(output["service"], "Teams");
+        assert_eq!(output["status"], 200);
+
+        let req = rx.recv().await.expect("workflow request recorded");
+        handle.abort();
+        let body: Value = serde_json::from_slice(&req.body).expect("json body");
+        assert_eq!(body["type"], "message");
+        assert_eq!(body["text"], "payload text");
+        assert_eq!(body["summary"], "payload summary");
+        assert!(body.get("attachments").is_none());
+    }
+
+    #[tokio::test]
+    async fn teams_workflow_webhook_sends_raw_json_payload() {
+        let (addr, mut rx, handle) = spawn_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap()
+        })
+        .await;
+
+        let node = Node {
+            id: "action-8".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Teams",
+                    "deliveryMethod": "Incoming Webhook",
+                    "webhookType": "Workflow/Power Automate",
+                    "webhookUrl": format!("http://{addr}/workflow"),
+                    "workflowOption": "Basic (Raw JSON)",
+                    "workflowRawJson": r#"{
+                        "type": "message",
+                        "text": "Hello {{ user }}",
+                        "summary": "raw"
+                    }"#
+                }
+            }),
+        };
+
+        let context = json!({ "user": "Charlie" });
+
+        let (output, _) = execute_messaging(&node, &context)
+            .await
+            .expect("raw json workflow succeeds");
+
+        assert_eq!(output["service"], "Teams");
+        assert_eq!(output["status"], 200);
+
+        let req = rx.recv().await.expect("workflow request recorded");
+        handle.abort();
+        let body: Value = serde_json::from_slice(&req.body).expect("json body");
+        assert_eq!(body["type"], "message");
+        assert_eq!(body["text"], "Hello Charlie");
+        assert_eq!(body["summary"], "raw");
+    }
+
+    #[tokio::test]
+    async fn teams_workflow_webhook_attaches_header_secret() {
+        let (addr, mut rx, handle) = spawn_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap()
+        })
+        .await;
+
+        let node = Node {
+            id: "action-9".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Teams",
+                    "deliveryMethod": "Incoming Webhook",
+                    "webhookType": "Workflow/Power Automate",
+                    "webhookUrl": format!("http://{addr}/workflow"),
+                    "workflowOption": "Header Secret Auth",
+                    "workflowRawJson": r#"{
+                        "type": "message",
+                        "text": "secret"
+                    }"#,
+                    "workflowHeaderName": "X-Workflow-Secret",
+                    "workflowHeaderSecret": "super-secret"
+                }
+            }),
+        };
+
+        let (output, _) = execute_messaging(&node, &Value::Null)
+            .await
+            .expect("header secret workflow succeeds");
+
+        assert_eq!(output["status"], 200);
+
+        let req = rx.recv().await.expect("workflow request recorded");
+        handle.abort();
+
+        let header = req
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("X-Workflow-Secret"))
+            .map(|(_, value)| value.clone())
+            .expect("header should exist");
+        assert_eq!(header, "super-secret");
+    }
+
+    #[test]
+    fn sanitize_teams_params_drops_oauth_fields() {
+        let params = json!({
+            "deliveryMethod": "Incoming Webhook",
+            "webhookType": "Workflow/Power Automate",
+            "webhookUrl": "https://example.com/workflow",
+            "workflowOption": "Basic (Raw JSON)",
+            "workflowRawJson": "{\"type\":\"message\"}",
+            "workflowOAuthUrl": "https://login.microsoftonline.com/tenant/oauth2/v2.0/token",
+            "workflowOAuthClientId": "client",
+            "workflowOAuthClientSecret": "secret",
+            "workflowOAuthScope": "scope",
+            "workflowOAuthTenantId": "tenant"
+        });
+
+        let sanitized = sanitize_teams_params(&params);
+        let map = sanitized
+            .as_object()
+            .expect("teams params should sanitize to an object");
+
+        assert_eq!(
+            map.get("workflowOption")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
+            "Basic (Raw JSON)"
+        );
+        assert!(map.get("workflowRawJson").is_some());
+        assert!(map.get("workflowOAuthUrl").is_none());
+        assert!(map.get("workflowOAuthClientId").is_none());
+        assert!(map.get("workflowOAuthClientSecret").is_none());
+        assert!(map.get("workflowOAuthScope").is_none());
+        assert!(map.get("workflowOAuthTenantId").is_none());
     }
 
     #[tokio::test]
