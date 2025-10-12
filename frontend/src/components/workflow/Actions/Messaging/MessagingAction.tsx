@@ -24,7 +24,7 @@ const allowedKeys: Record<MessagingPlatform, string[]> = {
     'workflowHeaderName',
     'workflowHeaderSecret'
   ],
-  'Google Chat': ['webhookUrl', 'message']
+  'Google Chat': ['webhookUrl', 'message', 'cardJson']
 }
 
 const sanitizeParams = (

@@ -161,23 +161,90 @@ async fn send_google_chat(
     params: &Value,
     context: &Value,
 ) -> Result<(Value, Option<String>), String> {
-    send_webhook_message(params, context, "Google Chat").await
-}
-
-async fn send_webhook_message(
-    params: &Value,
-    context: &Value,
-    service: &str,
-) -> Result<(Value, Option<String>), String> {
     let webhook_raw = extract_required_str(params, "webhookUrl", "Webhook URL")?;
-    let message_raw = extract_required_str(params, "message", "Message")?;
 
-    let message = templ_str(message_raw, context);
-    if message.trim().is_empty() {
-        return Err("Message is required".to_string());
+    let card_payload = params
+        .get("cardJson")
+        .and_then(|v| v.as_str())
+        .map(|raw| templ_str(raw, context))
+        .and_then(|templated| {
+            if templated.trim().is_empty() {
+                None
+            } else {
+                Some(templated)
+            }
+        });
+
+    let payload = if let Some(card_raw) = card_payload {
+        let payload_value: Value =
+            serde_json::from_str(card_raw.trim()).map_err(|e| format!("Invalid card JSON: {e}"))?;
+
+        let has_cards = payload_value
+            .as_object()
+            .map(|obj| obj.contains_key("cards") || obj.contains_key("cardsV2"))
+            .unwrap_or(false);
+
+        if !has_cards {
+            return Err("Card JSON must include 'cards' or 'cardsV2'".to_string());
+        }
+
+        payload_value
+    } else {
+        let message_raw = extract_required_str(params, "message", "Message")?;
+
+        let message = templ_str(message_raw, context);
+        if message.trim().is_empty() {
+            return Err("Message is required".to_string());
+        }
+
+        json!({ "text": message })
+    };
+
+    let parsed_url =
+        Url::parse(webhook_raw).map_err(|_| "Invalid webhook URL for Google Chat".to_string())?;
+    match parsed_url.scheme() {
+        "http" | "https" => {}
+        _ => return Err("Webhook URL for Google Chat must be HTTP or HTTPS".to_string()),
     }
 
-    post_webhook_payload(webhook_raw, json!({ "text": message }), service, None).await
+    let client = reqwest::Client::new();
+    let response = client
+        .post(parsed_url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Google Chat webhook request failed: {e}"))?;
+
+    let status = response.status();
+    let body_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Google Chat webhook response read failed: {e}"))?;
+
+    if !status.is_success() {
+        let detail = body_text.trim();
+        if detail.is_empty() {
+            return Err(format!(
+                "Google Chat webhook returned status {}",
+                status.as_u16()
+            ));
+        }
+        return Err(format!(
+            "Google Chat webhook returned status {}: {}",
+            status.as_u16(),
+            detail
+        ));
+    }
+
+    Ok((
+        json!({
+            "sent": true,
+            "service": "Google Chat",
+            "platform": "Google Chat",
+            "status": status.as_u16(),
+        }),
+        None,
+    ))
 }
 
 fn normalize_identifier(value: &str) -> String {
@@ -979,7 +1046,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn google_chat_succeeds() {
+    async fn google_chat_text_message_succeeds() {
         let (addr, mut rx, handle) = spawn_stub_server(|| {
             Response::builder()
                 .status(StatusCode::OK)
@@ -1011,7 +1078,140 @@ mod tests {
 
         let req = rx.recv().await.expect("request recorded");
         handle.abort();
+        assert_eq!(req.method, "POST");
+        let content_type = req
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+            .map(|(_, value)| value.clone())
+            .unwrap_or_default();
+        assert!(content_type.contains("application/json"));
         let body: Value = serde_json::from_slice(&req.body).expect("json body");
         assert_eq!(body["text"], "Hello Integrations");
+    }
+
+    #[tokio::test]
+    async fn google_chat_card_payload_succeeds() {
+        let (addr, mut rx, handle) = spawn_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap()
+        })
+        .await;
+
+        let node = Node {
+            id: "action-7".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Google Chat",
+                    "webhookUrl": format!("http://{addr}/chat"),
+                    "cardJson": r#"{
+                        "cardsV2": [
+                            {
+                                "cardId": "updates",
+                                "card": {
+                                    "sections": [
+                                        {
+                                            "widgets": [
+                                                {
+                                                    "textParagraph": {
+                                                        "text": "Hello {{ team }}"
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }"#
+                }
+            }),
+        };
+
+        let context = json!({ "team": "Cards" });
+
+        let (output, _) = execute_messaging(&node, &context)
+            .await
+            .expect("card call succeeds");
+
+        assert_eq!(output["service"], "Google Chat");
+        assert_eq!(output["status"], 200);
+
+        let req = rx.recv().await.expect("request recorded");
+        handle.abort();
+        assert_eq!(req.method, "POST");
+        let content_type = req
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+            .map(|(_, value)| value.clone())
+            .unwrap_or_default();
+        assert!(content_type.contains("application/json"));
+
+        let body: Value = serde_json::from_slice(&req.body).expect("json body");
+        assert!(body.get("cards").is_none());
+        let cards_v2 = body
+            .get("cardsV2")
+            .and_then(|v| v.as_array())
+            .expect("cardsV2 array should exist");
+        assert!(!cards_v2.is_empty(), "cardsV2 should not be empty");
+        let text = cards_v2[0]
+            .get("card")
+            .and_then(|card| card.get("sections"))
+            .and_then(|sections| sections.as_array())
+            .and_then(|sections| sections.get(0))
+            .and_then(|section| section.get("widgets"))
+            .and_then(|widgets| widgets.as_array())
+            .and_then(|widgets| widgets.get(0))
+            .and_then(|widget| widget.get("textParagraph"))
+            .and_then(|paragraph| paragraph.get("text"))
+            .and_then(|text| text.as_str())
+            .expect("text paragraph should exist");
+        assert_eq!(text, "Hello Cards");
+    }
+
+    #[tokio::test]
+    async fn google_chat_card_payload_requires_valid_json() {
+        let node = Node {
+            id: "action-8".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Google Chat",
+                    "webhookUrl": "https://example.com/webhook",
+                    "cardJson": "{ invalid }"
+                }
+            }),
+        };
+
+        let err = execute_messaging(&node, &Value::Null)
+            .await
+            .expect_err("invalid card json should fail");
+
+        assert!(err.starts_with("Invalid card JSON:"));
+    }
+
+    #[tokio::test]
+    async fn google_chat_card_payload_requires_cards_key() {
+        let node = Node {
+            id: "action-9".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Google Chat",
+                    "webhookUrl": "https://example.com/webhook",
+                    "cardJson": "{\"text\": \"missing cards\"}"
+                }
+            }),
+        };
+
+        let err = execute_messaging(&node, &Value::Null)
+            .await
+            .expect_err("missing cards key should fail");
+
+        assert_eq!(err, "Card JSON must include 'cards' or 'cardsV2'");
     }
 }
