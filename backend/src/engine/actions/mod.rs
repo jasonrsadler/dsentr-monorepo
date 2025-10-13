@@ -9,7 +9,7 @@ use crate::engine::templating::templ_str;
 use crate::models::workflow_run::WorkflowRun;
 use crate::state::AppState;
 
-use super::graph::{Edge, Node};
+use super::graph::Node;
 
 pub(crate) async fn execute_trigger(
     node: &Node,
@@ -34,7 +34,6 @@ pub(crate) async fn execute_trigger(
 pub(crate) async fn execute_condition(
     node: &Node,
     context: &Value,
-    outgoing: &[Edge],
 ) -> Result<(Value, Option<String>), String> {
     let expression = node
         .data
@@ -49,17 +48,7 @@ pub(crate) async fn execute_condition(
         evaluate_legacy_condition(node, context)?
     };
 
-    let wanted = if result {
-        Some("cond-true")
-    } else {
-        Some("cond-false")
-    };
-    let selected = outgoing
-        .iter()
-        .find(|e| e.source_handle.as_deref() == wanted)
-        .map(|e| e.target.clone());
-
-    Ok((json!({"result": result}), selected))
+    Ok((json!({"result": result}), None))
 }
 
 fn parse_input_value(raw: &str) -> Value {

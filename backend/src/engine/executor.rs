@@ -158,7 +158,7 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
 
         let execution = match kind {
             "trigger" => execute_trigger(node, &context_value).await,
-            "condition" => execute_condition(node, &context_value, graph.outgoing(&node_id)).await,
+            "condition" => execute_condition(node, &context_value).await,
             "action" => {
                 execute_action(
                     node,
@@ -199,8 +199,37 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                 match selected_next {
                     Some(next_id) => next_nodes.push(next_id),
                     None => {
-                        if let Some(edge) = graph.outgoing(&node_id).first() {
-                            next_nodes.push(edge.target.clone());
+                        if kind == "condition" {
+                            let desired_handle = outputs
+                                .get("result")
+                                .and_then(|v| v.as_bool())
+                                .map(|is_true| if is_true { "cond-true" } else { "cond-false" });
+
+                            if let Some(handle) = desired_handle {
+                                next_nodes.extend(
+                                    graph
+                                        .outgoing(&node_id)
+                                        .iter()
+                                        .filter(|edge| {
+                                            edge.source_handle.as_deref() == Some(handle)
+                                        })
+                                        .map(|edge| edge.target.clone()),
+                                );
+                            } else {
+                                next_nodes.extend(
+                                    graph
+                                        .outgoing(&node_id)
+                                        .iter()
+                                        .map(|edge| edge.target.clone()),
+                                );
+                            }
+                        } else {
+                            next_nodes.extend(
+                                graph
+                                    .outgoing(&node_id)
+                                    .iter()
+                                    .map(|edge| edge.target.clone()),
+                            );
                         }
                     }
                 }
@@ -244,9 +273,12 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                         .await;
                     return;
                 } else {
-                    if let Some(edge) = graph.outgoing(&node_id).first() {
-                        next_nodes.push(edge.target.clone());
-                    }
+                    next_nodes.extend(
+                        graph
+                            .outgoing(&node_id)
+                            .iter()
+                            .map(|edge| edge.target.clone()),
+                    );
                 }
             }
         }
