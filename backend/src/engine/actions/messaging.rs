@@ -134,7 +134,7 @@ async fn send_slack(params: &Value, context: &Value) -> Result<(Value, Option<St
 }
 
 async fn send_teams(
-    node: &Node,
+    _node: &Node,
     params: &Value,
     context: &Value,
 ) -> Result<(Value, Option<String>), String> {

@@ -1,5 +1,6 @@
 use crate::models::user::{OauthProvider, PublicUser, User};
 use async_trait::async_trait;
+use std::sync::Mutex;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -24,6 +25,7 @@ pub struct MockDb {
     pub mark_verification_token_fn: MarkVerificationTokenFn,
     pub set_user_verified_fn: Box<dyn Fn(Uuid) -> Result<(), sqlx::Error> + Send + Sync>,
     pub insert_early_access_email_fn: Box<dyn Fn(String) -> Result<(), sqlx::Error> + Send + Sync>,
+    pub user_settings: Mutex<Value>,
 }
 
 impl Default for MockDb {
@@ -35,6 +37,7 @@ impl Default for MockDb {
             mark_verification_token_fn: Box::new(|_, _| Ok(Some(Uuid::new_v4()))), // manually initialize all non-Default fields
             set_user_verified_fn: Box::new(|_| Ok(())),
             insert_early_access_email_fn: Box::new(|_| Ok(())),
+            user_settings: Mutex::new(Value::Object(Default::default())),
         }
     }
 }
@@ -133,6 +136,20 @@ impl UserRepository for MockDb {
     }
     async fn insert_early_access_email(&self, email: &str) -> Result<(), sqlx::Error> {
         (self.insert_early_access_email_fn)(email.to_string())
+    }
+
+    async fn get_user_settings(&self, _user_id: Uuid) -> Result<Value, sqlx::Error> {
+        Ok(self.user_settings.lock().unwrap().clone())
+    }
+
+    async fn update_user_settings(
+        &self,
+        _user_id: Uuid,
+        settings: Value,
+    ) -> Result<(), sqlx::Error> {
+        let mut guard = self.user_settings.lock().unwrap();
+        *guard = settings;
+        Ok(())
     }
 }
 

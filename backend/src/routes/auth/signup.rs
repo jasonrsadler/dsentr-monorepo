@@ -252,6 +252,18 @@ mod tests {
         async fn insert_early_access_email(&self, _email: &str) -> Result<(), sqlx::Error> {
             Ok(())
         }
+
+        async fn get_user_settings(&self, _: Uuid) -> Result<serde_json::Value, sqlx::Error> {
+            Ok(serde_json::Value::Object(Default::default()))
+        }
+
+        async fn update_user_settings(
+            &self,
+            _: Uuid,
+            _: serde_json::Value,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
     }
 
     fn test_payload() -> SignupPayload {

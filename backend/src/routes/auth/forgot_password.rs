@@ -195,6 +195,14 @@ mod tests {
         async fn insert_early_access_email(&self, _: &str) -> Result<(), Error> {
             Ok(())
         }
+
+        async fn get_user_settings(&self, _: Uuid) -> Result<serde_json::Value, Error> {
+            Ok(serde_json::Value::Object(Default::default()))
+        }
+
+        async fn update_user_settings(&self, _: Uuid, _: serde_json::Value) -> Result<(), Error> {
+            Ok(())
+        }
     }
 
     fn make_app(behavior: MockBehavior) -> Router {

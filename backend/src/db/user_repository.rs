@@ -60,4 +60,10 @@ pub trait UserRepository: Send + Sync {
     ) -> Result<Option<Uuid>, sqlx::Error>;
     async fn set_user_verified(&self, user_id: Uuid) -> Result<(), sqlx::Error>;
     async fn insert_early_access_email(&self, email: &str) -> Result<(), sqlx::Error>;
+    async fn get_user_settings(&self, user_id: Uuid) -> Result<serde_json::Value, sqlx::Error>;
+    async fn update_user_settings(
+        &self,
+        user_id: Uuid,
+        settings: serde_json::Value,
+    ) -> Result<(), sqlx::Error>;
 }

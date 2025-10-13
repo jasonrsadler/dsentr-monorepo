@@ -10,6 +10,7 @@ import WorkflowsTab from '@/components/Settings/tabs/WorkflowsTab'
 import EngineTab from '@/components/Settings/tabs/EngineTab'
 import LogsTab from '@/components/Settings/tabs/LogsTab'
 import WebhooksTab from '@/components/Settings/tabs/WebhooksTab'
+import OptionsTab from '@/components/Settings/tabs/OptionsTab'
 import { DsentrLogo } from '@/components/DsentrLogo'
 
 export default function DashboardLayout() {
@@ -51,16 +52,19 @@ export default function DashboardLayout() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         tabs={[
-          { key: 'workflows', label: 'Workflows' },
+          { key: 'engine', label: 'Engine' },
           { key: 'logs', label: 'Logs' },
           { key: 'webhooks', label: 'Webhooks' },
-          { key: 'engine', label: 'Engine' }
+          { key: 'options', label: 'Secrets & API Keys' },
+          { key: 'workflows', label: 'Workflows' }
+
         ]}
         renderTab={(key) => {
-          if (key === 'workflows') return <WorkflowsTab />
+          if (key === 'engine') return <EngineTab />
           if (key === 'logs') return <LogsTab />
           if (key === 'webhooks') return <WebhooksTab />
-          if (key === 'engine') return <EngineTab />
+          if (key === 'options') return <OptionsTab />
+          if (key === 'workflows') return <WorkflowsTab />
           return <div />
         }}
       />

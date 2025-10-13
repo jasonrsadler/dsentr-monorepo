@@ -1,13 +1,13 @@
 mod config;
 mod db;
+mod engine;
 mod models;
 mod responses;
 mod routes;
 mod services;
 mod state;
-mod engine;
-mod worker;
 pub mod utils;
+mod worker;
 
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::HeaderValue;
@@ -15,7 +15,7 @@ use axum::http::Method;
 use axum::{
     http::HeaderName,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use config::Config;
@@ -25,6 +25,7 @@ use reqwest::Client;
 use responses::JsonResponse;
 use routes::auth::{handle_login, handle_signup, verify_email};
 use routes::{
+    admin::purge_runs,
     auth::{
         forgot_password::handle_forgot_password,
         github_login::{github_callback, github_login},
@@ -34,15 +35,15 @@ use routes::{
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
+    options::secrets::{delete_secret, list_secrets, upsert_secret},
     workflows::{
-        create_workflow, delete_workflow, get_workflow, list_workflows, update_workflow,
-        get_workflow_run_status, start_workflow_run, get_webhook_url, webhook_trigger, regenerate_webhook_token, cancel_workflow_run,
-        list_runs_for_workflow, cancel_all_runs_for_workflow, rerun_workflow_run, download_run_json, sse_run_events,
-        set_concurrency_limit, list_dead_letters, requeue_dead_letter, rerun_from_failed_node,
-        get_egress_allowlist, set_egress_allowlist, get_webhook_config, set_webhook_config,
-        list_egress_block_events, clear_egress_block_events, clear_dead_letters_api,
+        cancel_all_runs_for_workflow, cancel_workflow_run, create_workflow, delete_workflow,
+        download_run_json, get_egress_allowlist, get_webhook_config, get_webhook_url, get_workflow,
+        get_workflow_run_status, list_dead_letters, list_runs_for_workflow, list_workflows,
+        regenerate_webhook_token, requeue_dead_letter, rerun_from_failed_node, rerun_workflow_run,
+        set_concurrency_limit, set_egress_allowlist, set_webhook_config, sse_run_events,
+        start_workflow_run, update_workflow, webhook_trigger,
     },
-    admin::purge_runs,
 };
 use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
@@ -169,7 +170,10 @@ async fn main() {
         google_oauth,
         github_oauth,
         worker_id: Arc::new(uuid::Uuid::new_v4().to_string()),
-        worker_lease_seconds: std::env::var("WORKER_LEASE_SECONDS").ok().and_then(|v| v.parse::<i32>().ok()).unwrap_or(15),
+        worker_lease_seconds: std::env::var("WORKER_LEASE_SECONDS")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+            .unwrap_or(15),
     };
     let state_for_worker = state.clone();
 
@@ -218,36 +222,21 @@ async fn main() {
     // Protected workflow routes (CSRF layer applied)
     let workflow_routes = Router::new()
         .route("/", post(create_workflow).get(list_workflows))
-        .route(
-            "/runs",
-            get(routes::workflows::list_active_runs),
-        )
-        .route(
-            "/runs/events",
-            get(routes::workflows::sse_global_runs),
-        )
+        .route("/runs", get(routes::workflows::list_active_runs))
+        .route("/runs/events", get(routes::workflows::sse_global_runs))
         .route(
             "/{workflow_id}",
             get(get_workflow)
                 .put(update_workflow)
                 .delete(delete_workflow),
         )
-        .route(
-            "/{workflow_id}/run",
-            post(start_workflow_run),
-        )
-        .route(
-            "/{workflow_id}/runs/{run_id}",
-            get(get_workflow_run_status),
-        )
+        .route("/{workflow_id}/run", post(start_workflow_run))
+        .route("/{workflow_id}/runs/{run_id}", get(get_workflow_run_status))
         .route(
             "/{workflow_id}/runs/{run_id}/cancel",
             post(cancel_workflow_run),
         )
-        .route(
-            "/{workflow_id}/runs",
-            get(list_runs_for_workflow),
-        )
+        .route("/{workflow_id}/runs", get(list_runs_for_workflow))
         .route(
             "/{workflow_id}/runs/cancel-all",
             post(cancel_all_runs_for_workflow),
@@ -264,18 +253,12 @@ async fn main() {
             "/{workflow_id}/runs/{run_id}/download",
             get(download_run_json),
         )
-        .route(
-            "/{workflow_id}/runs/{run_id}/events",
-            get(sse_run_events),
-        )
+        .route("/{workflow_id}/runs/{run_id}/events", get(sse_run_events))
         .route(
             "/{workflow_id}/runs/events-stream",
             get(routes::workflows::sse_workflow_runs),
         )
-        .route(
-            "/{workflow_id}/webhook-url",
-            get(get_webhook_url),
-        )
+        .route("/{workflow_id}/webhook-url", get(get_webhook_url))
         .route(
             "/{workflow_id}/webhook/config",
             get(get_webhook_config).post(set_webhook_config),
@@ -290,44 +273,58 @@ async fn main() {
         )
         .route(
             "/{workflow_id}/egress/blocks",
-            get(routes::workflows::list_egress_block_events).delete(routes::workflows::clear_egress_block_events),
+            get(routes::workflows::list_egress_block_events)
+                .delete(routes::workflows::clear_egress_block_events),
         )
-        .route(
-            "/{workflow_id}/concurrency",
-            post(set_concurrency_limit),
-        )
+        .route("/{workflow_id}/concurrency", post(set_concurrency_limit))
         .route(
             "/{workflow_id}/dead-letters",
-            get(list_dead_letters).delete(routes::workflows::clear_dead_letters_api))
+            get(list_dead_letters).delete(routes::workflows::clear_dead_letters_api),
+        )
         .route(
             "/{workflow_id}/dead-letters/{dead_id}/requeue",
             post(requeue_dead_letter),
         )
-        .route("/{workflow_id}/logs", get(routes::workflows::list_workflow_logs).delete(routes::workflows::clear_workflow_logs))
-        .route("/{workflow_id}/logs/{log_id}", delete(routes::workflows::delete_workflow_log_entry))
+        .route(
+            "/{workflow_id}/logs",
+            get(routes::workflows::list_workflow_logs)
+                .delete(routes::workflows::clear_workflow_logs),
+        )
+        .route(
+            "/{workflow_id}/logs/{log_id}",
+            delete(routes::workflows::delete_workflow_log_entry),
+        )
+        .layer(csrf_layer.clone());
+
+    let options_routes = Router::new()
+        .route("/secrets", get(list_secrets))
+        .route(
+            "/secrets/{group}/{service}/{name}",
+            put(upsert_secret).delete(delete_secret),
+        )
         .layer(csrf_layer.clone());
 
     // Admin routes (CSRF + rate limit). Only Admin role may call these handlers.
     let admin_routes = Router::new()
-        .route(
-            "/purge-runs",
-            post(purge_runs),
-        )
+        .route("/purge-runs", post(purge_runs))
         .layer(csrf_layer.clone())
-        .layer(GovernorLayer { config: global_governor_conf.clone() });
+        .layer(GovernorLayer {
+            config: global_governor_conf.clone(),
+        });
 
     // Public webhook route (no CSRF, no auth)
-    let public_workflow_routes = Router::new()
-        .route(
-            "/{workflow_id}/trigger/{token}",
-            post(webhook_trigger),
-        );
+    let public_workflow_routes =
+        Router::new().route("/{workflow_id}/trigger/{token}", post(webhook_trigger));
     let app = Router::new()
         .route("/", get(root))
         .route("/api/early-access", post(handle_early_access))
         .route("/api/dashboard", get(dashboard_handler))
         .nest("/api/auth", auth_routes) // <-- your auth routes with CSRF selectively applied
-        .nest("/api/workflows", workflow_routes.merge(public_workflow_routes))
+        .nest(
+            "/api/workflows",
+            workflow_routes.merge(public_workflow_routes),
+        )
+        .nest("/api/options", options_routes)
         .nest("/api/admin", admin_routes)
         .with_state(state)
         .layer(TraceLayer::new_for_http())
@@ -382,5 +379,3 @@ async fn establish_connection(database_url: &str) -> PgPool {
     info!("✅ Successfully connected to the database");
     pool
 }
-
-

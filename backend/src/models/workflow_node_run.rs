@@ -23,4 +23,3 @@ pub struct WorkflowNodeRun {
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
 }
-

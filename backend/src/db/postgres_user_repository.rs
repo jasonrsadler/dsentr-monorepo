@@ -6,6 +6,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use serde_json::Value;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -270,5 +271,42 @@ impl UserRepository for PostgresUserRepository {
             .execute(&self.pool)
             .await
             .map(|_| ()) // return `Ok(())` on success
+    }
+
+    async fn get_user_settings(&self, user_id: Uuid) -> Result<Value, sqlx::Error> {
+        let record = sqlx::query!("SELECT settings FROM users WHERE id = $1", user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        match record {
+            Some(row) => {
+                let mut settings = row.settings;
+                if settings.is_null() {
+                    settings = Value::Object(Default::default());
+                }
+                Ok(settings)
+            }
+            None => Err(sqlx::Error::RowNotFound),
+        }
+    }
+
+    async fn update_user_settings(
+        &self,
+        user_id: Uuid,
+        settings: Value,
+    ) -> Result<(), sqlx::Error> {
+        let result = sqlx::query!(
+            "UPDATE users SET settings = $2, updated_at = now() WHERE id = $1",
+            user_id,
+            settings
+        )
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(sqlx::Error::RowNotFound);
+        }
+
+        Ok(())
     }
 }

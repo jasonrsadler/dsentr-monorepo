@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     models::workflow::{CreateWorkflow, Workflow},
     responses::JsonResponse,
-    routes::auth::session::AuthSession,
+    routes::{auth::session::AuthSession, options::secrets::sync_secrets_from_workflow},
     state::AppState,
     utils::schedule::{compute_next_run, offset_to_utc, parse_schedule_config, utc_to_offset},
 };
@@ -218,6 +218,7 @@ pub async fn create_workflow(
     match result {
         Ok(workflow) => {
             sync_workflow_schedule(&app_state, &workflow).await;
+            sync_secrets_from_workflow(&app_state, user_id, &workflow.data).await;
             (
                 StatusCode::CREATED,
                 Json(json!({
@@ -337,6 +338,7 @@ pub async fn update_workflow(
                     eprintln!("Failed to insert workflow log: {:?}", e);
                 }
             }
+            sync_secrets_from_workflow(&app_state, user_id, &workflow.data).await;
             (
                 StatusCode::OK,
                 Json(json!({
