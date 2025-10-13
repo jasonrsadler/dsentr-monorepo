@@ -11,6 +11,7 @@ interface ConditionNodeProps {
     field?: string
     operator?: string
     value?: string
+    expression?: string
     dirty?: boolean
     expanded?: boolean
     hasValidationErrors?: boolean
@@ -65,11 +66,13 @@ export default function ConditionNode({
 
   // Sync node data to parent
   useEffect(() => {
+    const expression = buildExpression(field, operator, value)
     const nextData = {
       label,
       field,
       operator,
       value,
+      expression,
       dirty,
       expanded,
       hasValidationErrors: combinedHasValidationErrors
@@ -266,4 +269,54 @@ export default function ConditionNode({
       </AnimatePresence>
     </motion.div>
   )
+}
+
+function buildExpression(field: string, operator: string, value: string) {
+  const left = field.trim()
+  if (!left) {
+    return ''
+  }
+
+  const operatorSymbol = OPERATOR_SYMBOLS[operator.toLowerCase()] ?? '=='
+  const formattedLeft = left.startsWith('{{') ? left : `{{${left}}}`
+  const formattedRight = formatExpressionValue(value)
+
+  return `${formattedLeft} ${operatorSymbol} ${formattedRight}`.trim()
+}
+
+const OPERATOR_SYMBOLS: Record<string, string> = {
+  equals: '==',
+  'not equals': '!=',
+  'greater than': '>',
+  'less than': '<',
+  contains: 'contains'
+}
+
+function formatExpressionValue(raw: string) {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return '""'
+  }
+
+  if (trimmed.startsWith('{{') && trimmed.endsWith('}}')) {
+    return trimmed
+  }
+
+  if (/^(true|false|null)$/i.test(trimmed)) {
+    return trimmed.toLowerCase()
+  }
+
+  if (!Number.isNaN(Number(trimmed))) {
+    return trimmed
+  }
+
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed
+  }
+
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return JSON.stringify(trimmed.slice(1, -1))
+  }
+
+  return JSON.stringify(trimmed)
 }
