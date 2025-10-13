@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSecrets } from '@/contexts/SecretsContext'
 import {
   getWorkflowLogs,
   listWorkflows,
@@ -7,6 +8,7 @@ import {
   WorkflowLogEntry,
   WorkflowRecord
 } from '@/lib/workflowApi'
+import { flattenSecretValues, maskValueForPath } from '@/lib/secretMask'
 
 export default function LogsTab() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
@@ -14,6 +16,8 @@ export default function LogsTab() {
   const [logs, setLogs] = useState<WorkflowLogEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [workflowName, setWorkflowName] = useState<string>('')
+  const { secrets } = useSecrets()
+  const secretValues = useMemo(() => flattenSecretValues(secrets), [secrets])
 
   useEffect(() => {
     listWorkflows()
@@ -113,11 +117,23 @@ export default function LogsTab() {
             </div>
             <ul className="text-xs space-y-1 max-h-48 overflow-auto">
               {(Array.isArray(e.diffs) ? e.diffs : []).map(
-                (d: any, i: number) => (
-                  <li key={i} className="font-mono">
-                    {d.path}: {JSON.stringify(d.from)} → {JSON.stringify(d.to)}
-                  </li>
-                )
+                (d: any, i: number) => {
+                  const maskedFrom = maskValueForPath(
+                    d.from,
+                    typeof d.path === 'string' ? d.path : '',
+                    secretValues
+                  )
+                  const maskedTo = maskValueForPath(
+                    d.to,
+                    typeof d.path === 'string' ? d.path : '',
+                    secretValues
+                  )
+                  return (
+                    <li key={i} className="font-mono">
+                      {`${d.path}: ${JSON.stringify(maskedFrom)} → ${JSON.stringify(maskedTo)}`}
+                    </li>
+                  )
+                }
               )}
             </ul>
           </div>

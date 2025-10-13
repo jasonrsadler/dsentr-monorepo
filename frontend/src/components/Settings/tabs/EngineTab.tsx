@@ -6,6 +6,7 @@ import {
   setConcurrencyLimit,
   cancelAllRunsForWorkflow,
   listDeadLetters,
+  type DeadLetter,
   requeueDeadLetter,
   purgeRuns,
   getEgressAllowlist,
@@ -19,6 +20,12 @@ import {
 } from '@/lib/workflowApi'
 import JsonDialog from '@/components/UI/Dialog/JsonDialog'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { useSecrets } from '@/contexts/SecretsContext'
+import {
+  flattenSecretValues,
+  maskSecretsDeep,
+  maskStringWithSecrets
+} from '@/lib/secretMask'
 
 export default function EngineTab() {
   const { user } = useAuth()
@@ -48,11 +55,12 @@ export default function EngineTab() {
     () => items.find((w) => w.id === selectedId) ?? null,
     [items, selectedId]
   )
+  const selectedWorkflowId = selected?.id ?? null
   const [limitInput, setLimitInput] = useState<string>('')
   useEffect(() => {
     const current = (selected as any)?.concurrency_limit
     setLimitInput(typeof current === 'number' ? String(current) : '')
-  }, [selected?.id])
+  }, [selectedWorkflowId])
 
   const [busy, setBusy] = useState(false)
   const [deadLetters, setDeadLetters] = useState<any[]>([])
@@ -73,6 +81,26 @@ export default function EngineTab() {
   const [jsonOpen, setJsonOpen] = useState(false)
   const [jsonTitle, setJsonTitle] = useState<string>('')
   const [jsonBody, setJsonBody] = useState<string>('')
+  const { secrets } = useSecrets()
+  const secretValues = useMemo(() => flattenSecretValues(secrets), [secrets])
+  const sanitizeDeadLetters = useCallback(
+    (items: DeadLetter[]) =>
+      items.map((item) => ({
+        ...item,
+        error: maskStringWithSecrets(item.error, secretValues)
+      })),
+    [secretValues]
+  )
+  const sanitizeEgress = useCallback(
+    (items: EgressBlockEvent[]) =>
+      items.map((item) => ({
+        ...item,
+        host: maskStringWithSecrets(item.host ?? '', secretValues),
+        message: maskStringWithSecrets(item.message ?? '', secretValues),
+        url: maskStringWithSecrets(item.url ?? '', secretValues)
+      })),
+    [secretValues]
+  )
 
   async function handleSaveLimit() {
     if (!selected || busy) return
@@ -114,18 +142,18 @@ export default function EngineTab() {
     }
   }
 
-  async function refreshDeadLetters() {
-    if (!selected) return
+  const refreshDeadLetters = useCallback(async () => {
+    if (!selectedWorkflowId) return
     try {
-      const items = await listDeadLetters(selected.id, 1, 50)
-      setDeadLetters(items)
+      const items = await listDeadLetters(selectedWorkflowId, 1, 50)
+      setDeadLetters(sanitizeDeadLetters(items))
     } catch {
       /* ignore */
     }
-  }
+  }, [selectedWorkflowId, sanitizeDeadLetters])
   useEffect(() => {
     refreshDeadLetters()
-  }, [selected?.id])
+  }, [refreshDeadLetters])
 
   const refreshSuccessfulRuns = useCallback(
     async (page: number) => {
@@ -166,39 +194,39 @@ export default function EngineTab() {
 
   useEffect(() => {
     ;(async () => {
-      if (!selected) {
+      if (!selectedWorkflowId) {
         setEgressText('')
         return
       }
       try {
-        const list = await getEgressAllowlist(selected.id)
+        const list = await getEgressAllowlist(selectedWorkflowId)
         setEgressText(list.join('\n'))
       } catch {
         setEgressText('')
       }
     })()
-  }, [selected?.id])
+  }, [selectedWorkflowId])
 
   useEffect(() => {
     ;(async () => {
-      if (!selected) {
+      if (!selectedWorkflowId) {
         setEgressBlocks([])
         return
       }
       try {
-        const items = await listEgressBlocks(selected.id, 1, 25)
-        setEgressBlocks(items)
+        const items = await listEgressBlocks(selectedWorkflowId, 1, 25)
+        setEgressBlocks(sanitizeEgress(items))
       } catch {
         setEgressBlocks([])
       }
     })()
-  }, [selected?.id])
+  }, [selectedWorkflowId, sanitizeEgress])
 
   async function handleRequeue(id: string) {
-    if (!selected) return
+    if (!selectedWorkflowId) return
     try {
       setDlBusyId(id)
-      await requeueDeadLetter(selected.id, id)
+      await requeueDeadLetter(selectedWorkflowId, id)
       await refreshDeadLetters()
     } finally {
       setDlBusyId(null)
@@ -412,16 +440,14 @@ export default function EngineTab() {
                                   r.id
                                 )
                                 setJsonTitle(`Run ${r.id}`)
-                                setJsonBody(
-                                  JSON.stringify(
-                                    {
-                                      run: data.run,
-                                      node_runs: data.node_runs
-                                    },
-                                    null,
-                                    2
-                                  )
+                                const sanitized = maskSecretsDeep(
+                                  {
+                                    run: data.run,
+                                    node_runs: data.node_runs
+                                  },
+                                  secretValues
                                 )
+                                setJsonBody(JSON.stringify(sanitized, null, 2))
                                 setJsonOpen(true)
                               } catch (e) {
                                 console.error(e.message)
@@ -458,9 +484,9 @@ export default function EngineTab() {
             </button>
             <button
               onClick={async () => {
-                if (selected) {
+                if (selectedWorkflowId) {
                   try {
-                    await clearDeadLetters(selected.id)
+                    await clearDeadLetters(selectedWorkflowId)
                     await refreshDeadLetters()
                   } catch (e) {
                     console.error(e.message)
@@ -491,9 +517,9 @@ export default function EngineTab() {
                     </div>
                     <div
                       className="text-sm truncate max-w-full"
-                      title={d.error}
+                      title={maskStringWithSecrets(d.error ?? '', secretValues)}
                     >
-                      {d.error}
+                      {maskStringWithSecrets(d.error ?? '', secretValues)}
                     </div>
                     <div className="mt-2 flex gap-2">
                       <button
@@ -525,10 +551,14 @@ export default function EngineTab() {
           <div className="flex items-center gap-2">
             <button
               onClick={async () => {
-                if (selected) {
+                if (selectedWorkflowId) {
                   try {
-                    const items = await listEgressBlocks(selected.id, 1, 25)
-                    setEgressBlocks(items)
+                    const items = await listEgressBlocks(
+                      selectedWorkflowId,
+                      1,
+                      25
+                    )
+                    setEgressBlocks(sanitizeEgress(items))
                   } catch (e) {
                     console.error(e.message)
                   }
@@ -540,11 +570,15 @@ export default function EngineTab() {
             </button>
             <button
               onClick={async () => {
-                if (selected) {
+                if (selectedWorkflowId) {
                   try {
-                    await clearEgressBlocks(selected.id)
-                    const items = await listEgressBlocks(selected.id, 1, 25)
-                    setEgressBlocks(items)
+                    await clearEgressBlocks(selectedWorkflowId)
+                    const items = await listEgressBlocks(
+                      selectedWorkflowId,
+                      1,
+                      25
+                    )
+                    setEgressBlocks(sanitizeEgress(items))
                   } catch (e) {
                     console.error(e.message)
                   }
@@ -574,10 +608,13 @@ export default function EngineTab() {
                       {b.node_id} - {b.rule}
                     </div>
                     <div className="text-sm">
-                      <span className="font-mono">{b.host}</span> - {b.message}
+                      <span className="font-mono">
+                        {maskStringWithSecrets(b.host ?? '', secretValues)}
+                      </span>{' '}
+                      - {maskStringWithSecrets(b.message ?? '', secretValues)}
                     </div>
                     <div className="text-xs text-zinc-500 break-words">
-                      {b.url}
+                      {maskStringWithSecrets(b.url ?? '', secretValues)}
                     </div>
                   </div>
                 ))}
