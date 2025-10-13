@@ -47,6 +47,114 @@ function sanitizeData(data: any) {
   return rest
 }
 
+const LABEL_MESSAGES = {
+  spaces: 'Node names cannot contain spaces.',
+  duplicate: 'Node name must be unique.'
+} as const
+
+type FlowNode = {
+  id: string
+  data?: Record<string, any>
+  [key: string]: any
+}
+
+function sanitizeLabelInput(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function countExistingLabels(nodes: FlowNode[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  nodes.forEach((node) => {
+    const label = sanitizeLabelInput(node?.data?.label)
+    if (!label) return
+    const key = label.toLowerCase()
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  })
+  return counts
+}
+
+function generateUniqueLabel(baseLabel: string, nodes: FlowNode[]): string {
+  const trimmed = sanitizeLabelInput(baseLabel)
+  const normalizedBase = trimmed.replace(/\s+/g, '') || 'Node'
+  const counts = countExistingLabels(nodes)
+  if ((counts.get(normalizedBase.toLowerCase()) ?? 0) === 0) {
+    return normalizedBase
+  }
+  let suffix = 2
+  let candidate = `${normalizedBase}${suffix}`
+  while ((counts.get(candidate.toLowerCase()) ?? 0) > 0) {
+    suffix += 1
+    candidate = `${normalizedBase}${suffix}`
+  }
+  return candidate
+}
+
+function shallowEqualData(
+  a: Record<string, any> | undefined,
+  b: Record<string, any>
+): boolean {
+  if (!a) {
+    return Object.keys(b).length === 0
+  }
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+  for (const key of keysA) {
+    if (a[key] !== b[key]) {
+      return false
+    }
+  }
+  return true
+}
+
+function reconcileNodeLabels(nodes: FlowNode[]): FlowNode[] {
+  const metadata = nodes.map((node) => {
+    const trimmed = sanitizeLabelInput(node?.data?.label)
+    return {
+      trimmed,
+      hasSpaces: /\s/.test(trimmed),
+      normalized: trimmed.toLowerCase()
+    }
+  })
+  const counts = new Map<string, number>()
+  metadata.forEach(({ trimmed, normalized }) => {
+    if (!trimmed) return
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+  })
+  let hasChanges = false
+  const nextNodes = nodes.map((node, index) => {
+    const prevData = node.data ?? {}
+    const { trimmed, hasSpaces, normalized } = metadata[index]
+    let labelError: string | null = null
+    if (trimmed && hasSpaces) {
+      labelError = LABEL_MESSAGES.spaces
+    } else if (trimmed && (counts.get(normalized) ?? 0) > 1) {
+      labelError = LABEL_MESSAGES.duplicate
+    }
+    const hasLabelValidationError = Boolean(labelError)
+    const nextDataShouldChange =
+      prevData.label !== trimmed ||
+      (prevData.labelError ?? null) !== labelError ||
+      Boolean(prevData.hasLabelValidationError) !== hasLabelValidationError
+
+    if (!nextDataShouldChange) {
+      return node
+    }
+
+    hasChanges = true
+    return {
+      ...node,
+      data: {
+        ...prevData,
+        label: trimmed,
+        labelError,
+        hasLabelValidationError
+      }
+    }
+  })
+  return hasChanges ? nextNodes : nodes
+}
+
 interface FlowCanvasProps {
   isDark?: boolean
   markWorkflowDirty: () => void
@@ -109,7 +217,7 @@ export default function FlowCanvas({
     const incomingEdges = (workflowData?.edges ?? []).map((e: any) => ({
       ...e
     }))
-    setNodes(incomingNodes)
+    setNodes(reconcileNodeLabels(incomingNodes))
     setEdges(incomingEdges)
   }, [workflowId, workflowData, setNodes, setEdges])
   useEffect(() => {
@@ -144,11 +252,24 @@ export default function FlowCanvas({
 
   const updateNodeData = useCallback(
     (id: string, newData: any, suppressDirty = false) => {
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === id ? { ...n, data: { ...n.data, ...newData } } : n
-        )
-      )
+      setNodes((nds) => {
+        let didChange = false
+        const updated = nds.map((n) => {
+          if (n.id !== id) return n
+          const prevData = n.data ?? {}
+          const mergedData = { ...prevData, ...newData }
+          if (shallowEqualData(prevData, mergedData)) {
+            return n
+          }
+          didChange = true
+          return { ...n, data: mergedData }
+        })
+        const reconciled = reconcileNodeLabels(updated)
+        if (!didChange && reconciled === updated) {
+          return nds
+        }
+        return reconciled
+      })
       if (!suppressDirty) markWorkflowDirty()
     },
     [setNodes, markWorkflowDirty]
@@ -171,7 +292,7 @@ export default function FlowCanvas({
       }
     })
 
-    setNodes(clearedNodes)
+    setNodes(reconcileNodeLabels(clearedNodes))
 
     return clearedNodes
   }, [nodes, setNodes])
@@ -181,14 +302,25 @@ export default function FlowCanvas({
         saveAllNodes,
         getEdges: () => edges,
         setNodesFromToolbar: (updatedNodes) =>
-          setNodes((nds) =>
-            nds.map((n) => {
+          setNodes((nds) => {
+            let changed = false
+            const mapped = nds.map((n) => {
               const updated = updatedNodes.find((u) => u.id === n.id)
-              return updated
-                ? { ...n, data: { ...n.data, ...updated.data } }
-                : n
+              if (!updated) return n
+              const prevData = n.data ?? {}
+              const nextData = { ...prevData, ...updated.data }
+              if (shallowEqualData(prevData, nextData)) {
+                return n
+              }
+              changed = true
+              return { ...n, data: nextData }
             })
-          ),
+            const reconciled = reconcileNodeLabels(mapped)
+            if (!changed && reconciled === mapped) {
+              return nds
+            }
+            return reconciled
+          }),
         loadGraph: (graph) => {
           const epoch = Date.now()
           const safeNodes = (graph?.nodes ?? []).map((n: any) => ({
@@ -199,7 +331,7 @@ export default function FlowCanvas({
               wfEpoch: epoch
             }
           }))
-          setNodes(safeNodes)
+          setNodes(reconcileNodeLabels(safeNodes))
           setEdges(graph?.edges ?? [])
           markWorkflowDirty()
         }
@@ -321,21 +453,26 @@ export default function FlowCanvas({
         y: event.clientY - bounds.top
       }
 
-      const newNode = {
-        id: `${type}-${+new Date()}`,
-        type: type.toLowerCase(),
-        position,
-        data: {
-          label: type,
-          expanded: ['trigger', 'action', 'condition'].includes(
-            type.toLowerCase()
-          ),
-          dirty: true,
-          inputs: []
+      setNodes((nds) => {
+        const label = generateUniqueLabel(type, nds)
+        const newNode = {
+          id: `${type}-${+new Date()}`,
+          type: type.toLowerCase(),
+          position,
+          data: {
+            label,
+            expanded: ['trigger', 'action', 'condition'].includes(
+              type.toLowerCase()
+            ),
+            dirty: true,
+            inputs: [],
+            labelError: null,
+            hasLabelValidationError: false
+          }
         }
-      }
-
-      setNodes((nds) => [...nds, newNode])
+        const withNewNode = [...nds, newNode]
+        return reconcileNodeLabels(withNewNode)
+      })
       markWorkflowDirty()
     },
     [setNodes, markWorkflowDirty]

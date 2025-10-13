@@ -74,6 +74,7 @@ type NodeUpdatePayload = {
   expanded: boolean
   triggerType: string
   scheduleConfig?: ScheduleConfig
+  hasValidationErrors: boolean
 }
 
 function inputsEqual(a: TriggerInput[], b: TriggerInput[]) {
@@ -96,6 +97,7 @@ function nodeUpdatesEqual(
   if (a.dirty !== b.dirty) return false
   if (a.expanded !== b.expanded) return false
   if (a.triggerType !== b.triggerType) return false
+  if (a.hasValidationErrors !== b.hasValidationErrors) return false
   if (!inputsEqual(a.inputs, b.inputs)) return false
 
   const scheduleA = a.scheduleConfig
@@ -174,6 +176,9 @@ export default function TriggerNode({
   const [triggerType, setTriggerType] = useState(data?.triggerType ?? 'Manual')
   const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>(() =>
     normalizeScheduleConfig(data?.scheduleConfig, defaultTimezone)
+  )
+  const [labelError, setLabelError] = useState<string | null>(
+    data?.labelError ?? null
   )
   const timezoneOptions = useMemo(() => {
     const options: string[] = []
@@ -341,6 +346,9 @@ export default function TriggerNode({
     setScheduleConfig((prev) =>
       scheduleConfigsEqual(prev, normalizedSchedule) ? prev : normalizedSchedule
     )
+
+    const nextLabelError = data?.labelError ?? null
+    setLabelError((prev) => (prev === nextLabelError ? prev : nextLabelError))
   }, [
     id,
     data?.label,
@@ -348,8 +356,22 @@ export default function TriggerNode({
     data?.inputs,
     data?.triggerType,
     data?.scheduleConfig,
-    defaultTimezone
+    defaultTimezone,
+    data?.labelError
   ])
+
+  const hasInvalidInputs = useMemo(() => {
+    if (inputs.length === 0) return false
+    return inputs.some((i) => !i.key.trim() || !i.value.trim())
+  }, [inputs])
+
+  const hasDuplicateKeys = useMemo(() => {
+    const keys = inputs.map((i) => i.key.trim()).filter((k) => k)
+    return new Set(keys).size !== keys.length
+  }, [inputs])
+
+  const combinedHasValidationErrors =
+    hasDuplicateKeys || hasInvalidInputs || Boolean(labelError)
 
   useEffect(() => {
     // notify node update; suppress marking workflow dirty if clearing programmatically
@@ -362,7 +384,8 @@ export default function TriggerNode({
       dirty,
       expanded,
       triggerType,
-      ...(schedulePayload ? { scheduleConfig: schedulePayload } : {})
+      ...(schedulePayload ? { scheduleConfig: schedulePayload } : {}),
+      hasValidationErrors: combinedHasValidationErrors
     }
 
     if (nodeUpdatesEqual(lastNodeUpdateRef.current, payload)) {
@@ -388,18 +411,9 @@ export default function TriggerNode({
     scheduleConfig,
     id,
     onDirtyChange,
-    onUpdateNode
+    onUpdateNode,
+    combinedHasValidationErrors
   ])
-
-  const hasInvalidInputs = useMemo(() => {
-    if (inputs.length === 0) return false
-    return inputs.some((i) => !i.key.trim() || !i.value.trim())
-  }, [inputs])
-
-  const hasDuplicateKeys = useMemo(() => {
-    const keys = inputs.map((i) => i.key.trim()).filter((k) => k)
-    return new Set(keys).size !== keys.length
-  }, [inputs])
 
   const handleRun = async () => {
     setRunning(true)
@@ -464,7 +478,7 @@ export default function TriggerNode({
               className="text-sm font-semibold cursor-pointer relative"
             >
               {label}
-              {dirty && (
+              {(dirty || combinedHasValidationErrors) && (
                 <span className="absolute -right-3 top-1 w-2 h-2 rounded-full bg-blue-500" />
               )}
             </h3>
@@ -486,9 +500,12 @@ export default function TriggerNode({
           </div>
         </div>
 
+        {labelError && (
+          <p className="mt-2 text-xs text-red-500">{labelError}</p>
+        )}
         <button
           onClick={handleRun}
-          disabled={running || hasDuplicateKeys || hasInvalidInputs}
+          disabled={running || combinedHasValidationErrors}
           className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
         >
           {running ? 'Running...' : 'Run'}

@@ -15,6 +15,8 @@ interface ConditionNodeProps {
     expanded?: boolean
     hasValidationErrors?: boolean
     label?: string
+    labelError?: string | null
+    hasLabelValidationError?: boolean
   }
   selected: boolean
   onRemove?: (id: string) => void
@@ -42,11 +44,19 @@ export default function ConditionNode({
   const [dirty, setDirty] = useState(data?.dirty ?? isNewNode)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [hasValidationErrors, setHasValidationErrors] = useState(false)
+  const [labelError, setLabelError] = useState<string | null>(
+    data?.labelError ?? null
+  )
+  const combinedHasValidationErrors = hasValidationErrors || Boolean(labelError)
 
   const [field, setField] = useState(data?.field || '')
   const [operator, setOperator] = useState(data?.operator || 'equals')
   const [value, setValue] = useState(data?.value || '')
   const [label, setLabel] = useState(data?.label || 'Condition')
+
+  useEffect(() => {
+    setLabelError(data?.labelError ?? null)
+  }, [data?.labelError])
 
   // Sync validation
   useEffect(() => {
@@ -62,11 +72,23 @@ export default function ConditionNode({
       value,
       dirty,
       expanded,
-      hasValidationErrors
+      hasValidationErrors: combinedHasValidationErrors
     }
     onUpdateNode?.(id, nextData, true)
     if (dirty) onDirtyChange?.(true, nextData)
-  }, [label, field, operator, value, dirty, expanded, hasValidationErrors])
+  }, [
+    label,
+    field,
+    operator,
+    value,
+    dirty,
+    expanded,
+    hasValidationErrors,
+    combinedHasValidationErrors,
+    id,
+    onUpdateNode,
+    onDirtyChange
+  ])
 
   // Sync dirty from parent
   useEffect(() => {
@@ -83,6 +105,7 @@ export default function ConditionNode({
     setOperator(data?.operator || 'equals')
     setValue(data?.value || '')
     setDirty(data?.dirty ?? isNewNode)
+    setLabelError(data?.labelError ?? null)
   }, [id])
 
   const ringClass = isFailed
@@ -145,7 +168,7 @@ export default function ConditionNode({
         <NodeHeader
           label={label}
           dirty={dirty}
-          hasValidationErrors={hasValidationErrors}
+          hasValidationErrors={combinedHasValidationErrors}
           expanded={expanded}
           onLabelChange={(val) => {
             setLabel(val)
@@ -154,6 +177,9 @@ export default function ConditionNode({
           onExpanded={() => setExpanded((prev) => !prev)}
           onConfirmingDelete={() => setConfirmingDelete(true)}
         />
+        {labelError && (
+          <p className="mt-2 text-xs text-red-500">{labelError}</p>
+        )}
 
         <AnimatePresence>
           {expanded && (

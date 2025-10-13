@@ -57,6 +57,9 @@ export default function ActionNode({
   const [stopOnError, setStopOnError] = useState(data?.stopOnError ?? true)
   const [_, setConfig] = useState(() => data || { type: '', params: {} })
   const [label, setLabel] = useState(data?.label || 'Action')
+  const [labelError, setLabelError] = useState<string | null>(
+    data?.labelError ?? null
+  )
 
   useEffect(() => {
     setConfig(data || { type: '', params: {} })
@@ -84,6 +87,11 @@ export default function ActionNode({
   const [prevService, setPrevService] = useState('')
 
   const [hasValidationErrors, setHasValidationErrors] = useState(false)
+  const combinedHasValidationErrors = hasValidationErrors || Boolean(labelError)
+
+  useEffect(() => {
+    setLabelError(data?.labelError ?? null)
+  }, [data?.labelError])
 
   useEffect(() => {
     if (params.service !== prevService) {
@@ -117,7 +125,7 @@ export default function ActionNode({
         stopOnError,
         dirty,
         expanded,
-        hasValidationErrors
+        hasValidationErrors: combinedHasValidationErrors
       },
       true
     )
@@ -130,7 +138,8 @@ export default function ActionNode({
         timeout,
         retries,
         stopOnError,
-        expanded
+        expanded,
+        hasValidationErrors: combinedHasValidationErrors
       })
     }
   }, [
@@ -142,7 +151,11 @@ export default function ActionNode({
     stopOnError,
     dirty,
     expanded,
-    hasValidationErrors
+    hasValidationErrors,
+    combinedHasValidationErrors,
+    onUpdateNode,
+    id,
+    onDirtyChange
   ])
 
   const handleRun = async () => {
@@ -194,7 +207,7 @@ export default function ActionNode({
         <NodeHeader
           label={label}
           dirty={dirty}
-          hasValidationErrors={hasValidationErrors}
+          hasValidationErrors={combinedHasValidationErrors}
           expanded={expanded}
           onLabelChange={(val) => {
             setLabel(val)
@@ -203,9 +216,12 @@ export default function ActionNode({
           onExpanded={() => setExpanded((prev) => !prev)}
           onConfirmingDelete={() => setConfirmingDelete(true)}
         />
+        {labelError && (
+          <p className="mt-2 text-xs text-red-500">{labelError}</p>
+        )}
         <button
           onClick={handleRun}
-          disabled={running || hasValidationErrors}
+          disabled={running || combinedHasValidationErrors}
           className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
         >
           {running ? 'Testing...' : 'Test Action'}
