@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
+use tracing::debug;
 
 use crate::models::workflow_run::WorkflowRun;
 use crate::state::AppState;
@@ -17,23 +18,15 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         return;
     };
 
-    let mut context = run
-        .snapshot
-        .get("_trigger_context")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    if let Some(trigger) = graph.nodes.values().find(|n| n.kind == "trigger") {
-        if let Some(inputs) = trigger.data.get("inputs").and_then(|v| v.as_array()) {
-            let mut map = context.as_object().cloned().unwrap_or_default();
-            for kv in inputs {
-                if let (Some(k), Some(v)) = (kv.get("key"), kv.get("value")) {
-                    if let Some(ks) = k.as_str() {
-                        map.insert(ks.to_string(), v.clone());
-                    }
-                }
-            }
-            context = Value::Object(map);
-        }
+    let mut context: Map<String, Value> = Map::new();
+    if let Some(initial) = run.snapshot.get("_trigger_context") {
+        let trigger_key = graph
+            .nodes
+            .values()
+            .find(|n| n.kind == "trigger")
+            .map(|node| context_key(node));
+        let key = trigger_key.unwrap_or_else(|| "trigger".to_string());
+        context.insert(key, initial.clone());
     }
 
     let allowlist_env = std::env::var("ALLOWED_HTTP_DOMAINS")
@@ -149,13 +142,27 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
             .await
             .ok();
 
+        let context_value = Value::Object(context.clone());
+        let node_label = node
+            .data
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        debug!(
+            node_id = %node.id,
+            node_kind = %node.kind,
+            node_label,
+            context = %context_value,
+            "Executing workflow node"
+        );
+
         let execution = match kind {
-            "trigger" => execute_trigger(node).await,
-            "condition" => execute_condition(node, &context, graph.outgoing(&node_id)).await,
+            "trigger" => execute_trigger(node, &context_value).await,
+            "condition" => execute_condition(node, &context_value, graph.outgoing(&node_id)).await,
             "action" => {
                 execute_action(
                     node,
-                    &context,
+                    &context_value,
                     &allowed_hosts,
                     &disallowed_hosts,
                     default_deny,
@@ -186,9 +193,8 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                         .await;
                 }
 
-                if let Some(obj) = context.as_object_mut() {
-                    obj.insert(node.id.clone(), outputs);
-                }
+                let key = context_key(node);
+                context.insert(key, outputs.clone());
 
                 match selected_next {
                     Some(next_id) => next_nodes.push(next_id),
@@ -261,4 +267,13 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
             .complete_workflow_run(run.id, "succeeded", None)
             .await
     };
+}
+
+fn context_key(node: &super::graph::Node) -> String {
+    node.data
+        .get("label")
+        .and_then(|v| v.as_str())
+        .map(|label| label.trim().to_lowercase())
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| node.id.clone())
 }
