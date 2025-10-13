@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
-import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
-
 interface RunCustomCodeActionProps {
-  code: string // user-entered JS/TS code
-  language: 'js' | 'ts'
+  code: string // user-entered JavaScript code
   inputs?: { key: string; value: string }[]
   outputs?: { key: string; value: string }[]
   dirty: boolean
@@ -25,7 +22,6 @@ export default function RunCustomCodeAction({
   ) => void
 }) {
   const [code, setCode] = useState(args.code || '')
-  const [language, setLanguage] = useState(args.language || 'js')
   const [inputs, setInputs] = useState(args.inputs || [])
   const [outputs, setOutputs] = useState(args.outputs || [])
   const [hasErrors, setHasErrors] = useState(false)
@@ -39,22 +35,14 @@ export default function RunCustomCodeAction({
       error = true
     }
     setHasErrors(error)
-    onChange?.({ code, language, inputs, outputs }, error, true)
-  }, [code, language, inputs, outputs])
+    onChange?.({ code, inputs, outputs }, error, true)
+  }, [code, inputs, outputs])
 
   return (
     <div className="flex flex-col gap-2">
-      <NodeDropdownField
-        options={['js', 'ts']}
-        value={language}
-        onChange={(val) => {
-          setLanguage(val)
-          setDirty(true)
-        }}
-      />
       <NodeTextAreaField
         value={code}
-        placeholder="Enter custom JS/TS code"
+        placeholder="Enter custom JavaScript code"
         rows={6}
         onChange={(val) => {
           setCode(val)
@@ -68,7 +56,7 @@ export default function RunCustomCodeAction({
           setInputs(updated)
           setDirty((prev) => prev || childDirty)
           onChange?.(
-            { code, language, inputs: updated, outputs },
+            { code, inputs: updated, outputs },
             nodeHasErrors,
             childDirty
           )
@@ -81,7 +69,7 @@ export default function RunCustomCodeAction({
           setOutputs(updated)
           setDirty((prev) => prev || childDirty)
           onChange?.(
-            { code, language, inputs, outputs: updated },
+            { code, inputs, outputs: updated },
             nodeHasErrors,
             childDirty
           )

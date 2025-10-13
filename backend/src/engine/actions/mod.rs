@@ -1,3 +1,4 @@
+mod code;
 mod email;
 mod http;
 mod messaging;
@@ -103,6 +104,7 @@ pub(crate) async fn execute_action(
         }
         "email" => email::execute_email(node, context, state).await,
         "messaging" => messaging::execute_messaging(node, context).await,
+        "code" => code::execute_code(node, context).await,
         _ => Ok((
             json!({"skipped": true, "reason": "unsupported actionType"}),
             None,

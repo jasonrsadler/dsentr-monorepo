@@ -325,7 +325,6 @@ export default function ActionNode({
                 <RunCustomCodeAction
                   args={{
                     code: params.code || '',
-                    language: params.language || 'js',
                     inputs: params.inputs || [],
                     outputs: params.outputs || [],
                     dirty
