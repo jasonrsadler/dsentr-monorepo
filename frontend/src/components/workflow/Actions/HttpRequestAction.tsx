@@ -1,5 +1,6 @@
 import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import NodeCheckBoxField from '@/components/UI/InputFields/NodeCheckboxField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
@@ -171,19 +172,22 @@ export default function HttpRequestAction({
             value={params.username || ''}
             onChange={(val) => updateField('username', val)}
           />
-          <NodeInputField
-            type="password"
-            placeholder="Password"
+          <NodeSecretDropdown
+            group="http"
+            service="basic_auth"
             value={params.password || ''}
             onChange={(val) => updateField('password', val)}
+            placeholder="Select HTTP basic password"
           />
         </>
       )}
       {params.authType === 'bearer' && (
-        <NodeInputField
-          placeholder="Bearer Token"
+        <NodeSecretDropdown
+          group="http"
+          service="bearer_token"
           value={params.token || ''}
           onChange={(val) => updateField('token', val)}
+          placeholder="Select bearer token"
         />
       )}
     </div>

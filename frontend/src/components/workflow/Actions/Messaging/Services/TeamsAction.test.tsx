@@ -1,6 +1,15 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import TeamsAction from './TeamsAction'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+
+const secrets = {
+  messaging: {
+    teams: {
+      existing: 'abc'
+    }
+  }
+}
 
 describe('TeamsAction', () => {
   const baseArgs = {
@@ -19,7 +28,12 @@ describe('TeamsAction', () => {
 
   it('emits changes without validation errors', async () => {
     const onChange = vi.fn()
-    render(<TeamsAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     await waitFor(() => {
       expect(onChange).toHaveBeenCalled()
@@ -36,7 +50,12 @@ describe('TeamsAction', () => {
 
   it('validates webhook URL presence', async () => {
     const onChange = vi.fn()
-    render(<TeamsAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     const webhookInput = screen.getByPlaceholderText('Webhook URL')
     fireEvent.change(webhookInput, { target: { value: '' } })
@@ -52,8 +71,9 @@ describe('TeamsAction', () => {
 
   it('accepts the initialDirty flag', async () => {
     const onChange = vi.fn()
-    render(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} initialDirty />
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} initialDirty />,
+      { secrets }
     )
 
     await waitFor(() => {
@@ -66,7 +86,12 @@ describe('TeamsAction', () => {
 
   it('validates raw JSON workflow payloads', async () => {
     const onChange = vi.fn()
-    render(<TeamsAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     const typeDropdown = screen.getByRole('button', {
       name: 'Connector'
@@ -96,7 +121,12 @@ describe('TeamsAction', () => {
 
   it('validates header secret requirements', async () => {
     const onChange = vi.fn()
-    render(<TeamsAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     const typeDropdown = screen.getByRole('button', {
       name: 'Connector'
@@ -118,10 +148,6 @@ describe('TeamsAction', () => {
     const headerNameInput = screen.getByPlaceholderText('Header Name')
     fireEvent.change(headerNameInput, { target: { value: '' } })
 
-    const headerSecretInput = screen.getByPlaceholderText('Header Secret')
-    fireEvent.change(headerSecretInput, { target: { value: '' } })
-    vi.advanceTimersByTime(400)
-
     await waitFor(() => {
       expect(screen.getByText('Header name is required')).toBeInTheDocument()
     })
@@ -132,7 +158,12 @@ describe('TeamsAction', () => {
 
   it('omits connector fields for workflow webhooks', async () => {
     const onChange = vi.fn()
-    render(<TeamsAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     const typeDropdown = screen.getByRole('button', {
       name: 'Connector'
@@ -159,7 +190,10 @@ describe('TeamsAction', () => {
 
   it('clears header secret values when switching back to basic workflow auth', async () => {
     const onChange = vi.fn()
-    render(<TeamsAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      { secrets }
+    )
 
     const typeDropdown = screen.getByRole('button', {
       name: 'Connector'
@@ -180,8 +214,11 @@ describe('TeamsAction', () => {
 
     const headerNameInput = screen.getByPlaceholderText('Header Name')
     fireEvent.change(headerNameInput, { target: { value: 'X-Test' } })
-    const headerSecretInput = screen.getByPlaceholderText('Header Secret')
-    fireEvent.change(headerSecretInput, { target: { value: 'abc' } })
+    const secretDropdown = screen.getByRole('button', {
+      name: 'Select header secret'
+    })
+    fireEvent.click(secretDropdown)
+    fireEvent.click(screen.getByText('existing'))
     vi.advanceTimersByTime(400)
 
     await waitFor(() => {
@@ -203,7 +240,7 @@ describe('TeamsAction', () => {
   })
 
   it('does not expose OAuth client credential controls in workflow mode', () => {
-    render(<TeamsAction args={{ ...baseArgs }} />)
+    renderWithSecrets(<TeamsAction args={{ ...baseArgs }} />, { secrets })
 
     const typeDropdown = screen.getByRole('button', {
       name: 'Connector'

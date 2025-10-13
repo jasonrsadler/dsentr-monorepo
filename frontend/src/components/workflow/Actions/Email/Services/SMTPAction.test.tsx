@@ -1,6 +1,15 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import SMTPAction from './SMTPAction'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+
+const secrets = {
+  email: {
+    smtp: {
+      primary: 'secret'
+    }
+  }
+}
 
 describe('SMTPAction', () => {
   const baseArgs = {
@@ -30,7 +39,12 @@ describe('SMTPAction', () => {
 
   it('emits updates without validation errors for valid inputs', async () => {
     const onChange = vi.fn()
-    render(<SMTPAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <SMTPAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     await waitFor(() => {
       expect(onChange).toHaveBeenCalled()
@@ -43,7 +57,7 @@ describe('SMTPAction', () => {
   })
 
   it('surfaces validation errors for invalid recipients', async () => {
-    render(<SMTPAction args={{ ...baseArgs }} />)
+    renderWithSecrets(<SMTPAction args={{ ...baseArgs }} />, { secrets })
 
     const recipientField = screen.getByPlaceholderText('Recipient Email(s)')
     fireEvent.change(recipientField, { target: { value: 'invalid-email' } })
@@ -57,10 +71,11 @@ describe('SMTPAction', () => {
   })
 
   it('switches encryption modes and updates default ports when unchanged', async () => {
-    render(
+    renderWithSecrets(
       <SMTPAction
         args={{ ...baseArgs, smtpPort: 587, smtpTlsMode: 'starttls' }}
-      />
+      />,
+      { secrets }
     )
 
     const portField = screen.getByPlaceholderText(

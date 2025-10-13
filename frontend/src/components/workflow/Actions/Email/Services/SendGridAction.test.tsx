@@ -1,6 +1,15 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import SendGridAction from './SendGridAction'
 import { vi } from 'vitest'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+
+const secrets = {
+  email: {
+    sendgrid: {
+      primary: 'key-123'
+    }
+  }
+}
 
 describe('SendGridAction', () => {
   const baseArgs = {
@@ -23,7 +32,10 @@ describe('SendGridAction', () => {
 
   it('emits updates without validation errors for valid inputs', async () => {
     const onChange = vi.fn()
-    render(<SendGridAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <SendGridAction args={{ ...baseArgs }} onChange={onChange} />,
+      { secrets }
+    )
 
     await waitFor(() => {
       expect(onChange).toHaveBeenCalled()
@@ -35,7 +47,10 @@ describe('SendGridAction', () => {
 
   it('surfaces validation errors for invalid recipient emails', async () => {
     const onChange = vi.fn()
-    render(<SendGridAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <SendGridAction args={{ ...baseArgs }} onChange={onChange} />,
+      { secrets }
+    )
 
     const input = screen.getByPlaceholderText('Recipient Email(s)')
     fireEvent.change(input, { target: { value: 'invalid-email' } })
@@ -52,10 +67,11 @@ describe('SendGridAction', () => {
   })
 
   it('hides subject and body inputs when using a template', () => {
-    render(
+    renderWithSecrets(
       <SendGridAction
         args={{ ...baseArgs, templateId: 'tmpl-1', subject: '', body: '' }}
-      />
+      />,
+      { secrets }
     )
 
     expect(screen.queryByPlaceholderText('Subject')).not.toBeInTheDocument()

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 
 interface SendGridActionProps {
@@ -27,9 +28,6 @@ export default function SendGridAction({
     dirty: boolean
   ) => void
 }) {
-  const inputClass =
-    'text-xs p-1 w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 placeholder-zinc-400 dark:placeholder-zinc-500 nodrag'
-
   const [_, setDirty] = useState(false)
   const [params, setParams] = useState({
     ...args
@@ -77,12 +75,12 @@ export default function SendGridAction({
 
   return (
     <div className="flex flex-col gap-2">
-      <NodeInputField
-        placeholder="SendGrid API Key"
-        className={inputClass}
-        value={params.apiKey}
+      <NodeSecretDropdown
+        group="email"
+        service="sendgrid"
+        value={params.apiKey || ''}
         onChange={(val) => updateField('apiKey', val)}
-        type="password"
+        placeholder="Select SendGrid API key"
       />
       {sendGridErrors.apiKey && (
         <p className="text-xs text-red-500">{sendGridErrors.apiKey}</p>

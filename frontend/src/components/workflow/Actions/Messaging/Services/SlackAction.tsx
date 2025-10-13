@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 
 export interface SlackActionValues {
   channel?: string
@@ -72,11 +73,12 @@ export default function SlackAction({
         <p className={errorClass}>{validationErrors.channel}</p>
       )}
 
-      <NodeInputField
-        placeholder="Token"
-        type="password"
+      <NodeSecretDropdown
+        group="messaging"
+        service="slack"
         value={params.token || ''}
         onChange={(val) => updateField('token', val)}
+        placeholder="Select Slack token"
       />
       {validationErrors.token && (
         <p className={errorClass}>{validationErrors.token}</p>

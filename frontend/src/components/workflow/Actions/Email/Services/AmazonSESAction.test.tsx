@@ -1,6 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import AmazonSESAction from './AmazonSESAction'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+
+const secrets = {
+  email: {
+    amazon_ses: {
+      primary: 'secret'
+    }
+  }
+}
 
 describe('AmazonSESAction', () => {
   const baseArgs = {
@@ -25,7 +34,10 @@ describe('AmazonSESAction', () => {
 
   it('emits updates without validation errors when inputs are valid', async () => {
     const onChange = vi.fn()
-    render(<AmazonSESAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <AmazonSESAction args={{ ...baseArgs }} onChange={onChange} />,
+      { secrets }
+    )
 
     await waitFor(() => {
       expect(onChange).toHaveBeenCalled()
@@ -36,13 +48,14 @@ describe('AmazonSESAction', () => {
   })
 
   it('surfaces an error when region is not selected', async () => {
-    render(
+    renderWithSecrets(
       <AmazonSESAction
         args={{
           ...baseArgs,
           awsRegion: ''
         }}
-      />
+      />,
+      { secrets }
     )
 
     await waitFor(() => {
@@ -55,14 +68,15 @@ describe('AmazonSESAction', () => {
 
   it('defaults SES version to v2 when not provided', async () => {
     const onChange = vi.fn()
-    render(
+    renderWithSecrets(
       <AmazonSESAction
         args={{
           ...baseArgs,
           sesVersion: ''
         }}
         onChange={onChange}
-      />
+      />,
+      { secrets }
     )
 
     const versionButton = screen.getByRole('button', {
@@ -80,14 +94,15 @@ describe('AmazonSESAction', () => {
 
   it('allows the user to change SES version via dropdown', async () => {
     const onChange = vi.fn()
-    render(
+    renderWithSecrets(
       <AmazonSESAction
         args={{
           ...baseArgs,
           sesVersion: 'v1'
         }}
         onChange={onChange}
-      />
+      />,
+      { secrets }
     )
 
     const versionButton = screen.getByRole('button', {
@@ -106,7 +121,7 @@ describe('AmazonSESAction', () => {
   })
 
   it('shows template variables editor when a template is provided', () => {
-    render(
+    renderWithSecrets(
       <AmazonSESAction
         args={{
           ...baseArgs,
@@ -114,7 +129,8 @@ describe('AmazonSESAction', () => {
           subject: '',
           body: ''
         }}
-      />
+      />,
+      { secrets }
     )
 
     expect(screen.getByText('Template Variables')).toBeInTheDocument()

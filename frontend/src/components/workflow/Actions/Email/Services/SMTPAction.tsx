@@ -1,4 +1,5 @@
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -202,11 +203,12 @@ export default function SMTPAction({
       {smtpErrors.smtpUser && (
         <p className={errorClass}>{smtpErrors.smtpUser}</p>
       )}
-      <NodeInputField
-        type="password"
-        placeholder="API Key / Password"
+      <NodeSecretDropdown
+        group="email"
+        service="smtp"
         value={params.smtpPassword || ''}
         onChange={(val) => updateField('smtpPassword', val)}
+        placeholder="Select SMTP password or API key"
       />
       {smtpErrors.smtpPassword && (
         <p className={errorClass}>{smtpErrors.smtpPassword}</p>

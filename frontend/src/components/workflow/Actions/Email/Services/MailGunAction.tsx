@@ -1,4 +1,5 @@
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import { useEffect, useMemo, useState } from 'react'
 import MailgunRegionDropdown from '../ServiceDropDowns/MailgunRegionDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
@@ -87,11 +88,12 @@ export default function MailGunAction({
           <p className={errorClass}>{mailGunErrors.domain}</p>
         )}
 
-        <NodeInputField
-          placeholder="API Key"
+        <NodeSecretDropdown
+          group="email"
+          service="mailgun"
           value={params.apiKey || ''}
           onChange={(val) => updateField('apiKey', val)}
-          type="password"
+          placeholder="Select Mailgun API key"
         />
         {mailGunErrors.apiKey && (
           <p className={errorClass}>{mailGunErrors.apiKey}</p>

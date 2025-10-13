@@ -1,6 +1,15 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import MailGunAction from './MailGunAction'
 import { vi } from 'vitest'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+
+const secrets = {
+  email: {
+    mailgun: {
+      primary: 'key-123'
+    }
+  }
+}
 
 describe('MailGunAction', () => {
   const baseArgs = {
@@ -25,7 +34,12 @@ describe('MailGunAction', () => {
 
   it('emits updates without validation errors for valid inputs', async () => {
     const onChange = vi.fn()
-    render(<MailGunAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <MailGunAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     await waitFor(() => {
       expect(onChange).toHaveBeenCalled()
@@ -37,7 +51,12 @@ describe('MailGunAction', () => {
 
   it('surfaces validation errors for invalid recipients', async () => {
     const onChange = vi.fn()
-    render(<MailGunAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <MailGunAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     const input = screen.getByPlaceholderText('To (comma separated)')
     fireEvent.change(input, { target: { value: 'invalid-email' } })
@@ -54,7 +73,7 @@ describe('MailGunAction', () => {
   })
 
   it('renders template variable editor when template is provided', () => {
-    render(
+    renderWithSecrets(
       <MailGunAction
         args={{
           ...baseArgs,
@@ -62,7 +81,8 @@ describe('MailGunAction', () => {
           subject: '',
           body: ''
         }}
-      />
+      />,
+      { secrets }
     )
 
     expect(screen.queryByPlaceholderText('Subject')).not.toBeInTheDocument()
@@ -74,7 +94,12 @@ describe('MailGunAction', () => {
 
   it('updates region selection through the dropdown', async () => {
     const onChange = vi.fn()
-    render(<MailGunAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <MailGunAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     const regionButton = screen.getByRole('button', {
       name: /us \(api\.mailgun\.net\)/i

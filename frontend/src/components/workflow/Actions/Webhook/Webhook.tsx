@@ -1,6 +1,7 @@
 import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -200,11 +201,12 @@ export default function WebhookAction({
           {webhookErrors.authUsername && (
             <p className={errorClass}>{webhookErrors.authUsername}</p>
           )}
-          <NodeInputField
-            placeholder="Password"
-            type="password"
+          <NodeSecretDropdown
+            group="webhook"
+            service="basic_auth"
             value={params.authPassword || ''}
             onChange={(val) => updateField('authPassword', val)}
+            placeholder="Select basic auth password"
           />
           {webhookErrors.authPassword && (
             <p className={errorClass}>{webhookErrors.authPassword}</p>
@@ -214,11 +216,12 @@ export default function WebhookAction({
 
       {params.authType === 'bearer' && (
         <>
-          <NodeInputField
-            placeholder="Token"
-            type="password"
+          <NodeSecretDropdown
+            group="webhook"
+            service="bearer_token"
             value={params.authToken || ''}
             onChange={(val) => updateField('authToken', val)}
+            placeholder="Select bearer token"
           />
           {webhookErrors.authToken && (
             <p className={errorClass}>{webhookErrors.authToken}</p>

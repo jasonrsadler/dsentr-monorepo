@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 
 export interface TeamsActionValues {
@@ -387,11 +388,12 @@ export default function TeamsAction({
                       {validationErrors.workflowHeaderName}
                     </p>
                   )}
-                  <NodeInputField
-                    placeholder="Header Secret"
-                    type="password"
+                  <NodeSecretDropdown
+                    group="messaging"
+                    service="teams"
                     value={params.workflowHeaderSecret || ''}
                     onChange={(val) => updateField('workflowHeaderSecret', val)}
+                    placeholder="Select header secret"
                   />
                   {validationErrors.workflowHeaderSecret && (
                     <p className={errorClass}>

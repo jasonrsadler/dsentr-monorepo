@@ -1,4 +1,5 @@
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -108,11 +109,12 @@ export default function AmazonSESAction({
       {amazonSESErrors.awsAccessKey && (
         <p className={errorClass}>{amazonSESErrors.awsAccessKey}</p>
       )}
-      <NodeInputField
-        placeholder="AWS Secret Access Key"
+      <NodeSecretDropdown
+        group="email"
+        service="amazon_ses"
         value={params.awsSecretKey || ''}
         onChange={(val) => updateField('awsSecretKey', val)}
-        type="password"
+        placeholder="Select AWS secret access key"
       />
       {amazonSESErrors.awsSecretKey && (
         <p className={errorClass}>{amazonSESErrors.awsSecretKey}</p>

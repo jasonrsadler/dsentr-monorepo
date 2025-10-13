@@ -1,12 +1,21 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import SlackAction from './SlackAction'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 
 describe('SlackAction', () => {
   const baseArgs = {
     channel: '#alerts',
     message: 'Hello',
     token: 'xoxb-token'
+  }
+
+  const secrets = {
+    messaging: {
+      slack: {
+        primary: 'xoxb-token'
+      }
+    }
   }
 
   beforeEach(() => {
@@ -20,7 +29,12 @@ describe('SlackAction', () => {
 
   it('emits values without validation errors when inputs are valid', async () => {
     const onChange = vi.fn()
-    render(<SlackAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <SlackAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     await waitFor(() => {
       expect(onChange).toHaveBeenCalled()
@@ -33,7 +47,12 @@ describe('SlackAction', () => {
 
   it('marks inputs dirty when fields change', async () => {
     const onChange = vi.fn()
-    render(<SlackAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <SlackAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     const channelInput = screen.getByPlaceholderText('Channel (e.g. #general)')
     fireEvent.change(channelInput, { target: { value: '#ops' } })
@@ -50,7 +69,12 @@ describe('SlackAction', () => {
 
   it('propagates validation errors for empty message', async () => {
     const onChange = vi.fn()
-    render(<SlackAction args={{ ...baseArgs }} onChange={onChange} />)
+    renderWithSecrets(
+      <SlackAction args={{ ...baseArgs }} onChange={onChange} />,
+      {
+        secrets
+      }
+    )
 
     const messageInput = screen.getByPlaceholderText('Message')
     fireEvent.change(messageInput, { target: { value: '' } })
@@ -66,8 +90,9 @@ describe('SlackAction', () => {
 
   it('respects the initialDirty flag', async () => {
     const onChange = vi.fn()
-    render(
-      <SlackAction args={{ ...baseArgs }} onChange={onChange} initialDirty />
+    renderWithSecrets(
+      <SlackAction args={{ ...baseArgs }} onChange={onChange} initialDirty />,
+      { secrets }
     )
 
     await waitFor(() => {
