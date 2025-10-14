@@ -159,6 +159,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
+        config::{Config, OAuthProviderConfig, OAuthSettings},
         db::{
             mock_db::{MockDb, NoopWorkflowRepository},
             user_repository::UserRepository,
@@ -167,13 +168,14 @@ mod tests {
         routes::auth::login::LoginPayload,
         services::{
             oauth::{
-                github::mock_github_oauth::MockGitHubOAuth,
+                account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
                 google::mock_google_oauth::MockGoogleOAuth,
             },
             smtp_mailer::MockMailer,
         },
         state::AppState,
     };
+    use reqwest::Client;
 
     use super::handle_login;
 
@@ -202,12 +204,32 @@ mod tests {
     }
 
     fn build_app(db: impl UserRepository + 'static) -> Router {
+        let config = Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+        });
         let app_state = AppState {
             db: Arc::new(db),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             mailer: Arc::new(MockMailer::default()), // Not used in these tests
             google_oauth: Arc::new(MockGoogleOAuth::default()), // Not used in these tests
             github_oauth: Arc::new(MockGitHubOAuth::default()), // Not used in these tests
+            oauth_accounts: OAuthAccountService::test_stub(),
+            http_client: Arc::new(Client::new()),
+            config,
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
         };

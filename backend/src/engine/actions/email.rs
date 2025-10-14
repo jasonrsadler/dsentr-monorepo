@@ -936,7 +936,9 @@ pub(crate) async fn execute_email(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
+    use crate::services::oauth::account_service::OAuthAccountService;
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
     use crate::services::smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig, TlsMode};
@@ -950,6 +952,7 @@ mod tests {
     use axum::Router;
     use base64::engine::general_purpose::STANDARD as BASE64;
     use base64::Engine;
+    use reqwest::Client;
     use serde_json::{json, Value};
     use std::collections::HashMap;
     use std::net::SocketAddr;
@@ -977,6 +980,26 @@ mod tests {
         }
     }
 
+    fn test_config() -> Arc<Config> {
+        Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+        })
+    }
+
     fn test_state_with_mailer(mailer: Arc<dyn Mailer>) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
@@ -984,6 +1007,9 @@ mod tests {
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
             worker_id: Arc::new("worker".to_string()),
             worker_lease_seconds: 30,
         }

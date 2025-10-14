@@ -19,6 +19,8 @@ use axum::{
     Router,
 };
 use config::Config;
+use db::oauth_token_repository::UserOAuthTokenRepository;
+use db::postgres_oauth_token_repository::PostgresUserOAuthTokenRepository;
 use db::postgres_user_repository::PostgresUserRepository;
 use db::postgres_workflow_repository::PostgresWorkflowRepository;
 use reqwest::Client;
@@ -35,6 +37,10 @@ use routes::{
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
+    oauth::{
+        disconnect_connection, google_connect_callback, google_connect_start, list_connections,
+        microsoft_connect_callback, microsoft_connect_start, refresh_connection,
+    },
     options::secrets::{delete_secret, list_secrets, upsert_secret},
     workflows::{
         cancel_all_runs_for_workflow, cancel_workflow_run, create_workflow, delete_workflow,
@@ -45,6 +51,7 @@ use routes::{
         start_workflow_run, update_workflow, webhook_trigger,
     },
 };
+use services::oauth::account_service::OAuthAccountService;
 use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
 use sqlx::PgPool;
@@ -140,7 +147,7 @@ async fn main() {
             .unwrap(),
     );
 
-    let config = Config::from_env();
+    let config = Arc::new(Config::from_env());
 
     let pg_pool = establish_connection(&config.database_url).await;
     let user_repo = Arc::new(PostgresUserRepository {
@@ -154,6 +161,7 @@ async fn main() {
     // Initialize mailer
     let mailer = Arc::new(SmtpMailer::new().expect("Failed to initialize mailer"));
     let http_client = Client::new();
+    let http_client_arc = Arc::new(http_client.clone());
 
     let google_oauth = Arc::new(GoogleOAuthClient {
         client: http_client.clone(),
@@ -163,12 +171,25 @@ async fn main() {
         client: http_client.clone(),
     });
 
+    let oauth_repo = Arc::new(PostgresUserOAuthTokenRepository {
+        pool: pg_pool.clone(),
+    }) as Arc<dyn UserOAuthTokenRepository>;
+    let oauth_accounts = Arc::new(OAuthAccountService::new(
+        oauth_repo.clone(),
+        Arc::new(config.oauth.token_encryption_key.clone()),
+        http_client_arc.clone(),
+        &config.oauth,
+    ));
+
     let state = AppState {
         db: user_repo,
         workflow_repo,
         mailer,
         google_oauth,
         github_oauth,
+        oauth_accounts,
+        http_client: http_client_arc,
+        config: config.clone(),
         worker_id: Arc::new(uuid::Uuid::new_v4().to_string()),
         worker_lease_seconds: std::env::var("WORKER_LEASE_SECONDS")
             .ok()
@@ -304,6 +325,20 @@ async fn main() {
         )
         .layer(csrf_layer.clone());
 
+    let oauth_public_routes = Router::new()
+        .route("/google/start", get(google_connect_start))
+        .route("/google/callback", get(google_connect_callback))
+        .route("/microsoft/start", get(microsoft_connect_start))
+        .route("/microsoft/callback", get(microsoft_connect_callback));
+
+    let oauth_private_routes = Router::new()
+        .route("/connections", get(list_connections))
+        .route("/{provider}/refresh", post(refresh_connection))
+        .route("/{provider}/disconnect", delete(disconnect_connection))
+        .layer(csrf_layer.clone());
+
+    let oauth_routes = oauth_public_routes.merge(oauth_private_routes);
+
     // Admin routes (CSRF + rate limit). Only Admin role may call these handlers.
     let admin_routes = Router::new()
         .route("/purge-runs", post(purge_runs))
@@ -324,6 +359,7 @@ async fn main() {
             "/api/workflows",
             workflow_routes.merge(public_workflow_routes),
         )
+        .nest("/api/oauth", oauth_routes)
         .nest("/api/options", options_routes)
         .nest("/api/admin", admin_routes)
         .with_state(state)

@@ -51,16 +51,38 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
+        config::{Config, OAuthProviderConfig, OAuthSettings},
         db::mock_db::{MockDb, NoopWorkflowRepository},
         services::{
             oauth::{
-                github::mock_github_oauth::MockGitHubOAuth,
+                account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
                 google::mock_google_oauth::MockGoogleOAuth,
             },
             smtp_mailer::MockMailer,
         },
         state::AppState,
     };
+    use reqwest::Client;
+
+    fn test_config() -> Arc<Config> {
+        Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+        })
+    }
 
     use super::verify_email;
 
@@ -73,6 +95,9 @@ mod tests {
                 mailer: Arc::new(MockMailer::default()),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),
+                oauth_accounts: OAuthAccountService::test_stub(),
+                http_client: Arc::new(Client::new()),
+                config: test_config(),
                 worker_id: Arc::new("test-worker".to_string()),
                 worker_lease_seconds: 30,
             })

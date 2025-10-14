@@ -1,6 +1,6 @@
 // src/layouts/DashboardLayout.tsx
-import { useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
 import { useAuth } from '@/stores/auth'
@@ -11,13 +11,58 @@ import EngineTab from '@/components/Settings/tabs/EngineTab'
 import LogsTab from '@/components/Settings/tabs/LogsTab'
 import WebhooksTab from '@/components/Settings/tabs/WebhooksTab'
 import OptionsTab from '@/components/Settings/tabs/OptionsTab'
+import IntegrationsTab, {
+  IntegrationNotice
+} from '@/components/Settings/tabs/IntegrationsTab'
 import { DsentrLogo } from '@/components/DsentrLogo'
 import { SecretsProvider } from '@/contexts/SecretsContext'
+import { OAuthProvider } from '@/lib/oauthApi'
 
 export default function DashboardLayout() {
   const { user } = useAuth()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [initialSettingsTab, setInitialSettingsTab] = useState<
+    string | undefined
+  >(undefined)
+  const [integrationNotice, setIntegrationNotice] =
+    useState<IntegrationNotice | null>(null)
+  const location = useLocation()
+  const navigate = useNavigate()
   // Preferences removed
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const connected = params.get('connected')
+    if (!connected) return
+
+    const providerParamRaw = params.get('provider')
+    const providerParam: OAuthProvider | undefined =
+      providerParamRaw === 'google' || providerParamRaw === 'microsoft'
+        ? providerParamRaw
+        : undefined
+    const error = params.get('error') || undefined
+
+    if (connected === 'true') {
+      setIntegrationNotice({ kind: 'connected', provider: providerParam })
+    } else if (connected === 'false') {
+      setIntegrationNotice({
+        kind: 'error',
+        provider: providerParam,
+        message: error
+      })
+    }
+
+    setSettingsOpen(true)
+    setInitialSettingsTab('integrations')
+
+    params.delete('connected')
+    params.delete('provider')
+    params.delete('error')
+    navigate(
+      { pathname: location.pathname, search: params.toString() },
+      { replace: true }
+    )
+  }, [location, navigate])
 
   return (
     <SecretsProvider>
@@ -55,12 +100,17 @@ export default function DashboardLayout() {
 
         <SettingsModal
           open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false)
+            setInitialSettingsTab(undefined)
+          }}
+          initialTab={initialSettingsTab}
           tabs={[
             { key: 'engine', label: 'Engine' },
             { key: 'logs', label: 'Logs' },
             { key: 'webhooks', label: 'Webhooks' },
             { key: 'options', label: 'Secrets & API Keys' },
+            { key: 'integrations', label: 'Integrations' },
             { key: 'workflows', label: 'Workflows' }
           ]}
           renderTab={(key) => {
@@ -68,6 +118,14 @@ export default function DashboardLayout() {
             if (key === 'logs') return <LogsTab />
             if (key === 'webhooks') return <WebhooksTab />
             if (key === 'options') return <OptionsTab />
+            if (key === 'integrations') {
+              return (
+                <IntegrationsTab
+                  notice={integrationNotice}
+                  onDismissNotice={() => setIntegrationNotice(null)}
+                />
+              )
+            }
             if (key === 'workflows') return <WorkflowsTab />
             return <div />
           }}

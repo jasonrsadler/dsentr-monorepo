@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 type Props = {
   open: boolean
@@ -16,6 +16,15 @@ export default function SettingsModal({
   initialTab
 }: Props) {
   const [active, setActive] = useState(initialTab ?? tabs[0]?.key)
+
+  useEffect(() => {
+    if (!open) return
+    if (initialTab) {
+      setActive(initialTab)
+    } else {
+      setActive((prev) => prev ?? tabs[0]?.key)
+    }
+  }, [open, initialTab, tabs])
   if (!open) return null
 
   return (

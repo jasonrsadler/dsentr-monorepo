@@ -231,10 +231,12 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{
+        config::{Config, OAuthProviderConfig, OAuthSettings},
         db::mock_db::{MockDb, NoopWorkflowRepository},
         routes::auth::google_login::{google_callback, google_login},
         services::{
             oauth::{
+                account_service::OAuthAccountService,
                 github::mock_github_oauth::MockGitHubOAuth,
                 google::{
                     errors::GoogleAuthError, mock_google_oauth::MockGoogleOAuth,
@@ -245,6 +247,27 @@ mod tests {
         },
         state::AppState,
     }; // for `.oneshot()`
+    use reqwest::Client;
+
+    fn test_config() -> Arc<Config> {
+        Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+        })
+    }
 
     #[tokio::test]
     async fn test_google_login_sets_cookie_and_redirects() {
@@ -280,12 +303,16 @@ mod tests {
         let mailer = Arc::new(MockMailer::default());
         let google_oauth = Arc::new(MockGoogleOAuth::default());
         let github_oauth = Arc::new(MockGitHubOAuth::default());
+        let config = test_config();
         let app_state = AppState {
             db: repo,
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             mailer,
             google_oauth,
             github_oauth,
+            oauth_accounts: OAuthAccountService::test_stub(),
+            http_client: Arc::new(Client::new()),
+            config,
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
         };
@@ -357,6 +384,9 @@ mod tests {
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(FailingGoogleOAuth),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
         };
