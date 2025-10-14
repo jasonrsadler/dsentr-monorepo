@@ -10,6 +10,7 @@ use reqwest::{
 };
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
+use tracing::{info, warn};
 use urlencoding::encode;
 use uuid::Uuid;
 
@@ -561,6 +562,15 @@ fn sanitize_teams_params(params: &Value) -> Value {
             );
 
             if message_type == "Card" {
+                if let Some(mode) = optional_string(params, "cardMode") {
+                    map.insert("cardMode".into(), Value::String(mode));
+                }
+                if let Some(title) = optional_string(params, "cardTitle") {
+                    map.insert("cardTitle".into(), Value::String(title));
+                }
+                if let Some(body) = optional_string(params, "cardBody") {
+                    map.insert("cardBody".into(), Value::String(body));
+                }
                 if let Some(raw) = optional_string(params, "cardJson") {
                     map.insert("cardJson".into(), Value::String(raw));
                 }
@@ -799,36 +809,63 @@ fn build_card_payload(card_json: &str) -> Result<Value, String> {
     let parsed: Value = serde_json::from_str(trimmed)
         .map_err(|err| format!("Card JSON must be valid JSON: {err}"))?;
 
-    let Value::Object(obj) = parsed else {
+    let Value::Object(mut obj) = parsed else {
         return Err("Card JSON must be an object".to_string());
     };
 
-    if obj.contains_key("body") || obj.contains_key("attachments") || obj.contains_key("subject") {
-        return Ok(Value::Object(obj));
+    if obj.contains_key("attachments") {
+        obj.remove("subject");
+
+        if let Some(value) = obj.get_mut("attachments") {
+            let Value::Array(attachments) = value else {
+                return Err("Attachments must be an array".to_string());
+            };
+
+            for attachment in attachments {
+                let Value::Object(map) = attachment else {
+                    return Err("Each attachment must be an object".to_string());
+                };
+
+                if let Some(content) = map.get("content") {
+                    if !content.is_string() {
+                        let serialized = serde_json::to_string(content).map_err(|err| {
+                            format!("Attachment content must serialize to a string: {err}")
+                        })?;
+                        map.insert("content".to_string(), Value::String(serialized));
+                    }
+                }
+            }
+
+            return Ok(Value::Object(obj));
+        }
     }
 
-    let attachment_id = Uuid::new_v4().to_string();
-    let attachment_type = obj
+    let card_type = obj
         .get("type")
         .and_then(|v| v.as_str())
-        .map(|value| {
-            if value.eq_ignore_ascii_case("adaptivecard") {
-                "application/vnd.microsoft.card.adaptive"
-            } else {
-                "application/json"
-            }
-        })
-        .unwrap_or("application/json");
+        .ok_or_else(|| "Card JSON must include a 'type' field".to_string())?;
+
+    if !card_type.eq_ignore_ascii_case("AdaptiveCard") {
+        return Err("Only AdaptiveCard payloads are supported".to_string());
+    }
+
+    let card_content = Value::Object(obj);
+    let card_json = serde_json::to_string(&card_content)
+        .map_err(|err| format!("Card JSON must serialize to a string: {err}"))?;
+
+    let attachment_id = "1";
+    let attachment_placeholder = format!("<attachment id=\"{}\"></attachment>", attachment_id);
 
     Ok(json!({
         "body": {
             "contentType": "html",
-            "content": format!("<attachment id=\"{}\"></attachment>", attachment_id),
+            "content": attachment_placeholder,
         },
         "attachments": [{
             "id": attachment_id,
-            "contentType": attachment_type,
-            "content": Value::Object(obj),
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": card_json,
+            "contentUrl": Value::Null,
         }]
     }))
 }
@@ -915,6 +952,19 @@ async fn send_teams_delegated_oauth(
         let mentions = extract_mentions(params);
         build_text_payload(&templated, &mentions)
     };
+
+    match serde_json::to_string(&payload) {
+        Ok(serialized) => info!(
+            target: "dsentr::actions::messaging::teams",
+            payload = %serialized,
+            "Sending Teams delegated OAuth payload"
+        ),
+        Err(err) => warn!(
+            target: "dsentr::actions::messaging::teams",
+            %err,
+            "Failed to serialize Teams delegated OAuth payload for logging"
+        ),
+    }
 
     let response = state
         .http_client
@@ -1755,6 +1805,9 @@ mod tests {
         let params = json!({
             "deliveryMethod": "Delegated OAuth (Post as user)",
             "messageType": "Card",
+            "cardMode": "Simple card builder",
+            "cardTitle": "Hello from Dsentr",
+            "cardBody": "Automation ran",
             "cardJson": "{\"type\":\"AdaptiveCard\"}",
             "message": "legacy"
         });
@@ -1766,12 +1819,118 @@ mod tests {
             map.get("messageType").and_then(|v| v.as_str()).unwrap(),
             "Card"
         );
+        assert_eq!(
+            map.get("cardMode").and_then(|v| v.as_str()).unwrap(),
+            "Simple card builder"
+        );
+        assert_eq!(
+            map.get("cardTitle").and_then(|v| v.as_str()).unwrap(),
+            "Hello from Dsentr"
+        );
+        assert_eq!(
+            map.get("cardBody").and_then(|v| v.as_str()).unwrap(),
+            "Automation ran"
+        );
         assert!(map.get("cardJson").is_some());
         assert!(
             map.get("message").is_some(),
             "legacy messages are preserved"
         );
         assert!(map.get("mentions").is_none());
+    }
+
+    #[test]
+    fn build_card_payload_wraps_simple_cards_in_graph_message() {
+        let input = r#"{
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [
+                { "type": "TextBlock", "text": "Hello" }
+            ]
+        }"#;
+
+        let payload = build_card_payload(input).expect("card payload");
+        assert!(payload.get("subject").is_none());
+
+        let body = payload
+            .get("body")
+            .and_then(|v| v.as_object())
+            .expect("body");
+        assert_eq!(body.get("contentType"), Some(&Value::String("html".into())));
+
+        let content_html = body
+            .get("content")
+            .and_then(|v| v.as_str())
+            .expect("html content");
+        assert_eq!(content_html, "<attachment id=\"1\"></attachment>");
+
+        let attachments = payload
+            .get("attachments")
+            .and_then(|v| v.as_array())
+            .expect("attachments array");
+        assert_eq!(attachments.len(), 1);
+
+        let attachment = attachments[0].as_object().expect("attachment object");
+        assert_eq!(attachment.get("id"), Some(&Value::String("1".into())));
+        assert_eq!(
+            attachment.get("contentType"),
+            Some(&Value::String(
+                "application/vnd.microsoft.card.adaptive".into()
+            ))
+        );
+        assert_eq!(attachment.get("contentUrl"), Some(&Value::Null));
+
+        let card_json = attachment
+            .get("content")
+            .and_then(|v| v.as_str())
+            .expect("stringified card");
+        let parsed: Value = serde_json::from_str(card_json).expect("card JSON should remain valid");
+        assert_eq!(parsed["body"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn build_card_payload_normalizes_preformatted_graph_message() {
+        let input = r#"{
+            "subject": "Ignored",
+            "body": {
+                "contentType": "html",
+                "content": "<attachment id=\"1\"></attachment>"
+            },
+            "attachments": [
+                {
+                    "id": "1",
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "contentUrl": null,
+                    "content": {
+                        "type": "AdaptiveCard",
+                        "version": "1.4",
+                        "body": [
+                            { "type": "TextBlock", "text": "Hello" }
+                        ]
+                    }
+                }
+            ]
+        }"#;
+
+        let payload = build_card_payload(input).expect("preformatted payload");
+
+        assert!(payload.get("subject").is_none());
+
+        let attachments = payload
+            .get("attachments")
+            .and_then(|v| v.as_array())
+            .expect("attachments array");
+        assert_eq!(attachments.len(), 1);
+
+        let attachment = attachments[0].as_object().expect("attachment");
+        let content = attachment
+            .get("content")
+            .and_then(|v| v.as_str())
+            .expect("string content");
+
+        let parsed: Value =
+            serde_json::from_str(content).expect("attachment content to remain valid JSON");
+        assert_eq!(parsed["type"].as_str(), Some("AdaptiveCard"));
     }
 
     #[tokio::test]

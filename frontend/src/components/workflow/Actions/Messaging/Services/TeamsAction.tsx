@@ -27,6 +27,9 @@ export interface TeamsActionValues {
   themeColor?: string
   message?: string
   cardJson?: string
+  cardMode?: string
+  cardTitle?: string
+  cardBody?: string
   workflowOption?: string
   workflowRawJson?: string
   workflowHeaderName?: string
@@ -52,11 +55,13 @@ interface TeamsActionProps {
   ) => void
 }
 
+const DELIVERY_METHOD_INCOMING = 'Incoming Webhook'
+const DELIVERY_METHOD_DELEGATED = 'Delegated OAuth (Post as user)'
+
 const deliveryOptions = [
-  'Incoming Webhook',
-  'Teams Bot (Bot Framework)',
-  'Delegated OAuth (Post as user)'
-]
+  DELIVERY_METHOD_INCOMING,
+  DELIVERY_METHOD_DELEGATED
+] as const
 
 const webhookOptions = ['Connector', 'Workflow/Power Automate']
 
@@ -65,6 +70,45 @@ const workflowOptions = ['Basic (Raw JSON)', 'Header Secret Auth']
 const delegatedMessageTypes = ['Text', 'Card'] as const
 
 type DelegatedMessageType = (typeof delegatedMessageTypes)[number]
+
+const delegatedCardModes = ['Simple card builder', 'Custom JSON'] as const
+
+type DelegatedCardMode = (typeof delegatedCardModes)[number]
+
+const buildSimpleAdaptiveCardJson = (title: string, body: string) => {
+  const trimmedBody = body.trim()
+  const trimmedTitle = title.trim()
+
+  if (!trimmedBody) {
+    return ''
+  }
+
+  const cardBody: Array<Record<string, string | boolean>> = []
+
+  if (trimmedTitle) {
+    cardBody.push({
+      type: 'TextBlock',
+      text: trimmedTitle,
+      weight: 'Bolder',
+      size: 'Medium'
+    })
+  }
+
+  cardBody.push({
+    type: 'TextBlock',
+    text: trimmedBody,
+    wrap: true
+  })
+
+  const payload = {
+    $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+    type: 'AdaptiveCard',
+    version: '1.4',
+    body: cardBody
+  }
+
+  return JSON.stringify(payload, null, 2)
+}
 
 const STRING_KEYS: (keyof TeamsActionValues)[] = [
   'deliveryMethod',
@@ -75,6 +119,9 @@ const STRING_KEYS: (keyof TeamsActionValues)[] = [
   'themeColor',
   'message',
   'cardJson',
+  'cardMode',
+  'cardTitle',
+  'cardBody',
   'workflowOption',
   'workflowRawJson',
   'workflowHeaderName',
@@ -120,7 +167,7 @@ const sanitizeMentions = (mentions?: TeamsMention[]): TeamsMention[] => {
 
 const normalizeParams = (incoming?: TeamsActionValues): TeamsActionValues => {
   const base: TeamsActionValues = {
-    deliveryMethod: deliveryOptions[0],
+    deliveryMethod: DELIVERY_METHOD_INCOMING,
     webhookType: webhookOptions[0],
     webhookUrl: '',
     title: '',
@@ -128,6 +175,9 @@ const normalizeParams = (incoming?: TeamsActionValues): TeamsActionValues => {
     themeColor: '',
     message: '',
     cardJson: '',
+    cardMode: delegatedCardModes[0],
+    cardTitle: '',
+    cardBody: '',
     workflowOption: workflowOptions[0],
     workflowRawJson: '',
     workflowHeaderName: '',
@@ -167,7 +217,8 @@ const sanitizeForSelection = (
     isWorkflow,
     workflowUsesHeaderSecret,
     isDelegated,
-    delegatedMessageType
+    delegatedMessageType,
+    delegatedCardMode
   }: {
     isIncomingWebhook: boolean
     isConnector: boolean
@@ -175,6 +226,7 @@ const sanitizeForSelection = (
     workflowUsesHeaderSecret: boolean
     isDelegated: boolean
     delegatedMessageType: DelegatedMessageType
+    delegatedCardMode: DelegatedCardMode
   }
 ): TeamsActionValues => {
   const normalized = normalizeParams(current)
@@ -193,6 +245,9 @@ const sanitizeForSelection = (
     sanitized.channelName = ''
     sanitized.messageType = delegatedMessageTypes[0]
     sanitized.mentions = []
+    sanitized.cardMode = delegatedCardModes[0]
+    sanitized.cardTitle = ''
+    sanitized.cardBody = ''
 
     const webhookType = sanitized.webhookType || webhookOptions[0]
     sanitized.webhookType = webhookType
@@ -233,6 +288,9 @@ const sanitizeForSelection = (
       sanitized.workflowHeaderName = ''
       sanitized.workflowHeaderSecret = ''
       sanitized.cardJson = ''
+      sanitized.cardMode = delegatedCardModes[0]
+      sanitized.cardTitle = ''
+      sanitized.cardBody = ''
     }
 
     return sanitized
@@ -261,10 +319,30 @@ const sanitizeForSelection = (
     sanitized.messageType = delegatedMessageType
 
     if (delegatedMessageType === 'Card') {
+      const cardMode = delegatedCardModes.includes(delegatedCardMode)
+        ? delegatedCardMode
+        : delegatedCardModes[0]
+
+      sanitized.cardMode = cardMode
       sanitized.message = ''
       sanitized.mentions = []
+
+      if (cardMode === delegatedCardModes[0]) {
+        const title = sanitized.cardTitle?.trim() || ''
+        const body = sanitized.cardBody?.trim() || ''
+        sanitized.cardTitle = title
+        sanitized.cardBody = body
+        sanitized.cardJson = buildSimpleAdaptiveCardJson(title, body)
+      } else {
+        sanitized.cardTitle = ''
+        sanitized.cardBody = ''
+        sanitized.cardJson = sanitized.cardJson?.trim() || ''
+      }
     } else {
       sanitized.cardJson = ''
+      sanitized.cardMode = delegatedCardModes[0]
+      sanitized.cardTitle = ''
+      sanitized.cardBody = ''
     }
 
     return sanitized
@@ -290,6 +368,9 @@ const sanitizeForSelection = (
   sanitized.channelName = ''
   sanitized.messageType = delegatedMessageTypes[0]
   sanitized.mentions = []
+  sanitized.cardMode = delegatedCardModes[0]
+  sanitized.cardTitle = ''
+  sanitized.cardBody = ''
 
   return sanitized
 }
@@ -394,26 +475,26 @@ export default function TeamsAction({
   const [teamsRequestId, setTeamsRequestId] = useState(0)
   const [channelsRequestId, setChannelsRequestId] = useState(0)
   const [membersRequestId, setMembersRequestId] = useState(0)
-  const internalUpdateRef = useRef(false);
+  const internalUpdateRef = useRef(false)
 
   useEffect(() => {
-    const normalized = normalizeParams(args);
-    const signature = stableSerialize(normalized);
+    const normalized = normalizeParams(args)
+    const signature = stableSerialize(normalized)
 
-    if (signature === lastNormalizedSignatureRef.current) return;
+    if (signature === lastNormalizedSignatureRef.current) return
     // mark that we're syncing from props, not user input
-    internalUpdateRef.current = true;
-    lastNormalizedArgsRef.current = normalized;
-    lastNormalizedSignatureRef.current = signature;
-    setParams(normalized);
-  }, [args]);
+    internalUpdateRef.current = true
+    lastNormalizedArgsRef.current = normalized
+    lastNormalizedSignatureRef.current = signature
+    setParams(normalized)
+  }, [args])
 
   useEffect(() => {
     setDirty(initialDirty)
   }, [initialDirty])
 
-  const isIncomingWebhook = params.deliveryMethod === deliveryOptions[0]
-  const isDelegated = params.deliveryMethod === deliveryOptions[2]
+  const isIncomingWebhook = params.deliveryMethod === DELIVERY_METHOD_INCOMING
+  const isDelegated = params.deliveryMethod === DELIVERY_METHOD_DELEGATED
   const isConnector =
     isIncomingWebhook && params.webhookType === webhookOptions[0]
   const isWorkflow =
@@ -431,6 +512,12 @@ export default function TeamsAction({
     )
       ? (params.messageType as DelegatedMessageType) || delegatedMessageTypes[0]
       : delegatedMessageTypes[0]
+
+  const delegatedCardMode: DelegatedCardMode = delegatedCardModes.includes(
+    (params.cardMode as DelegatedCardMode) ?? delegatedCardModes[0]
+  )
+    ? (params.cardMode as DelegatedCardMode) || delegatedCardModes[0]
+    : delegatedCardModes[0]
 
   const hasMicrosoftAccount = Boolean(microsoftConnection?.connected)
 
@@ -618,8 +705,8 @@ export default function TeamsAction({
     if (!deliveryMethod) {
       errors.deliveryMethod = 'Delivery method is required'
     } else if (
-      deliveryMethod !== deliveryOptions[0] &&
-      deliveryMethod !== deliveryOptions[2]
+      deliveryMethod !== DELIVERY_METHOD_INCOMING &&
+      deliveryMethod !== DELIVERY_METHOD_DELEGATED
     ) {
       errors.deliveryMethod =
         'Only incoming webhooks or delegated OAuth are supported'
@@ -695,17 +782,24 @@ export default function TeamsAction({
       }
 
       if (delegatedMessageType === 'Card') {
-        const raw = params.cardJson?.trim()
-        if (!raw) {
-          errors.cardJson = 'Card JSON is required'
+        if (delegatedCardMode === delegatedCardModes[0]) {
+          const body = params.cardBody?.trim() ?? ''
+          if (!body) {
+            errors.cardBody = 'Card message is required'
+          }
         } else {
-          try {
-            const parsed = JSON.parse(raw)
-            if (!parsed || typeof parsed !== 'object') {
-              errors.cardJson = 'Card JSON must be an object'
+          const raw = params.cardJson?.trim()
+          if (!raw) {
+            errors.cardJson = 'Card JSON is required'
+          } else {
+            try {
+              const parsed = JSON.parse(raw)
+              if (!parsed || typeof parsed !== 'object') {
+                errors.cardJson = 'Card JSON must be an object'
+              }
+            } catch (error) {
+              errors.cardJson = 'Card JSON must be valid JSON'
             }
-          } catch (error) {
-            errors.cardJson = 'Card JSON must be valid JSON'
           }
         }
       } else if (!params.message?.trim()) {
@@ -722,6 +816,7 @@ export default function TeamsAction({
     workflowUsesHeaderSecret,
     isDelegated,
     delegatedMessageType,
+    delegatedCardMode,
     connectionsError,
     connectionsLoading,
     hasMicrosoftAccount,
@@ -739,7 +834,8 @@ export default function TeamsAction({
         isWorkflow,
         workflowUsesHeaderSecret,
         isDelegated,
-        delegatedMessageType
+        delegatedMessageType,
+        delegatedCardMode
       }),
     [
       params,
@@ -748,7 +844,8 @@ export default function TeamsAction({
       isWorkflow,
       workflowUsesHeaderSecret,
       isDelegated,
-      delegatedMessageType
+      delegatedMessageType,
+      delegatedCardMode
     ]
   )
 
@@ -759,16 +856,16 @@ export default function TeamsAction({
   } | null>(null)
 
   useEffect(() => {
-    if (!onChange) return;
+    if (!onChange) return
 
     // if this update came from args sync, skip one emission
     if (internalUpdateRef.current) {
-      internalUpdateRef.current = false;
-      return;
+      internalUpdateRef.current = false
+      return
     }
 
-    const hasErrors = Object.keys(validationErrors).length > 0;
-    const last = lastEmittedRef.current;
+    const hasErrors = Object.keys(validationErrors).length > 0
+    const last = lastEmittedRef.current
 
     if (
       last &&
@@ -776,7 +873,7 @@ export default function TeamsAction({
       last.hasErrors === hasErrors &&
       shallowEqual(last.values, sanitizedOutput)
     ) {
-      return;
+      return
     }
 
     lastEmittedRef.current = {
@@ -786,10 +883,10 @@ export default function TeamsAction({
       },
       hasErrors,
       dirty
-    };
+    }
 
-    onChange(sanitizedOutput, hasErrors, dirty);
-  }, [dirty, onChange, sanitizedOutput, validationErrors]);
+    onChange(sanitizedOutput, hasErrors, dirty)
+  }, [dirty, onChange, sanitizedOutput, validationErrors])
 
   const updateField = useCallback(
     (key: keyof TeamsActionValues, value: string) => {
@@ -845,6 +942,36 @@ export default function TeamsAction({
       setParams((prev) => ({ ...prev, messageType: nextType }))
     },
     [delegatedMessageType]
+  )
+
+  const handleCardModeChange = useCallback(
+    (value: string) => {
+      const nextMode = delegatedCardModes.includes(value as DelegatedCardMode)
+        ? (value as DelegatedCardMode)
+        : delegatedCardModes[0]
+      if (nextMode === delegatedCardMode) return
+      setDirty(true)
+      setParams((prev) => {
+        if (nextMode === delegatedCardModes[1]) {
+          const generated = buildSimpleAdaptiveCardJson(
+            prev.cardTitle ?? '',
+            prev.cardBody ?? ''
+          )
+          const fallback = prev.cardJson?.trim() || ''
+          return {
+            ...prev,
+            cardMode: nextMode,
+            cardJson: generated || fallback
+          }
+        }
+
+        return {
+          ...prev,
+          cardMode: nextMode
+        }
+      })
+    },
+    [delegatedCardMode]
   )
 
   const handleMentionToggle = useCallback((member: MicrosoftChannelMember) => {
@@ -1224,19 +1351,49 @@ export default function TeamsAction({
             </>
           ) : (
             <>
-              <NodeTextAreaField
-                placeholder="Adaptive Card or JSON payload"
-                value={params.cardJson || ''}
-                onChange={(val) => updateField('cardJson', val)}
-                rows={8}
+              <NodeDropdownField
+                options={delegatedCardModes}
+                value={delegatedCardMode}
+                onChange={handleCardModeChange}
               />
-              {validationErrors.cardJson && (
-                <p className={errorClass}>{validationErrors.cardJson}</p>
+              {delegatedCardMode === delegatedCardModes[0] ? (
+                <>
+                  <NodeInputField
+                    placeholder="Card title (optional)"
+                    value={params.cardTitle || ''}
+                    onChange={(val) => updateField('cardTitle', val)}
+                  />
+                  <NodeTextAreaField
+                    placeholder="Card message"
+                    value={params.cardBody || ''}
+                    onChange={(val) => updateField('cardBody', val)}
+                    rows={5}
+                  />
+                  {validationErrors.cardBody && (
+                    <p className={errorClass}>{validationErrors.cardBody}</p>
+                  )}
+                  <p className={helperClass}>
+                    We'll generate a simple Adaptive Card attachment with this
+                    content. Switch to Custom JSON for full control.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <NodeTextAreaField
+                    placeholder="Adaptive Card or JSON payload"
+                    value={params.cardJson || ''}
+                    onChange={(val) => updateField('cardJson', val)}
+                    rows={8}
+                  />
+                  {validationErrors.cardJson && (
+                    <p className={errorClass}>{validationErrors.cardJson}</p>
+                  )}
+                  <p className={helperClass}>
+                    Provide Adaptive Card JSON or a Teams message payload. We'll
+                    attach it as a card in the selected channel.
+                  </p>
+                </>
               )}
-              <p className={helperClass}>
-                Provide Adaptive Card JSON or a Teams message payload. We'll
-                attach it as a card in the selected channel.
-              </p>
             </>
           )}
         </div>

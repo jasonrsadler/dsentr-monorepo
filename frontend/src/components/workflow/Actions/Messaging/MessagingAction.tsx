@@ -8,6 +8,8 @@ type MessagingPlatform = 'Slack' | 'Teams' | 'Google Chat'
 
 type PlatformParams = Record<string, any>
 
+const DEFAULT_TEAMS_CARD_MODE = 'Simple card builder'
+
 const allowedKeys: Record<MessagingPlatform, string[]> = {
   Slack: ['channel', 'message', 'token'],
   Teams: [
@@ -19,6 +21,9 @@ const allowedKeys: Record<MessagingPlatform, string[]> = {
     'themeColor',
     'message',
     'cardJson',
+    'cardMode',
+    'cardTitle',
+    'cardBody',
     'workflowOption',
     'workflowRawJson',
     'workflowHeaderName',
@@ -79,12 +84,30 @@ const sanitizeParams = (
     if (effectiveDeliveryMethod === 'Delegated OAuth (Post as user)') {
       if (!sanitized.messageType) sanitized.messageType = 'Text'
       if (!Array.isArray(sanitized.mentions)) sanitized.mentions = []
+      if (
+        typeof sanitized.cardMode !== 'string' ||
+        !sanitized.cardMode.trim()
+      ) {
+        sanitized.cardMode = DEFAULT_TEAMS_CARD_MODE
+      }
+      if (sanitized.messageType === 'Card') {
+        sanitized.cardTitle =
+          typeof sanitized.cardTitle === 'string' ? sanitized.cardTitle : ''
+        sanitized.cardBody =
+          typeof sanitized.cardBody === 'string' ? sanitized.cardBody : ''
+      } else {
+        sanitized.cardTitle = ''
+        sanitized.cardBody = ''
+      }
     } else {
       // Ensure non-delegated payloads don't accidentally carry mention data
       sanitized.messageType = sanitized.messageType || ''
       sanitized.mentions = Array.isArray(sanitized.mentions)
         ? sanitized.mentions
         : []
+      sanitized.cardMode = DEFAULT_TEAMS_CARD_MODE
+      sanitized.cardTitle = ''
+      sanitized.cardBody = ''
     }
   }
 

@@ -3,10 +3,10 @@ import { useMemo, useState } from 'react'
 type DropdownOption =
   | string
   | {
-    label: string
-    value: string
-    disabled?: boolean
-  }
+      label: string
+      value: string
+      disabled?: boolean
+    }
 
 interface NodeDropdownFieldProps {
   options: DropdownOption[]
@@ -35,10 +35,10 @@ export default function NodeDropdownField({
         typeof option === 'string'
           ? { label: option, value: option, disabled: false }
           : {
-            label: option.label,
-            value: option.value,
-            disabled: option.disabled ?? false
-          }
+              label: option.label,
+              value: option.value,
+              disabled: option.disabled ?? false
+            }
       ),
     [options]
   )
@@ -109,10 +109,11 @@ export default function NodeDropdownField({
                   if (option.disabled) return
                   handleSelect(option.value)
                 }}
-                className={`px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 ${option.disabled
-                  ? 'cursor-not-allowed opacity-50 hover:bg-transparent'
-                  : ''
-                  }`}
+                className={`px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 ${
+                  option.disabled
+                    ? 'cursor-not-allowed opacity-50 hover:bg-transparent'
+                    : ''
+                }`}
               >
                 {option.label}
               </li>

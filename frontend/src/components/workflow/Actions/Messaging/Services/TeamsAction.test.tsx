@@ -471,4 +471,155 @@ describe('TeamsAction', () => {
       expect(lastCall?.[1]).toBe(false)
     })
   })
+
+  it('builds delegated adaptive cards without manual JSON', async () => {
+    const fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : 'url' in input
+                ? input.url
+                : input.toString()
+
+        if (url.includes('/api/oauth/connections')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              providers: {
+                microsoft: {
+                  connected: true,
+                  account_email: 'alice@example.com'
+                }
+              }
+            })
+          )
+        }
+
+        if (
+          url.includes('/api/microsoft/teams/team-1/channels/channel-1/members')
+        ) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              members: []
+            })
+          )
+        }
+
+        if (url.includes('/api/microsoft/teams/team-1/channels')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              channels: [
+                { id: 'channel-1', displayName: 'General' },
+                { id: 'channel-2', displayName: 'Announcements' }
+              ]
+            })
+          )
+        }
+
+        if (url.includes('/api/microsoft/teams')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              teams: [
+                { id: 'team-1', displayName: 'Team One' },
+                { id: 'team-2', displayName: 'Team Two' }
+              ]
+            })
+          )
+        }
+
+        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+      })
+
+    const onChange = vi.fn()
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      { secrets }
+    )
+
+    const deliveryDropdown = screen.getByRole('button', {
+      name: 'Incoming Webhook'
+    })
+    fireEvent.click(deliveryDropdown)
+    fireEvent.click(screen.getByText('Delegated OAuth (Post as user)'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/oauth/connections'),
+        expect.anything()
+      )
+    })
+
+    const teamDropdown = await screen.findByRole('button', {
+      name: 'Select team'
+    })
+    fireEvent.click(teamDropdown)
+    fireEvent.click(await screen.findByText('Team One'))
+
+    const channelDropdown = await screen.findByRole('button', {
+      name: 'Select channel'
+    })
+    fireEvent.click(channelDropdown)
+    fireEvent.click(await screen.findByText('General'))
+
+    const messageTypeDropdown = screen.getByRole('button', { name: 'Text' })
+    fireEvent.click(messageTypeDropdown)
+    fireEvent.click(screen.getByText('Card'))
+
+    await screen.findByRole('button', {
+      name: 'Simple card builder'
+    })
+
+    const titleInput = screen.getByPlaceholderText('Card title (optional)')
+    fireEvent.change(titleInput, { target: { value: 'Hello from Dsentr' } })
+
+    const bodyInput = screen.getByPlaceholderText('Card message')
+    fireEvent.change(bodyInput, {
+      target: { value: 'Your automation ran successfully.' }
+    })
+
+    vi.advanceTimersByTime(400)
+
+    await waitFor(() => {
+      const lastCall = onChange.mock.calls.at(-1)
+      expect(lastCall?.[0]).toMatchObject({
+        deliveryMethod: 'Delegated OAuth (Post as user)',
+        messageType: 'Card',
+        cardMode: 'Simple card builder',
+        cardTitle: 'Hello from Dsentr',
+        cardBody: 'Your automation ran successfully.'
+      })
+    })
+
+    const lastCall = onChange.mock.calls.at(-1)
+    const cardJson = lastCall?.[0].cardJson
+    expect(typeof cardJson).toBe('string')
+    expect(cardJson).toBeTruthy()
+
+    const parsed = JSON.parse(cardJson as string)
+    expect(parsed).toEqual({
+      $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+      type: 'AdaptiveCard',
+      version: '1.4',
+      body: [
+        {
+          type: 'TextBlock',
+          text: 'Hello from Dsentr',
+          weight: 'Bolder',
+          size: 'Medium'
+        },
+        {
+          type: 'TextBlock',
+          text: 'Your automation ran successfully.',
+          wrap: true
+        }
+      ]
+    })
+  })
 })
