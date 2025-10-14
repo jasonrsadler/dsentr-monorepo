@@ -351,7 +351,7 @@ fn redirect_with_error(
     Redirect::to(&url).into_response()
 }
 
-fn map_oauth_error(err: OAuthAccountError) -> Response {
+pub(crate) fn map_oauth_error(err: OAuthAccountError) -> Response {
     match err {
         OAuthAccountError::NotFound => {
             JsonResponse::not_found("No connection found for provider").into_response()

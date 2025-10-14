@@ -17,11 +17,18 @@ describe('TeamsAction', () => {
     message: 'Hello Teams'
   }
 
+  const createJsonResponse = (body: any, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' }
+    })
+
   beforeEach(() => {
     vi.useFakeTimers()
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
   })
@@ -262,5 +269,206 @@ describe('TeamsAction', () => {
       screen.queryByPlaceholderText('Client Secret')
     ).not.toBeInTheDocument()
     expect(screen.queryByPlaceholderText('OAuth Scope')).not.toBeInTheDocument()
+  })
+
+  it('shows guidance when delegated OAuth has no Microsoft connection', async () => {
+    const fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : 'url' in input
+                ? input.url
+                : input.toString()
+
+        if (url.includes('/api/oauth/connections')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              providers: {
+                microsoft: { connected: false }
+              }
+            })
+          )
+        }
+
+        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+      })
+
+    const onChange = vi.fn()
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      { secrets }
+    )
+
+    const deliveryDropdown = screen.getByRole('button', {
+      name: 'Incoming Webhook'
+    })
+    fireEvent.click(deliveryDropdown)
+    fireEvent.click(screen.getByText('Delegated OAuth (Post as user)'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled()
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          'Connect the Microsoft integration in Settings → Integrations, then return to enable delegated messaging.'
+        )
+      ).toBeInTheDocument()
+    })
+
+    const lastCall = onChange.mock.calls.at(-1)
+    expect(lastCall?.[1]).toBe(true)
+  })
+
+  it('loads teams, channels, and members for delegated OAuth messaging', async () => {
+    const fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : 'url' in input
+                ? input.url
+                : input.toString()
+
+        if (url.includes('/api/oauth/connections')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              providers: {
+                microsoft: {
+                  connected: true,
+                  account_email: 'alice@example.com'
+                }
+              }
+            })
+          )
+        }
+
+        if (
+          url.includes('/api/microsoft/teams/team-1/channels/channel-1/members')
+        ) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              members: [
+                {
+                  id: 'member-1',
+                  userId: 'user-1',
+                  displayName: 'Jane Doe',
+                  email: 'jane@example.com'
+                }
+              ]
+            })
+          )
+        }
+
+        if (url.includes('/api/microsoft/teams/team-1/channels')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              channels: [
+                { id: 'channel-1', displayName: 'General' },
+                { id: 'channel-2', displayName: 'Announcements' }
+              ]
+            })
+          )
+        }
+
+        if (url.includes('/api/microsoft/teams')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              teams: [
+                { id: 'team-1', displayName: 'Team One' },
+                { id: 'team-2', displayName: 'Team Two' }
+              ]
+            })
+          )
+        }
+
+        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+      })
+
+    const onChange = vi.fn()
+    renderWithSecrets(
+      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
+      { secrets }
+    )
+
+    const deliveryDropdown = screen.getByRole('button', {
+      name: 'Incoming Webhook'
+    })
+    fireEvent.click(deliveryDropdown)
+    fireEvent.click(screen.getByText('Delegated OAuth (Post as user)'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/oauth/connections'),
+        expect.anything()
+      )
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', {
+          name: /Microsoft \(alice@example.com\)/i
+        })
+      ).toBeInTheDocument()
+    })
+
+    const teamDropdown = await screen.findByRole('button', {
+      name: 'Select team'
+    })
+    fireEvent.click(teamDropdown)
+    fireEvent.click(await screen.findByText('Team One'))
+
+    const channelDropdown = await screen.findByRole('button', {
+      name: 'Select channel'
+    })
+    fireEvent.click(channelDropdown)
+    fireEvent.click(await screen.findByText('General'))
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText('Jane Doe (jane@example.com)')
+      ).toBeInTheDocument()
+    })
+
+    const messageField = screen.getByPlaceholderText('Message')
+    fireEvent.change(messageField, {
+      target: { value: 'Hello delegated world' }
+    })
+
+    const mentionCheckbox = screen.getByLabelText('Jane Doe (jane@example.com)')
+    fireEvent.click(mentionCheckbox)
+
+    vi.advanceTimersByTime(400)
+
+    await waitFor(() => {
+      const lastCall = onChange.mock.calls.at(-1)
+      expect(lastCall?.[0]).toMatchObject({
+        deliveryMethod: 'Delegated OAuth (Post as user)',
+        oauthAccountEmail: 'alice@example.com',
+        teamId: 'team-1',
+        teamName: 'Team One',
+        channelId: 'channel-1',
+        channelName: 'General',
+        messageType: 'Text',
+        message: 'Hello delegated world'
+      })
+      expect(lastCall?.[0].mentions).toEqual([
+        { userId: 'user-1', displayName: 'Jane Doe' }
+      ])
+      expect(lastCall?.[1]).toBe(false)
+    })
   })
 })

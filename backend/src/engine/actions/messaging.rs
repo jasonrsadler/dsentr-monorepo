@@ -1,14 +1,25 @@
 use crate::engine::graph::Node;
 use crate::engine::templating::templ_str;
+use crate::models::oauth_token::ConnectedOAuthProvider;
+use crate::models::workflow_run::WorkflowRun;
+use crate::services::oauth::account_service::{OAuthAccountError, StoredOAuthToken};
+use crate::state::AppState;
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
     Url,
 };
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
+use urlencoding::encode;
+use uuid::Uuid;
+
+const DEFAULT_MICROSOFT_GRAPH_BASE_URL: &str = "https://graph.microsoft.com/v1.0";
 
 pub(crate) async fn execute_messaging(
     node: &Node,
     context: &Value,
+    state: &AppState,
+    run: &WorkflowRun,
 ) -> Result<(Value, Option<String>), String> {
     let params = node.data.get("params").cloned().unwrap_or(Value::Null);
     let platform_raw = params
@@ -26,7 +37,7 @@ pub(crate) async fn execute_messaging(
 
     match normalized.as_str() {
         "slack" => send_slack(&params, context).await,
-        "teams" => send_teams(node, &params, context).await,
+        "teams" => send_teams(node, &params, context, state, run).await,
         "googlechat" | "google" | "googlechatapp" => send_google_chat(&params, context).await,
         other => Err(format!("Unsupported messaging platform: {}", other)),
     }
@@ -137,6 +148,8 @@ async fn send_teams(
     _node: &Node,
     params: &Value,
     context: &Value,
+    state: &AppState,
+    run: &WorkflowRun,
 ) -> Result<(Value, Option<String>), String> {
     let sanitized = sanitize_teams_params(params);
 
@@ -150,6 +163,9 @@ async fn send_teams(
 
     match normalize_identifier(&delivery_method).as_str() {
         "incomingwebhook" => send_teams_incoming_webhook(&sanitized, context).await,
+        "delegatedoauthpostasuser" => {
+            send_teams_delegated_oauth(&sanitized, context, state, run).await
+        }
         _ => Err(format!(
             "Teams delivery method '{}' is not supported yet",
             delivery_method
@@ -250,7 +266,7 @@ async fn send_google_chat(
 fn normalize_identifier(value: &str) -> String {
     value
         .chars()
-        .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_' && *c != '/')
+        .filter(|c| c.is_alphanumeric())
         .flat_map(|c| c.to_lowercase())
         .collect()
 }
@@ -423,85 +439,562 @@ fn sanitize_teams_params(params: &Value) -> Value {
         Value::String(delivery_method.to_string()),
     );
 
-    let normalized_delivery = normalize_identifier(delivery_method);
-
-    if normalized_delivery != "incomingwebhook" {
-        return Value::Object(map);
-    }
-
-    let webhook_type = params
-        .get("webhookType")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Connector");
-
-    map.insert(
-        "webhookType".to_string(),
-        Value::String(webhook_type.to_string()),
-    );
-
-    let webhook_url = optional_string(params, "webhookUrl");
-
-    match normalize_identifier(webhook_type).as_str() {
-        "connector" => {
-            if let Some(url) = webhook_url {
-                map.insert("webhookUrl".to_string(), Value::String(url));
-            }
-            if let Some(title) = optional_string(params, "title") {
-                map.insert("title".to_string(), Value::String(title));
-            }
-            if let Some(summary) = optional_string(params, "summary") {
-                map.insert("summary".to_string(), Value::String(summary));
-            }
-            if let Some(theme_color) = optional_string(params, "themeColor") {
-                map.insert("themeColor".to_string(), Value::String(theme_color));
-            }
-            if let Some(message) = optional_string(params, "message") {
-                map.insert("message".to_string(), Value::String(message));
-            }
-        }
-        "workflowpowerautomate" | "workflow" | "powerautomate" => {
-            let requested_option = params
-                .get("workflowOption")
+    match normalize_identifier(delivery_method).as_str() {
+        "incomingwebhook" => {
+            let webhook_type = params
+                .get("webhookType")
                 .and_then(|v| v.as_str())
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
-                .unwrap_or("Basic (Raw JSON)");
+                .unwrap_or("Connector");
 
-            let normalized_option = normalize_identifier(requested_option);
-            let coerced_option = if normalized_option == "headersecretauth" {
-                "Header Secret Auth"
+            map.insert(
+                "webhookType".to_string(),
+                Value::String(webhook_type.to_string()),
+            );
+
+            let webhook_url = optional_string(params, "webhookUrl");
+
+            match normalize_identifier(webhook_type).as_str() {
+                "connector" => {
+                    if let Some(url) = webhook_url {
+                        map.insert("webhookUrl".to_string(), Value::String(url));
+                    }
+                    if let Some(title) = optional_string(params, "title") {
+                        map.insert("title".to_string(), Value::String(title));
+                    }
+                    if let Some(summary) = optional_string(params, "summary") {
+                        map.insert("summary".to_string(), Value::String(summary));
+                    }
+                    if let Some(theme_color) = optional_string(params, "themeColor") {
+                        map.insert("themeColor".to_string(), Value::String(theme_color));
+                    }
+                    if let Some(message) = optional_string(params, "message") {
+                        map.insert("message".to_string(), Value::String(message));
+                    }
+                }
+                "workflowpowerautomate" | "workflow" | "powerautomate" => {
+                    let requested_option = params
+                        .get("workflowOption")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("Basic (Raw JSON)");
+
+                    let normalized_option = normalize_identifier(requested_option);
+                    let coerced_option = if normalized_option == "headersecretauth" {
+                        "Header Secret Auth"
+                    } else {
+                        "Basic (Raw JSON)"
+                    };
+
+                    map.insert(
+                        "workflowOption".to_string(),
+                        Value::String(coerced_option.to_string()),
+                    );
+
+                    if let Some(raw) = optional_string(params, "workflowRawJson") {
+                        map.insert("workflowRawJson".to_string(), Value::String(raw));
+                    }
+
+                    if let Some(url) = webhook_url.clone() {
+                        map.insert("webhookUrl".to_string(), Value::String(url));
+                    }
+
+                    if normalized_option == "headersecretauth" {
+                        if let Some(name) = optional_string(params, "workflowHeaderName") {
+                            map.insert("workflowHeaderName".to_string(), Value::String(name));
+                        }
+                        if let Some(secret) = optional_string(params, "workflowHeaderSecret") {
+                            map.insert("workflowHeaderSecret".to_string(), Value::String(secret));
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            Value::Object(map)
+        }
+        "delegatedoauthpostasuser" => {
+            let provider =
+                optional_string(params, "oauthProvider").unwrap_or_else(|| "microsoft".to_string());
+            map.insert("oauthProvider".into(), Value::String(provider));
+
+            if let Some(connection) = optional_string(params, "oauthConnectionId") {
+                map.insert("oauthConnectionId".into(), Value::String(connection));
+            }
+
+            if let Some(email) = optional_string(params, "oauthAccountEmail") {
+                map.insert("oauthAccountEmail".into(), Value::String(email));
+            }
+
+            if let Some(team_id) = optional_string(params, "teamId") {
+                map.insert("teamId".into(), Value::String(team_id));
+            }
+            if let Some(team_name) = optional_string(params, "teamName") {
+                map.insert("teamName".into(), Value::String(team_name));
+            }
+            if let Some(channel_id) = optional_string(params, "channelId") {
+                map.insert("channelId".into(), Value::String(channel_id));
+            }
+            if let Some(channel_name) = optional_string(params, "channelName") {
+                map.insert("channelName".into(), Value::String(channel_name));
+            }
+
+            let message_type_raw = params
+                .get("messageType")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Text");
+
+            let normalized_type = normalize_identifier(message_type_raw);
+            let message_type = if normalized_type == "card" {
+                "Card"
             } else {
-                "Basic (Raw JSON)"
+                "Text"
             };
 
             map.insert(
-                "workflowOption".to_string(),
-                Value::String(coerced_option.to_string()),
+                "messageType".into(),
+                Value::String(message_type.to_string()),
             );
 
-            if let Some(raw) = optional_string(params, "workflowRawJson") {
-                map.insert("workflowRawJson".to_string(), Value::String(raw));
-            }
-
-            if let Some(url) = webhook_url.clone() {
-                map.insert("webhookUrl".to_string(), Value::String(url));
-            }
-
-            if normalized_option == "headersecretauth" {
-                if let Some(name) = optional_string(params, "workflowHeaderName") {
-                    map.insert("workflowHeaderName".to_string(), Value::String(name));
+            if message_type == "Card" {
+                if let Some(raw) = optional_string(params, "cardJson") {
+                    map.insert("cardJson".into(), Value::String(raw));
                 }
-                if let Some(secret) = optional_string(params, "workflowHeaderSecret") {
-                    map.insert("workflowHeaderSecret".to_string(), Value::String(secret));
+                if let Some(message) = optional_string(params, "message") {
+                    // Preserve legacy message fields if present for migration purposes.
+                    map.insert("message".into(), Value::String(message));
+                }
+            } else {
+                if let Some(message) = optional_string(params, "message") {
+                    map.insert("message".into(), Value::String(message));
+                }
+                if let Some(mentions) = sanitize_mentions_array(params) {
+                    map.insert("mentions".into(), Value::Array(mentions));
+                }
+            }
+
+            Value::Object(map)
+        }
+        _ => Value::Object(map),
+    }
+}
+
+fn sanitize_mentions_array(params: &Value) -> Option<Vec<Value>> {
+    let mentions = params.get("mentions")?.as_array()?;
+    let mut seen = HashSet::new();
+    let mut sanitized = Vec::new();
+
+    for entry in mentions {
+        let user_id = entry
+            .get("userId")
+            .and_then(|v| v.as_str())
+            .or_else(|| entry.get("user_id").and_then(|v| v.as_str()))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
+        if user_id.is_empty() {
+            continue;
+        }
+
+        if !seen.insert(user_id.clone()) {
+            continue;
+        }
+
+        let display = entry
+            .get("displayName")
+            .and_then(|v| v.as_str())
+            .or_else(|| entry.get("display_name").and_then(|v| v.as_str()))
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| user_id.clone());
+
+        let mut map = Map::new();
+        map.insert("userId".to_string(), Value::String(user_id.clone()));
+        map.insert("displayName".to_string(), Value::String(display));
+
+        if let Some(member_id) = entry
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+        {
+            map.insert("id".to_string(), Value::String(member_id));
+        }
+
+        sanitized.push(Value::Object(map));
+    }
+
+    Some(sanitized)
+}
+
+#[derive(Clone)]
+struct TeamsMentionEntry {
+    user_id: String,
+    display_name: String,
+}
+
+fn extract_mentions(params: &Value) -> Vec<TeamsMentionEntry> {
+    params
+        .get("mentions")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|entry| {
+                    let user_id = entry
+                        .get("userId")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| entry.get("user_id").and_then(|v| v.as_str()))?
+                        .trim();
+
+                    if user_id.is_empty() {
+                        return None;
+                    }
+
+                    let display_name = entry
+                        .get("displayName")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| entry.get("display_name").and_then(|v| v.as_str()))
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(user_id);
+
+                    Some(TeamsMentionEntry {
+                        user_id: user_id.to_string(),
+                        display_name: display_name.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn microsoft_graph_base_url() -> String {
+    std::env::var("MICROSOFT_GRAPH_BASE_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_MICROSOFT_GRAPH_BASE_URL.to_string())
+}
+
+fn escape_html(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn text_to_html(input: &str) -> String {
+    let escaped = escape_html(input);
+    let mut html = String::with_capacity(escaped.len());
+    for ch in escaped.chars() {
+        match ch {
+            '\r' => {}
+            '\n' => html.push_str("<br/>"),
+            _ => html.push(ch),
+        }
+    }
+    html
+}
+
+fn graph_error_message(parsed: Option<&Value>, raw: &str) -> String {
+    if let Some(Value::Object(obj)) = parsed {
+        if let Some(Value::Object(error)) = obj.get("error") {
+            if let Some(Value::String(message)) = error.get("message") {
+                let trimmed = message.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
                 }
             }
         }
-        _ => {}
     }
 
-    Value::Object(map)
+    let fallback = raw.trim();
+    if fallback.is_empty() {
+        "Microsoft Graph request failed".to_string()
+    } else {
+        fallback.to_string()
+    }
+}
+
+async fn ensure_microsoft_access_token(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<StoredOAuthToken, String> {
+    state
+        .oauth_accounts
+        .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Microsoft)
+        .await
+        .map_err(|err| match err {
+            OAuthAccountError::NotFound => {
+                "Connect the Microsoft integration before using delegated Teams messaging"
+                    .to_string()
+            }
+            other => format!("Failed to refresh Microsoft OAuth token: {other}"),
+        })
+}
+
+fn build_text_payload(message: &str, mentions: &[TeamsMentionEntry]) -> (Value, usize) {
+    let mut content = text_to_html(message);
+    let mut mention_entities = Vec::new();
+
+    if !mentions.is_empty() {
+        if !content.trim().is_empty() {
+            content.push_str("<br/><br/>");
+        }
+        for (idx, mention) in mentions.iter().enumerate() {
+            if idx > 0 {
+                content.push_str("<br/>");
+            }
+            let escaped = escape_html(&mention.display_name);
+            content.push_str(&format!("<at id=\"{}\">@{}</at>", idx, escaped));
+            mention_entities.push(json!({
+                "id": idx as i32,
+                "mentionText": format!("@{}", mention.display_name),
+                "mentioned": {
+                    "user": {
+                        "id": mention.user_id,
+                        "displayName": mention.display_name,
+                    }
+                }
+            }));
+        }
+    }
+
+    let mention_count = mention_entities.len();
+
+    let mut payload = json!({
+        "body": {
+            "contentType": "html",
+            "content": content,
+        }
+    });
+
+    if mention_count > 0 {
+        payload["mentions"] = Value::Array(mention_entities);
+    }
+
+    (payload, mention_count)
+}
+
+fn build_card_payload(card_json: &str) -> Result<Value, String> {
+    let trimmed = card_json.trim();
+    if trimmed.is_empty() {
+        return Err("Card JSON is required".to_string());
+    }
+
+    let parsed: Value = serde_json::from_str(trimmed)
+        .map_err(|err| format!("Card JSON must be valid JSON: {err}"))?;
+
+    let Value::Object(obj) = parsed else {
+        return Err("Card JSON must be an object".to_string());
+    };
+
+    if obj.contains_key("body") || obj.contains_key("attachments") || obj.contains_key("subject") {
+        return Ok(Value::Object(obj));
+    }
+
+    let attachment_id = Uuid::new_v4().to_string();
+    let attachment_type = obj
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(|value| {
+            if value.eq_ignore_ascii_case("adaptivecard") {
+                "application/vnd.microsoft.card.adaptive"
+            } else {
+                "application/json"
+            }
+        })
+        .unwrap_or("application/json");
+
+    Ok(json!({
+        "body": {
+            "contentType": "html",
+            "content": format!("<attachment id=\"{}\"></attachment>", attachment_id),
+        },
+        "attachments": [{
+            "id": attachment_id,
+            "contentType": attachment_type,
+            "content": Value::Object(obj),
+        }]
+    }))
+}
+
+async fn send_teams_delegated_oauth(
+    params: &Value,
+    context: &Value,
+    state: &AppState,
+    run: &WorkflowRun,
+) -> Result<(Value, Option<String>), String> {
+    let provider = params
+        .get("oauthProvider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("microsoft");
+
+    if normalize_identifier(provider) != "microsoft" {
+        return Err(
+            "Only Microsoft delegated OAuth connections are supported for Teams messaging"
+                .to_string(),
+        );
+    }
+
+    let connection = params
+        .get("oauthConnectionId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            "Select a connected Microsoft account before using delegated Teams messaging"
+                .to_string()
+        })?;
+
+    if normalize_identifier(connection) != "microsoft" {
+        return Err("Unknown Microsoft OAuth connection selected".to_string());
+    }
+
+    let team_id = params
+        .get("teamId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Team ID is required for delegated Teams messaging".to_string())?;
+
+    let channel_id = params
+        .get("channelId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Channel ID is required for delegated Teams messaging".to_string())?;
+
+    let message_type_raw = params
+        .get("messageType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Text");
+    let message_type = if normalize_identifier(message_type_raw) == "card" {
+        "Card"
+    } else {
+        "Text"
+    };
+
+    let token = ensure_microsoft_access_token(state, run.user_id).await?;
+
+    let base_url = microsoft_graph_base_url();
+    let target = format!(
+        "{}/teams/{}/channels/{}/messages",
+        base_url.trim_end_matches('/'),
+        encode(team_id),
+        encode(channel_id)
+    );
+
+    let (payload, mention_count) = if message_type == "Card" {
+        let card_raw = params
+            .get("cardJson")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Card JSON is required for delegated card messages".to_string())?;
+        let templated = templ_str(card_raw, context);
+        (build_card_payload(&templated)?, 0)
+    } else {
+        let message_raw = extract_required_str(params, "message", "Message")?;
+        let templated = templ_str(message_raw, context);
+        if templated.trim().is_empty() {
+            return Err("Message is required".to_string());
+        }
+        let mentions = extract_mentions(params);
+        build_text_payload(&templated, &mentions)
+    };
+
+    let response = state
+        .http_client
+        .post(&target)
+        .bearer_auth(&token.access_token)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|err| format!("Microsoft Graph request failed: {err}"))?;
+
+    let status = response.status();
+    let body_text = response
+        .text()
+        .await
+        .map_err(|err| format!("Failed to read Microsoft Graph response: {err}"))?;
+    let parsed: Option<Value> = serde_json::from_str(&body_text).ok();
+
+    if !status.is_success() {
+        let message = graph_error_message(parsed.as_ref(), &body_text);
+        return Err(format!(
+            "Microsoft Graph returned status {}: {}",
+            status.as_u16(),
+            message
+        ));
+    }
+
+    let mut output = json!({
+        "sent": true,
+        "service": "Teams",
+        "platform": "Teams",
+        "deliveryMethod": "Delegated OAuth (Post as user)",
+        "status": status.as_u16(),
+        "teamId": team_id,
+        "channelId": channel_id,
+        "messageType": message_type,
+    });
+
+    if mention_count > 0 {
+        output["mentionsAdded"] = Value::Number(serde_json::Number::from(mention_count as u64));
+    }
+
+    if let Some(team_name) = params
+        .get("teamName")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        output["teamName"] = Value::String(team_name.to_string());
+    }
+
+    if let Some(channel_name) = params
+        .get("channelName")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        output["channelName"] = Value::String(channel_name.to_string());
+    }
+
+    if let Some(email) = params
+        .get("oauthAccountEmail")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        output["oauthAccountEmail"] = Value::String(email.to_string());
+    } else if !token.account_email.trim().is_empty() {
+        output["oauthAccountEmail"] = Value::String(token.account_email.clone());
+    }
+
+    if let Some(Value::Object(obj)) = parsed.as_ref() {
+        if let Some(Value::String(id)) = obj.get("id") {
+            output["messageId"] = Value::String(id.clone());
+        }
+        if let Some(Value::String(url)) = obj.get("webUrl") {
+            output["webUrl"] = Value::String(url.clone());
+        }
+    }
+
+    Ok((output, None))
 }
 
 async fn post_webhook_payload(
@@ -564,6 +1057,7 @@ async fn post_webhook_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use axum::{
         body::{to_bytes, Body},
         extract::State,
@@ -571,8 +1065,10 @@ mod tests {
         routing::post,
         Router,
     };
+    use reqwest::Client;
     use serde_json::{json, Value};
     use std::sync::Arc;
+    use time::{Duration, OffsetDateTime};
     use tokio::{
         net::TcpListener,
         sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -580,6 +1076,24 @@ mod tests {
     };
 
     use crate::engine::graph::Node;
+    use crate::{
+        config::{Config, OAuthProviderConfig, OAuthSettings},
+        db::mock_db::{MockDb, NoopWorkflowRepository},
+        db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
+        models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken},
+        models::workflow_run::WorkflowRun,
+        services::{
+            oauth::{
+                account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
+                google::mock_google_oauth::MockGoogleOAuth,
+            },
+            smtp_mailer::{Mailer, MockMailer},
+        },
+        state::AppState,
+        utils::encryption::encrypt_secret,
+    };
+    use sqlx::Error as SqlxError;
+    use uuid::Uuid;
 
     struct EnvGuard(&'static str);
 
@@ -680,6 +1194,120 @@ mod tests {
         (addr, rx, handle)
     }
 
+    fn test_config() -> Arc<Config> {
+        Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+        })
+    }
+
+    fn build_state_with_oauth(
+        oauth_accounts: Arc<OAuthAccountService>,
+        config: Arc<Config>,
+    ) -> AppState {
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts,
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("worker".to_string()),
+            worker_lease_seconds: 30,
+        }
+    }
+
+    fn test_state() -> AppState {
+        let config = test_config();
+        build_state_with_oauth(OAuthAccountService::test_stub(), Arc::clone(&config))
+    }
+
+    fn test_run() -> WorkflowRun {
+        WorkflowRun {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            workflow_id: Uuid::new_v4(),
+            snapshot: json!({}),
+            status: "pending".into(),
+            error: None,
+            idempotency_key: None,
+            started_at: OffsetDateTime::now_utc(),
+            finished_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        }
+    }
+
+    async fn execute_default(
+        node: &Node,
+        context: &Value,
+    ) -> Result<(Value, Option<String>), String> {
+        let state = test_state();
+        let run = test_run();
+        execute_messaging(node, context, &state, &run).await
+    }
+
+    #[derive(Clone)]
+    struct StaticTokenRepo {
+        record: UserOAuthToken,
+    }
+
+    #[async_trait]
+    impl UserOAuthTokenRepository for StaticTokenRepo {
+        async fn upsert_token(
+            &self,
+            _new_token: NewUserOAuthToken,
+        ) -> Result<UserOAuthToken, SqlxError> {
+            Ok(self.record.clone())
+        }
+
+        async fn find_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<UserOAuthToken>, SqlxError> {
+            if user_id == self.record.user_id && provider == self.record.provider {
+                Ok(Some(self.record.clone()))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn delete_token(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            user_id: Uuid,
+        ) -> Result<Vec<UserOAuthToken>, SqlxError> {
+            if user_id == self.record.user_id {
+                Ok(vec![self.record.clone()])
+            } else {
+                Ok(vec![])
+            }
+        }
+    }
+
     #[tokio::test]
     async fn slack_message_succeeds() {
         let (addr, mut rx, handle) = spawn_stub_server(|| {
@@ -708,7 +1336,7 @@ mod tests {
 
         let context = json!({ "user": { "name": "Alice" } });
 
-        let (output, next) = execute_messaging(&node, &context)
+        let (output, next) = execute_default(&node, &context)
             .await
             .expect("slack message should succeed");
 
@@ -763,7 +1391,7 @@ mod tests {
             }),
         };
 
-        let err = execute_messaging(&node, &Value::Null)
+        let err = execute_default(&node, &Value::Null)
             .await
             .expect_err("slack call should fail");
         handle.abort();
@@ -784,7 +1412,7 @@ mod tests {
             }),
         };
 
-        let err = execute_messaging(&node, &Value::Null)
+        let err = execute_default(&node, &Value::Null)
             .await
             .expect_err("missing token should fail");
         assert!(err.contains("Slack token"));
@@ -819,7 +1447,7 @@ mod tests {
 
         let context = json!({ "incident": { "id": "INC-1" } });
 
-        let (output, _) = execute_messaging(&node, &context)
+        let (output, _) = execute_default(&node, &context)
             .await
             .expect("teams call succeeds");
 
@@ -861,7 +1489,7 @@ mod tests {
             }),
         };
 
-        let err = execute_messaging(&node, &Value::Null)
+        let err = execute_default(&node, &Value::Null)
             .await
             .expect_err("teams should fail");
         handle.abort();
@@ -901,7 +1529,7 @@ mod tests {
             }),
         };
 
-        let (output, _) = execute_messaging(&node, &Value::Null)
+        let (output, _) = execute_default(&node, &Value::Null)
             .await
             .expect("workflow webhook succeeds");
 
@@ -948,7 +1576,7 @@ mod tests {
 
         let context = json!({ "user": "Charlie" });
 
-        let (output, _) = execute_messaging(&node, &context)
+        let (output, _) = execute_default(&node, &context)
             .await
             .expect("raw json workflow succeeds");
 
@@ -993,7 +1621,7 @@ mod tests {
             }),
         };
 
-        let (output, _) = execute_messaging(&node, &Value::Null)
+        let (output, _) = execute_default(&node, &Value::Null)
             .await
             .expect("header secret workflow succeeds");
 
@@ -1045,6 +1673,107 @@ mod tests {
         assert!(map.get("workflowOAuthTenantId").is_none());
     }
 
+    #[test]
+    fn sanitize_teams_params_preserves_delegated_fields() {
+        let params = json!({
+            "deliveryMethod": "Delegated OAuth (Post as user)",
+            "oauthProvider": "microsoft",
+            "oauthConnectionId": "microsoft",
+            "oauthAccountEmail": "alice@example.com",
+            "teamId": "team-1",
+            "teamName": "Team One",
+            "channelId": "channel-7",
+            "channelName": "General",
+            "messageType": "Text",
+            "message": "Hello",
+            "mentions": [
+                { "userId": "user-1", "displayName": "Jane" },
+                { "user_id": "user-2", "display_name": "John", "id": "member-2" },
+                { "userId": "user-1", "displayName": "Duplicate" }
+            ]
+        });
+
+        let sanitized = sanitize_teams_params(&params);
+        let map = sanitized
+            .as_object()
+            .expect("delegated params should sanitize to an object");
+
+        assert_eq!(
+            map.get("deliveryMethod").and_then(|v| v.as_str()).unwrap(),
+            "Delegated OAuth (Post as user)"
+        );
+        assert_eq!(
+            map.get("oauthProvider").and_then(|v| v.as_str()).unwrap(),
+            "microsoft"
+        );
+        assert_eq!(
+            map.get("oauthConnectionId")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "microsoft"
+        );
+        assert_eq!(
+            map.get("oauthAccountEmail")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "alice@example.com"
+        );
+        assert_eq!(
+            map.get("teamId").and_then(|v| v.as_str()).unwrap(),
+            "team-1"
+        );
+        assert_eq!(
+            map.get("channelId").and_then(|v| v.as_str()).unwrap(),
+            "channel-7"
+        );
+        assert_eq!(
+            map.get("messageType").and_then(|v| v.as_str()).unwrap(),
+            "Text"
+        );
+        assert_eq!(
+            map.get("message").and_then(|v| v.as_str()).unwrap(),
+            "Hello"
+        );
+
+        let mentions = map
+            .get("mentions")
+            .and_then(|v| v.as_array())
+            .expect("mentions should exist");
+        assert_eq!(mentions.len(), 2, "duplicate mentions should be removed");
+        assert_eq!(
+            mentions[0].get("userId").and_then(|v| v.as_str()).unwrap(),
+            "user-1"
+        );
+        assert_eq!(
+            mentions[1].get("id").and_then(|v| v.as_str()).unwrap(),
+            "member-2"
+        );
+    }
+
+    #[test]
+    fn sanitize_teams_params_handles_delegated_card() {
+        let params = json!({
+            "deliveryMethod": "Delegated OAuth (Post as user)",
+            "messageType": "Card",
+            "cardJson": "{\"type\":\"AdaptiveCard\"}",
+            "message": "legacy"
+        });
+
+        let sanitized = sanitize_teams_params(&params);
+        let map = sanitized.as_object().expect("delegated card");
+
+        assert_eq!(
+            map.get("messageType").and_then(|v| v.as_str()).unwrap(),
+            "Card"
+        );
+        assert!(map.get("cardJson").is_some());
+        assert!(
+            map.get("message").is_some(),
+            "legacy messages are preserved"
+        );
+        assert!(map.get("mentions").is_none());
+    }
+
     #[tokio::test]
     async fn google_chat_text_message_succeeds() {
         let (addr, mut rx, handle) = spawn_stub_server(|| {
@@ -1069,7 +1798,7 @@ mod tests {
 
         let context = json!({ "team": "Integrations" });
 
-        let (output, _) = execute_messaging(&node, &context)
+        let (output, _) = execute_default(&node, &context)
             .await
             .expect("chat call succeeds");
 
@@ -1088,6 +1817,118 @@ mod tests {
         assert!(content_type.contains("application/json"));
         let body: Value = serde_json::from_slice(&req.body).expect("json body");
         assert_eq!(body["text"], "Hello Integrations");
+    }
+
+    #[tokio::test]
+    async fn teams_delegated_text_message_sends_mentions() {
+        let (addr, mut rx, handle) = spawn_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::CREATED)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "id": "message-123",
+                        "webUrl": "https://teams.microsoft.com/l/message/123"
+                    })
+                    .to_string(),
+                ))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set("MICROSOFT_GRAPH_BASE_URL", format!("http://{}", addr));
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let user_id = Uuid::new_v4();
+
+        let access_token = "delegated-access";
+        let refresh_token = "delegated-refresh";
+        let encrypted_access = encrypt_secret(&encryption_key, access_token).unwrap();
+        let encrypted_refresh = encrypt_secret(&encryption_key, refresh_token).unwrap();
+
+        let record = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Microsoft,
+            access_token: encrypted_access,
+            refresh_token: encrypted_refresh,
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "alice@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let repo = Arc::new(StaticTokenRepo { record }) as Arc<dyn UserOAuthTokenRepository>;
+        let oauth_accounts = Arc::new(OAuthAccountService::new(
+            repo,
+            Arc::clone(&encryption_key),
+            Arc::new(Client::new()),
+            &config.oauth,
+        ));
+
+        let state = build_state_with_oauth(oauth_accounts, Arc::clone(&config));
+        let mut run = test_run();
+        run.user_id = user_id;
+
+        let node = Node {
+            id: "delegated-text".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Teams",
+                    "deliveryMethod": "Delegated OAuth (Post as user)",
+                    "oauthProvider": "microsoft",
+                    "oauthConnectionId": "microsoft",
+                    "teamId": "team-1",
+                    "teamName": "Team One",
+                    "channelId": "channel-1",
+                    "channelName": "General",
+                    "messageType": "Text",
+                    "message": "Hello team",
+                    "mentions": [
+                        { "userId": "user-1", "displayName": "Jane" },
+                        { "userId": "user-2", "displayName": "John" }
+                    ]
+                }
+            }),
+        };
+
+        let (output, _) = execute_messaging(&node, &Value::Null, &state, &run)
+            .await
+            .expect("delegated message should succeed");
+
+        assert_eq!(output["status"], 201);
+        assert_eq!(output["service"], "Teams");
+        assert_eq!(output["messageId"], "message-123");
+        assert_eq!(output["mentionsAdded"], 2);
+        assert_eq!(output["oauthAccountEmail"], "alice@example.com");
+
+        let req = rx.recv().await.expect("graph request recorded");
+        handle.abort();
+
+        assert!(req
+            .uri
+            .ends_with("/teams/team-1/channels/channel-1/messages"));
+
+        let auth_header = req
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+            .map(|(_, value)| value.clone())
+            .expect("authorization header");
+        assert_eq!(auth_header, format!("Bearer {}", access_token));
+
+        let body: Value = serde_json::from_slice(&req.body).expect("graph payload");
+        assert_eq!(body["body"]["contentType"], "html");
+        let content = body["body"]["content"].as_str().expect("html content");
+        assert!(content.contains("<at id=\"0\">@Jane</at>"));
+        assert!(content.contains("<at id=\"1\">@John</at>"));
+
+        let mentions = body["mentions"].as_array().expect("mentions array");
+        assert_eq!(mentions.len(), 2);
+        assert_eq!(mentions[0]["mentionText"], "@Jane");
+        assert_eq!(mentions[0]["mentioned"]["user"]["id"], "user-1");
     }
 
     #[tokio::test]
@@ -1133,7 +1974,7 @@ mod tests {
 
         let context = json!({ "team": "Cards" });
 
-        let (output, _) = execute_messaging(&node, &context)
+        let (output, _) = execute_default(&node, &context)
             .await
             .expect("card call succeeds");
 
@@ -1187,7 +2028,7 @@ mod tests {
             }),
         };
 
-        let err = execute_messaging(&node, &Value::Null)
+        let err = execute_default(&node, &Value::Null)
             .await
             .expect_err("invalid card json should fail");
 
@@ -1208,7 +2049,7 @@ mod tests {
             }),
         };
 
-        let err = execute_messaging(&node, &Value::Null)
+        let err = execute_default(&node, &Value::Null)
             .await
             .expect_err("missing cards key should fail");
 

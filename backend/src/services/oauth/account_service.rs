@@ -82,7 +82,7 @@ impl OAuthAccountService {
     }
 
     pub fn microsoft_scopes(&self) -> &'static str {
-        "offline_access User.Read"
+        "offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMember.Read.All ChannelMessage.Send"
     }
 
     pub async fn save_authorization(

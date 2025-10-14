@@ -37,6 +37,7 @@ use routes::{
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
+    microsoft::{list_channel_members, list_team_channels, list_teams},
     oauth::{
         disconnect_connection, google_connect_callback, google_connect_start, list_connections,
         microsoft_connect_callback, microsoft_connect_start, refresh_connection,
@@ -339,6 +340,15 @@ async fn main() {
 
     let oauth_routes = oauth_public_routes.merge(oauth_private_routes);
 
+    let microsoft_routes = Router::new()
+        .route("/teams", get(list_teams))
+        .route("/teams/{team_id}/channels", get(list_team_channels))
+        .route(
+            "/teams/{team_id}/channels/{channel_id}/members",
+            get(list_channel_members),
+        )
+        .layer(csrf_layer.clone());
+
     // Admin routes (CSRF + rate limit). Only Admin role may call these handlers.
     let admin_routes = Router::new()
         .route("/purge-runs", post(purge_runs))
@@ -360,6 +370,7 @@ async fn main() {
             workflow_routes.merge(public_workflow_routes),
         )
         .nest("/api/oauth", oauth_routes)
+        .nest("/api/microsoft", microsoft_routes)
         .nest("/api/options", options_routes)
         .nest("/api/admin", admin_routes)
         .with_state(state)

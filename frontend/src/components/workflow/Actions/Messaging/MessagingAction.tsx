@@ -6,7 +6,7 @@ import GoogleChatAction from './Services/GoogleChatAction'
 
 type MessagingPlatform = 'Slack' | 'Teams' | 'Google Chat'
 
-type PlatformParams = Record<string, string>
+type PlatformParams = Record<string, any>
 
 const allowedKeys: Record<MessagingPlatform, string[]> = {
   Slack: ['channel', 'message', 'token'],
@@ -22,7 +22,16 @@ const allowedKeys: Record<MessagingPlatform, string[]> = {
     'workflowOption',
     'workflowRawJson',
     'workflowHeaderName',
-    'workflowHeaderSecret'
+    'workflowHeaderSecret',
+    'oauthProvider',
+    'oauthConnectionId',
+    'oauthAccountEmail',
+    'teamId',
+    'teamName',
+    'channelId',
+    'channelName',
+    'messageType',
+    'mentions'
   ],
   'Google Chat': ['webhookUrl', 'message', 'cardJson']
 }
@@ -34,15 +43,27 @@ const sanitizeParams = (
   const keys = allowedKeys[platform]
   const sanitized = keys.reduce<PlatformParams>((acc, key) => {
     const value = params?.[key]
-    if (typeof value === 'string') acc[key] = value
-    else if (value === undefined || value === null) acc[key] = ''
-    else acc[key] = String(value)
+    if (Array.isArray(value)) {
+      acc[key] = value.map((entry) =>
+        typeof entry === 'object' && entry !== null ? { ...entry } : entry
+      )
+    } else if (value === undefined || value === null) {
+      acc[key] = key === 'mentions' ? [] : ''
+    } else if (typeof value === 'object') {
+      acc[key] = { ...value }
+    } else if (typeof value === 'string') {
+      acc[key] = value
+    } else {
+      acc[key] = String(value)
+    }
     return acc
   }, {} as PlatformParams)
 
   if (platform === 'Teams') {
     if (!sanitized.deliveryMethod) sanitized.deliveryMethod = 'Incoming Webhook'
     if (!sanitized.webhookType) sanitized.webhookType = 'Connector'
+    if (!sanitized.messageType) sanitized.messageType = 'Text'
+    if (!Array.isArray(sanitized.mentions)) sanitized.mentions = []
   }
 
   return sanitized

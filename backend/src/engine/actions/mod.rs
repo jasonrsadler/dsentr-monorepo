@@ -308,7 +308,7 @@ pub(crate) async fn execute_action(
             .await
         }
         "email" => email::execute_email(node, context, state).await,
-        "messaging" => messaging::execute_messaging(node, context).await,
+        "messaging" => messaging::execute_messaging(node, context, state, run).await,
         "sheets" => google::execute_sheets(node, context, state, run).await,
         "code" => code::execute_code(node, context).await,
         _ => Ok((
