@@ -321,13 +321,55 @@ const shallowEqual = (a: TeamsActionValues, b: TeamsActionValues) => {
   return true
 }
 
+const stableSerialize = (value: TeamsActionValues) =>
+  JSON.stringify(value, (_key, val) => {
+    if (!val || typeof val !== 'object') {
+      return val
+    }
+
+    if (Array.isArray(val)) {
+      return val.map((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          return entry
+        }
+
+        return Object.keys(entry)
+          .sort()
+          .reduce<Record<string, unknown>>((acc, key) => {
+            acc[key] = (entry as Record<string, unknown>)[key]
+            return acc
+          }, {})
+      })
+    }
+
+    return Object.keys(val as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = (val as Record<string, unknown>)[key]
+        return acc
+      }, {})
+  })
+
 export default function TeamsAction({
   args,
   initialDirty = false,
   onChange
 }: TeamsActionProps) {
-  const [params, setParams] = useState<TeamsActionValues>(() =>
-    normalizeParams(args)
+  // React Flow safe pattern: initialize local state from props exactly once
+  // via a ref so downstream effects don't thrash the canvas with resets.
+  const initialParamsRef = useRef<TeamsActionValues | null>(null)
+  if (!initialParamsRef.current) {
+    initialParamsRef.current = normalizeParams(args)
+  }
+
+  const [params, setParams] = useState<TeamsActionValues>(
+    initialParamsRef.current!
+  )
+  const lastNormalizedArgsRef = useRef<TeamsActionValues>(
+    initialParamsRef.current!
+  )
+  const lastNormalizedSignatureRef = useRef<string>(
+    stableSerialize(initialParamsRef.current!)
   )
   const [dirty, setDirty] = useState(initialDirty)
 
@@ -352,13 +394,19 @@ export default function TeamsAction({
   const [teamsRequestId, setTeamsRequestId] = useState(0)
   const [channelsRequestId, setChannelsRequestId] = useState(0)
   const [membersRequestId, setMembersRequestId] = useState(0)
+  const internalUpdateRef = useRef(false);
 
   useEffect(() => {
-    setParams((prev) => {
-      const next = normalizeParams(args)
-      return shallowEqual(prev, next) ? prev : next
-    })
-  }, [args])
+    const normalized = normalizeParams(args);
+    const signature = stableSerialize(normalized);
+
+    if (signature === lastNormalizedSignatureRef.current) return;
+    // mark that we're syncing from props, not user input
+    internalUpdateRef.current = true;
+    lastNormalizedArgsRef.current = normalized;
+    lastNormalizedSignatureRef.current = signature;
+    setParams(normalized);
+  }, [args]);
 
   useEffect(() => {
     setDirty(initialDirty)
@@ -711,10 +759,16 @@ export default function TeamsAction({
   } | null>(null)
 
   useEffect(() => {
-    if (!onChange) return
+    if (!onChange) return;
 
-    const hasErrors = Object.keys(validationErrors).length > 0
-    const last = lastEmittedRef.current
+    // if this update came from args sync, skip one emission
+    if (internalUpdateRef.current) {
+      internalUpdateRef.current = false;
+      return;
+    }
+
+    const hasErrors = Object.keys(validationErrors).length > 0;
+    const last = lastEmittedRef.current;
 
     if (
       last &&
@@ -722,22 +776,20 @@ export default function TeamsAction({
       last.hasErrors === hasErrors &&
       shallowEqual(last.values, sanitizedOutput)
     ) {
-      return
+      return;
     }
 
     lastEmittedRef.current = {
       values: {
         ...sanitizedOutput,
-        mentions: (sanitizedOutput.mentions ?? []).map((mention) => ({
-          ...mention
-        }))
+        mentions: (sanitizedOutput.mentions ?? []).map((m) => ({ ...m }))
       },
       hasErrors,
       dirty
-    }
+    };
 
-    onChange(sanitizedOutput, hasErrors, dirty)
-  }, [dirty, onChange, sanitizedOutput, validationErrors])
+    onChange(sanitizedOutput, hasErrors, dirty);
+  }, [dirty, onChange, sanitizedOutput, validationErrors]);
 
   const updateField = useCallback(
     (key: keyof TeamsActionValues, value: string) => {

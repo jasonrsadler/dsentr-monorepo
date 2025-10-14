@@ -60,10 +60,32 @@ const sanitizeParams = (
   }, {} as PlatformParams)
 
   if (platform === 'Teams') {
-    if (!sanitized.deliveryMethod) sanitized.deliveryMethod = 'Incoming Webhook'
-    if (!sanitized.webhookType) sanitized.webhookType = 'Connector'
-    if (!sanitized.messageType) sanitized.messageType = 'Text'
-    if (!Array.isArray(sanitized.mentions)) sanitized.mentions = []
+    const deliveryMethod =
+      typeof sanitized.deliveryMethod === 'string'
+        ? sanitized.deliveryMethod.trim()
+        : ''
+
+    if (!deliveryMethod) sanitized.deliveryMethod = 'Incoming Webhook'
+
+    const effectiveDeliveryMethod = deliveryMethod || 'Incoming Webhook'
+
+    if (
+      effectiveDeliveryMethod === 'Incoming Webhook' &&
+      !sanitized.webhookType
+    ) {
+      sanitized.webhookType = 'Connector'
+    }
+
+    if (effectiveDeliveryMethod === 'Delegated OAuth (Post as user)') {
+      if (!sanitized.messageType) sanitized.messageType = 'Text'
+      if (!Array.isArray(sanitized.mentions)) sanitized.mentions = []
+    } else {
+      // Ensure non-delegated payloads don't accidentally carry mention data
+      sanitized.messageType = sanitized.messageType || ''
+      sanitized.mentions = Array.isArray(sanitized.mentions)
+        ? sanitized.mentions
+        : []
+    }
   }
 
   return sanitized
