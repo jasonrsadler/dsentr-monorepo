@@ -4,28 +4,42 @@ interface NodeDropdownFieldProps {
   options: string[]
   value?: string
   onChange: (value: string) => void
+  placeholder?: string
+  disabled?: boolean
 }
 
 export default function NodeDropdownField({
   options,
   value,
-  onChange
+  onChange,
+  placeholder = 'Select Region',
+  disabled = false
 }: NodeDropdownFieldProps) {
   const [open, setOpen] = useState(false)
 
-  const handleSelect = (region: string) => {
-    onChange(region)
+  const handleSelect = (option: string) => {
+    onChange(option)
     setOpen(false)
   }
+
+  const toggleOpen = () => {
+    if (disabled || options.length === 0) return
+    setOpen((prev) => !prev)
+  }
+
+  const displayLabel = value || placeholder
 
   return (
     <div className="relative inline-block w-full text-xs">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
-        className="relative w-full text-left px-2 py-1 border rounded bg-zinc-50 dark:bg-zinc-800"
+        onClick={toggleOpen}
+        disabled={disabled}
+        className={`relative w-full text-left px-2 py-1 border rounded bg-zinc-50 dark:bg-zinc-800 ${
+          disabled ? 'opacity-60 cursor-not-allowed' : ''
+        }`}
       >
-        {value || 'Select Region'}
+        {displayLabel}
         <svg
           className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none"

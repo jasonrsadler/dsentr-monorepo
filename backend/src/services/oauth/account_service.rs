@@ -78,7 +78,7 @@ impl OAuthAccountService {
     }
 
     pub fn google_scopes(&self) -> &'static str {
-        "openid email profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+        "openid email profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/spreadsheets"
     }
 
     pub fn microsoft_scopes(&self) -> &'static str {
@@ -589,7 +589,9 @@ mod tests {
             token_encryption_key: vec![0u8; 32],
         };
         let service = OAuthAccountService::new(repo, key, client, &settings);
-        assert!(service.google_scopes().contains("email"));
+        let scopes = service.google_scopes();
+        assert!(scopes.contains("email"));
+        assert!(scopes.contains("https://www.googleapis.com/auth/spreadsheets"));
         assert!(service.microsoft_scopes().contains("offline_access"));
     }
 }
