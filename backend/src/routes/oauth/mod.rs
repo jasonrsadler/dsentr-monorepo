@@ -66,7 +66,14 @@ pub async fn google_connect_start(
     AuthSession(claims): AuthSession,
     jar: CookieJar,
 ) -> Response {
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = match Uuid::parse_str(&claims.id) {
+        Ok(user_id) => {
+            state
+                .resolve_plan_tier(user_id, claims.plan.as_deref())
+                .await
+        }
+        Err(_) => NormalizedPlanTier::from_str(claims.plan.as_deref()),
+    };
     if plan_tier.is_solo() {
         return redirect_with_error(
             &state.config,
@@ -114,7 +121,14 @@ pub async fn microsoft_connect_start(
     AuthSession(claims): AuthSession,
     jar: CookieJar,
 ) -> Response {
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = match Uuid::parse_str(&claims.id) {
+        Ok(user_id) => {
+            state
+                .resolve_plan_tier(user_id, claims.plan.as_deref())
+                .await
+        }
+        Err(_) => NormalizedPlanTier::from_str(claims.plan.as_deref()),
+    };
     if plan_tier.is_solo() {
         return redirect_with_error(
             &state.config,

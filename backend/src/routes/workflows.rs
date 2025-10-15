@@ -215,7 +215,9 @@ pub async fn create_workflow(
         data,
         workspace_id,
     } = payload;
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = app_state
+        .resolve_plan_tier(user_id, claims.plan.as_deref())
+        .await;
 
     if plan_tier.is_solo() {
         let assessment = assess_workflow_for_plan(&data);
@@ -281,7 +283,9 @@ pub async fn list_workflows(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = app_state
+        .resolve_plan_tier(user_id, claims.plan.as_deref())
+        .await;
 
     match app_state
         .workflow_repo
@@ -321,7 +325,9 @@ pub async fn get_workflow(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = app_state
+        .resolve_plan_tier(user_id, claims.plan.as_deref())
+        .await;
 
     match app_state
         .workflow_repo
@@ -389,7 +395,9 @@ pub async fn update_workflow(
         data,
         workspace_id: _,
     } = payload;
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = app_state
+        .resolve_plan_tier(user_id, claims.plan.as_deref())
+        .await;
 
     if plan_tier.is_solo() {
         let assessment = assess_workflow_for_plan(&data);
@@ -486,7 +494,9 @@ pub async fn list_workflow_logs(
         .find_workflow_by_id(user_id, workflow_id)
         .await;
 
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = app_state
+        .resolve_plan_tier(user_id, claims.plan.as_deref())
+        .await;
 
     match app_state
         .workflow_repo
@@ -693,7 +703,9 @@ pub async fn start_workflow_run(
             return JsonResponse::server_error("Failed to start run").into_response();
         }
     };
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = app_state
+        .resolve_plan_tier(user_id, claims.plan.as_deref())
+        .await;
 
     if plan_tier.is_solo() {
         match app_state
@@ -1673,7 +1685,9 @@ pub async fn set_concurrency_limit(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = app_state
+        .resolve_plan_tier(user_id, claims.plan.as_deref())
+        .await;
     if body.limit < 1 {
         return JsonResponse::bad_request("limit must be >= 1").into_response();
     }
@@ -1707,7 +1721,9 @@ pub async fn get_plan_usage(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    let plan_tier = app_state
+        .resolve_plan_tier(user_id, claims.plan.as_deref())
+        .await;
 
     let now = OffsetDateTime::now_utc();
     let start_of_month = now
@@ -1737,8 +1753,12 @@ pub async fn get_plan_usage(
             return JsonResponse::server_error("Failed to load plan usage").into_response();
         }
     };
-    let allowed = enforce_solo_workflow_limit(&workflows);
-    let hidden_count = workflows.len().saturating_sub(allowed.len());
+    let hidden_count = if plan_tier.is_solo() {
+        let allowed = enforce_solo_workflow_limit(&workflows);
+        workflows.len().saturating_sub(allowed.len())
+    } else {
+        0
+    };
 
     let runs_limit = if plan_tier.is_solo() {
         Some(SOLO_MONTHLY_RUN_LIMIT)
