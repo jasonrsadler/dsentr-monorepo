@@ -80,13 +80,13 @@ export default function EngineTab() {
   }, [selected?.concurrency_limit, selectedId])
   const [limitInput, setLimitInput] = useState<string>('')
   useEffect(() => {
-    const current = (selected as any)?.concurrency_limit
-    if (typeof current === 'number' && current >= 1) {
-      setLimitInput(String(current))
-    } else {
+    if (isSoloPlan) {
       setLimitInput('1')
+      setPlanRestrictionNotice(null)
+      return
     }
-  }, [selectedWorkflowId])
+    setLimitInput(String(baselineLimit))
+  }, [baselineLimit, isSoloPlan, selectedWorkflowId])
   useEffect(() => {
     setPlanRestrictionNotice(null)
   }, [selectedId, isSoloPlan])
@@ -96,7 +96,11 @@ export default function EngineTab() {
   const limitInputValid = Number.isFinite(parsedLimit) && parsedLimit >= 1
   const hasLimitChange = limitInputValid && parsedLimit !== baselineLimit
   const canSaveLimit =
-    Boolean(selected) && !busy && limitInputValid && hasLimitChange
+    Boolean(selected) &&
+    !busy &&
+    limitInputValid &&
+    hasLimitChange &&
+    !isSoloPlan
   const [deadLetters, setDeadLetters] = useState<any[]>([])
   const [dlBusyId, setDlBusyId] = useState<string | null>(null)
   const [purgeBusy, setPurgeBusy] = useState(false)
@@ -146,7 +150,7 @@ export default function EngineTab() {
     if (isSoloPlan) {
       setError(null)
       setPlanRestrictionNotice(CONCURRENCY_RESTRICTION_MESSAGE)
-      setLimitInput(String(baselineLimit))
+      setLimitInput('1')
       return
     }
     try {
@@ -340,6 +344,7 @@ export default function EngineTab() {
               }
             }}
             className="w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700"
+            disabled={isSoloPlan}
           />
           <button
             onClick={handleSaveLimit}
