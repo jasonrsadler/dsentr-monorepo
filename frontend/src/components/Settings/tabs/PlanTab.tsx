@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { API_BASE_URL } from '@/lib'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import { getCsrfToken } from '@/lib/csrfCache'
@@ -33,7 +33,7 @@ const FALLBACK_PLAN_OPTIONS: PlanOption[] = [
 ]
 
 export default function PlanTab() {
-  const { user, checkAuth } = useAuth()
+  const { user, checkAuth, memberships, organizationMemberships } = useAuth()
   const [planOptions, setPlanOptions] = useState<PlanOption[]>(
     FALLBACK_PLAN_OPTIONS
   )
@@ -44,10 +44,49 @@ export default function PlanTab() {
     normalizePlanTier(user?.plan)
   )
   const [workspaceName, setWorkspaceName] = useState('')
-  const [organizationName, setOrganizationName] = useState('')
+  const [organizationName, setOrganizationName] = useState(
+    typeof user?.companyName === 'string' ? user.companyName : ''
+  )
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const workspaceEditedRef = useRef(false)
+  const organizationEditedRef = useRef(false)
+
+  const previousWorkspaceName = useMemo(() => {
+    if (!Array.isArray(memberships)) return ''
+    for (const membership of memberships) {
+      const name =
+        typeof membership?.workspace?.name === 'string'
+          ? membership.workspace.name.trim()
+          : ''
+      if (name) {
+        return name
+      }
+    }
+    return ''
+  }, [memberships])
+
+  const previousOrganizationName = useMemo(() => {
+    if (Array.isArray(organizationMemberships)) {
+      for (const membership of organizationMemberships) {
+        const name =
+          typeof membership?.organization?.name === 'string'
+            ? membership.organization.name.trim()
+            : ''
+        if (name) {
+          return name
+        }
+      }
+    }
+
+    if (typeof user?.companyName === 'string') {
+      const trimmed = user.companyName.trim()
+      if (trimmed) return trimmed
+    }
+
+    return ''
+  }, [organizationMemberships, user?.companyName])
 
   useEffect(() => {
     const fetchOptions = async () => {
@@ -60,20 +99,20 @@ export default function PlanTab() {
         if (!data) return
         const options: PlanOption[] = Array.isArray(data.plan_options)
           ? data.plan_options
-            .map((option: any) => ({
-              tier: normalizePlanTier(option?.tier),
-              name: typeof option?.name === 'string' ? option.name : 'Plan',
-              description:
-                typeof option?.description === 'string'
-                  ? option.description
-                  : ''
-            }))
-            .filter(
-              (option): option is PlanOption =>
-                option.tier === 'solo' ||
-                option.tier === 'workspace' ||
-                option.tier === 'organization'
-            )
+              .map((option: any) => ({
+                tier: normalizePlanTier(option?.tier),
+                name: typeof option?.name === 'string' ? option.name : 'Plan',
+                description:
+                  typeof option?.description === 'string'
+                    ? option.description
+                    : ''
+              }))
+              .filter(
+                (option): option is PlanOption =>
+                  option.tier === 'solo' ||
+                  option.tier === 'workspace' ||
+                  option.tier === 'organization'
+              )
           : FALLBACK_PLAN_OPTIONS
 
         setPlanOptions(options.length > 0 ? options : FALLBACK_PLAN_OPTIONS)
@@ -82,8 +121,39 @@ export default function PlanTab() {
           setSelected(detectedPlan)
           setCurrentPlan(detectedPlan)
         }
-        if (typeof data.user?.company_name === 'string') {
-          setOrganizationName(data.user.company_name.trim())
+        if (Array.isArray(data.memberships)) {
+          const membershipName = data.memberships
+            .map((membership: any) => {
+              const candidate = membership?.workspace?.name
+              return typeof candidate === 'string' ? candidate.trim() : ''
+            })
+            .find((name: string) => Boolean(name))
+
+          if (membershipName && !workspaceEditedRef.current) {
+            setWorkspaceName(membershipName)
+          }
+        }
+        const organizationNameFromMembership = Array.isArray(
+          data.organization_memberships
+        )
+          ? data.organization_memberships
+              .map((membership: any) => {
+                const candidate = membership?.organization?.name
+                return typeof candidate === 'string' ? candidate.trim() : ''
+              })
+              .find((name: string) => Boolean(name))
+          : ''
+
+        const organizationNameFromUser =
+          typeof data.user?.company_name === 'string'
+            ? data.user.company_name.trim()
+            : ''
+
+        const resolvedOrganizationName =
+          organizationNameFromMembership || organizationNameFromUser
+
+        if (resolvedOrganizationName && !organizationEditedRef.current) {
+          setOrganizationName(resolvedOrganizationName)
         }
       } catch (err) {
         console.error(err)
@@ -111,6 +181,20 @@ export default function PlanTab() {
     () => planOptions.find((option) => option.tier === currentPlan),
     [planOptions, currentPlan]
   )
+
+  useEffect(() => {
+    if (!canConfigureWorkspace) return
+    if (workspaceEditedRef.current) return
+    if (!previousWorkspaceName) return
+    setWorkspaceName(previousWorkspaceName)
+  }, [canConfigureWorkspace, previousWorkspaceName])
+
+  useEffect(() => {
+    if (!needsOrganizationName) return
+    if (organizationEditedRef.current) return
+    if (!previousOrganizationName) return
+    setOrganizationName(previousOrganizationName)
+  }, [needsOrganizationName, previousOrganizationName])
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -153,19 +237,96 @@ export default function PlanTab() {
         body: JSON.stringify(payload)
       })
 
+      const body = await res.json().catch(() => null)
+
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
         throw new Error(body?.message ?? 'Failed to update plan')
       }
 
-      await checkAuth()
-      setStatus('Your plan was updated successfully.')
+      const trimmedWorkspaceName = canConfigureWorkspace
+        ? workspaceName.trim()
+        : ''
+      const trimmedOrganizationName = needsOrganizationName
+        ? organizationName.trim()
+        : ''
+
+      if (canConfigureWorkspace) {
+        const membershipName = Array.isArray(body?.memberships)
+          ? body.memberships
+              .map((membership: any) => {
+                const candidate = membership?.workspace?.name
+                return typeof candidate === 'string' ? candidate.trim() : ''
+              })
+              .find((name: string) => Boolean(name))
+          : ''
+
+        const resolvedWorkspaceName =
+          membershipName || trimmedWorkspaceName || previousWorkspaceName
+
+        if (resolvedWorkspaceName) {
+          workspaceEditedRef.current = false
+          setWorkspaceName(resolvedWorkspaceName)
+        }
+      } else {
+        workspaceEditedRef.current = false
+        setWorkspaceName('')
+      }
+
+      if (needsOrganizationName) {
+        const organizationNameFromMembership = Array.isArray(
+          body?.organization_memberships
+        )
+          ? body.organization_memberships
+              .map((membership: any) => {
+                const candidate = membership?.organization?.name
+                return typeof candidate === 'string' ? candidate.trim() : ''
+              })
+              .find((name: string) => Boolean(name))
+          : ''
+
+        const resolvedOrganizationName =
+          organizationNameFromMembership ||
+          trimmedOrganizationName ||
+          previousOrganizationName
+
+        if (resolvedOrganizationName) {
+          organizationEditedRef.current = false
+          setOrganizationName(resolvedOrganizationName)
+        }
+      } else {
+        organizationEditedRef.current = false
+        setOrganizationName(
+          typeof user?.companyName === 'string' ? user.companyName : ''
+        )
+      }
+
+      setCurrentPlan(selected)
+
+      await checkAuth({ silent: true })
+      const planName = selectedPlanDetails?.name ?? 'selected plan'
+      setStatus(`The ${planName} plan is now active.`)
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : 'Failed to update plan')
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  const handleWorkspaceInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (!workspaceEditedRef.current) {
+      workspaceEditedRef.current = true
+    }
+    setWorkspaceName(event.target.value)
+  }
+
+  const handleOrganizationInputChange = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    if (!organizationEditedRef.current) {
+      organizationEditedRef.current = true
+    }
+    setOrganizationName(event.target.value)
   }
 
   return (
@@ -200,10 +361,11 @@ export default function PlanTab() {
               key={option.tier}
               type="button"
               onClick={() => setSelected(option.tier)}
-              className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isSelected
-                ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400/70 dark:bg-indigo-500/10'
-                : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-300'
-                }`}
+              className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                isSelected
+                  ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400/70 dark:bg-indigo-500/10'
+                  : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-300'
+              }`}
             >
               <span className="block text-base font-semibold text-zinc-900 dark:text-zinc-100">
                 {option.name}
@@ -228,7 +390,7 @@ export default function PlanTab() {
             <input
               type="text"
               value={workspaceName}
-              onChange={(event) => setWorkspaceName(event.target.value)}
+              onChange={handleWorkspaceInputChange}
               className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
               placeholder="Acme Workspace"
             />
@@ -247,7 +409,7 @@ export default function PlanTab() {
             <input
               type="text"
               value={organizationName}
-              onChange={(event) => setOrganizationName(event.target.value)}
+              onChange={handleOrganizationInputChange}
               className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
               placeholder="Acme Holdings"
             />

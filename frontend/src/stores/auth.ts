@@ -35,6 +35,10 @@ type OrganizationSummary = {
   role: 'admin' | 'user' | 'viewer'
 }
 
+type CheckAuthOptions = {
+  silent?: boolean
+}
+
 type AuthState = {
   user: User | null
   isLoading: boolean
@@ -49,7 +53,7 @@ type AuthState = {
     requiresOnboarding?: boolean
   ) => void
   logout: () => void
-  checkAuth: () => Promise<void>
+  checkAuth: (options?: CheckAuthOptions) => Promise<void>
 }
 
 export const useAuth = create<AuthState>((set) => ({
@@ -92,8 +96,10 @@ export const useAuth = create<AuthState>((set) => ({
     })
   },
 
-  checkAuth: async () => {
-    set({ isLoading: true }) // explicitly show loading
+  checkAuth: async (options) => {
+    if (!options?.silent) {
+      set({ isLoading: true }) // explicitly show loading when not silent
+    }
     try {
       const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
         method: 'GET',
