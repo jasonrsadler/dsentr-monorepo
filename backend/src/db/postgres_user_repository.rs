@@ -2,7 +2,7 @@ use crate::{
     db::user_repository::UserRepository,
     models::{
         signup::SignupPayload,
-        user::{OauthProvider, PublicUser, User, UserRole},
+        user::{OauthProvider, PublicUser, User},
     },
 };
 use async_trait::async_trait;
@@ -99,7 +99,7 @@ impl UserRepository for PostgresUserRepository {
                 password_hash,
                 first_name,
                 last_name,
-                role as "role: UserRole",
+                role as "role: crate::models::user::UserRole",
                 plan,
                 company_name,
                 oauth_provider as "oauth_provider: OauthProvider",
