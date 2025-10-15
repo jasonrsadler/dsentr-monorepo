@@ -46,6 +46,9 @@ export default function PlanTab() {
     FALLBACK_PLAN_OPTIONS
   )
   const [selected, setSelected] = useState<PlanTier>(normalizePlan(user?.plan))
+  const [currentPlan, setCurrentPlan] = useState<PlanTier>(
+    normalizePlan(user?.plan)
+  )
   const [workspaceName, setWorkspaceName] = useState('')
   const [organizationName, setOrganizationName] = useState('')
   const [status, setStatus] = useState<string | null>(null)
@@ -81,7 +84,9 @@ export default function PlanTab() {
 
         setPlanOptions(options.length > 0 ? options : FALLBACK_PLAN_OPTIONS)
         if (data.user?.plan) {
-          setSelected(normalizePlan(data.user.plan))
+          const detectedPlan = normalizePlan(data.user.plan)
+          setSelected(detectedPlan)
+          setCurrentPlan(detectedPlan)
         }
         if (typeof data.user?.company_name === 'string') {
           setOrganizationName(data.user.company_name.trim())
@@ -95,7 +100,9 @@ export default function PlanTab() {
   }, [])
 
   useEffect(() => {
-    setSelected(normalizePlan(user?.plan))
+    const normalizedPlan = normalizePlan(user?.plan)
+    setSelected(normalizedPlan)
+    setCurrentPlan(normalizedPlan)
   }, [user?.plan])
 
   const canConfigureWorkspace = selected !== 'solo'
@@ -104,6 +111,11 @@ export default function PlanTab() {
   const selectedPlanDetails = useMemo(
     () => planOptions.find((option) => option.tier === selected),
     [planOptions, selected]
+  )
+
+  const currentPlanDetails = useMemo(
+    () => planOptions.find((option) => option.tier === currentPlan),
+    [planOptions, currentPlan]
   )
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -257,9 +269,9 @@ export default function PlanTab() {
         </button>
       </div>
 
-      {selectedPlanDetails ? (
+      {currentPlanDetails ? (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Current plan: {selectedPlanDetails.name}
+          Current plan: {currentPlanDetails.name}
         </p>
       ) : null}
     </form>
