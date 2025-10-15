@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { API_BASE_URL } from '@/lib/config'
 import {
@@ -8,6 +8,8 @@ import {
   fetchConnections,
   refreshProvider
 } from '@/lib/oauthApi'
+import { useAuth } from '@/stores/auth'
+import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 
 export type IntegrationNotice =
   | { kind: 'connected'; provider?: OAuthProvider }
@@ -46,6 +48,7 @@ export default function IntegrationsTab({
   notice,
   onDismissNotice
 }: IntegrationsTabProps) {
+  const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<
@@ -55,6 +58,21 @@ export default function IntegrationsTab({
     microsoft: { connected: false }
   })
   const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
+
+  const planTier = useMemo<PlanTier>((): PlanTier => {
+    return normalizePlanTier(user?.plan)
+  }, [user?.plan])
+  const isSoloPlan = planTier === 'solo'
+
+  const openPlanSettings = useCallback(() => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+      )
+    } catch (err) {
+      console.error((err as Error).message)
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -98,6 +116,9 @@ export default function IntegrationsTab({
   }, [notice])
 
   const handleConnect = (provider: OAuthProvider) => {
+    if (isSoloPlan) {
+      return
+    }
     window.location.href = `${API_BASE_URL}/api/oauth/${provider}/start`
   }
 
@@ -147,6 +168,24 @@ export default function IntegrationsTab({
           automatically.
         </p>
       </header>
+
+      {isSoloPlan ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+          <div className="flex items-start justify-between gap-2">
+            <span>
+              OAuth integrations are available on workspace plans and above.
+              Upgrade in Settings → Plan to connect accounts for workflows.
+            </span>
+            <button
+              type="button"
+              onClick={openPlanSettings}
+              className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-50 dark:hover:bg-amber-400/10"
+            >
+              Upgrade
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {noticeText && (
         <div className="rounded-md border border-emerald-500/40 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-500/60 dark:bg-emerald-900/20 dark:text-emerald-100">
@@ -218,7 +257,8 @@ export default function IntegrationsTab({
                     ) : (
                       <button
                         onClick={() => handleConnect(provider.key)}
-                        className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700"
+                        disabled={isSoloPlan}
+                        className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Connect
                       </button>

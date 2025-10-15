@@ -90,6 +90,17 @@ impl JsonResponse {
         )
     }
 
+    pub fn forbidden(msg: &str) -> impl IntoResponse {
+        (
+            StatusCode::FORBIDDEN,
+            Json(JsonResponse {
+                status: "error".to_string(),
+                success: false,
+                message: msg.to_string(),
+            }),
+        )
+    }
+
     pub fn redirect_to_login_with_error(msg: &str) -> impl IntoResponse {
         let frontend_url = std::env::var("FRONTEND_ORIGIN")
             .unwrap_or_else(|_| "https://localhost:5173".to_string());
@@ -115,6 +126,18 @@ mod tests {
         assert_eq!(json.status, "success");
         assert!(json.success);
         assert_eq!(json.message, "ok");
+    }
+
+    #[tokio::test]
+    async fn test_forbidden_response() {
+        let resp = JsonResponse::forbidden("nope").into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
+
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        let json: JsonResponse = from_slice(&body).unwrap();
+        assert_eq!(json.status, "error");
+        assert!(!json.success);
+        assert_eq!(json.message, "nope");
     }
 
     #[tokio::test]

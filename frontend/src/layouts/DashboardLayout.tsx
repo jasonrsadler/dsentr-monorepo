@@ -72,6 +72,18 @@ export default function DashboardLayout() {
     )
   }, [location, navigate])
 
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: string }>).detail
+      setInitialSettingsTab(detail?.tab ?? 'plan')
+      setSettingsOpen(true)
+    }
+    window.addEventListener('open-plan-settings', handler)
+    return () => {
+      window.removeEventListener('open-plan-settings', handler)
+    }
+  }, [])
+
   return (
     <SecretsProvider>
       <div className="min-h-screen flex flex-col">

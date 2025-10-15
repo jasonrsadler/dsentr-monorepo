@@ -2,10 +2,24 @@ import { useState } from 'react'
 
 const triggerTypes = ['Manual', 'Webhook', 'Schedule']
 
-export default function TriggerTypeDropdown({ value, onChange }) {
+export default function TriggerTypeDropdown({
+  value,
+  onChange,
+  disabledOptions = {},
+  onBlockedSelect
+}: {
+  value: string
+  onChange: (value: string) => void
+  disabledOptions?: Record<string, string>
+  onBlockedSelect?: (value: string, reason?: string) => void
+}) {
   const [open, setOpen] = useState(false)
 
   const handleSelect = (type) => {
+    if (disabledOptions[type]) {
+      onBlockedSelect?.(type, disabledOptions[type])
+      return
+    }
     onChange(type)
     setOpen(false)
   }
@@ -41,7 +55,13 @@ export default function TriggerTypeDropdown({ value, onChange }) {
             <li
               key={type}
               onClick={() => handleSelect(type)}
-              className="px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700"
+              className={`px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 ${
+                disabledOptions[type]
+                  ? 'opacity-60 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent'
+                  : ''
+              }`}
+              aria-disabled={Boolean(disabledOptions[type])}
+              title={disabledOptions[type] ?? undefined}
             >
               {type}
             </li>

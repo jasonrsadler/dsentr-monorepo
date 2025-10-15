@@ -12,6 +12,7 @@ import ActionNode from '@/components/Workflow/ActionNode'
 import NodeEdge from '@/components/Workflow/NodeEdge'
 import CustomControls from '@/components/UI/ReactFlow/CustomControl'
 import ConditionNode from '@/components/Workflow/ConditionNode'
+import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 
 function normalizeNode(n: any) {
   return {
@@ -171,6 +172,8 @@ interface FlowCanvasProps {
   runningIds?: Set<string>
   succeededIds?: Set<string>
   failedIds?: Set<string>
+  planTier?: PlanTier
+  onRestrictionNotice?: (message: string) => void
 }
 
 export default function FlowCanvas({
@@ -183,10 +186,17 @@ export default function FlowCanvas({
   onRunWorkflow,
   runningIds = new Set(),
   succeededIds = new Set(),
-  failedIds = new Set()
+  failedIds = new Set(),
+  planTier,
+  onRestrictionNotice
 }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
   const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
+  const normalizedPlanTier = useMemo(
+    () => normalizePlanTier(planTier),
+    [planTier]
+  )
+  const isSoloPlan = normalizedPlanTier === 'solo'
   const rafRef = useRef<number | null>(null)
   // Keep a stable callable for run to avoid re-creating nodeTypes
   const onRunWorkflowRef = useRef(onRunWorkflow)
@@ -363,6 +373,8 @@ export default function FlowCanvas({
           onRun={() => {
             invokeRunWorkflow()
           }}
+          planTier={normalizedPlanTier}
+          onRestrictionNotice={onRestrictionNotice}
         />
       ),
       action: (props) => (
@@ -378,6 +390,8 @@ export default function FlowCanvas({
           onRun={() => {
             invokeRunWorkflow()
           }}
+          planTier={normalizedPlanTier}
+          onRestrictionNotice={onRestrictionNotice}
         />
       ),
       condition: (props) => (
@@ -396,7 +410,14 @@ export default function FlowCanvas({
         />
       )
     }),
-    [removeNode, markWorkflowDirty, updateNodeData, invokeRunWorkflow]
+    [
+      removeNode,
+      markWorkflowDirty,
+      updateNodeData,
+      invokeRunWorkflow,
+      normalizedPlanTier,
+      onRestrictionNotice
+    ]
   )
 
   const onNodesChange = useCallback(
@@ -454,6 +475,12 @@ export default function FlowCanvas({
       }
 
       setNodes((nds) => {
+        if (isSoloPlan && nds.length >= 10) {
+          onRestrictionNotice?.(
+            'Solo plan workflows support up to 10 nodes. Upgrade in Settings → Plan to add more steps.'
+          )
+          return nds
+        }
         const label = generateUniqueLabel(type, nds)
         const newNode = {
           id: `${type}-${+new Date()}`,
@@ -475,7 +502,7 @@ export default function FlowCanvas({
       })
       markWorkflowDirty()
     },
-    [setNodes, markWorkflowDirty]
+    [setNodes, markWorkflowDirty, isSoloPlan, onRestrictionNotice]
   )
 
   const onDragOver = useCallback((event) => {

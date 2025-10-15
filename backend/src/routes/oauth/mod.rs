@@ -21,12 +21,15 @@ use crate::routes::auth::session::AuthSession;
 use crate::services::oauth::account_service::OAuthAccountError;
 use crate::state::AppState;
 use crate::utils::csrf::generate_csrf_token;
+use crate::utils::plan_limits::NormalizedPlanTier;
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const MICROSOFT_AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const GOOGLE_STATE_COOKIE: &str = "oauth_google_state";
 const MICROSOFT_STATE_COOKIE: &str = "oauth_microsoft_state";
 const STATE_COOKIE_MAX_MINUTES: i64 = 10;
+const OAUTH_PLAN_RESTRICTION_MESSAGE: &str =
+    "OAuth integrations are available on workspace plans and above. Upgrade to connect accounts.";
 
 #[derive(Deserialize)]
 pub(crate) struct CallbackQuery {
@@ -60,9 +63,18 @@ struct RefreshResponse {
 
 pub async fn google_connect_start(
     State(state): State<AppState>,
-    _session: AuthSession,
+    AuthSession(claims): AuthSession,
     jar: CookieJar,
 ) -> Response {
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    if plan_tier.is_solo() {
+        return redirect_with_error(
+            &state.config,
+            ConnectedOAuthProvider::Google,
+            OAUTH_PLAN_RESTRICTION_MESSAGE,
+        );
+    }
+
     let state_token = generate_csrf_token();
     let cookie = build_state_cookie(GOOGLE_STATE_COOKIE, &state_token);
     let jar = jar.add(cookie);
@@ -99,9 +111,18 @@ pub async fn google_connect_callback(
 
 pub async fn microsoft_connect_start(
     State(state): State<AppState>,
-    _session: AuthSession,
+    AuthSession(claims): AuthSession,
     jar: CookieJar,
 ) -> Response {
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+    if plan_tier.is_solo() {
+        return redirect_with_error(
+            &state.config,
+            ConnectedOAuthProvider::Microsoft,
+            OAUTH_PLAN_RESTRICTION_MESSAGE,
+        );
+    }
+
     let state_token = generate_csrf_token();
     let cookie = build_state_cookie(MICROSOFT_STATE_COOKIE, &state_token);
     let jar = jar.add(cookie);
@@ -416,7 +437,10 @@ fn default_provider_statuses() -> HashMap<String, ProviderStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{header, StatusCode};
+    use axum::{
+        extract::State,
+        http::{header, StatusCode},
+    };
     use axum_extra::extract::cookie::CookieJar;
     use std::sync::Arc;
 
@@ -425,7 +449,7 @@ mod tests {
         MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
     };
     use crate::models::user::UserRole;
-    use crate::routes::auth::claims::Claims;
+    use crate::routes::auth::{claims::Claims, session::AuthSession};
     use crate::services::{
         oauth::{
             account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
@@ -542,5 +566,51 @@ mod tests {
     fn redirect_error_messages_are_user_friendly() {
         let msg = error_message_for_redirect(&OAuthAccountError::MissingRefreshToken);
         assert!(msg.contains("refresh token"));
+    }
+
+    #[tokio::test]
+    async fn solo_plan_google_start_redirects_with_upgrade_message() {
+        let config = stub_config();
+        let state = stub_state(config.clone());
+        let claims = Claims {
+            plan: Some("solo".into()),
+            ..stub_claims()
+        };
+
+        let response =
+            google_connect_start(State(state), AuthSession(claims), CookieJar::new()).await;
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .expect("location header present");
+        let location = location.to_str().unwrap();
+        assert!(location.contains("connected=false"));
+        assert!(location.contains("provider=google"));
+    }
+
+    #[tokio::test]
+    async fn workspace_plan_google_start_sets_state_cookie() {
+        let config = stub_config();
+        let state = stub_state(config.clone());
+        let claims = Claims {
+            plan: Some("workspace".into()),
+            ..stub_claims()
+        };
+
+        let response =
+            google_connect_start(State(state), AuthSession(claims), CookieJar::new()).await;
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let cookies = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(cookies
+            .iter()
+            .any(|cookie| cookie.contains(GOOGLE_STATE_COOKIE)));
     }
 }

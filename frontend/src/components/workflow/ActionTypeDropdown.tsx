@@ -9,13 +9,27 @@ const actionTypes = [
   { id: 'code', label: 'Run Custom Code' }
 ]
 
-export default function ActionTypeDropdown({ value, onChange }) {
+export default function ActionTypeDropdown({
+  value,
+  onChange,
+  disabledOptions = {},
+  onBlockedSelect
+}: {
+  value: string
+  onChange: (value: string) => void
+  disabledOptions?: Record<string, string>
+  onBlockedSelect?: (id: string, reason?: string) => void
+}) {
   const [open, setOpen] = useState(false)
 
   const selectedLabel =
     actionTypes.find((a) => a.id === value)?.label || 'Select Action'
 
   const handleSelect = (id) => {
+    if (disabledOptions[id]) {
+      onBlockedSelect?.(id, disabledOptions[id])
+      return
+    }
     onChange(id)
     setOpen(false)
   }
@@ -49,7 +63,13 @@ export default function ActionTypeDropdown({ value, onChange }) {
             <li
               key={action.id}
               onClick={() => handleSelect(action.id)}
-              className="px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700"
+              className={`px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 ${
+                disabledOptions[action.id]
+                  ? 'opacity-60 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent'
+                  : ''
+              }`}
+              aria-disabled={Boolean(disabledOptions[action.id])}
+              title={disabledOptions[action.id] ?? undefined}
             >
               {action.label}
             </li>

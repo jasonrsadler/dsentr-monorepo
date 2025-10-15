@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API_BASE_URL } from '@/lib'
+import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import { getCsrfToken } from '@/lib/csrfCache'
 import { useAuth } from '@/stores/auth'
-
-type PlanTier = 'solo' | 'workspace' | 'organization'
 
 type PlanOption = {
   tier: PlanTier
@@ -33,25 +32,16 @@ const FALLBACK_PLAN_OPTIONS: PlanOption[] = [
   }
 ]
 
-function normalizePlan(plan?: string | null): PlanTier {
-  switch ((plan ?? '').toLowerCase()) {
-    case 'workspace':
-      return 'workspace'
-    case 'organization':
-      return 'organization'
-    default:
-      return 'solo'
-  }
-}
-
 export default function PlanTab() {
   const { user, checkAuth } = useAuth()
   const [planOptions, setPlanOptions] = useState<PlanOption[]>(
     FALLBACK_PLAN_OPTIONS
   )
-  const [selected, setSelected] = useState<PlanTier>(normalizePlan(user?.plan))
+  const [selected, setSelected] = useState<PlanTier>(
+    normalizePlanTier(user?.plan)
+  )
   const [currentPlan, setCurrentPlan] = useState<PlanTier>(
-    normalizePlan(user?.plan)
+    normalizePlanTier(user?.plan)
   )
   const [workspaceName, setWorkspaceName] = useState('')
   const [organizationName, setOrganizationName] = useState('')
@@ -70,37 +60,14 @@ export default function PlanTab() {
         if (!data) return
         const options: PlanOption[] = Array.isArray(data.plan_options)
           ? data.plan_options
-            .map((option: any) => {
-              const normalizedTier = normalizePlan(option?.tier)
-              const fallbackOption = FALLBACK_PLAN_OPTIONS.find(
-                (fallback) => fallback.tier === normalizedTier
-              )
-
-              const name =
-                typeof option?.name === 'string' &&
-                  option.name.trim().length > 0
-                  ? option.name
-                  : (fallbackOption?.name ?? 'Plan')
-
-              const description =
-                typeof option?.description === 'string' &&
-                  option.description.trim().length > 0
+            .map((option: any) => ({
+              tier: normalizePlanTier(option?.tier),
+              name: typeof option?.name === 'string' ? option.name : 'Plan',
+              description:
+                typeof option?.description === 'string'
                   ? option.description
-                  : (fallbackOption?.description ?? '')
-
-              const price =
-                typeof option?.price === 'string' &&
-                  option.price.trim().length > 0
-                  ? option.price
-                  : (fallbackOption?.price ?? '')
-
-              return {
-                tier: normalizedTier,
-                name,
-                description,
-                price
-              }
-            })
+                  : ''
+            }))
             .filter(
               (option): option is PlanOption =>
                 option.tier === 'solo' ||
@@ -111,7 +78,7 @@ export default function PlanTab() {
 
         setPlanOptions(options.length > 0 ? options : FALLBACK_PLAN_OPTIONS)
         if (data.user?.plan) {
-          const detectedPlan = normalizePlan(data.user.plan)
+          const detectedPlan = normalizePlanTier(data.user.plan)
           setSelected(detectedPlan)
           setCurrentPlan(detectedPlan)
         }
@@ -127,7 +94,7 @@ export default function PlanTab() {
   }, [])
 
   useEffect(() => {
-    const normalizedPlan = normalizePlan(user?.plan)
+    const normalizedPlan = normalizePlanTier(user?.plan)
     setSelected(normalizedPlan)
     setCurrentPlan(normalizedPlan)
   }, [user?.plan])
@@ -234,8 +201,8 @@ export default function PlanTab() {
               type="button"
               onClick={() => setSelected(option.tier)}
               className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isSelected
-                  ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400/70 dark:bg-indigo-500/10'
-                  : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-300'
+                ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400/70 dark:bg-indigo-500/10'
+                : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-300'
                 }`}
             >
               <span className="block text-base font-semibold text-zinc-900 dark:text-zinc-100">

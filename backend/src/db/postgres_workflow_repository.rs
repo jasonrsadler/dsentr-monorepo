@@ -787,6 +787,25 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         Ok(res.rows_affected() > 0)
     }
 
+    async fn count_user_runs_since(
+        &self,
+        user_id: Uuid,
+        since: OffsetDateTime,
+    ) -> Result<i64, sqlx::Error> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM workflow_runs
+            WHERE user_id = $1 AND created_at >= $2
+            "#,
+            user_id,
+            since
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count.unwrap_or(0))
+    }
+
     async fn set_workflow_concurrency_limit(
         &self,
         user_id: Uuid,

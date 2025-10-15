@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import ActionTypeDropdown from './ActionTypeDropdown'
@@ -15,6 +15,35 @@ import MessagingAction from './Actions/Messaging/MessagingAction'
 import SheetsAction from './Actions/Google/SheetsAction'
 import HttpRequestAction from './Actions/HttpRequestAction'
 import RunCustomCodeAction from './Actions/RunCustomCodeAction'
+import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+
+const PLAN_RESTRICTION_MESSAGES = {
+  sheets:
+    'Google Sheets actions are available on workspace plans and above. Upgrade in Settings → Plan to run this step.',
+  slack:
+    'Slack messaging is available on workspace plans and above. Switch this action to Google Chat or upgrade in Settings → Plan.',
+  teams:
+    'Microsoft Teams messaging is available on workspace plans and above. Switch this action to Google Chat or upgrade in Settings → Plan.'
+} as const
+
+function normalizeActionType(value: any): string {
+  if (typeof value !== 'string') return 'email'
+  const lowered = value.trim().toLowerCase()
+  switch (lowered) {
+    case 'send email':
+      return 'email'
+    case 'post webhook':
+      return 'webhook'
+    case 'create google sheet row':
+      return 'sheets'
+    case 'http request':
+      return 'http'
+    case 'run custom code':
+      return 'code'
+    default:
+      return lowered || 'email'
+  }
+}
 
 interface ActionNodeProps {
   id: string
@@ -27,6 +56,8 @@ interface ActionNodeProps {
   isRunning?: boolean
   isSucceeded?: boolean
   isFailed?: boolean
+  planTier?: PlanTier
+  onRestrictionNotice?: (message: string) => void
 }
 
 export default function ActionNode({
@@ -39,15 +70,24 @@ export default function ActionNode({
   onUpdateNode,
   isRunning,
   isSucceeded,
-  isFailed
+  isFailed,
+  planTier,
+  onRestrictionNotice
 }: ActionNodeProps) {
+  const normalizedPlanTier = useMemo(
+    () => normalizePlanTier(planTier),
+    [planTier]
+  )
+  const isSoloPlan = normalizedPlanTier === 'solo'
   const isNewNode = !data?.id
 
   const [expanded, setExpanded] = useState(data?.expanded ?? false)
   const [dirty, setDirty] = useState(data?.dirty ?? isNewNode)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [running, setRunning] = useState(false)
-  const [actionType, setActionType] = useState(data?.actionType || 'Send Email')
+  const [actionType, setActionType] = useState<string>(
+    normalizeActionType(data?.actionType)
+  )
   const [params, setParams] = useState(() => ({
     service: '',
     ...(data?.params || data?.inputs || {})
@@ -69,7 +109,7 @@ export default function ActionNode({
   useEffect(() => {
     setLabel(data?.label || 'Action')
     setExpanded(data?.expanded ?? false)
-    setActionType(data?.actionType || 'Send Email')
+    setActionType(normalizeActionType(data?.actionType))
     setParams(() => ({ service: '', ...(data?.params || data?.inputs || {}) }))
     setTimeoutMs(data?.timeout || 5000)
     setRetries(data?.retries || 0)
@@ -87,11 +127,75 @@ export default function ActionNode({
   const [prevService, setPrevService] = useState('')
 
   const [hasValidationErrors, setHasValidationErrors] = useState(false)
-  const combinedHasValidationErrors = hasValidationErrors || Boolean(labelError)
+  const normalizedActionType = useMemo(
+    () => actionType.toLowerCase(),
+    [actionType]
+  )
+  const normalizedMessagingPlatform = useMemo(() => {
+    if (!params || typeof (params as any).platform !== 'string') return ''
+    return ((params as any).platform as string).trim().toLowerCase()
+  }, [params])
+  const messagingRestrictionKey = useMemo(() => {
+    if (!isSoloPlan) return null
+    if (normalizedActionType !== 'messaging') return null
+    if (normalizedMessagingPlatform === 'slack') return 'slack' as const
+    if (normalizedMessagingPlatform === 'teams') return 'teams' as const
+    return null
+  }, [isSoloPlan, normalizedActionType, normalizedMessagingPlatform])
+  const planRestrictionMessage = useMemo(() => {
+    if (!isSoloPlan) return null
+    if (normalizedActionType === 'sheets') {
+      return PLAN_RESTRICTION_MESSAGES.sheets
+    }
+    if (messagingRestrictionKey) {
+      return PLAN_RESTRICTION_MESSAGES[messagingRestrictionKey]
+    }
+    return null
+  }, [isSoloPlan, normalizedActionType, messagingRestrictionKey])
+  const combinedHasValidationErrors =
+    hasValidationErrors ||
+    Boolean(labelError) ||
+    Boolean(planRestrictionMessage)
+  const lastPlanNoticeRef = useRef<string | null>(null)
 
   useEffect(() => {
     setLabelError(data?.labelError ?? null)
   }, [data?.labelError])
+
+  useEffect(() => {
+    if (!onRestrictionNotice) return
+    if (planRestrictionMessage) {
+      if (lastPlanNoticeRef.current === planRestrictionMessage) return
+      lastPlanNoticeRef.current = planRestrictionMessage
+      onRestrictionNotice(planRestrictionMessage)
+    } else {
+      lastPlanNoticeRef.current = null
+    }
+  }, [planRestrictionMessage, onRestrictionNotice])
+
+  useEffect(() => {
+    if (!isSoloPlan) return
+    if (normalizedActionType !== 'messaging') return
+    setParams((prev) => {
+      if (!prev || typeof prev !== 'object') return prev
+      const platform =
+        typeof (prev as any).platform === 'string'
+          ? ((prev as any).platform as string)
+          : ''
+      if (platform && platform.trim()) return prev
+      return { ...prev, platform: 'Google Chat' }
+    })
+  }, [isSoloPlan, normalizedActionType])
+
+  const openPlanSettings = useCallback(() => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+      )
+    } catch (err) {
+      console.error((err as Error).message)
+    }
+  }, [])
 
   useEffect(() => {
     if (params.service !== prevService) {
@@ -118,7 +222,7 @@ export default function ActionNode({
       id,
       {
         label,
-        actionType,
+        actionType: normalizedActionType,
         params,
         timeout,
         retries,
@@ -133,7 +237,7 @@ export default function ActionNode({
     if (dirty) {
       onDirtyChange?.(true, {
         label,
-        actionType,
+        actionType: normalizedActionType,
         params,
         timeout,
         retries,
@@ -155,7 +259,8 @@ export default function ActionNode({
     combinedHasValidationErrors,
     onUpdateNode,
     id,
-    onDirtyChange
+    onDirtyChange,
+    normalizedActionType
   ])
 
   const handleRun = async () => {
@@ -238,13 +343,42 @@ export default function ActionNode({
             >
               <p className="text-xs text-zinc-500">Action Type</p>
               <ActionTypeDropdown
-                value={actionType}
+                value={normalizedActionType}
                 onChange={(t) => {
                   setActionType(t)
                   setDirty(true)
                 }}
+                disabledOptions={
+                  isSoloPlan
+                    ? {
+                        sheets: PLAN_RESTRICTION_MESSAGES.sheets
+                      }
+                    : {}
+                }
+                onBlockedSelect={(id, reason) => {
+                  if (!onRestrictionNotice) return
+                  const fallback =
+                    id === 'sheets'
+                      ? PLAN_RESTRICTION_MESSAGES.sheets
+                      : 'This action is locked on your current plan.'
+                  onRestrictionNotice(reason || fallback)
+                }}
               />
-              {actionType === 'webhook' && (
+              {normalizedActionType === 'sheets' && planRestrictionMessage ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+                  <div className="flex items-start justify-between gap-2">
+                    <span>{planRestrictionMessage}</span>
+                    <button
+                      type="button"
+                      onClick={openPlanSettings}
+                      className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+                    >
+                      Upgrade
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {normalizedActionType === 'webhook' && (
                 <div className="flex flex-col gap-2">
                   <WebhookAction
                     args={params}
@@ -256,7 +390,7 @@ export default function ActionNode({
                   />
                 </div>
               )}
-              {actionType === 'email' && (
+              {normalizedActionType === 'email' && (
                 <div className="flex flex-col gap-2">
                   <ActionServiceDropdown
                     value={params.service}
@@ -307,7 +441,7 @@ export default function ActionNode({
                   )}
                 </div>
               )}
-              {actionType === 'messaging' && (
+              {normalizedActionType === 'messaging' && (
                 <MessagingAction
                   args={params}
                   onChange={(updatedParams, nodeHasErrors, childDirty) => {
@@ -315,9 +449,25 @@ export default function ActionNode({
                     setHasValidationErrors(nodeHasErrors)
                     setDirty((prev) => childDirty || prev)
                   }}
+                  disabledPlatforms={
+                    isSoloPlan
+                      ? {
+                          Slack: PLAN_RESTRICTION_MESSAGES.slack,
+                          Teams: PLAN_RESTRICTION_MESSAGES.teams
+                        }
+                      : {}
+                  }
+                  restrictedPlatform={messagingRestrictionKey}
+                  restrictionMessage={
+                    messagingRestrictionKey
+                      ? PLAN_RESTRICTION_MESSAGES[messagingRestrictionKey]
+                      : null
+                  }
+                  onRestrictionNotice={onRestrictionNotice}
+                  onUpgradeClick={openPlanSettings}
                 />
               )}
-              {actionType === 'sheets' && (
+              {normalizedActionType === 'sheets' && !planRestrictionMessage && (
                 <SheetsAction
                   args={params}
                   onChange={(updatedParams, nodeHasErrors, childDirty) => {
@@ -327,7 +477,7 @@ export default function ActionNode({
                   }}
                 />
               )}
-              {actionType === 'http' && (
+              {normalizedActionType === 'http' && (
                 <HttpRequestAction
                   args={params}
                   onChange={(updatedParams, nodeHasErrors, childDirty) => {
@@ -337,7 +487,7 @@ export default function ActionNode({
                   }}
                 />
               )}
-              {actionType === 'code' && (
+              {normalizedActionType === 'code' && (
                 <RunCustomCodeAction
                   args={{
                     code: params.code || '',

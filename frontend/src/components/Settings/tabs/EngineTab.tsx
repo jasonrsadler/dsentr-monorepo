@@ -26,14 +26,32 @@ import {
   maskSecretsDeep,
   maskStringWithSecrets
 } from '@/lib/secretMask'
+import { normalizePlanTier } from '@/lib/planTiers'
+
+const CONCURRENCY_RESTRICTION_MESSAGE =
+  'Solo plan workflows run one job at a time. Upgrade in Settings → Plan to raise the concurrency limit.'
 
 export default function EngineTab() {
   const { user } = useAuth()
   const isAdmin = (user?.role ?? '').toLowerCase() === 'admin'
+  const planTier = normalizePlanTier(user?.plan)
+  const isSoloPlan = planTier === 'solo'
+  const openPlanSettings = useCallback(() => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+      )
+    } catch (err) {
+      console.error((err as Error).message)
+    }
+  }, [])
   const [items, setItems] = useState<WorkflowRecord[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [planRestrictionNotice, setPlanRestrictionNotice] = useState<
+    string | null
+  >(null)
 
   useEffect(() => {
     let alive = true
@@ -56,13 +74,29 @@ export default function EngineTab() {
     [items, selectedId]
   )
   const selectedWorkflowId = selected?.id ?? null
+  const baselineLimit = useMemo(() => {
+    const raw = (selected as any)?.concurrency_limit
+    return typeof raw === 'number' && raw >= 1 ? raw : 1
+  }, [selected?.concurrency_limit, selectedId])
   const [limitInput, setLimitInput] = useState<string>('')
   useEffect(() => {
     const current = (selected as any)?.concurrency_limit
-    setLimitInput(typeof current === 'number' ? String(current) : '')
+    if (typeof current === 'number' && current >= 1) {
+      setLimitInput(String(current))
+    } else {
+      setLimitInput('1')
+    }
   }, [selectedWorkflowId])
+  useEffect(() => {
+    setPlanRestrictionNotice(null)
+  }, [selectedId, isSoloPlan])
 
   const [busy, setBusy] = useState(false)
+  const parsedLimit = Number.parseInt(limitInput || '', 10)
+  const limitInputValid = Number.isFinite(parsedLimit) && parsedLimit >= 1
+  const hasLimitChange = limitInputValid && parsedLimit !== baselineLimit
+  const canSaveLimit =
+    Boolean(selected) && !busy && limitInputValid && hasLimitChange
   const [deadLetters, setDeadLetters] = useState<any[]>([])
   const [dlBusyId, setDlBusyId] = useState<string | null>(null)
   const [purgeBusy, setPurgeBusy] = useState(false)
@@ -104,14 +138,21 @@ export default function EngineTab() {
 
   async function handleSaveLimit() {
     if (!selected || busy) return
-    const parsed = parseInt(limitInput || '0', 10)
+    const parsed = Number.parseInt(limitInput || '0', 10)
     if (!Number.isFinite(parsed) || parsed < 1) {
       setError('Limit must be a positive integer')
+      return
+    }
+    if (isSoloPlan) {
+      setError(null)
+      setPlanRestrictionNotice(CONCURRENCY_RESTRICTION_MESSAGE)
+      setLimitInput(String(baselineLimit))
       return
     }
     try {
       setBusy(true)
       setError(null)
+      setPlanRestrictionNotice(null)
       const res = await setConcurrencyLimit(selected.id, parsed)
       if (res.success) {
         setItems((prev) =>
@@ -121,9 +162,19 @@ export default function EngineTab() {
               : w
           )
         )
+        setLimitInput(String(res.limit))
       }
     } catch (e: any) {
-      setError(e?.message || 'Failed to set limit')
+      const violationMessage = Array.isArray(e?.violations)
+        ? e.violations[0]?.message
+        : null
+      if (violationMessage) {
+        setError(null)
+        setPlanRestrictionNotice(violationMessage)
+      } else {
+        setError(e?.message || 'Failed to set limit')
+      }
+      setLimitInput(String(baselineLimit))
     } finally {
       setBusy(false)
     }
@@ -277,17 +328,52 @@ export default function EngineTab() {
             min={1}
             step={1}
             value={limitInput}
-            onChange={(e) => setLimitInput(e.target.value)}
+            onChange={(e) => {
+              const nextValue = e.target.value
+              setLimitInput(nextValue)
+              if (isSoloPlan) {
+                if (nextValue && nextValue !== '1') {
+                  setPlanRestrictionNotice(CONCURRENCY_RESTRICTION_MESSAGE)
+                } else {
+                  setPlanRestrictionNotice(null)
+                }
+              }
+            }}
             className="w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700"
           />
           <button
             onClick={handleSaveLimit}
-            disabled={!selected || busy || !limitInput}
-            className={`px-3 py-1 rounded ${busy ? 'opacity-60 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
+            type="button"
+            disabled={!canSaveLimit}
+            className={`px-3 py-1 rounded ${
+              canSaveLimit
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-green-600 text-white opacity-60 cursor-not-allowed'
+            }`}
           >
             Save Limit
           </button>
         </div>
+        {isSoloPlan ? (
+          <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+            Solo plan workflows run sequentially. Upgrade in Settings → Plan to
+            unlock higher throughput.
+          </p>
+        ) : null}
+        {planRestrictionNotice ? (
+          <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+            <div className="flex items-start justify-between gap-2">
+              <span>{planRestrictionNotice}</span>
+              <button
+                type="button"
+                onClick={openPlanSettings}
+                className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+              >
+                Upgrade
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Queue actions */}

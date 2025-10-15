@@ -194,6 +194,12 @@ pub trait WorkflowRepository: Send + Sync {
         priority: i32,
     ) -> Result<bool, sqlx::Error>;
 
+    async fn count_user_runs_since(
+        &self,
+        user_id: Uuid,
+        since: OffsetDateTime,
+    ) -> Result<i64, sqlx::Error>;
+
     // Concurrency & leasing
     async fn set_workflow_concurrency_limit(
         &self,

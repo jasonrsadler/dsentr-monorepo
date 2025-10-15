@@ -415,6 +415,14 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(true)
     }
 
+    async fn count_user_runs_since(
+        &self,
+        _user_id: Uuid,
+        _since: OffsetDateTime,
+    ) -> Result<i64, sqlx::Error> {
+        Ok(0)
+    }
+
     async fn set_workflow_concurrency_limit(
         &self,
         _user_id: Uuid,

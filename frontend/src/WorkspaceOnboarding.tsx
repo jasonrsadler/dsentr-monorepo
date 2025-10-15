@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { API_BASE_URL } from '@/lib'
 import { getCsrfToken } from '@/lib/csrfCache'
 import { useAuth } from '@/stores/auth'
-
-type PlanTier = 'solo' | 'workspace' | 'organization'
+import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 
 type PlanOption = {
   tier: PlanTier
@@ -57,17 +56,6 @@ const FALLBACK_PLAN_OPTIONS: PlanOption[] = [
   }
 ]
 
-function normalizePlan(plan?: string | null): PlanTier {
-  switch ((plan ?? '').toLowerCase()) {
-    case 'workspace':
-      return 'workspace'
-    case 'organization':
-      return 'organization'
-    default:
-      return 'solo'
-  }
-}
-
 function defaultWorkspaceName(user: OnboardingContext['user']): string {
   const fallback = `${user.first_name ?? 'My'} Workspace`
   const candidate = user.company_name?.trim()
@@ -111,43 +99,20 @@ export default function WorkspaceOnboarding() {
 
         const planOptions: PlanOption[] = Array.isArray(data.plan_options)
           ? data.plan_options
-              .map((option: any) => {
-                const normalizedTier = normalizePlan(option?.tier)
-                const fallbackOption = FALLBACK_PLAN_OPTIONS.find(
-                  (fallback) => fallback.tier === normalizedTier
-                )
-
-                const name =
-                  typeof option?.name === 'string' &&
-                  option.name.trim().length > 0
-                    ? option.name
-                    : (fallbackOption?.name ?? 'Plan')
-
-                const description =
-                  typeof option?.description === 'string' &&
-                  option.description.trim().length > 0
-                    ? option.description
-                    : (fallbackOption?.description ?? '')
-
-                const price =
-                  typeof option?.price === 'string' &&
-                  option.price.trim().length > 0
-                    ? option.price
-                    : (fallbackOption?.price ?? '')
-
-                return {
-                  tier: normalizedTier,
-                  name,
-                  description,
-                  price
-                }
-              })
-              .filter(
-                (option): option is PlanOption =>
-                  option.tier === 'solo' ||
-                  option.tier === 'workspace' ||
-                  option.tier === 'organization'
-              )
+            .map((option: any) => ({
+              tier: normalizePlanTier(option?.tier),
+              name: typeof option?.name === 'string' ? option.name : 'Plan',
+              description:
+                typeof option?.description === 'string'
+                  ? option.description
+                  : ''
+            }))
+            .filter(
+              (option): option is PlanOption =>
+                option.tier === 'solo' ||
+                option.tier === 'workspace' ||
+                option.tier === 'organization'
+            )
           : FALLBACK_PLAN_OPTIONS
 
         const user = data.user ?? {
@@ -162,7 +127,7 @@ export default function WorkspaceOnboarding() {
             planOptions.length > 0 ? planOptions : FALLBACK_PLAN_OPTIONS
         })
 
-        const detectedPlan = normalizePlan(user.plan)
+        const detectedPlan = normalizePlanTier(user.plan)
         setPlanTier(detectedPlan)
         setWorkspaceName(defaultWorkspaceName(user))
         setOrganizationName(user.company_name?.trim() ?? '')
@@ -196,6 +161,11 @@ export default function WorkspaceOnboarding() {
 
   const canConfigureWorkspace = planTier !== 'solo'
   const needsOrganizationName = planTier === 'organization'
+
+  useEffect(() => {
+    const normalized = normalizePlanTier(context?.user?.plan ?? null)
+    setPlanTier(normalized)
+  }, [context?.user?.plan])
 
   const toggleWorkflow = (id: string) => {
     if (!canConfigureWorkspace) return
@@ -245,8 +215,8 @@ export default function WorkspaceOnboarding() {
         plan_tier: planTier,
         teams: canConfigureWorkspace
           ? teams
-              .filter((team) => team.name.trim().length > 0)
-              .map((team) => ({ name: team.name.trim(), member_ids: [] }))
+            .filter((team) => team.name.trim().length > 0)
+            .map((team) => ({ name: team.name.trim(), member_ids: [] }))
           : [],
         shared_workflow_ids: canConfigureWorkspace
           ? Array.from(selectedWorkflows)
@@ -337,11 +307,10 @@ export default function WorkspaceOnboarding() {
                     key={option.tier}
                     type="button"
                     onClick={() => setPlanTier(option.tier)}
-                    className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                      isSelected
+                    className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isSelected
                         ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400/70 dark:bg-indigo-500/10'
                         : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-300'
-                    }`}
+                      }`}
                   >
                     <span className="block text-base font-semibold text-zinc-900 dark:text-zinc-100">
                       {option.name}
@@ -423,11 +392,10 @@ export default function WorkspaceOnboarding() {
                 type="button"
                 onClick={addTeam}
                 disabled={!canConfigureWorkspace}
-                className={`inline-flex items-center rounded-md border px-3 py-1 text-sm font-medium transition ${
-                  canConfigureWorkspace
+                className={`inline-flex items-center rounded-md border px-3 py-1 text-sm font-medium transition ${canConfigureWorkspace
                     ? 'border-indigo-500 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/10'
                     : 'cursor-not-allowed border-zinc-300 text-zinc-400 dark:border-zinc-700 dark:text-zinc-500'
-                }`}
+                  }`}
               >
                 + Add team
               </button>

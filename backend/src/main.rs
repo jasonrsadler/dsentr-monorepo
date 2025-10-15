@@ -260,6 +260,7 @@ async fn main() {
     // Protected workflow routes (CSRF layer applied)
     let workflow_routes = Router::new()
         .route("/", post(create_workflow).get(list_workflows))
+        .route("/usage", get(routes::workflows::get_plan_usage))
         .route("/runs", get(routes::workflows::list_active_runs))
         .route("/runs/events", get(routes::workflows::sse_global_runs))
         .route(

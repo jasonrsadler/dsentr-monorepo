@@ -16,6 +16,7 @@ interface NodeDropdownFieldProps {
   disabled?: boolean
   loading?: boolean
   emptyMessage?: string
+  onOptionBlocked?: (value: string) => void
 }
 
 export default function NodeDropdownField({
@@ -25,7 +26,8 @@ export default function NodeDropdownField({
   placeholder = 'Select Region',
   disabled = false,
   loading = false,
-  emptyMessage = 'No options available'
+  emptyMessage = 'No options available',
+  onOptionBlocked
 }: NodeDropdownFieldProps) {
   const [open, setOpen] = useState(false)
 
@@ -106,7 +108,10 @@ export default function NodeDropdownField({
                 key={option.value}
                 aria-selected={option.value === value}
                 onClick={() => {
-                  if (option.disabled) return
+                  if (option.disabled) {
+                    onOptionBlocked?.(option.value)
+                    return
+                  }
                   handleSelect(option.value)
                 }}
                 className={`px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 ${

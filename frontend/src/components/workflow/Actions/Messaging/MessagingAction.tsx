@@ -117,11 +117,21 @@ const sanitizeParams = (
 interface MessagingActionProps {
   args: any
   onChange?: (args: any, nodeHasErrors: boolean, childDirty: boolean) => void
+  disabledPlatforms?: Partial<Record<MessagingPlatform, string>>
+  restrictedPlatform?: 'slack' | 'teams' | null
+  restrictionMessage?: string | null
+  onRestrictionNotice?: (message: string) => void
+  onUpgradeClick?: () => void
 }
 
 export default function MessagingAction({
   args,
-  onChange
+  onChange,
+  disabledPlatforms = {},
+  restrictedPlatform = null,
+  restrictionMessage = null,
+  onRestrictionNotice,
+  onUpgradeClick
 }: MessagingActionProps) {
   const [initialPlatform] = useState<MessagingPlatform>(
     (args?.platform as MessagingPlatform) || 'Slack'
@@ -209,30 +219,86 @@ export default function MessagingAction({
 
   const errorClass = 'text-xs text-red-500'
 
+  const dropdownOptions = useMemo(
+    () =>
+      (['Slack', 'Teams', 'Google Chat'] as MessagingPlatform[]).map(
+        (label) => ({
+          label,
+          value: label,
+          disabled: Boolean(disabledPlatforms[label])
+        })
+      ),
+    [disabledPlatforms]
+  )
+
+  const isPlatformRestricted = useMemo(() => {
+    if (!restrictionMessage) return false
+    if (!restrictedPlatform) return false
+    return (
+      (restrictedPlatform === 'slack' && platform === 'Slack') ||
+      (restrictedPlatform === 'teams' && platform === 'Teams')
+    )
+  }, [restrictionMessage, restrictedPlatform, platform])
+
   return (
     <div className="flex flex-col gap-3">
       <NodeDropdownField
-        options={['Slack', 'Teams', 'Google Chat']}
+        options={dropdownOptions}
         value={platform}
         onChange={handlePlatformChange}
+        onOptionBlocked={(value) => {
+          if (!onRestrictionNotice) return
+          const reason =
+            disabledPlatforms[value as MessagingPlatform] ||
+            restrictionMessage ||
+            'This platform is locked on your current plan.'
+          onRestrictionNotice(reason)
+        }}
       />
       {validationErrors.platform && (
         <p className={errorClass}>{validationErrors.platform}</p>
       )}
 
+      {restrictionMessage && isPlatformRestricted && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+          <div className="flex items-start justify-between gap-2">
+            <span>{restrictionMessage}</span>
+            <button
+              type="button"
+              onClick={onUpgradeClick}
+              className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+            >
+              Upgrade
+            </button>
+          </div>
+        </div>
+      )}
+
       {platform === 'Slack' && (
-        <SlackAction
-          args={childParams}
-          initialDirty={childDirty}
-          onChange={handleChildChange}
-        />
+        <div
+          className={
+            isPlatformRestricted ? 'pointer-events-none opacity-50' : ''
+          }
+        >
+          <SlackAction
+            args={childParams}
+            initialDirty={childDirty}
+            onChange={handleChildChange}
+          />
+        </div>
       )}
       {platform === 'Teams' && (
-        <TeamsAction
-          args={childParams}
-          initialDirty={childDirty}
-          onChange={handleChildChange}
-        />
+        <div
+          className={
+            isPlatformRestricted ? 'pointer-events-none opacity-50' : ''
+          }
+        >
+          <TeamsAction
+            args={childParams}
+            initialDirty={childDirty}
+            onChange={handleChildChange}
+          />
+        </div>
       )}
       {platform === 'Google Chat' && (
         <GoogleChatAction

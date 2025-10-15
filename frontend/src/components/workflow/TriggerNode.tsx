@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import {
@@ -24,6 +24,10 @@ import {
 import { ScheduleCalendar } from '../ui/schedule/ScheduleCalendar'
 import { ScheduleTimePicker } from '../ui/schedule/ScheduleTimePicker'
 import { ScheduleTimezonePicker } from '../ui/schedule/ScheduleTimezonePicker'
+import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+
+const SCHEDULE_RESTRICTION_MESSAGE =
+  'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'
 
 const repeatUnits = ['minutes', 'hours', 'days', 'weeks'] as const
 type RepeatUnit = (typeof repeatUnits)[number]
@@ -155,9 +159,17 @@ export default function TriggerNode({
   onUpdateNode,
   isRunning,
   isSucceeded,
-  isFailed
+  isFailed,
+  planTier,
+  onRestrictionNotice
 }) {
   const isNewNode = !data?.id
+
+  const normalizedPlanTier = useMemo(
+    () => normalizePlanTier(planTier),
+    [planTier]
+  )
+  const isSoloPlan = normalizedPlanTier === 'solo'
 
   const defaultTimezone = useMemo(() => {
     try {
@@ -180,6 +192,17 @@ export default function TriggerNode({
   const [labelError, setLabelError] = useState<string | null>(
     data?.labelError ?? null
   )
+  const normalizedTriggerType = useMemo(
+    () =>
+      typeof triggerType === 'string'
+        ? triggerType.trim().toLowerCase()
+        : 'manual',
+    [triggerType]
+  )
+  const scheduleRestricted = isSoloPlan && normalizedTriggerType === 'schedule'
+  const scheduleRestrictionMessage = scheduleRestricted
+    ? SCHEDULE_RESTRICTION_MESSAGE
+    : null
   const timezoneOptions = useMemo(() => {
     const options: string[] = []
     if (typeof Intl !== 'undefined') {
@@ -213,6 +236,7 @@ export default function TriggerNode({
   const timePickerContainerRef = useRef<HTMLDivElement | null>(null)
   const timezonePickerContainerRef = useRef<HTMLDivElement | null>(null)
   const lastNodeUpdateRef = useRef<NodeUpdatePayload>()
+  const lastPlanNoticeRef = useRef<string | null>(null)
 
   const updateSchedule = (
     updater: (previous: ScheduleConfig) => ScheduleConfig
@@ -360,6 +384,27 @@ export default function TriggerNode({
     data?.labelError
   ])
 
+  useEffect(() => {
+    if (!onRestrictionNotice) return
+    if (scheduleRestrictionMessage) {
+      if (lastPlanNoticeRef.current === scheduleRestrictionMessage) return
+      lastPlanNoticeRef.current = scheduleRestrictionMessage
+      onRestrictionNotice(scheduleRestrictionMessage)
+    } else {
+      lastPlanNoticeRef.current = null
+    }
+  }, [scheduleRestrictionMessage, onRestrictionNotice])
+
+  const openPlanSettings = useCallback(() => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+      )
+    } catch (err) {
+      console.error((err as Error).message)
+    }
+  }, [])
+
   const hasInvalidInputs = useMemo(() => {
     if (inputs.length === 0) return false
     return inputs.some((i) => !i.key.trim() || !i.value.trim())
@@ -371,7 +416,10 @@ export default function TriggerNode({
   }, [inputs])
 
   const combinedHasValidationErrors =
-    hasDuplicateKeys || hasInvalidInputs || Boolean(labelError)
+    hasDuplicateKeys ||
+    hasInvalidInputs ||
+    Boolean(labelError) ||
+    scheduleRestricted
 
   useEffect(() => {
     // notify node update; suppress marking workflow dirty if clearing programmatically
@@ -528,78 +576,56 @@ export default function TriggerNode({
                   onUpdateNode?.(id, { triggerType: type, dirty: true })
                   setDirty(true)
                 }}
+                disabledOptions={
+                  isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
+                }
+                onBlockedSelect={(value, reason) => {
+                  if (!onRestrictionNotice) return
+                  const fallback =
+                    value === 'Schedule'
+                      ? SCHEDULE_RESTRICTION_MESSAGE
+                      : 'This trigger is locked on your current plan.'
+                  onRestrictionNotice(reason || fallback)
+                }}
               />
-              {triggerType === 'Schedule' && (
-                <div className="space-y-4 rounded-xl border border-zinc-200/70 bg-zinc-50/60 p-4 text-sm shadow-sm dark:border-zinc-700/60 dark:bg-zinc-900/40">
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      Start Date
-                    </label>
-                    <div ref={datePickerContainerRef} className="relative mt-2">
-                      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+              {triggerType === 'Schedule' ? (
+                scheduleRestricted ? (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+                    <div className="flex items-start justify-between gap-2">
+                      <span>{SCHEDULE_RESTRICTION_MESSAGE}</span>
                       <button
                         type="button"
-                        onClick={() => {
-                          setTimePickerOpen(false)
-                          setTimezonePickerOpen(false)
-                          setDatePickerOpen((prev) => !prev)
-                        }}
-                        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                        onClick={openPlanSettings}
+                        className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
                       >
-                        {formatDisplayDate(scheduleConfig.startDate)}
+                        Upgrade
                       </button>
-                      <AnimatePresence>
-                        {datePickerOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                            transition={{ duration: 0.15 }}
-                            className="absolute left-0 right-0 z-20 mt-2"
-                          >
-                            <ScheduleCalendar
-                              month={datePickerMonth}
-                              selectedDate={scheduleConfig.startDate}
-                              todayISO={todayISO}
-                              onMonthChange={(nextMonth) =>
-                                setDatePickerMonth(nextMonth)
-                              }
-                              onSelectDate={(isoDate) => {
-                                updateSchedule((prev) => ({
-                                  ...prev,
-                                  startDate: isoDate
-                                }))
-                                setDatePickerOpen(false)
-                              }}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                ) : (
+                  <div className="space-y-4 rounded-xl border border-zinc-200/70 bg-zinc-50/60 p-4 text-sm shadow-sm dark:border-zinc-700/60 dark:bg-zinc-900/40">
                     <div>
                       <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                        Start Time
+                        Start Date
                       </label>
                       <div
-                        ref={timePickerContainerRef}
+                        ref={datePickerContainerRef}
                         className="relative mt-2"
                       >
-                        <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                        <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
                         <button
                           type="button"
                           onClick={() => {
-                            setDatePickerOpen(false)
+                            setTimePickerOpen(false)
                             setTimezonePickerOpen(false)
-                            setTimePickerOpen((prev) => !prev)
+                            setDatePickerOpen((prev) => !prev)
                           }}
                           className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
                         >
-                          {formatDisplayTime(scheduleConfig.startTime)}
+                          {formatDisplayDate(scheduleConfig.startDate)}
                         </button>
                         <AnimatePresence>
-                          {timePickerOpen && (
+                          {datePickerOpen && (
                             <motion.div
                               initial={{ opacity: 0, scale: 0.95, y: -4 }}
                               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -607,63 +633,19 @@ export default function TriggerNode({
                               transition={{ duration: 0.15 }}
                               className="absolute left-0 right-0 z-20 mt-2"
                             >
-                              <ScheduleTimePicker
-                                selectedTime={selectedTime}
-                                onSelect={(time) => {
-                                  updateSchedule((prev) => ({
-                                    ...prev,
-                                    startTime: time
-                                  }))
-                                }}
-                                onClose={() => setTimePickerOpen(false)}
-                              />
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                        Timezone
-                      </label>
-                      <div
-                        ref={timezonePickerContainerRef}
-                        className="relative mt-2"
-                      >
-                        <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDatePickerOpen(false)
-                            setTimePickerOpen(false)
-                            setTimezonePickerOpen((prev) => !prev)
-                          }}
-                          className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                        >
-                          {scheduleConfig.timezone || 'Select timezone'}
-                        </button>
-                        <AnimatePresence>
-                          {timezonePickerOpen && (
-                            <motion.div
-                              initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                              animate={{ opacity: 1, scale: 1, y: 0 }}
-                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                              transition={{ duration: 0.15 }}
-                              className="absolute left-0 z-30 mt-2"
-                            >
-                              <ScheduleTimezonePicker
-                                options={filteredTimezoneOptions}
-                                selectedTimezone={scheduleConfig.timezone}
-                                search={timezoneSearch}
-                                onSearchChange={(value) =>
-                                  setTimezoneSearch(value)
+                              <ScheduleCalendar
+                                month={datePickerMonth}
+                                selectedDate={scheduleConfig.startDate}
+                                todayISO={todayISO}
+                                onMonthChange={(nextMonth) =>
+                                  setDatePickerMonth(nextMonth)
                                 }
-                                onSelect={(timezone) => {
+                                onSelectDate={(isoDate) => {
                                   updateSchedule((prev) => ({
                                     ...prev,
-                                    timezone
+                                    startDate: isoDate
                                   }))
-                                  setTimezonePickerOpen(false)
+                                  setDatePickerOpen(false)
                                 }}
                               />
                             </motion.div>
@@ -671,86 +653,184 @@ export default function TriggerNode({
                         </AnimatePresence>
                       </div>
                     </div>
-                  </div>
-                  <div className="space-y-3 rounded-lg border border-transparent bg-white/60 p-3 shadow-inner transition dark:bg-zinc-900/60">
-                    <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300">
-                        <RefreshCcw className="h-3.5 w-3.5" />
-                      </span>
-                      Repeat schedule
-                      <span className="text-[10px] font-normal uppercase text-zinc-400 dark:text-zinc-500">
-                        Optional
-                      </span>
-                      <input
-                        type="checkbox"
-                        className="ml-auto h-4 w-4 accent-blue-500"
-                        checked={repeatEnabled}
-                        onChange={(e) => {
-                          const enable = e.target.checked
-                          updateSchedule((prev) => ({
-                            ...prev,
-                            repeat: enable
-                              ? (prev.repeat ?? { every: 1, unit: 'days' })
-                              : undefined
-                          }))
-                        }}
-                      />
-                    </label>
-                    {repeatEnabled && (
-                      <div className="flex flex-col gap-3 rounded-md bg-zinc-100/70 p-3 dark:bg-zinc-800/60 sm:flex-row sm:items-center">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                            Every
-                          </span>
-                          <input
-                            type="number"
-                            min={1}
-                            value={scheduleConfig.repeat?.every ?? 1}
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          Start Time
+                        </label>
+                        <div
+                          ref={timePickerContainerRef}
+                          className="relative mt-2"
+                        >
+                          <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDatePickerOpen(false)
+                              setTimezonePickerOpen(false)
+                              setTimePickerOpen((prev) => !prev)
+                            }}
+                            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                          >
+                            {formatDisplayTime(scheduleConfig.startTime)}
+                          </button>
+                          <AnimatePresence>
+                            {timePickerOpen && (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                                transition={{ duration: 0.15 }}
+                                className="absolute left-0 right-0 z-20 mt-2"
+                              >
+                                <ScheduleTimePicker
+                                  selectedTime={selectedTime}
+                                  onSelect={(time) => {
+                                    updateSchedule((prev) => ({
+                                      ...prev,
+                                      startTime: time
+                                    }))
+                                  }}
+                                  onClose={() => setTimePickerOpen(false)}
+                                />
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          Timezone
+                        </label>
+                        <div
+                          ref={timezonePickerContainerRef}
+                          className="relative mt-2"
+                        >
+                          <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDatePickerOpen(false)
+                              setTimePickerOpen(false)
+                              setTimezonePickerOpen((prev) => !prev)
+                            }}
+                            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                          >
+                            {scheduleConfig.timezone || 'Select timezone'}
+                          </button>
+                          <AnimatePresence>
+                            {timezonePickerOpen && (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                                transition={{ duration: 0.15 }}
+                                className="absolute left-0 z-30 mt-2"
+                              >
+                                <ScheduleTimezonePicker
+                                  options={filteredTimezoneOptions}
+                                  selectedTimezone={scheduleConfig.timezone}
+                                  search={timezoneSearch}
+                                  onSearchChange={(value) =>
+                                    setTimezoneSearch(value)
+                                  }
+                                  onSelect={(timezone) => {
+                                    updateSchedule((prev) => ({
+                                      ...prev,
+                                      timezone
+                                    }))
+                                    setTimezonePickerOpen(false)
+                                  }}
+                                />
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-3 rounded-lg border border-transparent bg-white/60 p-3 shadow-inner transition dark:bg-zinc-900/60">
+                      <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300">
+                          <RefreshCcw className="h-3.5 w-3.5" />
+                        </span>
+                        Repeat schedule
+                        <span className="text-[10px] font-normal uppercase text-zinc-400 dark:text-zinc-500">
+                          Optional
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="ml-auto h-4 w-4 accent-blue-500"
+                          checked={repeatEnabled}
+                          onChange={(e) => {
+                            const enable = e.target.checked
+                            updateSchedule((prev) => ({
+                              ...prev,
+                              repeat: enable
+                                ? (prev.repeat ?? { every: 1, unit: 'days' })
+                                : undefined
+                            }))
+                          }}
+                        />
+                      </label>
+                      {repeatEnabled && (
+                        <div className="flex flex-col gap-3 rounded-md bg-zinc-100/70 p-3 dark:bg-zinc-800/60 sm:flex-row sm:items-center">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                              Every
+                            </span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={scheduleConfig.repeat?.every ?? 1}
+                              onChange={(e) => {
+                                const parsed = Number.parseInt(
+                                  e.target.value,
+                                  10
+                                )
+                                const every =
+                                  Number.isFinite(parsed) && parsed > 0
+                                    ? parsed
+                                    : 1
+                                updateSchedule((prev) => ({
+                                  ...prev,
+                                  repeat: {
+                                    every,
+                                    unit: prev.repeat?.unit ?? 'days'
+                                  }
+                                }))
+                              }}
+                              className="h-10 w-24 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                            />
+                          </div>
+                          <select
+                            value={scheduleConfig.repeat?.unit ?? 'days'}
                             onChange={(e) => {
-                              const parsed = Number.parseInt(e.target.value, 10)
-                              const every =
-                                Number.isFinite(parsed) && parsed > 0
-                                  ? parsed
-                                  : 1
+                              const rawValue = e.target.value as RepeatUnit
+                              const unit = repeatUnits.includes(rawValue)
+                                ? rawValue
+                                : 'days'
                               updateSchedule((prev) => ({
                                 ...prev,
                                 repeat: {
-                                  every,
-                                  unit: prev.repeat?.unit ?? 'days'
+                                  every: prev.repeat?.every ?? 1,
+                                  unit
                                 }
                               }))
                             }}
-                            className="h-10 w-24 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                          />
+                            className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pr-8 text-sm font-semibold capitalize text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 sm:w-40"
+                          >
+                            {repeatUnits.map((unit) => (
+                              <option key={unit} value={unit}>
+                                {unit.charAt(0).toUpperCase() + unit.slice(1)}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                        <select
-                          value={scheduleConfig.repeat?.unit ?? 'days'}
-                          onChange={(e) => {
-                            const rawValue = e.target.value as RepeatUnit
-                            const unit = repeatUnits.includes(rawValue)
-                              ? rawValue
-                              : 'days'
-                            updateSchedule((prev) => ({
-                              ...prev,
-                              repeat: {
-                                every: prev.repeat?.every ?? 1,
-                                unit
-                              }
-                            }))
-                          }}
-                          className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pr-8 text-sm font-semibold capitalize text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 sm:w-40"
-                        >
-                          {repeatUnits.map((unit) => (
-                            <option key={unit} value={unit}>
-                              {unit.charAt(0).toUpperCase() + unit.slice(1)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              ) : null}
               <KeyValuePair
                 key={`kv-${id}-${data?.wfEpoch ?? ''}`}
                 title="Input Variables"

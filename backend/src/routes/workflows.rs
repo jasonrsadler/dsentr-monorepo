@@ -12,7 +12,10 @@ use crate::{
     responses::JsonResponse,
     routes::{auth::session::AuthSession, options::secrets::sync_secrets_from_workflow},
     state::AppState,
-    utils::schedule::{compute_next_run, offset_to_utc, parse_schedule_config, utc_to_offset},
+    utils::{
+        plan_limits::{assess_workflow_for_plan, NormalizedPlanTier, PlanViolation},
+        schedule::{compute_next_run, offset_to_utc, parse_schedule_config, utc_to_offset},
+    },
 };
 use async_stream::stream;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -20,8 +23,10 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
-use std::convert::Infallible;
-use std::time::Duration;
+use std::{collections::HashSet, convert::Infallible, time::Duration};
+use time::{
+    format_description::well_known::Rfc3339, Duration as TimeDuration, OffsetDateTime, Time,
+};
 
 fn is_unique_violation(err: &sqlx::Error) -> bool {
     if let sqlx::Error::Database(db_err) = err {
@@ -210,6 +215,34 @@ pub async fn create_workflow(
         data,
         workspace_id,
     } = payload;
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+
+    if plan_tier.is_solo() {
+        let assessment = assess_workflow_for_plan(&data);
+        if !assessment.violations.is_empty() {
+            return plan_violation_response(assessment.violations);
+        }
+
+        match app_state
+            .workflow_repo
+            .list_workflows_by_user(user_id)
+            .await
+        {
+            Ok(existing) if existing.len() >= 3 => {
+                let violation = PlanViolation {
+                    code: "workflow-limit",
+                    message: "Solo accounts can save up to 3 workflows. Delete an existing workflow or upgrade in Settings → Plan.".to_string(),
+                    node_label: None,
+                };
+                return plan_violation_response(vec![violation]);
+            }
+            Ok(_) => {}
+            Err(err) => {
+                eprintln!("Failed to check workflow count: {:?}", err);
+                return JsonResponse::server_error("Failed to create workflow").into_response();
+            }
+        }
+    }
 
     let result = app_state
         .workflow_repo
@@ -248,20 +281,30 @@ pub async fn list_workflows(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
 
     match app_state
         .workflow_repo
         .list_workflows_by_user(user_id)
         .await
     {
-        Ok(workflows) => (
-            StatusCode::OK,
-            Json(json!({
+        Ok(workflows) => {
+            let (visible, hidden_count) = if plan_tier.is_solo() {
+                let limited = enforce_solo_workflow_limit(&workflows);
+                let hidden = workflows.len().saturating_sub(limited.len());
+                (limited, hidden)
+            } else {
+                (workflows, 0)
+            };
+            let mut payload = json!({
                 "success": true,
-                "workflows": workflows
-            })),
-        )
-            .into_response(),
+                "workflows": visible,
+            });
+            if plan_tier.is_solo() {
+                payload["hidden_count"] = json!(hidden_count);
+            }
+            (StatusCode::OK, Json(payload)).into_response()
+        }
         Err(e) => {
             eprintln!("DB error listing workflows: {:?}", e);
             JsonResponse::server_error("Failed to fetch workflows").into_response()
@@ -278,20 +321,49 @@ pub async fn get_workflow(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
 
     match app_state
         .workflow_repo
         .find_workflow_by_id(user_id, workflow_id)
         .await
     {
-        Ok(Some(workflow)) => (
-            StatusCode::OK,
-            Json(json!({
-                "success": true,
-                "workflow": workflow
-            })),
-        )
-            .into_response(),
+        Ok(Some(workflow)) => {
+            if plan_tier.is_solo() {
+                match app_state
+                    .workflow_repo
+                    .list_workflows_by_user(user_id)
+                    .await
+                {
+                    Ok(existing) => {
+                        let allowed = enforce_solo_workflow_limit(&existing);
+                        let allowed_ids: std::collections::HashSet<_> =
+                            allowed.into_iter().map(|wf| wf.id).collect();
+                        if !allowed_ids.contains(&workflow.id) {
+                            let violation = PlanViolation {
+                                code: "workflow-limit",
+                                message: "This workflow is locked on the solo plan. Upgrade in Settings → Plan to edit or run it.".to_string(),
+                                node_label: None,
+                            };
+                            return plan_violation_response(vec![violation]);
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("Failed to enforce workflow limit: {:?}", err);
+                        return JsonResponse::server_error("Failed to fetch workflow")
+                            .into_response();
+                    }
+                }
+            }
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "success": true,
+                    "workflow": workflow
+                })),
+            )
+                .into_response()
+        }
         Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
         Err(e) => {
             eprintln!("DB error fetching workflow: {:?}", e);
@@ -317,6 +389,33 @@ pub async fn update_workflow(
         data,
         workspace_id: _,
     } = payload;
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+
+    if plan_tier.is_solo() {
+        let assessment = assess_workflow_for_plan(&data);
+        if !assessment.violations.is_empty() {
+            return plan_violation_response(assessment.violations);
+        }
+    }
+
+    let allowed_ids = if plan_tier.is_solo() {
+        match app_state
+            .workflow_repo
+            .list_workflows_by_user(user_id)
+            .await
+        {
+            Ok(existing) => {
+                let allowed = enforce_solo_workflow_limit(&existing);
+                Some(allowed.into_iter().map(|wf| wf.id).collect::<HashSet<_>>())
+            }
+            Err(err) => {
+                eprintln!("Failed to enforce workflow limit: {:?}", err);
+                return JsonResponse::server_error("Failed to update workflow").into_response();
+            }
+        }
+    } else {
+        None
+    };
 
     let before = app_state
         .workflow_repo
@@ -329,6 +428,16 @@ pub async fn update_workflow(
         .await
     {
         Ok(Some(workflow)) => {
+            if let Some(ids) = allowed_ids.as_ref() {
+                if !ids.contains(&workflow.id) {
+                    let violation = PlanViolation {
+                        code: "workflow-limit",
+                        message: "This workflow is locked on the solo plan. Upgrade in Settings → Plan to edit or run it.".to_string(),
+                        node_label: None,
+                    };
+                    return plan_violation_response(vec![violation]);
+                }
+            }
             sync_workflow_schedule(&app_state, &workflow).await;
             if let Ok(Some(before_wf)) = before {
                 let diffs = diff_user_nodes_only(&before_wf.data, &workflow.data);
@@ -377,13 +486,24 @@ pub async fn list_workflow_logs(
         .find_workflow_by_id(user_id, workflow_id)
         .await;
 
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+
     match app_state
         .workflow_repo
         .list_workflow_logs(user_id, workflow_id, 200, 0)
         .await
     {
         Ok(entries) => {
-            let mut payload = json!({"success": true, "logs": entries});
+            let filtered = if plan_tier.is_solo() {
+                let cutoff = OffsetDateTime::now_utc() - TimeDuration::hours(24);
+                entries
+                    .into_iter()
+                    .filter(|entry| entry.created_at >= cutoff)
+                    .collect::<Vec<_>>()
+            } else {
+                entries
+            };
+            let mut payload = json!({"success": true, "logs": filtered});
             if let Ok(Some(wf)) = wf_meta {
                 // Attach minimal workflow info to help the client display context
                 payload["workflow"] = json!({ "id": wf.id, "name": wf.name });
@@ -493,6 +613,55 @@ fn compute_webhook_signing_key(
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(res)
 }
 
+fn plan_violation_response(violations: Vec<PlanViolation>) -> Response {
+    let summary = if violations.len() == 1 {
+        violations[0].message.clone()
+    } else {
+        "Solo plan restrictions prevent this workflow from running. Upgrade in Settings → Plan or adjust the nodes listed below.".to_string()
+    };
+
+    let details: Vec<serde_json::Value> = violations
+        .into_iter()
+        .map(|v| {
+            let mut payload = json!({
+                "code": v.code,
+                "message": v.message,
+            });
+            if let Some(label) = v.node_label {
+                payload["nodeLabel"] = json!(label);
+            }
+            payload
+        })
+        .collect();
+
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "success": false,
+            "status": "error",
+            "message": summary,
+            "violations": details,
+        })),
+    )
+        .into_response()
+}
+
+fn enforce_solo_workflow_limit(workflows: &[Workflow]) -> Vec<Workflow> {
+    let mut sorted = workflows.to_vec();
+    sorted.sort_by_key(|wf| wf.created_at);
+    sorted.into_iter().take(3).collect()
+}
+
+const SOLO_MONTHLY_RUN_LIMIT: i64 = 250;
+
+fn plan_tier_str(tier: NormalizedPlanTier) -> &'static str {
+    match tier {
+        NormalizedPlanTier::Solo => "solo",
+        NormalizedPlanTier::Workspace => "workspace",
+        NormalizedPlanTier::Organization => "organization",
+    }
+}
+
 #[derive(Deserialize)]
 pub struct StartWorkflowRunRequest {
     pub idempotency_key: Option<String>,
@@ -524,6 +693,62 @@ pub async fn start_workflow_run(
             return JsonResponse::server_error("Failed to start run").into_response();
         }
     };
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+
+    if plan_tier.is_solo() {
+        match app_state
+            .workflow_repo
+            .list_workflows_by_user(user_id)
+            .await
+        {
+            Ok(existing) => {
+                let allowed = enforce_solo_workflow_limit(&existing);
+                let allowed_ids: HashSet<_> = allowed.into_iter().map(|wf| wf.id).collect();
+                if !allowed_ids.contains(&wf.id) {
+                    let violation = PlanViolation {
+                        code: "workflow-limit",
+                        message: "This workflow is locked on the solo plan. Upgrade in Settings → Plan to run it.".to_string(),
+                        node_label: None,
+                    };
+                    return plan_violation_response(vec![violation]);
+                }
+            }
+            Err(err) => {
+                eprintln!("Failed to enforce workflow limit before run: {:?}", err);
+                return JsonResponse::server_error("Failed to start run").into_response();
+            }
+        }
+
+        let assessment = assess_workflow_for_plan(&wf.data);
+        if !assessment.violations.is_empty() {
+            return plan_violation_response(assessment.violations);
+        }
+
+        let now = OffsetDateTime::now_utc();
+        let start_of_month = now
+            .replace_day(1)
+            .unwrap_or(now)
+            .replace_time(Time::MIDNIGHT);
+        match app_state
+            .workflow_repo
+            .count_user_runs_since(user_id, start_of_month)
+            .await
+        {
+            Ok(count) if count >= SOLO_MONTHLY_RUN_LIMIT => {
+                let violation = PlanViolation {
+                    code: "run-limit",
+                    message: "Solo plan usage includes 250 runs per month. You've reached the limit—upgrade in Settings → Plan to keep running workflows.".to_string(),
+                    node_label: None,
+                };
+                return plan_violation_response(vec![violation]);
+            }
+            Ok(_) => {}
+            Err(err) => {
+                eprintln!("Failed to check monthly usage: {:?}", err);
+                return JsonResponse::server_error("Failed to start run").into_response();
+            }
+        }
+    }
 
     // Extract once to avoid borrow/move conflict
     let (idempotency_key_owned, trigger_ctx, priority) = match payload {
@@ -1448,8 +1673,17 @@ pub async fn set_concurrency_limit(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
     if body.limit < 1 {
         return JsonResponse::bad_request("limit must be >= 1").into_response();
+    }
+    if plan_tier.is_solo() && body.limit > 1 {
+        let violation = PlanViolation {
+            code: "concurrency-limit",
+            message: "Solo plan workflows run one job at a time. Upgrade in Settings → Plan to increase concurrency.".to_string(),
+            node_label: None,
+        };
+        return plan_violation_response(vec![violation]);
     }
     match app_state
         .workflow_repo
@@ -1463,6 +1697,82 @@ pub async fn set_concurrency_limit(
             JsonResponse::server_error("Failed to update").into_response()
         }
     }
+}
+
+pub async fn get_plan_usage(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+
+    let now = OffsetDateTime::now_utc();
+    let start_of_month = now
+        .replace_day(1)
+        .unwrap_or(now)
+        .replace_time(Time::MIDNIGHT);
+    let runs_used = match app_state
+        .workflow_repo
+        .count_user_runs_since(user_id, start_of_month)
+        .await
+    {
+        Ok(count) => count,
+        Err(err) => {
+            eprintln!("Failed to compute plan usage: {:?}", err);
+            return JsonResponse::server_error("Failed to load plan usage").into_response();
+        }
+    };
+
+    let workflows = match app_state
+        .workflow_repo
+        .list_workflows_by_user(user_id)
+        .await
+    {
+        Ok(list) => list,
+        Err(err) => {
+            eprintln!("Failed to load workflows for usage: {:?}", err);
+            return JsonResponse::server_error("Failed to load plan usage").into_response();
+        }
+    };
+    let allowed = enforce_solo_workflow_limit(&workflows);
+    let hidden_count = workflows.len().saturating_sub(allowed.len());
+
+    let runs_limit = if plan_tier.is_solo() {
+        Some(SOLO_MONTHLY_RUN_LIMIT)
+    } else {
+        None
+    };
+    let runs_period_start = start_of_month
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| start_of_month.to_string());
+
+    let mut runs_payload = json!({
+        "used": runs_used,
+        "period_start": runs_period_start,
+    });
+    if let Some(limit) = runs_limit {
+        runs_payload["limit"] = json!(limit);
+    }
+
+    let mut workflows_payload = json!({ "total": workflows.len() });
+    if plan_tier.is_solo() {
+        workflows_payload["limit"] = json!(3);
+        workflows_payload["hidden"] = json!(hidden_count);
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "success": true,
+            "plan": plan_tier_str(plan_tier),
+            "runs": runs_payload,
+            "workflows": workflows_payload,
+        })),
+    )
+        .into_response()
 }
 
 // Dead letters list

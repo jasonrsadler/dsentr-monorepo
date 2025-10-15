@@ -25,6 +25,20 @@ export interface WorkflowLogEntry {
   diffs: any
 }
 
+export interface PlanUsageSummary {
+  plan: string
+  runs: {
+    used: number
+    limit?: number
+    period_start: string
+  }
+  workflows: {
+    total: number
+    limit?: number
+    hidden?: number
+  }
+}
+
 async function handleJsonResponse(response: Response) {
   let body: any = null
 
@@ -74,9 +88,20 @@ export async function createWorkflow(
     credentials: 'include',
     body: JSON.stringify(payload)
   })
-
-  const data = await handleJsonResponse(res)
-  return data.workflow
+  let body: any = null
+  try {
+    body = await res.json()
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok || (body && body.success === false)) {
+    const error = new Error(body?.message || res.statusText || 'Request failed')
+    if (body?.violations) {
+      ;(error as any).violations = body.violations
+    }
+    throw error
+  }
+  return body.workflow
 }
 
 export async function updateWorkflow(
@@ -94,9 +119,20 @@ export async function updateWorkflow(
     credentials: 'include',
     body: JSON.stringify(payload)
   })
-
-  const data = await handleJsonResponse(res)
-  return data.workflow
+  let body: any = null
+  try {
+    body = await res.json()
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok || (body && body.success === false)) {
+    const error = new Error(body?.message || res.statusText || 'Request failed')
+    if (body?.violations) {
+      ;(error as any).violations = body.violations
+    }
+    throw error
+  }
+  return body.workflow
 }
 
 export async function deleteWorkflow(
@@ -125,6 +161,37 @@ export async function getWorkflowLogs(workflowId: string): Promise<{
   })
   const data = await handleJsonResponse(res)
   return { workflow: data.workflow, logs: data.logs ?? [] }
+}
+
+export async function getPlanUsage(): Promise<PlanUsageSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/workflows/usage`, {
+    credentials: 'include'
+  })
+
+  const data = await handleJsonResponse(res)
+  return {
+    plan: typeof data.plan === 'string' ? data.plan : 'solo',
+    runs: {
+      used: Number(data?.runs?.used ?? 0),
+      limit:
+        typeof data?.runs?.limit === 'number' ? data.runs.limit : undefined,
+      period_start:
+        typeof data?.runs?.period_start === 'string'
+          ? data.runs.period_start
+          : ''
+    },
+    workflows: {
+      total: Number(data?.workflows?.total ?? 0),
+      limit:
+        typeof data?.workflows?.limit === 'number'
+          ? data.workflows.limit
+          : undefined,
+      hidden:
+        typeof data?.workflows?.hidden === 'number'
+          ? data.workflows.hidden
+          : undefined
+    }
+  }
 }
 
 export async function deleteWorkflowLog(
@@ -246,8 +313,22 @@ export async function startWorkflowRun(
     credentials: 'include',
     body: JSON.stringify(opts ?? {})
   })
-  const data = await handleJsonResponse(res)
-  return data.run
+  let body: any = null
+  try {
+    body = await res.json()
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok || (body && body.success === false)) {
+    const error = new Error(
+      body?.message || res.statusText || 'Failed to start run'
+    )
+    if (body?.violations) {
+      ;(error as any).violations = body.violations
+    }
+    throw error
+  }
+  return body.run
 }
 
 // Queue & Concurrency helpers
@@ -268,10 +349,22 @@ export async function setConcurrencyLimit(
       body: JSON.stringify({ limit })
     }
   )
-  const data = await handleJsonResponse(res)
+  let body: any = null
+  try {
+    body = await res.json()
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok || (body && body.success === false)) {
+    const error = new Error(body?.message || res.statusText || 'Request failed')
+    if (body?.violations) {
+      ;(error as any).violations = body.violations
+    }
+    throw error
+  }
   return {
-    success: Boolean(data?.success ?? true),
-    limit: data?.limit ?? limit
+    success: Boolean(body?.success ?? true),
+    limit: body?.limit ?? limit
   }
 }
 

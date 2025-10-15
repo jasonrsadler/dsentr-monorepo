@@ -13,7 +13,9 @@ import {
   getWorkflow,
   createWorkflow as createWorkflowApi,
   updateWorkflow as updateWorkflowApi,
+  getPlanUsage,
   WorkflowRecord,
+  PlanUsageSummary,
   startWorkflowRun,
   getWorkflowRunStatus,
   cancelRun,
@@ -21,6 +23,7 @@ import {
   type WorkflowRunRecord,
   type WorkflowNodeRunRecord
 } from '@/lib/workflowApi'
+import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 
 const TriggerIcon = () => (
   <svg
@@ -142,6 +145,7 @@ function deepEqual(a: any, b: any): boolean {
 
 export default function Dashboard() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
+  const [hiddenWorkflowCount, setHiddenWorkflowCount] = useState(0)
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(
     null
   )
@@ -176,6 +180,35 @@ export default function Dashboard() {
   const overlayWatchTimerRef = useRef<any>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
   const [runToast, setRunToast] = useState<string | null>(null)
+  const [planUsage, setPlanUsage] = useState<PlanUsageSummary | null>(null)
+  const [planUsageError, setPlanUsageError] = useState<string | null>(null)
+  const [restrictionNotice, setRestrictionNotice] = useState<string | null>(
+    null
+  )
+  const { user } = useAuth()
+  const planTier = useMemo<PlanTier>(
+    () => normalizePlanTier(user?.plan),
+    [user?.plan]
+  )
+  const refreshPlanUsage = useCallback(async () => {
+    try {
+      const usage = await getPlanUsage()
+      setPlanUsage(usage)
+      setPlanUsageError(null)
+      if (planTier === 'solo') {
+        const hidden = usage.workflows.hidden ?? 0
+        setHiddenWorkflowCount(hidden)
+      }
+    } catch (error) {
+      console.error('Failed to load plan usage', error)
+      setPlanUsageError('Unable to load usage details right now.')
+    }
+  }, [planTier])
+  const openPlanSettings = useCallback(() => {
+    window.dispatchEvent(
+      new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+    )
+  }, [])
   // Global run status aggregator for toolbar (across all workflows)
   const [globalRunStatus, setGlobalRunStatus] = useState<
     'idle' | 'queued' | 'running'
@@ -201,21 +234,20 @@ export default function Dashboard() {
       ),
     [nodeRuns]
   )
-  const { user } = useAuth()
-  const planTier = useMemo(
-    () => (user?.plan ?? 'solo').toLowerCase(),
-    [user?.plan]
-  )
   const planNotice = useMemo(() => {
     switch (planTier) {
       case 'workspace':
         return 'Workspace plan: invite teammates to collaborate inside your shared workspace.'
       case 'organization':
         return 'Organization plan: manage multiple workspaces and assign teams across your organization.'
-      default:
-        return 'Solo plan: workflows are private to you. Upgrade in Settings → Plan to collaborate.'
+      default: {
+        if (hiddenWorkflowCount > 0) {
+          return `Solo plan is a monitored sandbox. Only your first three workflows stay active—${hiddenWorkflowCount} additional workflow${hiddenWorkflowCount > 1 ? 's are' : ' is'} read-only. Upgrade in Settings → Plan to unlock more capacity and premium integrations.`
+        }
+        return 'Solo plan is a monitored sandbox with manual & webhook triggers. Upgrade in Settings → Plan to unlock scheduled triggers, premium integrations, and collaboration.'
+      }
     }
-  }, [planTier])
+  }, [planTier, hiddenWorkflowCount])
   const failedIds = useMemo(
     () =>
       new Set(
@@ -223,6 +255,13 @@ export default function Dashboard() {
       ),
     [nodeRuns]
   )
+  const runsLimit = planUsage?.runs.limit ?? null
+  const runsUsed = planUsage?.runs.used ?? 0
+  const runsPercent = useMemo(() => {
+    if (!runsLimit || runsLimit <= 0) return null
+    if (runsUsed <= 0) return 0
+    return Math.min(100, Math.round((runsUsed / runsLimit) * 100))
+  }, [runsLimit, runsUsed])
 
   const normalizeWorkflowData = useCallback((data: any) => {
     if (data && typeof data === 'object') {
@@ -282,10 +321,25 @@ export default function Dashboard() {
         setLoadingWorkflows(true)
         setError(null)
         const data = await listWorkflows()
-        setWorkflows(data)
+        const visible =
+          planTier === 'solo'
+            ? [...data]
+                .sort((a, b) => {
+                  const aDate = a.created_at
+                    ? new Date(a.created_at).getTime()
+                    : 0
+                  const bDate = b.created_at
+                    ? new Date(b.created_at).getTime()
+                    : 0
+                  return aDate - bDate
+                })
+                .slice(0, 3)
+            : data
+        setHiddenWorkflowCount(Math.max(data.length - visible.length, 0))
+        setWorkflows(visible)
 
-        if (data.length > 0) {
-          const [first] = data
+        if (visible.length > 0) {
+          const [first] = visible
           const normalized = normalizeWorkflowData(first.data)
           setCurrentWorkflowId(first.id)
           setWorkflowData(normalized)
@@ -327,7 +381,8 @@ export default function Dashboard() {
     }
 
     fetchWorkflows()
-  }, [normalizeWorkflowData])
+    refreshPlanUsage()
+  }, [normalizeWorkflowData, planTier, refreshPlanUsage])
 
   const markWorkflowDirty = useCallback(() => {
     setError(null)
@@ -454,6 +509,12 @@ export default function Dashboard() {
   const handleNewWorkflow = useCallback(async () => {
     // Guard against rapid double-clicks while a create is in-flight
     if (isSavingRef.current || isSaving) return
+    if (planTier === 'solo' && workflows.length >= 3) {
+      setRestrictionNotice(
+        'You have reached the solo plan limit of 3 saved workflows. Upgrade in Settings → Plan to create additional workflows.'
+      )
+      return
+    }
     try {
       isSavingRef.current = true
       setIsSaving(true)
@@ -493,6 +554,7 @@ export default function Dashboard() {
       )
       pendingSnapshotRef.current = null
       setWorkflowDirty(false)
+      await refreshPlanUsage()
     } catch (err) {
       console.error('Failed to create workflow', err)
       setError('Failed to create workflow.')
@@ -501,7 +563,7 @@ export default function Dashboard() {
       setIsSaving(false)
       isSavingRef.current = false
     }
-  }, [normalizeWorkflowData, isSaving, workflows])
+  }, [normalizeWorkflowData, isSaving, workflows, planTier, refreshPlanUsage])
 
   const handleGraphChange = useCallback(
     (graph: { nodes: any[]; edges: any[] }) => {
@@ -849,6 +911,7 @@ export default function Dashboard() {
       setActiveRun(run)
       currentPollRunIdRef.current = run.id
       pollRun(currentWorkflow.id, run.id)
+      refreshPlanUsage()
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
       } catch (e) {
@@ -856,9 +919,13 @@ export default function Dashboard() {
       }
     } catch (e: any) {
       console.error('Failed to start run', e)
-      setError(e?.message || 'Failed to start run')
+      if (Array.isArray(e?.violations) && e.violations.length > 0) {
+        setRestrictionNotice(e.violations[0]?.message || e?.message || null)
+      } else {
+        setError(e?.message || 'Failed to start run')
+      }
     }
-  }, [currentWorkflow, workflowDirty, pollRun])
+  }, [currentWorkflow, workflowDirty, pollRun, refreshPlanUsage])
 
   // Overlay: subscribe to SSE for active run to reduce client work
   useEffect(() => {
@@ -1028,15 +1095,32 @@ export default function Dashboard() {
       setWorkflowDirty(false)
     } catch (err) {
       console.error('Failed to save workflow', err)
-      setError('Failed to save workflow.')
+      if (
+        Array.isArray((err as any)?.violations) &&
+        (err as any).violations.length > 0
+      ) {
+        const violationMessage =
+          (err as any).violations[0]?.message ||
+          (err as any).message ||
+          'This workflow uses a premium feature that is locked on the solo plan.'
+        setRestrictionNotice(violationMessage)
+      } else {
+        setError((err as any)?.message || 'Failed to save workflow.')
+        window.alert('Failed to save workflow. Please try again.')
+      }
       pendingSnapshotRef.current = null
-      window.alert('Failed to save workflow. Please try again.')
       handleGraphChange(latestGraphRef.current)
     } finally {
       setIsSaving(false)
       isSavingRef.current = false
     }
-  }, [currentWorkflow, isSaving, normalizeWorkflowData, handleGraphChange])
+  }, [
+    currentWorkflow,
+    isSaving,
+    normalizeWorkflowData,
+    handleGraphChange,
+    setRestrictionNotice
+  ])
 
   const toolbarWorkflow = useMemo(() => {
     if (!currentWorkflow) {
@@ -1166,13 +1250,67 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       {/* Header moved to DashboardLayout */}
-      {planNotice ? (
-        <div className="px-6 pt-4">
-          <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800 shadow-sm dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
-            {planNotice}
-          </div>
+      {(planNotice || planTier === 'solo' || restrictionNotice) && (
+        <div className="px-6 pt-4 space-y-3">
+          {planNotice ? (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800 shadow-sm dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+              {planNotice}
+            </div>
+          ) : null}
+          {planTier === 'solo' ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+              {planUsageError ? (
+                <p>{planUsageError}</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span>
+                      {runsLimit
+                        ? `You have used ${runsUsed} of ${runsLimit} monthly runs.`
+                        : `You have used ${runsUsed} runs this month.`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={openPlanSettings}
+                      className="rounded-md border border-amber-400 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+                    >
+                      Upgrade
+                    </button>
+                  </div>
+                  {runsPercent !== null ? (
+                    <div className="h-2 w-full overflow-hidden rounded bg-amber-100 dark:bg-amber-500/20">
+                      <div
+                        className="h-full rounded bg-amber-500 transition-all duration-300 dark:bg-amber-300"
+                        style={{ width: `${runsPercent}%` }}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="flex items-center justify-between text-xs text-amber-700 dark:text-amber-200/80">
+                    <span>Hidden workflows: {hiddenWorkflowCount}</span>
+                    <span>
+                      Manual & webhook triggers only on the solo plan.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+          {restrictionNotice ? (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900 shadow-sm dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+              <div className="flex items-start justify-between gap-3">
+                <span>{restrictionNotice}</span>
+                <button
+                  type="button"
+                  onClick={() => setRestrictionNotice(null)}
+                  className="text-xs font-semibold uppercase tracking-wide text-indigo-700 hover:underline dark:text-indigo-200"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      )}
       <div className="flex h-full">
         <aside className="w-64 border-r border-zinc-200 dark:border-zinc-700 p-4 bg-zinc-50 dark:bg-zinc-900">
           <h2 className="font-semibold mb-3 text-zinc-700 dark:text-zinc-200">
@@ -1826,6 +1964,8 @@ export default function Dashboard() {
                   runningIds={runningIds}
                   succeededIds={succeededIds}
                   failedIds={failedIds}
+                  planTier={planTier}
+                  onRestrictionNotice={setRestrictionNotice}
                 />
               ) : (
                 <div className="flex-1 flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
