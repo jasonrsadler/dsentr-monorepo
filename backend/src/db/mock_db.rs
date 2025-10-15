@@ -632,6 +632,21 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         })
     }
 
+    async fn update_workspace_organization(
+        &self,
+        workspace_id: Uuid,
+        organization_id: Option<Uuid>,
+    ) -> Result<Workspace, sqlx::Error> {
+        Ok(Workspace {
+            id: workspace_id,
+            name: String::new(),
+            created_by: created_by_placeholder(),
+            organization_id,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        })
+    }
+
     async fn add_member(
         &self,
         _workspace_id: Uuid,

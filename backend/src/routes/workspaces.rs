@@ -138,7 +138,9 @@ async fn process_plan_change(
                     .into_response()
                 })?;
 
-            let organization_id = if payload.plan_tier == PlanTier::Organization {
+            let mut active_organization: Option<Organization> = None;
+
+            if payload.plan_tier == PlanTier::Organization {
                 let organization_name = payload
                     .organization_name
                     .as_ref()
@@ -151,19 +153,80 @@ async fn process_plan_change(
                         .into_response()
                     })?;
 
-                let organization = match app_state
+                let existing_memberships = match app_state
                     .organization_repo
-                    .create_organization(organization_name, user_id)
+                    .list_memberships_for_user(user_id)
                     .await
                 {
-                    Ok(record) => record,
+                    Ok(list) => list,
                     Err(err) => {
                         tracing::error!(
-                            "failed to create organization during plan change: {:?}",
+                            "failed to inspect organization memberships during plan change: {:?}",
                             err
                         );
-                        return Err(JsonResponse::server_error("Failed to create organization")
+                        return Err(JsonResponse::server_error(
+                            "Failed to update organization settings",
+                        )
+                        .into_response());
+                    }
+                };
+
+                let organization = existing_memberships
+                    .iter()
+                    .find(|membership| {
+                        membership.organization.created_by == user_id
+                            && membership.role == OrganizationRole::Admin
+                    })
+                    .or_else(|| {
+                        existing_memberships
+                            .iter()
+                            .find(|membership| membership.organization.created_by == user_id)
+                    })
+                    .or_else(|| {
+                        existing_memberships
+                            .iter()
+                            .find(|membership| membership.role == OrganizationRole::Admin)
+                    })
+                    .map(|membership| membership.organization.clone());
+
+                let organization = if let Some(mut organization) = organization {
+                    if organization.name.trim() != organization_name {
+                        organization = match app_state
+                            .organization_repo
+                            .update_organization_name(organization.id, organization_name)
+                            .await
+                        {
+                            Ok(updated) => updated,
+                            Err(err) => {
+                                tracing::error!(
+                                    "failed to rename organization during plan change: {:?}",
+                                    err
+                                );
+                                return Err(JsonResponse::server_error(
+                                    "Failed to update organization",
+                                )
+                                .into_response());
+                            }
+                        };
+                    }
+                    organization
+                } else {
+                    match app_state
+                        .organization_repo
+                        .create_organization(organization_name, user_id)
+                        .await
+                    {
+                        Ok(record) => record,
+                        Err(err) => {
+                            tracing::error!(
+                                "failed to create organization during plan change: {:?}",
+                                err
+                            );
+                            return Err(JsonResponse::server_error(
+                                "Failed to create organization",
+                            )
                             .into_response());
+                        }
                     }
                 };
 
@@ -182,25 +245,113 @@ async fn process_plan_change(
                     .into_response());
                 }
 
-                created_organization = Some(organization);
-                created_organization.as_ref().map(|org| org.id)
-            } else {
-                None
-            };
+                active_organization = Some(organization);
+            }
 
-            let workspace = match app_state
+            let organization_id = active_organization.as_ref().map(|org| org.id);
+
+            let existing_memberships = match app_state
                 .workspace_repo
-                .create_workspace(workspace_name, user_id, organization_id)
+                .list_memberships_for_user(user_id)
                 .await
             {
-                Ok(workspace) => workspace,
+                Ok(list) => list,
                 Err(err) => {
-                    tracing::error!("failed to create workspace during plan change: {:?}", err);
+                    tracing::error!(
+                        "failed to inspect workspace memberships during plan change: {:?}",
+                        err
+                    );
                     return Err(
-                        JsonResponse::server_error("Failed to create workspace").into_response()
+                        JsonResponse::server_error("Failed to update workspace settings")
+                            .into_response(),
                     );
                 }
             };
+
+            let mut workspace_was_new = false;
+            let mut workspace = if let Some(membership) = existing_memberships
+                .iter()
+                .find(|membership| {
+                    membership.workspace.created_by == user_id
+                        && membership.role == WorkspaceRole::Admin
+                })
+                .or_else(|| {
+                    existing_memberships
+                        .iter()
+                        .find(|membership| membership.workspace.created_by == user_id)
+                })
+                .or_else(|| {
+                    existing_memberships
+                        .iter()
+                        .find(|membership| membership.role == WorkspaceRole::Admin)
+                }) {
+                membership.workspace.clone()
+            } else {
+                workspace_was_new = true;
+                match app_state
+                    .workspace_repo
+                    .create_workspace(workspace_name, user_id, organization_id)
+                    .await
+                {
+                    Ok(record) => record,
+                    Err(err) => {
+                        tracing::error!("failed to create workspace during plan change: {:?}", err);
+                        return Err(JsonResponse::server_error("Failed to create workspace")
+                            .into_response());
+                    }
+                }
+            };
+
+            if workspace.name.trim() != workspace_name {
+                workspace = match app_state
+                    .workspace_repo
+                    .update_workspace_name(workspace.id, workspace_name)
+                    .await
+                {
+                    Ok(updated) => updated,
+                    Err(err) => {
+                        tracing::error!("failed to rename workspace during plan change: {:?}", err);
+                        return Err(JsonResponse::server_error("Failed to update workspace")
+                            .into_response());
+                    }
+                };
+            }
+
+            if let Some(organization) = &active_organization {
+                if workspace.organization_id != Some(organization.id) {
+                    workspace = match app_state
+                        .workspace_repo
+                        .update_workspace_organization(workspace.id, Some(organization.id))
+                        .await
+                    {
+                        Ok(updated) => updated,
+                        Err(err) => {
+                            tracing::error!(
+                                "failed to link workspace to organization during plan change: {:?}",
+                                err
+                            );
+                            return Err(JsonResponse::server_error("Failed to update workspace")
+                                .into_response());
+                        }
+                    };
+                }
+            } else if !workspace_was_new && workspace.organization_id.is_some() {
+                workspace = match app_state
+                    .workspace_repo
+                    .update_workspace_organization(workspace.id, None)
+                    .await
+                {
+                    Ok(updated) => updated,
+                    Err(err) => {
+                        tracing::error!(
+                            "failed to clear workspace organization during plan change: {:?}",
+                            err
+                        );
+                        return Err(JsonResponse::server_error("Failed to update workspace")
+                            .into_response());
+                    }
+                };
+            }
 
             if let Err(err) = app_state
                 .workspace_repo
@@ -216,6 +367,7 @@ async fn process_plan_change(
 
             workspace_id = Some(workspace.id);
             created_workspace = Some(workspace);
+            created_organization = active_organization;
         }
     }
 
