@@ -14,7 +14,7 @@ export default function Login() {
   const [error, setError] = useState('')
   const navigate = useNavigate()
 
-  const { user, isLoading, login } = useAuth()
+  const { user, isLoading } = useAuth()
 
   useEffect(() => {
     if (!isLoading && user) {
@@ -44,7 +44,6 @@ export default function Login() {
     setError('')
     const res = await loginWithEmail({ email, password, remember })
     if (res.success && res.data?.user) {
-      login(res.data.user)
       navigate('/dashboard')
     } else {
       setError(res.message || 'Login failed')

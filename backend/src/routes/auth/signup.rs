@@ -88,7 +88,9 @@ mod tests {
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
         db::{
-            mock_db::NoopWorkflowRepository,
+            mock_db::{
+                NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
+            },
             user_repository::{UserId, UserRepository},
         },
         models::{
@@ -201,6 +203,7 @@ mod tests {
                 plan: None,
                 company_name: None,
                 oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: None,
             }))
         }
 
@@ -222,6 +225,7 @@ mod tests {
                 plan: None,
                 company_name: None,
                 oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: None,
             })
         }
 
@@ -237,6 +241,7 @@ mod tests {
                 plan: None,
                 company_name: None,
                 role: Some(UserRole::User),
+                onboarded_at: None,
             }))
         }
 
@@ -286,6 +291,18 @@ mod tests {
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }
+
+        async fn update_user_plan(&self, _: Uuid, _: &str) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn mark_workspace_onboarded(
+            &self,
+            _: Uuid,
+            _: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
     }
 
     fn test_payload() -> SignupPayload {
@@ -311,6 +328,8 @@ mod tests {
             .with_state(AppState {
                 db: Arc::new(repo),
                 workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+                workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+                organization_repo: Arc::new(NoopOrganizationRepository::default()),
                 mailer: Arc::new(mailer),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),

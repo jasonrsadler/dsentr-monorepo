@@ -7,7 +7,6 @@ use crate::models::oauth_token::ConnectedOAuthProvider;
 use crate::models::workflow_run::WorkflowRun;
 use crate::services::oauth::account_service::OAuthAccountError;
 use crate::state::AppState;
-use reqwest::StatusCode;
 use serde_json::{json, Map, Value};
 
 const DEFAULT_SHEETS_BASE: &str = "https://sheets.googleapis.com/v4/spreadsheets";
@@ -324,19 +323,20 @@ fn extract_error_message(body: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-use std::sync::Arc;
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
-    use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
+    use crate::db::mock_db::{
+        MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
+    };
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
     use crate::services::smtp_mailer::MockMailer;
     use reqwest::Client;
     use serde_json::json;
     use std::net::SocketAddr;
+    use std::sync::Arc;
     use std::time::Duration;
     use time::{Duration as TimeDuration, OffsetDateTime};
     use tokio::net::TcpListener;
@@ -412,6 +412,8 @@ mod tests {
         AppState {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer: Arc::new(MockMailer::default()) as Arc<dyn Mailer>,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -592,7 +594,7 @@ mod tests {
     #[derive(Clone)]
     struct StubState<F>
     where
-        F: Fn() -> Response<Body> + Send + Sync + 'static,
+        F: Fn() -> Response<Body> + Send + Sync + Clone + 'static,
     {
         tx: UnboundedSender<RecordedRequest>,
         response_factory: Arc<F>,
@@ -605,7 +607,7 @@ mod tests {
         body: Bytes,
     ) -> Response<Body>
     where
-        F: Fn() -> Response<Body> + Send + Sync + 'static,
+        F: Fn() -> Response<Body> + Send + Sync + Clone + 'static,
     {
         let record = RecordedRequest {
             method,
@@ -624,7 +626,7 @@ mod tests {
         JoinHandle<()>,
     )
     where
-        F: Fn() -> Response<Body> + Send + Sync + 'static,
+        F: Fn() -> Response<Body> + Send + Sync + Clone + 'static,
     {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -661,7 +663,7 @@ mod tests {
             }
         });
 
-        let (addr, mut rx, handle) = spawn_sheets_stub_server(|| {
+        let (addr, mut rx, handle) = spawn_sheets_stub_server(move || {
             Response::builder()
                 .status(StatusCode::OK)
                 .body(Body::from(response_body.to_string()))
@@ -745,7 +747,7 @@ mod tests {
             }
         });
 
-        let (addr, mut rx, handle) = spawn_sheets_stub_server(|| {
+        let (addr, mut rx, handle) = spawn_sheets_stub_server(move || {
             Response::builder()
                 .status(StatusCode::OK)
                 .body(Body::from(response_body.to_string()))

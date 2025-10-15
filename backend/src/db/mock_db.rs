@@ -5,12 +5,19 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::user_repository::{UserId, UserRepository};
-use crate::db::workflow_repository::WorkflowRepository;
+use crate::db::{
+    organization_repository::OrganizationRepository, workflow_repository::WorkflowRepository,
+    workspace_repository::WorkspaceRepository,
+};
+use crate::models::organization::{Organization, OrganizationMembershipSummary, OrganizationRole};
 use crate::models::signup::SignupPayload;
 use crate::models::workflow::Workflow;
 use crate::models::workflow_node_run::WorkflowNodeRun;
 use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_schedule::WorkflowSchedule;
+use crate::models::workspace::{
+    Team, TeamMember, Workspace, WorkspaceMembershipSummary, WorkspaceRole,
+};
 use serde_json::Value;
 
 #[allow(dead_code)]
@@ -88,6 +95,7 @@ impl UserRepository for MockDb {
                     role: user.role,
                     plan: user.plan.clone(),
                     company_name: user.company_name.clone(),
+                    onboarded_at: user.onboarded_at,
                 }));
             }
         }
@@ -151,6 +159,18 @@ impl UserRepository for MockDb {
         *guard = settings;
         Ok(())
     }
+
+    async fn update_user_plan(&self, _user_id: Uuid, _plan: &str) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn mark_workspace_onboarded(
+        &self,
+        _user_id: Uuid,
+        _onboarded_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -161,6 +181,7 @@ impl WorkflowRepository for NoopWorkflowRepository {
     async fn create_workflow(
         &self,
         _user_id: Uuid,
+        _workspace_id: Option<Uuid>,
         _name: &str,
         _description: Option<&str>,
         _data: Value,
@@ -204,6 +225,15 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _workflow_id: Uuid,
     ) -> Result<bool, sqlx::Error> {
         Ok(false)
+    }
+
+    async fn set_workflow_workspace(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+        _workspace_id: Option<Uuid>,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        Ok(None)
     }
 
     async fn insert_workflow_log(
@@ -556,4 +586,134 @@ impl WorkflowRepository for NoopWorkflowRepository {
     ) -> Result<u64, sqlx::Error> {
         Ok(0)
     }
+}
+
+#[derive(Default)]
+pub struct NoopWorkspaceRepository;
+
+#[async_trait]
+impl WorkspaceRepository for NoopWorkspaceRepository {
+    async fn create_workspace(
+        &self,
+        name: &str,
+        created_by: Uuid,
+        organization_id: Option<Uuid>,
+    ) -> Result<Workspace, sqlx::Error> {
+        Ok(Workspace {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            created_by,
+            organization_id,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        })
+    }
+
+    async fn update_workspace_name(
+        &self,
+        workspace_id: Uuid,
+        name: &str,
+    ) -> Result<Workspace, sqlx::Error> {
+        Ok(Workspace {
+            id: workspace_id,
+            name: name.to_string(),
+            created_by: created_by_placeholder(),
+            organization_id: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        })
+    }
+
+    async fn add_member(
+        &self,
+        _workspace_id: Uuid,
+        _user_id: Uuid,
+        _role: WorkspaceRole,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn list_memberships_for_user(
+        &self,
+        _user_id: Uuid,
+    ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn create_team(&self, workspace_id: Uuid, name: &str) -> Result<Team, sqlx::Error> {
+        Ok(Team {
+            id: Uuid::new_v4(),
+            workspace_id,
+            name: name.to_string(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        })
+    }
+
+    async fn add_team_member(
+        &self,
+        team_id: Uuid,
+        user_id: Uuid,
+        added_at: OffsetDateTime,
+    ) -> Result<TeamMember, sqlx::Error> {
+        Ok(TeamMember {
+            team_id,
+            user_id,
+            added_at,
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct NoopOrganizationRepository;
+
+#[async_trait]
+impl OrganizationRepository for NoopOrganizationRepository {
+    async fn create_organization(
+        &self,
+        name: &str,
+        created_by: Uuid,
+    ) -> Result<Organization, sqlx::Error> {
+        Ok(Organization {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            created_by,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        })
+    }
+
+    async fn update_organization_name(
+        &self,
+        organization_id: Uuid,
+        name: &str,
+    ) -> Result<Organization, sqlx::Error> {
+        Ok(Organization {
+            id: organization_id,
+            name: name.to_string(),
+            created_by: created_by_placeholder(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        })
+    }
+
+    async fn add_member(
+        &self,
+        _organization_id: Uuid,
+        _user_id: Uuid,
+        _role: OrganizationRole,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn list_memberships_for_user(
+        &self,
+        _user_id: Uuid,
+    ) -> Result<Vec<OrganizationMembershipSummary>, sqlx::Error> {
+        Ok(vec![])
+    }
+}
+
+fn created_by_placeholder() -> Uuid {
+    Uuid::nil()
 }

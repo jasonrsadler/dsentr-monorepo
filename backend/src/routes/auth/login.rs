@@ -125,10 +125,50 @@ pub async fn handle_me(
 
     match user {
         Ok(Some(user)) => {
+            let memberships = match app_state
+                .workspace_repo
+                .list_memberships_for_user(user.id)
+                .await
+            {
+                Ok(data) => data,
+                Err(err) => {
+                    tracing::error!(
+                        "failed to load workspace memberships for user {}: {:?}",
+                        user.id,
+                        err
+                    );
+                    return JsonResponse::server_error("Failed to load workspace context")
+                        .into_response();
+                }
+            };
+
+            let organization_memberships = match app_state
+                .organization_repo
+                .list_memberships_for_user(user.id)
+                .await
+            {
+                Ok(data) => data,
+                Err(err) => {
+                    tracing::error!(
+                        "failed to load organization memberships for user {}: {:?}",
+                        user.id,
+                        err
+                    );
+                    return JsonResponse::server_error("Failed to load organization context")
+                        .into_response();
+                }
+            };
+
+            let requires_onboarding = user.onboarded_at.is_none()
+                || user.plan.as_ref().map(|p| p.is_empty()).unwrap_or(true);
+
             let user_json = to_value(&user).expect("User serialization failed");
             Json(json!({
                 "success": true,
-                "user": user_json
+                "user": user_json,
+                "memberships": memberships,
+                "organization_memberships": organization_memberships,
+                "requires_onboarding": requires_onboarding
             }))
             .into_response()
         }
@@ -161,7 +201,9 @@ mod tests {
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
         db::{
-            mock_db::{MockDb, NoopWorkflowRepository},
+            mock_db::{
+                MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
+            },
             user_repository::UserRepository,
         },
         models::user::{OauthProvider, User, UserRole},
@@ -197,6 +239,7 @@ mod tests {
             role: Some(UserRole::User),
             plan: Some("free".into()),
             company_name: Some("Acme Corp".into()),
+            onboarded_at: None,
             created_at: OffsetDateTime::now_utc(),
         };
 
@@ -224,6 +267,8 @@ mod tests {
         let app_state = AppState {
             db: Arc::new(db),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer: Arc::new(MockMailer::default()), // Not used in these tests
             google_oauth: Arc::new(MockGoogleOAuth::default()), // Not used in these tests
             github_oauth: Arc::new(MockGitHubOAuth::default()), // Not used in these tests

@@ -50,7 +50,17 @@ impl UserRepository for PostgresUserRepository {
         let row = sqlx::query_as!(
             User,
             r#"
-            SELECT id, email, role as "role: _", password_hash, first_name, last_name, plan, company_name, created_at, oauth_provider as "oauth_provider: OauthProvider"
+            SELECT id,
+                   email,
+                   role as "role: _",
+                   password_hash,
+                   first_name,
+                   last_name,
+                   plan,
+                   company_name,
+                   oauth_provider as "oauth_provider: OauthProvider",
+                   onboarded_at,
+                   created_at
             FROM users
             WHERE email = $1
             "#,
@@ -93,6 +103,7 @@ impl UserRepository for PostgresUserRepository {
                 plan,
                 company_name,
                 oauth_provider as "oauth_provider: OauthProvider",
+                onboarded_at,
                 created_at
             "#,
             email,
@@ -112,7 +123,14 @@ impl UserRepository for PostgresUserRepository {
     ) -> Result<Option<PublicUser>, sqlx::Error> {
         sqlx::query_as::<_, PublicUser>(
             r#"
-            SELECT id, email, first_name, last_name, role, plan, company_name
+            SELECT id,
+                   email,
+                   first_name,
+                   last_name,
+                   role,
+                   plan,
+                   company_name,
+                   onboarded_at
             FROM users
             WHERE id = $1
             "#,
@@ -299,6 +317,42 @@ impl UserRepository for PostgresUserRepository {
             "UPDATE users SET settings = $2, updated_at = now() WHERE id = $1",
             user_id,
             settings
+        )
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(sqlx::Error::RowNotFound);
+        }
+
+        Ok(())
+    }
+
+    async fn update_user_plan(&self, user_id: Uuid, plan: &str) -> Result<(), sqlx::Error> {
+        let result = sqlx::query!(
+            "UPDATE users SET plan = $2, updated_at = now() WHERE id = $1",
+            user_id,
+            plan
+        )
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(sqlx::Error::RowNotFound);
+        }
+
+        Ok(())
+    }
+
+    async fn mark_workspace_onboarded(
+        &self,
+        user_id: Uuid,
+        onboarded_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        let result = sqlx::query!(
+            "UPDATE users SET onboarded_at = $2, updated_at = now() WHERE id = $1",
+            user_id,
+            onboarded_at
         )
         .execute(&self.pool)
         .await?;

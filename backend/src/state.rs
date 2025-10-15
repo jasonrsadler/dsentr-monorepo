@@ -1,5 +1,8 @@
 use crate::config::Config;
-use crate::db::{user_repository::UserRepository, workflow_repository::WorkflowRepository};
+use crate::db::{
+    organization_repository::OrganizationRepository, user_repository::UserRepository,
+    workflow_repository::WorkflowRepository, workspace_repository::WorkspaceRepository,
+};
 use crate::services::oauth::{
     account_service::OAuthAccountService, github::service::GitHubOAuthService,
     google::service::GoogleOAuthService,
@@ -12,6 +15,8 @@ use std::sync::Arc;
 pub struct AppState {
     pub db: Arc<dyn UserRepository>,
     pub workflow_repo: Arc<dyn WorkflowRepository>,
+    pub workspace_repo: Arc<dyn WorkspaceRepository>,
+    pub organization_repo: Arc<dyn OrganizationRepository>,
     pub mailer: Arc<dyn Mailer>,
     pub google_oauth: Arc<dyn GoogleOAuthService>,
     pub github_oauth: Arc<dyn GitHubOAuthService + Send + Sync>,

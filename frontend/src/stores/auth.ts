@@ -8,15 +8,46 @@ type User = {
   email: string
   id: string
   role: string
-  plan: string
-  companyName: string
+  plan: string | null
+  companyName: string | null
+  onboarded_at?: string | null
+}
+
+type WorkspaceSummary = {
+  workspace: {
+    id: string
+    name: string
+    created_by: string
+    created_at: string
+    updated_at: string
+  }
+  role: 'admin' | 'user' | 'viewer'
+}
+
+type OrganizationSummary = {
+  organization: {
+    id: string
+    name: string
+    created_by: string
+    created_at: string
+    updated_at: string
+  }
+  role: 'admin' | 'user' | 'viewer'
 }
 
 type AuthState = {
   user: User | null
   isLoading: boolean
+  memberships: WorkspaceSummary[]
+  organizationMemberships: OrganizationSummary[]
+  requiresOnboarding: boolean
 
-  login: (user: User) => void
+  login: (
+    user: User,
+    memberships?: WorkspaceSummary[],
+    organizationMemberships?: OrganizationSummary[],
+    requiresOnboarding?: boolean
+  ) => void
   logout: () => void
   checkAuth: () => Promise<void>
 }
@@ -24,8 +55,23 @@ type AuthState = {
 export const useAuth = create<AuthState>((set) => ({
   user: null,
   isLoading: true,
+  memberships: [],
+  organizationMemberships: [],
+  requiresOnboarding: false,
 
-  login: (user) => set({ user, isLoading: false }),
+  login: (
+    user,
+    memberships = [],
+    organizationMemberships = [],
+    requiresOnboarding = false
+  ) =>
+    set({
+      user,
+      memberships,
+      organizationMemberships,
+      requiresOnboarding,
+      isLoading: false
+    }),
 
   logout: async () => {
     const csrfToken = await getCsrfToken()
@@ -37,7 +83,13 @@ export const useAuth = create<AuthState>((set) => ({
         'x-csrf-token': csrfToken
       }
     })
-    set({ user: null, isLoading: false })
+    set({
+      user: null,
+      memberships: [],
+      organizationMemberships: [],
+      requiresOnboarding: false,
+      isLoading: false
+    })
   },
 
   checkAuth: async () => {
@@ -49,9 +101,28 @@ export const useAuth = create<AuthState>((set) => ({
       })
       if (!res.ok) throw new Error('Not authenticated')
       const data = await res.json()
-      set({ user: data?.user, isLoading: false })
+      const normalizedUser = data?.user
+        ? {
+            ...data.user,
+            plan: data.user.plan ?? null,
+            companyName: data.user.company_name ?? null
+          }
+        : null
+      set({
+        user: normalizedUser,
+        memberships: data?.memberships ?? [],
+        organizationMemberships: data?.organization_memberships ?? [],
+        requiresOnboarding: Boolean(data?.requires_onboarding),
+        isLoading: false
+      })
     } catch {
-      set({ user: null, isLoading: false })
+      set({
+        user: null,
+        memberships: [],
+        organizationMemberships: [],
+        requiresOnboarding: false,
+        isLoading: false
+      })
     }
   }
 }))

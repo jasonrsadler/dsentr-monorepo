@@ -1,6 +1,7 @@
 pub mod early_access;
 pub mod egress_block_event;
 pub mod oauth_token;
+pub mod organization;
 pub mod signup;
 pub mod user;
 pub mod workflow;
@@ -9,3 +10,4 @@ pub mod workflow_log;
 pub mod workflow_node_run;
 pub mod workflow_run;
 pub mod workflow_schedule;
+pub mod workspace;

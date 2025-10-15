@@ -66,4 +66,12 @@ pub trait UserRepository: Send + Sync {
         user_id: Uuid,
         settings: serde_json::Value,
     ) -> Result<(), sqlx::Error>;
+
+    async fn update_user_plan(&self, user_id: Uuid, plan: &str) -> Result<(), sqlx::Error>;
+
+    async fn mark_workspace_onboarded(
+        &self,
+        user_id: Uuid,
+        onboarded_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error>;
 }

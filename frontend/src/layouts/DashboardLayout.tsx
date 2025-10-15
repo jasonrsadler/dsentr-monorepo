@@ -1,5 +1,5 @@
 // src/layouts/DashboardLayout.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
@@ -14,6 +14,7 @@ import OptionsTab from '@/components/Settings/tabs/OptionsTab'
 import IntegrationsTab, {
   IntegrationNotice
 } from '@/components/Settings/tabs/IntegrationsTab'
+import PlanTab from '@/components/Settings/tabs/PlanTab'
 import { DsentrLogo } from '@/components/DsentrLogo'
 import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
@@ -29,6 +30,13 @@ export default function DashboardLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   // Preferences removed
+
+  const planLabel = useMemo(() => {
+    if (!user?.plan) return null
+    const normalized = user.plan.trim()
+    if (!normalized) return null
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+  }, [user?.plan])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -79,6 +87,11 @@ export default function DashboardLayout() {
           </div>
           {user && (
             <div className="flex items-center gap-3">
+              {planLabel ? (
+                <span className="rounded-full border border-indigo-500 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:border-indigo-400 dark:text-indigo-300">
+                  {planLabel}
+                </span>
+              ) : null}
               <span className="text-sm text-zinc-600 dark:text-zinc-300 leading-none">
                 {user.first_name} {user.last_name}
               </span>
@@ -106,6 +119,7 @@ export default function DashboardLayout() {
           }}
           initialTab={initialSettingsTab}
           tabs={[
+            { key: 'plan', label: 'Plan & Billing' },
             { key: 'engine', label: 'Engine' },
             { key: 'logs', label: 'Logs' },
             { key: 'webhooks', label: 'Webhooks' },
@@ -114,6 +128,7 @@ export default function DashboardLayout() {
             { key: 'workflows', label: 'Workflows' }
           ]}
           renderTab={(key) => {
+            if (key === 'plan') return <PlanTab />
             if (key === 'engine') return <EngineTab />
             if (key === 'logs') return <LogsTab />
             if (key === 'webhooks') return <WebhooksTab />

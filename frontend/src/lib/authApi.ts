@@ -75,7 +75,17 @@ export async function loginWithEmail({
     }
 
     if (data.user) {
-      login(data.user) // ✅ immediately update Zustand state
+      const normalizedUser = {
+        ...data.user,
+        plan: data.user.plan ?? null,
+        companyName: data.user.company_name ?? null
+      }
+      login(
+        normalizedUser,
+        data.memberships ?? [],
+        data.organization_memberships ?? [],
+        Boolean(data.requires_onboarding)
+      )
     }
 
     return { success: true, data }

@@ -1,7 +1,11 @@
 pub mod mock_db;
 pub mod oauth_token_repository;
+pub mod organization_repository;
 pub mod postgres_oauth_token_repository;
+pub mod postgres_organization_repository;
 pub mod postgres_user_repository;
 pub mod postgres_workflow_repository;
+pub mod postgres_workspace_repository;
 pub mod user_repository;
 pub mod workflow_repository;
+pub mod workspace_repository;

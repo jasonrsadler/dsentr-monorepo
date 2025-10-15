@@ -45,6 +45,8 @@ pub struct User {
     pub plan: Option<String>,
     pub company_name: Option<String>,
     pub oauth_provider: Option<OauthProvider>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub onboarded_at: Option<time::OffsetDateTime>,
     pub created_at: time::OffsetDateTime,
 }
 
@@ -57,4 +59,6 @@ pub struct PublicUser {
     pub role: Option<UserRole>,
     pub plan: Option<String>,
     pub company_name: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub onboarded_at: Option<time::OffsetDateTime>,
 }

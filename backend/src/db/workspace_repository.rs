@@ -1,0 +1,44 @@
+use async_trait::async_trait;
+use time::OffsetDateTime;
+use uuid::Uuid;
+
+use crate::models::workspace::{
+    Team, TeamMember, Workspace, WorkspaceMembershipSummary, WorkspaceRole,
+};
+
+#[async_trait]
+pub trait WorkspaceRepository: Send + Sync {
+    async fn create_workspace(
+        &self,
+        name: &str,
+        created_by: Uuid,
+        organization_id: Option<Uuid>,
+    ) -> Result<Workspace, sqlx::Error>;
+
+    async fn update_workspace_name(
+        &self,
+        workspace_id: Uuid,
+        name: &str,
+    ) -> Result<Workspace, sqlx::Error>;
+
+    async fn add_member(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn list_memberships_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error>;
+
+    async fn create_team(&self, workspace_id: Uuid, name: &str) -> Result<Team, sqlx::Error>;
+
+    async fn add_team_member(
+        &self,
+        team_id: Uuid,
+        user_id: Uuid,
+        added_at: OffsetDateTime,
+    ) -> Result<TeamMember, sqlx::Error>;
+}

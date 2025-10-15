@@ -208,11 +208,12 @@ pub async fn create_workflow(
         name,
         description,
         data,
+        workspace_id,
     } = payload;
 
     let result = app_state
         .workflow_repo
-        .create_workflow(user_id, &name, description.as_deref(), data)
+        .create_workflow(user_id, workspace_id, &name, description.as_deref(), data)
         .await;
 
     match result {
@@ -314,6 +315,7 @@ pub async fn update_workflow(
         name,
         description,
         data,
+        workspace_id: _,
     } = payload;
 
     let before = app_state

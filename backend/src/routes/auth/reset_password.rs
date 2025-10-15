@@ -90,7 +90,9 @@ mod tests {
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
         db::{
-            mock_db::NoopWorkflowRepository,
+            mock_db::{
+                NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
+            },
             user_repository::{UserId, UserRepository},
         },
         models::{
@@ -198,6 +200,7 @@ mod tests {
                 plan: None,
                 company_name: None,
                 oauth_provider: Some(OauthProvider::Google),
+                onboarded_at: None,
                 created_at: OffsetDateTime::now_utc(),
             })
         }
@@ -255,6 +258,14 @@ mod tests {
         async fn update_user_settings(&self, _: Uuid, _: serde_json::Value) -> Result<(), Error> {
             Ok(())
         }
+
+        async fn update_user_plan(&self, _: Uuid, _: &str) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn mark_workspace_onboarded(&self, _: Uuid, _: OffsetDateTime) -> Result<(), Error> {
+            Ok(())
+        }
     }
 
     fn make_app(behavior: MockBehavior) -> Router {
@@ -262,6 +273,8 @@ mod tests {
         let state = AppState {
             db,
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer: Arc::new(crate::services::smtp_mailer::MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

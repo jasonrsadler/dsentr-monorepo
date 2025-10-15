@@ -64,6 +64,7 @@ pub fn decrypt_secret(key: &[u8], ciphertext_b64: &str) -> Result<String, Encryp
 #[cfg(test)]
 mod tests {
     use super::{decode_key, decrypt_secret, encrypt_secret, EncryptionError};
+    use base64::Engine;
 
     #[test]
     fn round_trip() {

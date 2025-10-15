@@ -19,18 +19,20 @@ impl WorkflowRepository for PostgresWorkflowRepository {
     async fn create_workflow(
         &self,
         user_id: Uuid,
+        workspace_id: Option<Uuid>,
         name: &str,
         description: Option<&str>,
         data: Value,
     ) -> Result<Workflow, sqlx::Error> {
         let result = sqlx::query_as::<_, Workflow>(
             r#"
-            INSERT INTO workflows (user_id, name, description, data, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, now(), now())
-            RETURNING id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
+            INSERT INTO workflows (user_id, workspace_id, name, description, data, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, now(), now())
+            RETURNING id, user_id, workspace_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
             "#
         )
         .bind(user_id)
+        .bind(workspace_id)
         .bind(name)
         .bind(description)
         .bind(data)
@@ -43,11 +45,23 @@ impl WorkflowRepository for PostgresWorkflowRepository {
     async fn list_workflows_by_user(&self, user_id: Uuid) -> Result<Vec<Workflow>, sqlx::Error> {
         let results = sqlx::query_as::<_, Workflow>(
             r#"
-            SELECT id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
+            SELECT id,
+                   user_id,
+                   workspace_id,
+                   name,
+                   description,
+                   data,
+                   concurrency_limit,
+                   egress_allowlist,
+                   require_hmac,
+                   hmac_replay_window_sec,
+                   webhook_salt,
+                   created_at,
+                   updated_at
             FROM workflows
             WHERE user_id = $1
             ORDER BY updated_at DESC
-            "#
+            "#,
         )
         .bind(user_id)
         .fetch_all(&self.pool)
@@ -63,10 +77,22 @@ impl WorkflowRepository for PostgresWorkflowRepository {
     ) -> Result<Option<Workflow>, sqlx::Error> {
         let result = sqlx::query_as::<_, Workflow>(
             r#"
-            SELECT id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
+            SELECT id,
+                   user_id,
+                   workspace_id,
+                   name,
+                   description,
+                   data,
+                   concurrency_limit,
+                   egress_allowlist,
+                   require_hmac,
+                   hmac_replay_window_sec,
+                   webhook_salt,
+                   created_at,
+                   updated_at
             FROM workflows
             WHERE user_id = $1 AND id = $2
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(workflow_id)
@@ -82,10 +108,22 @@ impl WorkflowRepository for PostgresWorkflowRepository {
     ) -> Result<Option<Workflow>, sqlx::Error> {
         let result = sqlx::query_as::<_, Workflow>(
             r#"
-            SELECT id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
+            SELECT id,
+                   user_id,
+                   workspace_id,
+                   name,
+                   description,
+                   data,
+                   concurrency_limit,
+                   egress_allowlist,
+                   require_hmac,
+                   hmac_replay_window_sec,
+                   webhook_salt,
+                   created_at,
+                   updated_at
             FROM workflows
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(workflow_id)
         .fetch_optional(&self.pool)
@@ -110,7 +148,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 data = $5,
                 updated_at = now()
             WHERE user_id = $1 AND id = $2
-            RETURNING id, user_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
+            RETURNING id, user_id, workspace_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
             "#
         )
         .bind(user_id)
@@ -137,6 +175,30 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn set_workflow_workspace(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        workspace_id: Option<Uuid>,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        let result = sqlx::query_as::<_, Workflow>(
+            r#"
+            UPDATE workflows
+            SET workspace_id = $3,
+                updated_at = now()
+            WHERE user_id = $1 AND id = $2
+            RETURNING id, user_id, workspace_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, created_at, updated_at
+            "#
+        )
+        .bind(user_id)
+        .bind(workflow_id)
+        .bind(workspace_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result)
     }
 
     async fn insert_workflow_log(

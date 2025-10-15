@@ -7,6 +7,7 @@ import ActionIcon from '@/assets/svg-components/ActionIcon'
 import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
 import { useWorkflowLogs } from '@/stores/workflowLogs'
+import { useAuth } from '@/stores/auth'
 import {
   listWorkflows,
   getWorkflow,
@@ -200,6 +201,21 @@ export default function Dashboard() {
       ),
     [nodeRuns]
   )
+  const { user } = useAuth()
+  const planTier = useMemo(
+    () => (user?.plan ?? 'solo').toLowerCase(),
+    [user?.plan]
+  )
+  const planNotice = useMemo(() => {
+    switch (planTier) {
+      case 'workspace':
+        return 'Workspace plan: invite teammates to collaborate inside your shared workspace.'
+      case 'organization':
+        return 'Organization plan: manage multiple workspaces and assign teams across your organization.'
+      default:
+        return 'Solo plan: workflows are private to you. Upgrade in Settings → Plan to collaborate.'
+    }
+  }, [planTier])
   const failedIds = useMemo(
     () =>
       new Set(
@@ -1150,6 +1166,13 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       {/* Header moved to DashboardLayout */}
+      {planNotice ? (
+        <div className="px-6 pt-4">
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800 shadow-sm dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+            {planNotice}
+          </div>
+        </div>
+      ) : null}
       <div className="flex h-full">
         <aside className="w-64 border-r border-zinc-200 dark:border-zinc-700 p-4 bg-zinc-50 dark:bg-zinc-900">
           <h2 className="font-semibold mb-3 text-zinc-700 dark:text-zinc-200">

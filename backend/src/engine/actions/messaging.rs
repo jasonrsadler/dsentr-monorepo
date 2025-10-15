@@ -1128,7 +1128,9 @@ mod tests {
     use crate::engine::graph::Node;
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
-        db::mock_db::{MockDb, NoopWorkflowRepository},
+        db::mock_db::{
+            MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
+        },
         db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
         models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken},
         models::workflow_run::WorkflowRun,
@@ -1137,7 +1139,7 @@ mod tests {
                 account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
                 google::mock_google_oauth::MockGoogleOAuth,
             },
-            smtp_mailer::{Mailer, MockMailer},
+            smtp_mailer::MockMailer,
         },
         state::AppState,
         utils::encryption::encrypt_secret,
@@ -1271,6 +1273,8 @@ mod tests {
         AppState {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

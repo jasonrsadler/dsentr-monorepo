@@ -21,8 +21,10 @@ use axum::{
 use config::Config;
 use db::oauth_token_repository::UserOAuthTokenRepository;
 use db::postgres_oauth_token_repository::PostgresUserOAuthTokenRepository;
+use db::postgres_organization_repository::PostgresOrganizationRepository;
 use db::postgres_user_repository::PostgresUserRepository;
 use db::postgres_workflow_repository::PostgresWorkflowRepository;
+use db::postgres_workspace_repository::PostgresWorkspaceRepository;
 use reqwest::Client;
 use responses::JsonResponse;
 use routes::auth::{handle_login, handle_signup, verify_email};
@@ -57,6 +59,7 @@ use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
 use sqlx::PgPool;
 use std::{net::SocketAddr, sync::Arc};
+#[cfg(not(feature = "tls"))]
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
@@ -65,7 +68,10 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 use utils::csrf::{get_csrf_token, validate_csrf};
 
-use crate::db::{user_repository::UserRepository, workflow_repository::WorkflowRepository};
+use crate::db::{
+    organization_repository::OrganizationRepository, user_repository::UserRepository,
+    workflow_repository::WorkflowRepository, workspace_repository::WorkspaceRepository,
+};
 use crate::services::smtp_mailer::SmtpMailer;
 use crate::state::AppState;
 
@@ -159,6 +165,14 @@ async fn main() {
         pool: pg_pool.clone(),
     }) as Arc<dyn WorkflowRepository>;
 
+    let workspace_repo = Arc::new(PostgresWorkspaceRepository {
+        pool: pg_pool.clone(),
+    }) as Arc<dyn WorkspaceRepository>;
+
+    let organization_repo = Arc::new(PostgresOrganizationRepository {
+        pool: pg_pool.clone(),
+    }) as Arc<dyn OrganizationRepository>;
+
     // Initialize mailer
     let mailer = Arc::new(SmtpMailer::new().expect("Failed to initialize mailer"));
     let http_client = Client::new();
@@ -185,6 +199,8 @@ async fn main() {
     let state = AppState {
         db: user_repo,
         workflow_repo,
+        workspace_repo,
+        organization_repo,
         mailer,
         google_oauth,
         github_oauth,
@@ -318,6 +334,15 @@ async fn main() {
         )
         .layer(csrf_layer.clone());
 
+    let workspace_routes = Router::new()
+        .route(
+            "/onboarding",
+            get(routes::workspaces::get_onboarding_context)
+                .post(routes::workspaces::complete_onboarding),
+        )
+        .route("/plan", post(routes::workspaces::change_plan))
+        .layer(csrf_layer.clone());
+
     let options_routes = Router::new()
         .route("/secrets", get(list_secrets))
         .route(
@@ -369,6 +394,7 @@ async fn main() {
             "/api/workflows",
             workflow_routes.merge(public_workflow_routes),
         )
+        .nest("/api/workspaces", workspace_routes)
         .nest("/api/oauth", oauth_routes)
         .nest("/api/microsoft", microsoft_routes)
         .nest("/api/options", options_routes)
@@ -399,13 +425,14 @@ async fn main() {
         let _ = axum_server::bind_rustls(addr, tls_config)
             .serve(make_service)
             .await;
-
-        return; // Skip the fallback if TLS was used
     }
 
-    let listener = TcpListener::bind(addr).await.unwrap();
-    println!("Running without TLS at http://{}", addr);
-    axum::serve(listener, make_service).await.unwrap();
+    #[cfg(not(feature = "tls"))]
+    {
+        let listener = TcpListener::bind(addr).await.unwrap();
+        println!("Running without TLS at http://{}", addr);
+        axum::serve(listener, make_service).await.unwrap();
+    }
 }
 /// A simple root route.
 async fn root() -> Response {

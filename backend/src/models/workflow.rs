@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub struct Workflow {
     pub id: Uuid,
     pub user_id: Uuid,
+    pub workspace_id: Option<Uuid>,
     pub name: String,
     pub description: Option<String>,
     pub data: serde_json::Value,
@@ -27,4 +28,5 @@ pub struct CreateWorkflow {
     pub name: String,
     pub description: Option<String>,
     pub data: serde_json::Value,
+    pub workspace_id: Option<Uuid>,
 }

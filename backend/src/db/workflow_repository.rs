@@ -14,6 +14,7 @@ pub trait WorkflowRepository: Send + Sync {
     async fn create_workflow(
         &self,
         user_id: Uuid,
+        workspace_id: Option<Uuid>,
         name: &str,
         description: Option<&str>,
         data: Value,
@@ -48,6 +49,13 @@ pub trait WorkflowRepository: Send + Sync {
     ) -> Result<Option<Workflow>, sqlx::Error>;
 
     async fn delete_workflow(&self, user_id: Uuid, workflow_id: Uuid) -> Result<bool, sqlx::Error>;
+
+    async fn set_workflow_workspace(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+        workspace_id: Option<Uuid>,
+    ) -> Result<Option<Workflow>, sqlx::Error>;
 
     // Logging methods
     async fn insert_workflow_log(
