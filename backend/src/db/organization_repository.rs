@@ -24,8 +24,26 @@ pub trait OrganizationRepository: Send + Sync {
         role: OrganizationRole,
     ) -> Result<(), sqlx::Error>;
 
+    async fn set_member_role(
+        &self,
+        organization_id: Uuid,
+        user_id: Uuid,
+        role: OrganizationRole,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn remove_member(
+        &self,
+        organization_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), sqlx::Error>;
+
     async fn list_memberships_for_user(
         &self,
         user_id: Uuid,
     ) -> Result<Vec<OrganizationMembershipSummary>, sqlx::Error>;
+
+    async fn list_members(
+        &self,
+        organization_id: Uuid,
+    ) -> Result<Vec<crate::models::organization::OrganizationMember>, sqlx::Error>;
 }

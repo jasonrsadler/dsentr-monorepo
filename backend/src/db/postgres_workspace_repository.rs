@@ -98,6 +98,63 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         Ok(())
     }
 
+    async fn set_member_role(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE workspace_members
+            SET role = $3
+            WHERE workspace_id = $1 AND user_id = $2
+            "#,
+            workspace_id,
+            user_id,
+            role as WorkspaceRole
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn remove_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"DELETE FROM team_members USING teams WHERE team_members.team_id = teams.id AND teams.workspace_id = $1 AND team_members.user_id = $2"#,
+            workspace_id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query!(
+            r#"DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"#,
+            workspace_id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_members(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error> {
+        sqlx::query_as!(
+            crate::models::workspace::WorkspaceMember,
+            r#"
+            SELECT workspace_id, user_id, role as "role: WorkspaceRole", joined_at
+            FROM workspace_members
+            WHERE workspace_id = $1
+            ORDER BY joined_at ASC
+            "#,
+            workspace_id
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
     async fn list_memberships_for_user(
         &self,
         user_id: Uuid,
@@ -171,6 +228,75 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
             added_at
         )
         .fetch_one(&self.pool)
+        .await
+    }
+
+    async fn list_teams(&self, workspace_id: Uuid) -> Result<Vec<Team>, sqlx::Error> {
+        sqlx::query_as!(
+            Team,
+            r#"
+            SELECT id, workspace_id, name, created_at, updated_at
+            FROM teams
+            WHERE workspace_id = $1
+            ORDER BY created_at ASC
+            "#,
+            workspace_id
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn list_team_members(&self, team_id: Uuid) -> Result<Vec<TeamMember>, sqlx::Error> {
+        sqlx::query_as!(
+            TeamMember,
+            r#"
+            SELECT team_id, user_id, added_at
+            FROM team_members
+            WHERE team_id = $1
+            ORDER BY added_at ASC
+            "#,
+            team_id
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn remove_team_member(&self, team_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"DELETE FROM team_members WHERE team_id = $1 AND user_id = $2"#,
+            team_id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_team(&self, team_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"DELETE FROM teams WHERE id = $1"#,
+            team_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_workspaces_by_organization(
+        &self,
+        organization_id: Uuid,
+    ) -> Result<Vec<Workspace>, sqlx::Error> {
+        sqlx::query_as!(
+            Workspace,
+            r#"
+            SELECT id, name, created_by, organization_id, created_at, updated_at
+            FROM workspaces
+            WHERE organization_id = $1
+            ORDER BY created_at ASC
+            "#,
+            organization_id
+        )
+        .fetch_all(&self.pool)
         .await
     }
 }

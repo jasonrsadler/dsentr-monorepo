@@ -8,6 +8,7 @@ use uuid::Uuid;
 #[sqlx(rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceRole {
+    Owner,
     Admin,
     User,
     Viewer,

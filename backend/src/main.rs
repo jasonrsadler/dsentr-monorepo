@@ -342,6 +342,50 @@ async fn main() {
                 .post(routes::workspaces::complete_onboarding),
         )
         .route("/plan", post(routes::workspaces::change_plan))
+        .route(
+            "/{workspace_id}/members",
+            get(routes::workspaces::list_workspace_members)
+                .post(routes::workspaces::add_workspace_member),
+        )
+        .route(
+            "/{workspace_id}/members/{member_id}",
+            put(routes::workspaces::update_workspace_member_role)
+                .delete(routes::workspaces::remove_workspace_member),
+        )
+        .route(
+            "/{workspace_id}/teams",
+            get(routes::workspaces::list_workspace_teams)
+                .post(routes::workspaces::create_workspace_team),
+        )
+        .route(
+            "/{workspace_id}/teams/{team_id}",
+            delete(routes::workspaces::delete_workspace_team),
+        )
+        .route(
+            "/{workspace_id}/teams/{team_id}/members",
+            get(routes::workspaces::list_team_members)
+                .post(routes::workspaces::add_team_member),
+        )
+        .route(
+            "/{workspace_id}/teams/{team_id}/members/{member_id}",
+            delete(routes::workspaces::remove_team_member),
+        )
+        .route(
+            "/plan/downgrade-preview",
+            post(routes::workspaces::org_downgrade_preview),
+        )
+        .route(
+            "/plan/downgrade-execute",
+            post(routes::workspaces::org_downgrade_execute),
+        )
+        .route(
+            "/plan/workspace-to-solo-preview",
+            post(routes::workspaces::workspace_to_solo_preview),
+        )
+        .route(
+            "/plan/workspace-to-solo-execute",
+            post(routes::workspaces::workspace_to_solo_execute),
+        )
         .layer(csrf_layer.clone());
 
     let options_routes = Router::new()

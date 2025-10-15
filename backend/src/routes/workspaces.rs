@@ -14,7 +14,7 @@ use crate::{
     models::{
         organization::{Organization, OrganizationRole},
         workflow::Workflow,
-        workspace::{Workspace, WorkspaceRole},
+        workspace::{Team, Workspace, WorkspaceRole},
     },
     responses::JsonResponse,
     routes::auth::session::AuthSession,
@@ -640,4 +640,531 @@ pub async fn change_plan(
         Ok(value) => Json(value).into_response(),
         Err(response) => response,
     }
+}
+
+// --- Workspace members management ---
+
+#[derive(Debug, Deserialize)]
+pub struct AddWorkspaceMemberPayload {
+    pub user_id: Uuid,
+    pub role: WorkspaceRole,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorkspaceMemberRolePayload {
+    pub role: WorkspaceRole,
+}
+
+fn is_admin_or_owner(role: WorkspaceRole) -> bool {
+    matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
+}
+
+async fn require_workspace_admin(
+    app_state: &AppState,
+    acting_user: Uuid,
+    workspace_id: Uuid,
+) -> Result<(), Response> {
+    let memberships = app_state
+        .workspace_repo
+        .list_memberships_for_user(acting_user)
+        .await
+        .map_err(|_| JsonResponse::server_error("Failed to load memberships").into_response())?;
+    for m in memberships {
+        if m.workspace.id == workspace_id && is_admin_or_owner(m.role) {
+            return Ok(());
+        }
+    }
+    Err(JsonResponse::forbidden("Admin permissions required").into_response())
+}
+
+pub async fn list_workspace_members(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    match app_state.workspace_repo.list_members(workspace_id).await {
+        Ok(members) => Json(json!({"success": true, "members": members})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to list members").into_response(),
+    }
+}
+
+pub async fn add_workspace_member(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+    Json(payload): Json<AddWorkspaceMemberPayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    if payload.role == WorkspaceRole::Owner {
+        // rely on DB unique partial index to enforce single owner; attempt is allowed
+    }
+    match app_state
+        .workspace_repo
+        .add_member(workspace_id, payload.user_id, payload.role)
+        .await
+    {
+        Ok(_) => Json(json!({"success": true})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to add member").into_response(),
+    }
+}
+
+pub async fn update_workspace_member_role(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, member_id)): axum::extract::Path<(Uuid, Uuid)>,
+    Json(payload): Json<UpdateWorkspaceMemberRolePayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    match app_state
+        .workspace_repo
+        .set_member_role(workspace_id, member_id, payload.role)
+        .await
+    {
+        Ok(_) => Json(json!({"success": true})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to update role").into_response(),
+    }
+}
+
+pub async fn remove_workspace_member(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, member_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    match app_state
+        .workspace_repo
+        .remove_member(workspace_id, member_id)
+        .await
+    {
+        Ok(_) => Json(json!({"success": true})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to remove member").into_response(),
+    }
+}
+
+// --- Teams management ---
+
+pub async fn list_workspace_teams(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    match app_state.workspace_repo.list_teams(workspace_id).await {
+        Ok(teams) => Json(json!({"success": true, "teams": teams})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to list teams").into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateTeamPayload { pub name: String }
+
+pub async fn create_workspace_team(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+    Json(payload): Json<CreateTeamPayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    match app_state
+        .workspace_repo
+        .create_team(workspace_id, payload.name.trim())
+        .await
+    {
+        Ok(team) => Json(json!({"success": true, "team": team})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to create team").into_response(),
+    }
+}
+
+pub async fn delete_workspace_team(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, team_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    match app_state.workspace_repo.delete_team(team_id).await {
+        Ok(_) => Json(json!({"success": true})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to delete team").into_response(),
+    }
+}
+
+pub async fn list_team_members(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, team_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    match app_state.workspace_repo.list_team_members(team_id).await {
+        Ok(members) => Json(json!({"success": true, "members": members})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to list team members").into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddTeamMemberPayload { pub user_id: Uuid }
+
+pub async fn add_team_member(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, team_id)): axum::extract::Path<(Uuid, Uuid)>,
+    Json(payload): Json<AddTeamMemberPayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    let now = OffsetDateTime::now_utc();
+    match app_state
+        .workspace_repo
+        .add_team_member(team_id, payload.user_id, now)
+        .await
+    {
+        Ok(tm) => Json(json!({"success": true, "member": tm})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to add team member").into_response(),
+    }
+}
+
+pub async fn remove_team_member(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, team_id, member_id)): axum::extract::Path<(Uuid, Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+    match app_state.workspace_repo.remove_team_member(team_id, member_id).await {
+        Ok(_) => Json(json!({"success": true})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to remove team member").into_response(),
+    }
+}
+
+// --- Organization workspace listing & downgrade flows ---
+
+#[derive(Debug, Deserialize)]
+pub struct OrgDowngradePreviewPayload {
+    pub organization_id: Uuid,
+    pub target_workspace_id: Uuid,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrgDowngradePreviewResult {
+    pub target_workspace: Workspace,
+    pub teams: Vec<Team>,
+    pub will_disable_users: Vec<Uuid>,
+}
+
+async fn require_org_admin(
+    app_state: &AppState,
+    acting_user: Uuid,
+    organization_id: Uuid,
+) -> Result<(), Response> {
+    let org_memberships = app_state
+        .organization_repo
+        .list_memberships_for_user(acting_user)
+        .await
+        .map_err(|_| JsonResponse::server_error("Failed to load org memberships").into_response())?;
+    let mut ok = false;
+    for m in org_memberships {
+        if m.organization.id == organization_id {
+            ok = matches!(m.role, OrganizationRole::Owner | OrganizationRole::Admin);
+            break;
+        }
+    }
+    if ok { Ok(()) } else { Err(JsonResponse::forbidden("Admin permissions required").into_response()) }
+}
+
+pub async fn org_downgrade_preview(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Json(payload): Json<OrgDowngradePreviewPayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_org_admin(&app_state, user_id, payload.organization_id).await {
+        return resp;
+    }
+
+    // Fetch target workspace and validate it belongs to org
+    let workspaces = match app_state
+        .workspace_repo
+        .list_workspaces_by_organization(payload.organization_id)
+        .await
+    {
+        Ok(ws) => ws,
+        Err(_) => return JsonResponse::server_error("Failed to list org workspaces").into_response(),
+    };
+    let target = match workspaces.iter().find(|w| w.id == payload.target_workspace_id) {
+        Some(w) => w.clone(),
+        None => return JsonResponse::bad_request("Workspace does not belong to organization").into_response(),
+    };
+
+    // Gather org members and target members
+    let org_members = match app_state
+        .organization_repo
+        .list_members(payload.organization_id)
+        .await
+    {
+        Ok(ms) => ms,
+        Err(_) => return JsonResponse::server_error("Failed to list org members").into_response(),
+    };
+    let target_members = match app_state.workspace_repo.list_members(target.id).await {
+        Ok(ms) => ms,
+        Err(_) => return JsonResponse::server_error("Failed to list workspace members").into_response(),
+    };
+    let target_member_ids: std::collections::HashSet<_> =
+        target_members.iter().map(|m| m.user_id).collect();
+
+    let will_disable: Vec<Uuid> = org_members
+        .iter()
+        .map(|m| m.user_id)
+        .filter(|uid| !target_member_ids.contains(uid))
+        .collect();
+
+    let teams = match app_state.workspace_repo.list_teams(target.id).await {
+        Ok(ts) => ts,
+        Err(_) => return JsonResponse::server_error("Failed to list teams").into_response(),
+    };
+
+    Json(json!({
+        "success": true,
+        "target_workspace": target,
+        "teams": teams,
+        "will_disable_users": will_disable,
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OrgDowngradeExecutePayload {
+    pub organization_id: Uuid,
+    pub target_workspace_id: Uuid,
+    #[serde(default)]
+    pub transfers: Vec<TransferUser>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransferUser {
+    pub user_id: Uuid,
+    pub team_id: Option<Uuid>,
+}
+
+pub async fn org_downgrade_execute(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Json(payload): Json<OrgDowngradeExecutePayload>,
+) -> Response {
+    let acting_user = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_org_admin(&app_state, acting_user, payload.organization_id).await {
+        return resp;
+    }
+
+    // Validate target workspace
+    let workspaces = match app_state
+        .workspace_repo
+        .list_workspaces_by_organization(payload.organization_id)
+        .await
+    {
+        Ok(ws) => ws,
+        Err(_) => return JsonResponse::server_error("Failed to list org workspaces").into_response(),
+    };
+    if workspaces.iter().all(|w| w.id != payload.target_workspace_id) {
+        return JsonResponse::bad_request("Workspace does not belong to organization").into_response();
+    }
+
+    // Make sure acting user is at least a member of target workspace (and ideally becomes/keeps Owner)
+    let _ = app_state
+        .workspace_repo
+        .add_member(payload.target_workspace_id, acting_user, WorkspaceRole::Owner)
+        .await;
+
+    // Determine org members and target members
+    let org_members = match app_state
+        .organization_repo
+        .list_members(payload.organization_id)
+        .await
+    {
+        Ok(ms) => ms,
+        Err(_) => return JsonResponse::server_error("Failed to list org members").into_response(),
+    };
+    let target_members = match app_state
+        .workspace_repo
+        .list_members(payload.target_workspace_id)
+        .await
+    {
+        Ok(ms) => ms,
+        Err(_) => return JsonResponse::server_error("Failed to list workspace members").into_response(),
+    };
+    let target_member_ids: std::collections::HashSet<_> =
+        target_members.iter().map(|m| m.user_id).collect();
+
+    let transfers_map: std::collections::HashMap<Uuid, Option<Uuid>> =
+        payload.transfers.iter().map(|t| (t.user_id, t.team_id)).collect();
+
+    // Remove org memberships for everyone (org is kept for later re-upgrade)
+    for m in &org_members {
+        let _ = app_state
+            .organization_repo
+            .remove_member(payload.organization_id, m.user_id)
+            .await;
+    }
+
+    // For each workspace in org except target, remove memberships
+    for ws in &workspaces {
+        if ws.id == payload.target_workspace_id {
+            continue;
+        }
+        // List members of this workspace and remove them to disable access
+        if let Ok(members) = app_state.workspace_repo.list_members(ws.id).await {
+            for wm in members {
+                let _ = app_state.workspace_repo.remove_member(ws.id, wm.user_id).await;
+            }
+        }
+    }
+
+    // For users not already in target workspace, transfer if requested
+    for m in &org_members {
+        if target_member_ids.contains(&m.user_id) {
+            continue;
+        }
+        if let Some(team_choice) = transfers_map.get(&m.user_id) {
+            // Add as a user to target workspace
+            let _ = app_state
+                .workspace_repo
+                .add_member(payload.target_workspace_id, m.user_id, WorkspaceRole::User)
+                .await;
+            if let Some(team_id) = team_choice.clone() {
+                let _ = app_state
+                    .workspace_repo
+                    .add_team_member(team_id, m.user_id, OffsetDateTime::now_utc())
+                    .await;
+            }
+        }
+    }
+
+    // Update acting admin's plan to workspace
+    let _ = app_state
+        .db
+        .update_user_plan(acting_user, PlanTier::Workspace.as_str())
+        .await;
+
+    Json(json!({"success": true})).into_response()
+}
+
+// Workspace -> Solo downgrade
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceToSoloPreviewPayload { pub workspace_id: Uuid }
+
+pub async fn workspace_to_solo_preview(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Json(payload): Json<WorkspaceToSoloPreviewPayload>,
+) -> Response {
+    let acting = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, acting, payload.workspace_id).await {
+        return resp;
+    }
+    match app_state.workspace_repo.list_members(payload.workspace_id).await {
+        Ok(members) => {
+            let to_disable: Vec<Uuid> = members
+                .into_iter()
+                .filter(|m| m.user_id != acting)
+                .map(|m| m.user_id)
+                .collect();
+            Json(json!({"success": true, "will_disable_users": to_disable})).into_response()
+        }
+        Err(_) => JsonResponse::server_error("Failed to list members").into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceToSoloExecutePayload { pub workspace_id: Uuid }
+
+pub async fn workspace_to_solo_execute(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Json(payload): Json<WorkspaceToSoloExecutePayload>,
+) -> Response {
+    let acting = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = require_workspace_admin(&app_state, acting, payload.workspace_id).await {
+        return resp;
+    }
+    // Remove all members except acting user
+    if let Ok(members) = app_state.workspace_repo.list_members(payload.workspace_id).await {
+        for m in members {
+            if m.user_id == acting { continue; }
+            let _ = app_state.workspace_repo.remove_member(payload.workspace_id, m.user_id).await;
+        }
+    }
+    let _ = app_state
+        .db
+        .update_user_plan(acting, PlanTier::Solo.as_str())
+        .await;
+    Json(json!({"success": true})).into_response()
 }

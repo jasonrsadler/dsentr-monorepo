@@ -656,6 +656,26 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         Ok(())
     }
 
+    async fn set_member_role(
+        &self,
+        _workspace_id: Uuid,
+        _user_id: Uuid,
+        _role: WorkspaceRole,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn remove_member(&self, _workspace_id: Uuid, _user_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn list_members(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error> {
+        Ok(vec![])
+    }
+
     async fn list_memberships_for_user(
         &self,
         _user_id: Uuid,
@@ -684,6 +704,29 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
             user_id,
             added_at,
         })
+    }
+
+    async fn list_teams(&self, _workspace_id: Uuid) -> Result<Vec<Team>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn list_team_members(&self, _team_id: Uuid) -> Result<Vec<TeamMember>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn remove_team_member(&self, _team_id: Uuid, _user_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn delete_team(&self, _team_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn list_workspaces_by_organization(
+        &self,
+        _organization_id: Uuid,
+    ) -> Result<Vec<Workspace>, sqlx::Error> {
+        Ok(vec![])
     }
 }
 
@@ -729,10 +772,30 @@ impl OrganizationRepository for NoopOrganizationRepository {
         Ok(())
     }
 
+    async fn set_member_role(
+        &self,
+        _organization_id: Uuid,
+        _user_id: Uuid,
+        _role: OrganizationRole,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn remove_member(&self, _organization_id: Uuid, _user_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
     async fn list_memberships_for_user(
         &self,
         _user_id: Uuid,
     ) -> Result<Vec<OrganizationMembershipSummary>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn list_members(
+        &self,
+        _organization_id: Uuid,
+    ) -> Result<Vec<crate::models::organization::OrganizationMember>, sqlx::Error> {
         Ok(vec![])
     }
 }

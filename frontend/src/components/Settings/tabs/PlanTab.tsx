@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { API_BASE_URL } from '@/lib'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+import {
+  orgDowngradePreview,
+  orgDowngradeExecute,
+  workspaceToSoloPreview,
+  workspaceToSoloExecute
+} from '@/lib/orgWorkspaceApi'
 import { getCsrfToken } from '@/lib/csrfCache'
 import { useAuth } from '@/stores/auth'
 
@@ -52,6 +58,14 @@ export default function PlanTab() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const workspaceEditedRef = useRef(false)
   const organizationEditedRef = useRef(false)
+
+  // Advanced downgrade helpers
+  const [downgradeTargetWorkspaceId, setDowngradeTargetWorkspaceId] = useState<string>('')
+  const [downgradeAffectedUsers, setDowngradeAffectedUsers] = useState<string[]>([])
+  const [downgradeTeams, setDowngradeTeams] = useState<{ id: string; name: string }[]>([])
+  const [transferMap, setTransferMap] = useState<Record<string, string | ''>>({})
+  const [downgradeBusy, setDowngradeBusy] = useState(false)
+  const [workspaceSoloPreview, setWorkspaceSoloPreview] = useState<string[] | null>(null)
 
   const previousWorkspaceName = useMemo(() => {
     if (!Array.isArray(memberships)) return ''
@@ -196,6 +210,22 @@ export default function PlanTab() {
     setOrganizationName(previousOrganizationName)
   }, [needsOrganizationName, previousOrganizationName])
 
+  const organizationId = useMemo(() => {
+    // Pick first organization membership for admin view (simple heuristic)
+    if (Array.isArray(organizationMemberships) && organizationMemberships[0]) {
+      return organizationMemberships[0].organization.id
+    }
+    return ''
+  }, [organizationMemberships])
+
+  const orgWorkspaces = useMemo(() => {
+    return Array.isArray(memberships)
+      ? memberships
+          .filter((m) => typeof (m as any)?.workspace?.organization_id === 'string' || (m as any)?.workspace?.organization_id)
+          .map((m) => m.workspace)
+      : []
+  }, [memberships])
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setStatus(null)
@@ -310,6 +340,73 @@ export default function PlanTab() {
       setError(err instanceof Error ? err.message : 'Failed to update plan')
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // Advanced: Organization -> Workspace downgrade
+  const handlePreviewOrgDowngrade = async () => {
+    if (!downgradeTargetWorkspaceId || !organizationId) return
+    try {
+      setDowngradeBusy(true)
+      setError(null)
+      const result = await orgDowngradePreview(organizationId, downgradeTargetWorkspaceId)
+      setDowngradeAffectedUsers(result.will_disable_users)
+      setDowngradeTeams(result.teams)
+      setTransferMap({})
+      setStatus('Review affected users and choose transfers, then confirm downgrade.')
+    } catch (e: any) {
+      setError(e.message || 'Failed to preview downgrade')
+    } finally {
+      setDowngradeBusy(false)
+    }
+  }
+
+  const handleExecuteOrgDowngrade = async () => {
+    if (!downgradeTargetWorkspaceId || !organizationId) return
+    try {
+      setDowngradeBusy(true)
+      setError(null)
+      const transfers = Object.entries(transferMap)
+        .filter(([_, team]) => team)
+        .map(([user_id, team_id]) => ({ user_id, team_id }))
+      await orgDowngradeExecute(organizationId, downgradeTargetWorkspaceId, transfers)
+      await checkAuth({ silent: true })
+      setStatus('Organization downgraded to workspace successfully.')
+    } catch (e: any) {
+      setError(e.message || 'Failed to execute downgrade')
+    } finally {
+      setDowngradeBusy(false)
+    }
+  }
+
+  // Advanced: Workspace -> Solo downgrade
+  const handlePreviewWorkspaceToSolo = async () => {
+    const wsId = previousWorkspaceName ? (memberships.find((m) => m.workspace.name.trim() === previousWorkspaceName)?.workspace.id || '') : (memberships[0]?.workspace.id || '')
+    if (!wsId) return
+    try {
+      setDowngradeBusy(true)
+      const users = await workspaceToSoloPreview(wsId)
+      setWorkspaceSoloPreview(users)
+      setStatus('Users listed will lose access when confirming the downgrade.')
+    } catch (e: any) {
+      setError(e.message || 'Failed to preview workspace to solo')
+    } finally {
+      setDowngradeBusy(false)
+    }
+  }
+
+  const handleExecuteWorkspaceToSolo = async () => {
+    const wsId = previousWorkspaceName ? (memberships.find((m) => m.workspace.name.trim() === previousWorkspaceName)?.workspace.id || '') : (memberships[0]?.workspace.id || '')
+    if (!wsId) return
+    try {
+      setDowngradeBusy(true)
+      await workspaceToSoloExecute(wsId)
+      await checkAuth({ silent: true })
+      setStatus('Workspace downgraded to Solo; only owner retains access.')
+    } catch (e: any) {
+      setError(e.message || 'Failed to downgrade to solo')
+    } finally {
+      setDowngradeBusy(false)
     }
   }
 
@@ -432,6 +529,117 @@ export default function PlanTab() {
           Current plan: {currentPlanDetails.name}
         </p>
       ) : null}
+
+      {/* Advanced downgrade tools */}
+      <div className="mt-4 border-t pt-4 space-y-3">
+        <h4 className="font-semibold">Advanced actions</h4>
+        {currentPlan === 'organization' && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <label className="text-sm">Downgrade to workspace</label>
+              <select
+                value={downgradeTargetWorkspaceId}
+                onChange={(e) => setDowngradeTargetWorkspaceId(e.target.value)}
+                className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+              >
+                <option value="">Select workspace…</option>
+                {orgWorkspaces.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={handlePreviewOrgDowngrade}
+                disabled={!downgradeTargetWorkspaceId || downgradeBusy}
+                className="px-3 py-1 text-sm rounded border"
+              >
+                Preview downgrade
+              </button>
+            </div>
+
+            {downgradeAffectedUsers.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  The following users will lose access unless transferred to a team in the selected workspace:
+                </p>
+                <div className="space-y-1">
+                  {downgradeAffectedUsers.map((uid) => (
+                    <div key={uid} className="flex items-center gap-2">
+                      <span className="font-mono text-xs">{uid}</span>
+                      <select
+                        value={transferMap[uid] ?? ''}
+                        onChange={(e) =>
+                          setTransferMap((prev) => ({ ...prev, [uid]: e.target.value }))
+                        }
+                        className="px-2 py-1 text-xs border rounded"
+                      >
+                        <option value="">Do not transfer</option>
+                        {downgradeTeams.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExecuteOrgDowngrade}
+                  disabled={downgradeBusy}
+                  className="px-3 py-1 text-sm rounded bg-amber-600 text-white"
+                >
+                  Confirm downgrade
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {currentPlan === 'workspace' && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">Downgrade workspace to Solo</span>
+              <button
+                type="button"
+                onClick={handlePreviewWorkspaceToSolo}
+                disabled={downgradeBusy}
+                className="px-3 py-1 text-sm rounded border"
+              >
+                Preview
+              </button>
+            </div>
+            {Array.isArray(workspaceSoloPreview) && (
+              <div className="space-y-1">
+                {workspaceSoloPreview.length === 0 ? (
+                  <p className="text-sm text-zinc-600">No other users will be removed.</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-zinc-600">
+                      These users will be removed from the workspace:
+                    </p>
+                    <ul className="pl-4 list-disc">
+                      {workspaceSoloPreview.map((u) => (
+                        <li key={u} className="font-mono text-xs">{u}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={handleExecuteWorkspaceToSolo}
+                  disabled={downgradeBusy}
+                  className="px-3 py-1 text-sm rounded bg-amber-600 text-white"
+                >
+                  Confirm downgrade to Solo
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </form>
   )
 }

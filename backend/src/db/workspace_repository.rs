@@ -34,6 +34,21 @@ pub trait WorkspaceRepository: Send + Sync {
         role: WorkspaceRole,
     ) -> Result<(), sqlx::Error>;
 
+    async fn set_member_role(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn remove_member(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn list_members(&self, workspace_id: Uuid) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error>;
+
     async fn list_memberships_for_user(
         &self,
         user_id: Uuid,
@@ -47,4 +62,17 @@ pub trait WorkspaceRepository: Send + Sync {
         user_id: Uuid,
         added_at: OffsetDateTime,
     ) -> Result<TeamMember, sqlx::Error>;
+
+    async fn list_teams(&self, workspace_id: Uuid) -> Result<Vec<Team>, sqlx::Error>;
+
+    async fn list_team_members(&self, team_id: Uuid) -> Result<Vec<TeamMember>, sqlx::Error>;
+
+    async fn remove_team_member(&self, team_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn delete_team(&self, team_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn list_workspaces_by_organization(
+        &self,
+        organization_id: Uuid,
+    ) -> Result<Vec<Workspace>, sqlx::Error>;
 }

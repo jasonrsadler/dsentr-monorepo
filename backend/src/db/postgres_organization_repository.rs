@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::organization::{Organization, OrganizationMembershipSummary, OrganizationRole};
+use crate::models::organization::{Organization, OrganizationMember, OrganizationMembershipSummary, OrganizationRole};
 
 use super::organization_repository::OrganizationRepository;
 
@@ -73,6 +73,38 @@ impl OrganizationRepository for PostgresOrganizationRepository {
         Ok(())
     }
 
+    async fn set_member_role(
+        &self,
+        organization_id: Uuid,
+        user_id: Uuid,
+        role: OrganizationRole,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE organization_members
+            SET role = $3
+            WHERE organization_id = $1 AND user_id = $2
+            "#,
+            organization_id,
+            user_id,
+            role as OrganizationRole
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn remove_member(&self, organization_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2"#,
+            organization_id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn list_memberships_for_user(
         &self,
         user_id: Uuid,
@@ -108,5 +140,20 @@ impl OrganizationRepository for PostgresOrganizationRepository {
                 role: row.role,
             })
             .collect())
+    }
+
+    async fn list_members(&self, organization_id: Uuid) -> Result<Vec<OrganizationMember>, sqlx::Error> {
+        sqlx::query_as!(
+            OrganizationMember,
+            r#"
+            SELECT organization_id, user_id, role as "role: OrganizationRole", joined_at
+            FROM organization_members
+            WHERE organization_id = $1
+            ORDER BY joined_at ASC
+            "#,
+            organization_id
+        )
+        .fetch_all(&self.pool)
+        .await
     }
 }

@@ -8,6 +8,7 @@ use uuid::Uuid;
 #[sqlx(rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub enum OrganizationRole {
+    Owner,
     Admin,
     User,
     Viewer,
