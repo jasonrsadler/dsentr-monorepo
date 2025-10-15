@@ -1,21 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/stores/auth'
 import {
-  addWorkspaceMember,
   listWorkspaceMembers,
   removeWorkspaceMember,
   updateWorkspaceMemberRole,
-  type WorkspaceMember
+  createWorkspaceInvite,
+  listWorkspaceInvites,
+  revokeWorkspaceInvite,
+  type WorkspaceMember,
+  type WorkspaceInvitation,
 } from '@/lib/orgWorkspaceApi'
 
 export default function MembersTab() {
   const { memberships } = useAuth()
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([])
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
   const [members, setMembers] = useState<WorkspaceMember[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [inviteUserId, setInviteUserId] = useState('')
+  const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'owner' | 'admin' | 'user' | 'viewer'>('user')
+  const [inviteTeamId, setInviteTeamId] = useState<string | ''>('')
+  const [inviteExpires, setInviteExpires] = useState<number>(14)
+  const [pendingInvites, setPendingInvites] = useState<WorkspaceInvitation[]>([])
 
   const workspaceOptions = useMemo(
     () => (Array.isArray(memberships) ? memberships.map((m) => m.workspace) : []),
@@ -30,24 +37,45 @@ export default function MembersTab() {
     if (!workspaceId) return
     setBusy(true)
     setError(null)
-    listWorkspaceMembers(workspaceId)
-      .then(setMembers)
+    Promise.all([
+      listWorkspaceMembers(workspaceId),
+      listWorkspaceInvites(workspaceId),
+      (async () => {
+        try {
+          const res = await import('@/lib/orgWorkspaceApi')
+          const list = await res.listTeams(workspaceId)
+          return list
+        } catch {
+          return []
+        }
+      })()
+    ])
+      .then(([m, inv, t]) => {
+        setMembers(m)
+        setPendingInvites(inv)
+        setTeams(t)
+      })
       .catch((e) => setError(e.message || 'Failed to load'))
       .finally(() => setBusy(false))
   }, [workspaceId])
 
   const handleInvite = async () => {
-    if (!workspaceId || !inviteUserId.trim()) return
+    if (!workspaceId || !inviteEmail.trim()) return
     try {
       setBusy(true)
       setError(null)
-      await addWorkspaceMember(workspaceId, inviteUserId.trim(), inviteRole)
-      const next = await listWorkspaceMembers(workspaceId)
-      setMembers(next)
-      setInviteUserId('')
+      const inv = await createWorkspaceInvite(workspaceId, {
+        email: inviteEmail.trim(),
+        role: inviteRole,
+        team_id: inviteTeamId || undefined,
+        expires_in_days: inviteExpires
+      })
+      setPendingInvites((prev) => [inv, ...prev])
+      setInviteEmail('')
       setInviteRole('user')
+      setInviteTeamId('')
     } catch (e: any) {
-      setError(e.message || 'Failed to invite user')
+      setError(e.message || 'Failed to create invitation')
     } finally {
       setBusy(false)
     }
@@ -104,11 +132,11 @@ export default function MembersTab() {
 
       <div className="flex items-end gap-2">
         <div className="flex-1">
-          <label className="block text-sm">Invite by User ID</label>
+          <label className="block text-sm">Invite by Email</label>
           <input
-            value={inviteUserId}
-            onChange={(e) => setInviteUserId(e.target.value)}
-            placeholder="UUID of user"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="name@example.com"
             className="mt-1 w-full px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
           />
         </div>
@@ -125,6 +153,32 @@ export default function MembersTab() {
             <option value="owner">Owner</option>
           </select>
         </div>
+        <div>
+          <label className="block text-sm">Team (optional)</label>
+          <select
+            value={inviteTeamId}
+            onChange={(e) => setInviteTeamId(e.target.value)}
+            className="mt-1 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+          >
+            <option value="">—</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm">Expires (days)</label>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={inviteExpires}
+            onChange={(e) => setInviteExpires(Number(e.target.value))}
+            className="mt-1 w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+          />
+        </div>
         <button
           onClick={handleInvite}
           disabled={busy}
@@ -133,6 +187,43 @@ export default function MembersTab() {
           Invite
         </button>
       </div>
+
+      {pendingInvites.length > 0 && (
+        <div className="border-t pt-3">
+          <h4 className="font-semibold mb-2">Pending invitations</h4>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left">
+                <th className="py-1">Email</th>
+                <th className="py-1">Role</th>
+                <th className="py-1">Expires</th>
+                <th className="py-1 text-right"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingInvites.map((inv) => (
+                <tr key={inv.id} className="border-t border-zinc-200 dark:border-zinc-700">
+                  <td className="py-2">{inv.email}</td>
+                  <td className="py-2 capitalize">{inv.role}</td>
+                  <td className="py-2 text-xs">{new Date(inv.expires_at).toLocaleString()}</td>
+                  <td className="py-2 text-right">
+                    <button
+                      onClick={async () => {
+                        if (!workspaceId) return
+                        await revokeWorkspaceInvite(workspaceId, inv.id)
+                        setPendingInvites((prev) => prev.filter((i) => i.id !== inv.id))
+                      }}
+                      className="px-2 py-1 text-xs rounded border"
+                    >
+                      Revoke
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="border-t pt-3">
         <table className="w-full text-sm">
@@ -182,4 +273,3 @@ export default function MembersTab() {
     </div>
   )
 }
-

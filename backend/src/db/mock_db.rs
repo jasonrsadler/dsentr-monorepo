@@ -728,6 +728,99 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
     ) -> Result<Vec<Workspace>, sqlx::Error> {
         Ok(vec![])
     }
+
+    async fn create_workspace_invitation(
+        &self,
+        workspace_id: Uuid,
+        team_id: Option<Uuid>,
+        email: &str,
+        role: WorkspaceRole,
+        token: &str,
+        expires_at: OffsetDateTime,
+        created_by: Uuid,
+    ) -> Result<crate::models::workspace::WorkspaceInvitation, sqlx::Error> {
+        Ok(crate::models::workspace::WorkspaceInvitation {
+            id: Uuid::new_v4(),
+            workspace_id,
+            team_id,
+            email: email.to_string(),
+            role,
+            token: token.to_string(),
+            expires_at,
+            created_by,
+            created_at: OffsetDateTime::now_utc(),
+            accepted_at: None,
+            revoked_at: None,
+        })
+    }
+
+    async fn list_workspace_invitations(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn revoke_workspace_invitation(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn find_invitation_by_token(
+        &self,
+        _token: &str,
+    ) -> Result<Option<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn mark_invitation_accepted(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn create_team_invite_link(
+        &self,
+        workspace_id: Uuid,
+        team_id: Uuid,
+        token: &str,
+        created_by: Uuid,
+        expires_at: Option<OffsetDateTime>,
+        max_uses: Option<i32>,
+        allowed_domain: Option<&str>,
+    ) -> Result<crate::models::workspace::TeamInviteLink, sqlx::Error> {
+        Ok(crate::models::workspace::TeamInviteLink {
+            id: Uuid::new_v4(),
+            workspace_id,
+            team_id,
+            token: token.to_string(),
+            created_by,
+            created_at: OffsetDateTime::now_utc(),
+            expires_at,
+            max_uses,
+            used_count: 0,
+            allowed_domain: allowed_domain.map(|s| s.to_string()),
+        })
+    }
+
+    async fn list_team_invite_links(
+        &self,
+        _team_id: Uuid,
+    ) -> Result<Vec<crate::models::workspace::TeamInviteLink>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn revoke_team_invite_link(&self, _link_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn find_team_invite_by_token(
+        &self,
+        _token: &str,
+    ) -> Result<Option<crate::models::workspace::TeamInviteLink>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn increment_team_invite_use(&self, _link_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]

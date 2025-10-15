@@ -7,7 +7,11 @@ import {
   listTeamMembers,
   listTeams,
   removeTeamMember,
-  type Team
+  listTeamInviteLinks,
+  createTeamInviteLink,
+  revokeTeamInviteLink,
+  type Team,
+  type TeamInviteLink
 } from '@/lib/orgWorkspaceApi'
 
 export default function TeamsTab() {
@@ -20,6 +24,10 @@ export default function TeamsTab() {
   const [addUserId, setAddUserId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [joinLinks, setJoinLinks] = useState<TeamInviteLink[]>([])
+  const [expiresDays, setExpiresDays] = useState<number>(30)
+  const [maxUses, setMaxUses] = useState<number>(0)
+  const [allowedDomain, setAllowedDomain] = useState('')
 
   const workspaceOptions = useMemo(
     () => (Array.isArray(memberships) ? memberships.map((m) => m.workspace) : []),
@@ -46,12 +54,19 @@ export default function TeamsTab() {
   useEffect(() => {
     if (!workspaceId || !selectedTeamId) {
       setMembers([])
+      setJoinLinks([])
       return
     }
     setBusy(true)
     setError(null)
-    listTeamMembers(workspaceId, selectedTeamId)
-      .then(setMembers)
+    Promise.all([
+      listTeamMembers(workspaceId, selectedTeamId),
+      listTeamInviteLinks(workspaceId, selectedTeamId)
+    ])
+      .then(([m, links]) => {
+        setMembers(m)
+        setJoinLinks(links)
+      })
       .catch((e) => setError(e.message || 'Failed to load members'))
       .finally(() => setBusy(false))
   }, [workspaceId, selectedTeamId])
@@ -225,7 +240,103 @@ export default function TeamsTab() {
           )}
         </div>
       </div>
+
+      <div className="border-t pt-3 space-y-2">
+        <h4 className="font-semibold">Join links</h4>
+        <div className="flex items-end gap-2">
+          <div>
+            <label className="block text-sm">Expires (days)</label>
+            <input
+              type="number"
+              min={0}
+              max={180}
+              value={expiresDays}
+              onChange={(e) => setExpiresDays(Number(e.target.value))}
+              className="mt-1 w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+            />
+          </div>
+          <div>
+            <label className="block text-sm">Max uses (0=unlimited)</label>
+            <input
+              type="number"
+              min={0}
+              value={maxUses}
+              onChange={(e) => setMaxUses(Number(e.target.value))}
+              className="mt-1 w-28 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm">Allowed domain (optional)</label>
+            <input
+              value={allowedDomain}
+              onChange={(e) => setAllowedDomain(e.target.value)}
+              placeholder="acme.com"
+              className="mt-1 w-full px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+            />
+          </div>
+          <button
+            onClick={async () => {
+              if (!workspaceId || !selectedTeamId) return
+              try {
+                setBusy(true)
+                const link = await createTeamInviteLink(workspaceId, selectedTeamId, {
+                  expires_in_days: expiresDays > 0 ? expiresDays : undefined,
+                  max_uses: maxUses > 0 ? maxUses : undefined,
+                  allowed_domain: allowedDomain.trim() || undefined
+                })
+                setJoinLinks((prev) => [link, ...prev])
+              } catch (e: any) {
+                setError(e.message || 'Failed to create link')
+              } finally {
+                setBusy(false)
+              }
+            }}
+            disabled={!selectedTeamId || busy}
+            className="px-3 py-1 rounded border text-sm"
+          >
+            Create link
+          </button>
+        </div>
+        {joinLinks.length > 0 ? (
+          <ul className="space-y-2">
+            {joinLinks.map((l) => {
+              const url = `${window.location.origin}/login?join=${l.token}`
+              return (
+                <li key={l.id} className="flex items-center justify-between py-2 border-t border-zinc-200 dark:border-zinc-700">
+                  <div className="text-xs">
+                    <div className="font-mono break-all">{url}</div>
+                    <div className="text-zinc-500">
+                      Uses: {l.used_count}
+                      {typeof l.max_uses === 'number' && l.max_uses > 0 ? ` / ${l.max_uses}` : ''}
+                      {l.expires_at ? ` | Expires: ${new Date(l.expires_at).toLocaleString()}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => navigator.clipboard.writeText(url)}
+                      className="px-2 py-1 text-xs rounded border"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!workspaceId || !selectedTeamId) return
+                        await revokeTeamInviteLink(workspaceId, selectedTeamId, l.id)
+                        setJoinLinks((prev) => prev.filter((x) => x.id !== l.id))
+                      }}
+                      className="px-2 py-1 text-xs rounded border text-red-600"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <div className="text-sm text-zinc-500">No join links yet.</div>
+        )}
+      </div>
     </div>
   )
 }
-

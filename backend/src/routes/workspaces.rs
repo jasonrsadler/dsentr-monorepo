@@ -901,6 +901,273 @@ pub struct OrgDowngradePreviewPayload {
     pub target_workspace_id: Uuid,
 }
 
+// --- Email-based invitations ---
+
+#[derive(Debug, Deserialize)]
+pub struct CreateInvitationPayload {
+    pub email: String,
+    pub role: WorkspaceRole,
+    #[serde(default)]
+    pub team_id: Option<Uuid>,
+    #[serde(default)]
+    pub expires_in_days: Option<i32>,
+}
+
+fn random_token() -> String {
+    Uuid::new_v4().to_string().replace('-', "")
+}
+
+pub async fn create_workspace_invitation(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+    Json(payload): Json<CreateInvitationPayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await { return resp; }
+
+    let email = payload.email.trim();
+    if email.is_empty() { return JsonResponse::bad_request("Email is required").into_response(); }
+    let expires_days = payload.expires_in_days.unwrap_or(14).max(1).min(60);
+    let expires_at = OffsetDateTime::now_utc() + time::Duration::days(expires_days.into());
+
+    let token = random_token();
+    let invite = match app_state
+        .workspace_repo
+        .create_workspace_invitation(
+            workspace_id,
+            payload.team_id,
+            email,
+            payload.role,
+            &token,
+            expires_at,
+            user_id,
+        )
+        .await
+    {
+        Ok(inv) => inv,
+        Err(err) => {
+            tracing::error!(?err, "failed to create invitation");
+            return JsonResponse::server_error("Failed to create invitation").into_response();
+        }
+    };
+
+    // Send email with invite link
+    let frontend = &app_state.config.frontend_origin;
+    let accept_url = format!("{}/login?invite={}", frontend, invite.token);
+    let subject = format!("You're invited to join {} on DSentr", workspace_id);
+    let body = format!(
+        "You've been invited to join a workspace on DSentr.\n\nOpen this link to accept: {}\n\nThis link expires in {} days.",
+        accept_url, expires_days
+    );
+    if let Err(err) = app_state.mailer.send_email_generic(email, &subject, &body).await {
+        tracing::warn!(?err, "failed to send invitation email");
+    }
+
+    Json(json!({"success": true, "invitation": invite})).into_response()
+}
+
+pub async fn list_workspace_invitations(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await { return resp; }
+    match app_state.workspace_repo.list_workspace_invitations(workspace_id).await {
+        Ok(list) => Json(json!({"success": true, "invitations": list})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to list invitations").into_response(),
+    }
+}
+
+pub async fn revoke_workspace_invitation(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, invite_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await { return resp; }
+    match app_state.workspace_repo.revoke_workspace_invitation(invite_id).await {
+        Ok(_) => Json(json!({"success": true})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to revoke invitation").into_response(),
+    }
+}
+
+// Public: preview invite
+pub async fn preview_invitation(State(app_state): State<AppState>, axum::extract::Path(token): axum::extract::Path<String>) -> Response {
+    match app_state.workspace_repo.find_invitation_by_token(&token).await {
+        Ok(Some(inv)) => {
+            let now = OffsetDateTime::now_utc();
+            let expired = inv.expires_at <= now;
+            let revoked = inv.revoked_at.is_some();
+            let accepted = inv.accepted_at.is_some();
+            Json(json!({
+                "success": true,
+                "invitation": inv,
+                "expired": expired,
+                "revoked": revoked,
+                "accepted": accepted,
+            })).into_response()
+        }
+        Ok(None) => JsonResponse::not_found("Invalid or expired token").into_response(),
+        Err(_) => JsonResponse::server_error("Failed to lookup invite").into_response(),
+    }
+}
+
+// Public: accept invite (requires login)
+pub async fn accept_invitation(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(token): axum::extract::Path<String>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    let invite = match app_state.workspace_repo.find_invitation_by_token(&token).await {
+        Ok(Some(i)) => i,
+        Ok(None) => return JsonResponse::not_found("Invite not found").into_response(),
+        Err(_) => return JsonResponse::server_error("Failed to load invite").into_response(),
+    };
+    let now = OffsetDateTime::now_utc();
+    if invite.revoked_at.is_some() || invite.accepted_at.is_some() || invite.expires_at <= now {
+        return JsonResponse::bad_request("Invitation is not valid").into_response();
+    }
+    // Add workspace membership and optional team membership
+    let _ = app_state
+        .workspace_repo
+        .add_member(invite.workspace_id, user_id, invite.role)
+        .await;
+    if let Some(team_id) = invite.team_id {
+        let _ = app_state
+            .workspace_repo
+            .add_team_member(team_id, user_id, now)
+            .await;
+    }
+    let _ = app_state
+        .workspace_repo
+        .mark_invitation_accepted(invite.id)
+        .await;
+    Json(json!({"success": true})).into_response()
+}
+
+// --- Team shareable join links ---
+
+#[derive(Debug, Deserialize)]
+pub struct CreateJoinLinkPayload {
+    #[serde(default)]
+    pub expires_in_days: Option<i32>,
+    #[serde(default)]
+    pub max_uses: Option<i32>,
+    #[serde(default)]
+    pub allowed_domain: Option<String>,
+}
+
+pub async fn create_team_join_link(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, team_id)): axum::extract::Path<(Uuid, Uuid)>,
+    Json(payload): Json<CreateJoinLinkPayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await { return resp; }
+    let token = random_token();
+    let expires_at = payload
+        .expires_in_days
+        .and_then(|d| Some(OffsetDateTime::now_utc() + time::Duration::days(d.max(1).min(180).into())));
+    match app_state
+        .workspace_repo
+        .create_team_invite_link(
+            workspace_id,
+            team_id,
+            &token,
+            user_id,
+            expires_at,
+            payload.max_uses,
+            payload.allowed_domain.as_deref(),
+        )
+        .await
+    {
+        Ok(link) => Json(json!({"success": true, "link": link})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to create join link").into_response(),
+    }
+}
+
+pub async fn list_team_join_links(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, team_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await { return resp; }
+    match app_state.workspace_repo.list_team_invite_links(team_id).await {
+        Ok(list) => Json(json!({"success": true, "links": list})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to list links").into_response(),
+    }
+}
+
+pub async fn revoke_team_join_link(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((workspace_id, _team_id, link_id)): axum::extract::Path<(Uuid, Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await { return resp; }
+    match app_state.workspace_repo.revoke_team_invite_link(link_id).await {
+        Ok(_) => Json(json!({"success": true})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to revoke link").into_response(),
+    }
+}
+
+// Public: preview team join
+pub async fn preview_join_link(State(app_state): State<AppState>, axum::extract::Path(token): axum::extract::Path<String>) -> Response {
+    match app_state.workspace_repo.find_team_invite_by_token(&token).await {
+        Ok(Some(link)) => {
+            let now = OffsetDateTime::now_utc();
+            let expired = link.expires_at.map(|e| e <= now).unwrap_or(false);
+            let capped = link.max_uses.map(|m| m > 0 && link.used_count >= m).unwrap_or(false);
+            Json(json!({"success": true, "link": link, "expired": expired, "exhausted": capped})).into_response()
+        }
+        Ok(None) => JsonResponse::not_found("Invalid token").into_response(),
+        Err(_) => JsonResponse::server_error("Failed to load link").into_response(),
+    }
+}
+
+// Public: accept team join (requires login)
+pub async fn accept_join_link(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(token): axum::extract::Path<String>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
+    let link = match app_state.workspace_repo.find_team_invite_by_token(&token).await {
+        Ok(Some(l)) => l,
+        Ok(None) => return JsonResponse::not_found("Link not found").into_response(),
+        Err(_) => return JsonResponse::server_error("Failed to load link").into_response(),
+    };
+    let now = OffsetDateTime::now_utc();
+    if link.expires_at.map(|e| e <= now).unwrap_or(false) { return JsonResponse::bad_request("Link expired").into_response(); }
+    if link.max_uses.map(|m| m > 0 && link.used_count >= m).unwrap_or(false) { return JsonResponse::bad_request("Link exhausted").into_response(); }
+    // Domain restriction if configured
+    if let Some(domain) = link.allowed_domain.as_ref() {
+        if let Some(user) = app_state.db.find_public_user_by_id(user_id).await.ok().flatten() {
+            if let Some(pos) = user.email.rfind('@') {
+                let user_domain = user.email[pos+1..].to_lowercase();
+                if user_domain != domain.to_lowercase() {
+                    return JsonResponse::forbidden("Email domain not allowed for this link").into_response();
+                }
+            }
+        }
+    }
+    let _ = app_state
+        .workspace_repo
+        .add_member(link.workspace_id, user_id, WorkspaceRole::User)
+        .await;
+    let _ = app_state
+        .workspace_repo
+        .add_team_member(link.team_id, user_id, now)
+        .await;
+    let _ = app_state.workspace_repo.increment_team_invite_use(link.id).await;
+    Json(json!({"success": true})).into_response()
+}
+
 #[derive(Debug, Serialize)]
 pub struct OrgDowngradePreviewResult {
     pub target_workspace: Workspace,

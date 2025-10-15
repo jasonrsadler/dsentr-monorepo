@@ -386,6 +386,24 @@ async fn main() {
             "/plan/workspace-to-solo-execute",
             post(routes::workspaces::workspace_to_solo_execute),
         )
+        .route(
+            "/{workspace_id}/invites",
+            get(routes::workspaces::list_workspace_invitations)
+                .post(routes::workspaces::create_workspace_invitation),
+        )
+        .route(
+            "/{workspace_id}/invites/{invite_id}/revoke",
+            post(routes::workspaces::revoke_workspace_invitation),
+        )
+        .route(
+            "/{workspace_id}/teams/{team_id}/invite-links",
+            get(routes::workspaces::list_team_join_links)
+                .post(routes::workspaces::create_team_join_link),
+        )
+        .route(
+            "/{workspace_id}/teams/{team_id}/invite-links/{link_id}",
+            delete(routes::workspaces::revoke_team_join_link),
+        )
         .layer(csrf_layer.clone());
 
     let options_routes = Router::new()
@@ -430,6 +448,9 @@ async fn main() {
     // Public webhook route (no CSRF, no auth)
     let public_workflow_routes =
         Router::new().route("/{workflow_id}/trigger/{token}", post(webhook_trigger));
+    let public_invite_routes = Router::new()
+        .route("/invites/{token}", get(routes::workspaces::preview_invitation).post(routes::workspaces::accept_invitation))
+        .route("/join/{token}", get(routes::workspaces::preview_join_link).post(routes::workspaces::accept_join_link));
     let app = Router::new()
         .route("/", get(root))
         .route("/api/early-access", post(handle_early_access))
@@ -440,6 +461,7 @@ async fn main() {
             workflow_routes.merge(public_workflow_routes),
         )
         .nest("/api/workspaces", workspace_routes)
+        .merge(Router::new().nest("/api", public_invite_routes))
         .nest("/api/oauth", oauth_routes)
         .nest("/api/microsoft", microsoft_routes)
         .nest("/api/options", options_routes)
