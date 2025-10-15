@@ -1,3 +1,5 @@
+use std::env;
+
 use axum::{
     extract::State,
     response::{IntoResponse, Response},
@@ -44,30 +46,50 @@ impl PlanTier {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct PlanOption {
     tier: PlanTier,
     name: &'static str,
     description: &'static str,
+    price: String,
 }
 
-const PLAN_OPTIONS: &[PlanOption] = &[
-    PlanOption {
-        tier: PlanTier::Solo,
-        name: "Solo",
-        description: "Build personal automations with a single user account.",
-    },
-    PlanOption {
-        tier: PlanTier::Workspace,
-        name: "Workspace",
-        description: "Collaborate with your team inside one shared workspace.",
-    },
-    PlanOption {
-        tier: PlanTier::Organization,
-        name: "Organization",
-        description: "Coordinate multiple workspaces under one organization.",
-    },
-];
+fn plan_price_from_env(var: &str, default: &str) -> String {
+    match env::var(var) {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                default.to_string()
+            } else {
+                trimmed.to_owned()
+            }
+        }
+        Err(_) => default.to_string(),
+    }
+}
+
+fn plan_options() -> Vec<PlanOption> {
+    vec![
+        PlanOption {
+            tier: PlanTier::Solo,
+            name: "Solo",
+            description: "Build personal automations with a single user account.",
+            price: "Free".to_string(),
+        },
+        PlanOption {
+            tier: PlanTier::Workspace,
+            name: "Workspace",
+            description: "Collaborate with your team inside one shared workspace.",
+            price: plan_price_from_env("WORKSPACE_PLAN_PRICE", "$29/mo"),
+        },
+        PlanOption {
+            tier: PlanTier::Organization,
+            name: "Organization",
+            description: "Coordinate multiple workspaces under one organization.",
+            price: plan_price_from_env("ORGANIZATION_PLAN_PRICE", "$99/mo"),
+        },
+    ]
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CompleteOnboardingPayload {
@@ -419,13 +441,15 @@ pub async fn get_onboarding_context(
         }
     };
 
+    let plans = plan_options();
+
     Json(json!({
         "success": true,
         "user": user,
         "workflows": workflows,
         "memberships": memberships,
         "organization_memberships": organization_memberships,
-        "plan_options": PLAN_OPTIONS,
+        "plan_options": plans,
     }))
     .into_response()
 }

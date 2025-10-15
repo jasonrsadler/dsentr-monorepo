@@ -10,6 +10,7 @@ type PlanOption = {
   tier: PlanTier
   name: string
   description: string
+  price: string
 }
 
 type WorkflowSummary = {
@@ -39,17 +40,20 @@ const FALLBACK_PLAN_OPTIONS: PlanOption[] = [
   {
     tier: 'solo',
     name: 'Solo',
-    description: 'For individuals building personal automations.'
+    description: 'For individuals building personal automations.',
+    price: 'Free'
   },
   {
     tier: 'workspace',
     name: 'Workspace',
-    description: 'Invite collaborators into a single shared workspace.'
+    description: 'Invite collaborators into a single shared workspace.',
+    price: '$29/mo'
   },
   {
     tier: 'organization',
     name: 'Organization',
-    description: 'Manage multiple workspaces under one organization.'
+    description: 'Manage multiple workspaces under one organization.',
+    price: '$99/mo'
   }
 ]
 
@@ -107,14 +111,37 @@ export default function WorkspaceOnboarding() {
 
         const planOptions: PlanOption[] = Array.isArray(data.plan_options)
           ? data.plan_options
-              .map((option: any) => ({
-                tier: normalizePlan(option?.tier),
-                name: typeof option?.name === 'string' ? option.name : 'Plan',
-                description:
-                  typeof option?.description === 'string'
+              .map((option: any) => {
+                const normalizedTier = normalizePlan(option?.tier)
+                const fallbackOption = FALLBACK_PLAN_OPTIONS.find(
+                  (fallback) => fallback.tier === normalizedTier
+                )
+
+                const name =
+                  typeof option?.name === 'string' &&
+                  option.name.trim().length > 0
+                    ? option.name
+                    : (fallbackOption?.name ?? 'Plan')
+
+                const description =
+                  typeof option?.description === 'string' &&
+                  option.description.trim().length > 0
                     ? option.description
-                    : ''
-              }))
+                    : (fallbackOption?.description ?? '')
+
+                const price =
+                  typeof option?.price === 'string' &&
+                  option.price.trim().length > 0
+                    ? option.price
+                    : (fallbackOption?.price ?? '')
+
+                return {
+                  tier: normalizedTier,
+                  name,
+                  description,
+                  price
+                }
+              })
               .filter(
                 (option): option is PlanOption =>
                   option.tier === 'solo' ||
@@ -319,6 +346,9 @@ export default function WorkspaceOnboarding() {
                     <span className="block text-base font-semibold text-zinc-900 dark:text-zinc-100">
                       {option.name}
                     </span>
+                    <span className="mt-1 block text-sm font-medium text-indigo-600 dark:text-indigo-300">
+                      {option.price}
+                    </span>
                     <span className="mt-2 block text-sm text-zinc-600 dark:text-zinc-400">
                       {option.description}
                     </span>
@@ -332,7 +362,7 @@ export default function WorkspaceOnboarding() {
                 <span className="font-medium text-zinc-900 dark:text-zinc-100">
                   {selectedPlanDetails.name}
                 </span>{' '}
-                tier.
+                tier ({selectedPlanDetails.price}).
               </p>
             ) : null}
           </section>

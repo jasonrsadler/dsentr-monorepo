@@ -9,23 +9,27 @@ type PlanOption = {
   tier: PlanTier
   name: string
   description: string
+  price: string
 }
 
 const FALLBACK_PLAN_OPTIONS: PlanOption[] = [
   {
     tier: 'solo',
     name: 'Solo',
-    description: 'Personal account with private workflows.'
+    description: 'Personal account with private workflows.',
+    price: 'Free'
   },
   {
     tier: 'workspace',
     name: 'Workspace',
-    description: 'One shared workspace for your team.'
+    description: 'One shared workspace for your team.',
+    price: '$29/mo'
   },
   {
     tier: 'organization',
     name: 'Organization',
-    description: 'Multiple workspaces with centralized control.'
+    description: 'Multiple workspaces with centralized control.',
+    price: '$99/mo'
   }
 ]
 
@@ -66,20 +70,43 @@ export default function PlanTab() {
         if (!data) return
         const options: PlanOption[] = Array.isArray(data.plan_options)
           ? data.plan_options
-              .map((option: any) => ({
-                tier: normalizePlan(option?.tier),
-                name: typeof option?.name === 'string' ? option.name : 'Plan',
-                description:
-                  typeof option?.description === 'string'
-                    ? option.description
-                    : ''
-              }))
-              .filter(
-                (option): option is PlanOption =>
-                  option.tier === 'solo' ||
-                  option.tier === 'workspace' ||
-                  option.tier === 'organization'
+            .map((option: any) => {
+              const normalizedTier = normalizePlan(option?.tier)
+              const fallbackOption = FALLBACK_PLAN_OPTIONS.find(
+                (fallback) => fallback.tier === normalizedTier
               )
+
+              const name =
+                typeof option?.name === 'string' &&
+                  option.name.trim().length > 0
+                  ? option.name
+                  : (fallbackOption?.name ?? 'Plan')
+
+              const description =
+                typeof option?.description === 'string' &&
+                  option.description.trim().length > 0
+                  ? option.description
+                  : (fallbackOption?.description ?? '')
+
+              const price =
+                typeof option?.price === 'string' &&
+                  option.price.trim().length > 0
+                  ? option.price
+                  : (fallbackOption?.price ?? '')
+
+              return {
+                tier: normalizedTier,
+                name,
+                description,
+                price
+              }
+            })
+            .filter(
+              (option): option is PlanOption =>
+                option.tier === 'solo' ||
+                option.tier === 'workspace' ||
+                option.tier === 'organization'
+            )
           : FALLBACK_PLAN_OPTIONS
 
         setPlanOptions(options.length > 0 ? options : FALLBACK_PLAN_OPTIONS)
@@ -206,14 +233,16 @@ export default function PlanTab() {
               key={option.tier}
               type="button"
               onClick={() => setSelected(option.tier)}
-              className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                isSelected
+              className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isSelected
                   ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400/70 dark:bg-indigo-500/10'
                   : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-300'
-              }`}
+                }`}
             >
               <span className="block text-base font-semibold text-zinc-900 dark:text-zinc-100">
                 {option.name}
+              </span>
+              <span className="mt-1 block text-sm font-medium text-indigo-600 dark:text-indigo-300">
+                {option.price}
               </span>
               <span className="mt-2 block text-sm text-zinc-600 dark:text-zinc-400">
                 {option.description}
