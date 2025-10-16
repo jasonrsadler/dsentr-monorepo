@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { API_BASE_URL } from '@/lib'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
-import {
-  orgDowngradePreview,
-  orgDowngradeExecute,
-  workspaceToSoloPreview,
-  workspaceToSoloExecute
-} from '@/lib/orgWorkspaceApi'
 import { getCsrfToken } from '@/lib/csrfCache'
 import { useAuth } from '@/stores/auth'
 
@@ -29,17 +23,11 @@ const FALLBACK_PLAN_OPTIONS: PlanOption[] = [
     name: 'Workspace',
     description: 'One shared workspace for your team.',
     price: '$29/mo'
-  },
-  {
-    tier: 'organization',
-    name: 'Organization',
-    description: 'Multiple workspaces with centralized control.',
-    price: '$99/mo'
   }
 ]
 
 export default function PlanTab() {
-  const { user, checkAuth, memberships, organizationMemberships } = useAuth()
+  const { user, checkAuth, memberships } = useAuth()
   const [planOptions, setPlanOptions] = useState<PlanOption[]>(
     FALLBACK_PLAN_OPTIONS
   )
@@ -49,23 +37,16 @@ export default function PlanTab() {
   const [currentPlan, setCurrentPlan] = useState<PlanTier>(
     normalizePlanTier(user?.plan)
   )
-  const [workspaceName, setWorkspaceName] = useState('')
-  const [organizationName, setOrganizationName] = useState(
-    typeof user?.companyName === 'string' ? user.companyName : ''
-  )
+  const [workspaceName, setWorkspaceName] = useState(() => {
+    if (!Array.isArray(memberships)) return ''
+    const membership = memberships[0]
+    const name = membership?.workspace?.name
+    return typeof name === 'string' ? name : ''
+  })
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const workspaceEditedRef = useRef(false)
-  const organizationEditedRef = useRef(false)
-
-  // Advanced downgrade helpers
-  const [downgradeTargetWorkspaceId, setDowngradeTargetWorkspaceId] = useState<string>('')
-  const [downgradeAffectedUsers, setDowngradeAffectedUsers] = useState<string[]>([])
-  const [downgradeTeams, setDowngradeTeams] = useState<{ id: string; name: string }[]>([])
-  const [transferMap, setTransferMap] = useState<Record<string, string | ''>>({})
-  const [downgradeBusy, setDowngradeBusy] = useState(false)
-  const [workspaceSoloPreview, setWorkspaceSoloPreview] = useState<string[] | null>(null)
 
   const previousWorkspaceName = useMemo(() => {
     if (!Array.isArray(memberships)) return ''
@@ -81,27 +62,6 @@ export default function PlanTab() {
     return ''
   }, [memberships])
 
-  const previousOrganizationName = useMemo(() => {
-    if (Array.isArray(organizationMemberships)) {
-      for (const membership of organizationMemberships) {
-        const name =
-          typeof membership?.organization?.name === 'string'
-            ? membership.organization.name.trim()
-            : ''
-        if (name) {
-          return name
-        }
-      }
-    }
-
-    if (typeof user?.companyName === 'string') {
-      const trimmed = user.companyName.trim()
-      if (trimmed) return trimmed
-    }
-
-    return ''
-  }, [organizationMemberships, user?.companyName])
-
   useEffect(() => {
     const fetchOptions = async () => {
       try {
@@ -113,19 +73,30 @@ export default function PlanTab() {
         if (!data) return
         const options: PlanOption[] = Array.isArray(data.plan_options)
           ? data.plan_options
-              .map((option: any) => ({
-                tier: normalizePlanTier(option?.tier),
-                name: typeof option?.name === 'string' ? option.name : 'Plan',
-                description:
-                  typeof option?.description === 'string'
-                    ? option.description
-                    : ''
-              }))
+              .map((option: any) => {
+                const tier = normalizePlanTier(option?.tier)
+                const fallback = FALLBACK_PLAN_OPTIONS.find(
+                  (candidate) => candidate.tier === tier
+                )
+                return {
+                  tier,
+                  name:
+                    typeof option?.name === 'string' && option.name.trim()
+                      ? option.name
+                      : (fallback?.name ?? 'Plan'),
+                  description:
+                    typeof option?.description === 'string'
+                      ? option.description
+                      : (fallback?.description ?? ''),
+                  price:
+                    typeof option?.price === 'string' && option.price.trim()
+                      ? option.price
+                      : (fallback?.price ?? '')
+                }
+              })
               .filter(
                 (option): option is PlanOption =>
-                  option.tier === 'solo' ||
-                  option.tier === 'workspace' ||
-                  option.tier === 'organization'
+                  option.tier === 'solo' || option.tier === 'workspace'
               )
           : FALLBACK_PLAN_OPTIONS
 
@@ -147,28 +118,6 @@ export default function PlanTab() {
             setWorkspaceName(membershipName)
           }
         }
-        const organizationNameFromMembership = Array.isArray(
-          data.organization_memberships
-        )
-          ? data.organization_memberships
-              .map((membership: any) => {
-                const candidate = membership?.organization?.name
-                return typeof candidate === 'string' ? candidate.trim() : ''
-              })
-              .find((name: string) => Boolean(name))
-          : ''
-
-        const organizationNameFromUser =
-          typeof data.user?.company_name === 'string'
-            ? data.user.company_name.trim()
-            : ''
-
-        const resolvedOrganizationName =
-          organizationNameFromMembership || organizationNameFromUser
-
-        if (resolvedOrganizationName && !organizationEditedRef.current) {
-          setOrganizationName(resolvedOrganizationName)
-        }
       } catch (err) {
         console.error(err)
       }
@@ -183,8 +132,14 @@ export default function PlanTab() {
     setCurrentPlan(normalizedPlan)
   }, [user?.plan])
 
-  const canConfigureWorkspace = selected !== 'solo'
-  const needsOrganizationName = selected === 'organization'
+  useEffect(() => {
+    if (selected !== 'workspace') return
+    if (workspaceEditedRef.current) return
+    if (!previousWorkspaceName) return
+    setWorkspaceName(previousWorkspaceName)
+  }, [selected, previousWorkspaceName])
+
+  const canConfigureWorkspace = selected === 'workspace'
 
   const selectedPlanDetails = useMemo(
     () => planOptions.find((option) => option.tier === selected),
@@ -196,36 +151,6 @@ export default function PlanTab() {
     [planOptions, currentPlan]
   )
 
-  useEffect(() => {
-    if (!canConfigureWorkspace) return
-    if (workspaceEditedRef.current) return
-    if (!previousWorkspaceName) return
-    setWorkspaceName(previousWorkspaceName)
-  }, [canConfigureWorkspace, previousWorkspaceName])
-
-  useEffect(() => {
-    if (!needsOrganizationName) return
-    if (organizationEditedRef.current) return
-    if (!previousOrganizationName) return
-    setOrganizationName(previousOrganizationName)
-  }, [needsOrganizationName, previousOrganizationName])
-
-  const organizationId = useMemo(() => {
-    // Pick first organization membership for admin view (simple heuristic)
-    if (Array.isArray(organizationMemberships) && organizationMemberships[0]) {
-      return organizationMemberships[0].organization.id
-    }
-    return ''
-  }, [organizationMemberships])
-
-  const orgWorkspaces = useMemo(() => {
-    return Array.isArray(memberships)
-      ? memberships
-          .filter((m) => typeof (m as any)?.workspace?.organization_id === 'string' || (m as any)?.workspace?.organization_id)
-          .map((m) => m.workspace)
-      : []
-  }, [memberships])
-
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setStatus(null)
@@ -236,23 +161,13 @@ export default function PlanTab() {
       return
     }
 
-    if (needsOrganizationName && !organizationName.trim()) {
-      setError('Organization name is required for this plan')
-      return
-    }
-
     setIsSubmitting(true)
     try {
       const payload: Record<string, any> = {
-        plan_tier: selected,
-        teams: [],
-        shared_workflow_ids: []
+        plan_tier: selected
       }
       if (canConfigureWorkspace) {
         payload.workspace_name = workspaceName.trim()
-      }
-      if (needsOrganizationName) {
-        payload.organization_name = organizationName.trim()
       }
 
       const csrfToken = await getCsrfToken()
@@ -273,13 +188,6 @@ export default function PlanTab() {
         throw new Error(body?.message ?? 'Failed to update plan')
       }
 
-      const trimmedWorkspaceName = canConfigureWorkspace
-        ? workspaceName.trim()
-        : ''
-      const trimmedOrganizationName = needsOrganizationName
-        ? organizationName.trim()
-        : ''
-
       if (canConfigureWorkspace) {
         const membershipName = Array.isArray(body?.memberships)
           ? body.memberships
@@ -291,7 +199,7 @@ export default function PlanTab() {
           : ''
 
         const resolvedWorkspaceName =
-          membershipName || trimmedWorkspaceName || previousWorkspaceName
+          membershipName || workspaceName.trim() || previousWorkspaceName
 
         if (resolvedWorkspaceName) {
           workspaceEditedRef.current = false
@@ -300,34 +208,6 @@ export default function PlanTab() {
       } else {
         workspaceEditedRef.current = false
         setWorkspaceName('')
-      }
-
-      if (needsOrganizationName) {
-        const organizationNameFromMembership = Array.isArray(
-          body?.organization_memberships
-        )
-          ? body.organization_memberships
-              .map((membership: any) => {
-                const candidate = membership?.organization?.name
-                return typeof candidate === 'string' ? candidate.trim() : ''
-              })
-              .find((name: string) => Boolean(name))
-          : ''
-
-        const resolvedOrganizationName =
-          organizationNameFromMembership ||
-          trimmedOrganizationName ||
-          previousOrganizationName
-
-        if (resolvedOrganizationName) {
-          organizationEditedRef.current = false
-          setOrganizationName(resolvedOrganizationName)
-        }
-      } else {
-        organizationEditedRef.current = false
-        setOrganizationName(
-          typeof user?.companyName === 'string' ? user.companyName : ''
-        )
       }
 
       setCurrentPlan(selected)
@@ -343,87 +223,11 @@ export default function PlanTab() {
     }
   }
 
-  // Advanced: Organization -> Workspace downgrade
-  const handlePreviewOrgDowngrade = async () => {
-    if (!downgradeTargetWorkspaceId || !organizationId) return
-    try {
-      setDowngradeBusy(true)
-      setError(null)
-      const result = await orgDowngradePreview(organizationId, downgradeTargetWorkspaceId)
-      setDowngradeAffectedUsers(result.will_disable_users)
-      setDowngradeTeams(result.teams)
-      setTransferMap({})
-      setStatus('Review affected users and choose transfers, then confirm downgrade.')
-    } catch (e: any) {
-      setError(e.message || 'Failed to preview downgrade')
-    } finally {
-      setDowngradeBusy(false)
-    }
-  }
-
-  const handleExecuteOrgDowngrade = async () => {
-    if (!downgradeTargetWorkspaceId || !organizationId) return
-    try {
-      setDowngradeBusy(true)
-      setError(null)
-      const transfers = Object.entries(transferMap)
-        .filter(([_, team]) => team)
-        .map(([user_id, team_id]) => ({ user_id, team_id }))
-      await orgDowngradeExecute(organizationId, downgradeTargetWorkspaceId, transfers)
-      await checkAuth({ silent: true })
-      setStatus('Organization downgraded to workspace successfully.')
-    } catch (e: any) {
-      setError(e.message || 'Failed to execute downgrade')
-    } finally {
-      setDowngradeBusy(false)
-    }
-  }
-
-  // Advanced: Workspace -> Solo downgrade
-  const handlePreviewWorkspaceToSolo = async () => {
-    const wsId = previousWorkspaceName ? (memberships.find((m) => m.workspace.name.trim() === previousWorkspaceName)?.workspace.id || '') : (memberships[0]?.workspace.id || '')
-    if (!wsId) return
-    try {
-      setDowngradeBusy(true)
-      const users = await workspaceToSoloPreview(wsId)
-      setWorkspaceSoloPreview(users)
-      setStatus('Users listed will lose access when confirming the downgrade.')
-    } catch (e: any) {
-      setError(e.message || 'Failed to preview workspace to solo')
-    } finally {
-      setDowngradeBusy(false)
-    }
-  }
-
-  const handleExecuteWorkspaceToSolo = async () => {
-    const wsId = previousWorkspaceName ? (memberships.find((m) => m.workspace.name.trim() === previousWorkspaceName)?.workspace.id || '') : (memberships[0]?.workspace.id || '')
-    if (!wsId) return
-    try {
-      setDowngradeBusy(true)
-      await workspaceToSoloExecute(wsId)
-      await checkAuth({ silent: true })
-      setStatus('Workspace downgraded to Solo; only owner retains access.')
-    } catch (e: any) {
-      setError(e.message || 'Failed to downgrade to solo')
-    } finally {
-      setDowngradeBusy(false)
-    }
-  }
-
   const handleWorkspaceInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (!workspaceEditedRef.current) {
       workspaceEditedRef.current = true
     }
     setWorkspaceName(event.target.value)
-  }
-
-  const handleOrganizationInputChange = (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
-    if (!organizationEditedRef.current) {
-      organizationEditedRef.current = true
-    }
-    setOrganizationName(event.target.value)
   }
 
   return (
@@ -450,7 +254,7 @@ export default function PlanTab() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2">
         {planOptions.map((option) => {
           const isSelected = option.tier === selected
           return (
@@ -497,28 +301,13 @@ export default function PlanTab() {
             The solo plan keeps your workflows private to your account.
           </p>
         )}
-
-        {needsOrganizationName ? (
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Organization name
-            </span>
-            <input
-              type="text"
-              value={organizationName}
-              onChange={handleOrganizationInputChange}
-              className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-              placeholder="Acme Holdings"
-            />
-          </label>
-        ) : null}
       </div>
 
       <div className="flex justify-end">
         <button
           type="submit"
           disabled={isSubmitting}
-          className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-70"
         >
           {isSubmitting ? 'Updating…' : 'Update plan'}
         </button>
@@ -529,117 +318,6 @@ export default function PlanTab() {
           Current plan: {currentPlanDetails.name}
         </p>
       ) : null}
-
-      {/* Advanced downgrade tools */}
-      <div className="mt-4 border-t pt-4 space-y-3">
-        <h4 className="font-semibold">Advanced actions</h4>
-        {currentPlan === 'organization' && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <label className="text-sm">Downgrade to workspace</label>
-              <select
-                value={downgradeTargetWorkspaceId}
-                onChange={(e) => setDowngradeTargetWorkspaceId(e.target.value)}
-                className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
-              >
-                <option value="">Select workspace…</option>
-                {orgWorkspaces.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={handlePreviewOrgDowngrade}
-                disabled={!downgradeTargetWorkspaceId || downgradeBusy}
-                className="px-3 py-1 text-sm rounded border"
-              >
-                Preview downgrade
-              </button>
-            </div>
-
-            {downgradeAffectedUsers.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  The following users will lose access unless transferred to a team in the selected workspace:
-                </p>
-                <div className="space-y-1">
-                  {downgradeAffectedUsers.map((uid) => (
-                    <div key={uid} className="flex items-center gap-2">
-                      <span className="font-mono text-xs">{uid}</span>
-                      <select
-                        value={transferMap[uid] ?? ''}
-                        onChange={(e) =>
-                          setTransferMap((prev) => ({ ...prev, [uid]: e.target.value }))
-                        }
-                        className="px-2 py-1 text-xs border rounded"
-                      >
-                        <option value="">Do not transfer</option>
-                        {downgradeTeams.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleExecuteOrgDowngrade}
-                  disabled={downgradeBusy}
-                  className="px-3 py-1 text-sm rounded bg-amber-600 text-white"
-                >
-                  Confirm downgrade
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {currentPlan === 'workspace' && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-sm">Downgrade workspace to Solo</span>
-              <button
-                type="button"
-                onClick={handlePreviewWorkspaceToSolo}
-                disabled={downgradeBusy}
-                className="px-3 py-1 text-sm rounded border"
-              >
-                Preview
-              </button>
-            </div>
-            {Array.isArray(workspaceSoloPreview) && (
-              <div className="space-y-1">
-                {workspaceSoloPreview.length === 0 ? (
-                  <p className="text-sm text-zinc-600">No other users will be removed.</p>
-                ) : (
-                  <>
-                    <p className="text-sm text-zinc-600">
-                      These users will be removed from the workspace:
-                    </p>
-                    <ul className="pl-4 list-disc">
-                      {workspaceSoloPreview.map((u) => (
-                        <li key={u} className="font-mono text-xs">{u}</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={handleExecuteWorkspaceToSolo}
-                  disabled={downgradeBusy}
-                  className="px-3 py-1 text-sm rounded bg-amber-600 text-white"
-                >
-                  Confirm downgrade to Solo
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </form>
   )
 }

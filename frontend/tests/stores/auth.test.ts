@@ -16,7 +16,12 @@ const mockUser = {
 describe('auth.ts', () => {
   beforeEach(() => {
     // Reset Zustand store
-    useAuth.setState({ user: null, isLoading: true })
+    useAuth.setState({
+      user: null,
+      isLoading: true,
+      memberships: [],
+      requiresOnboarding: false
+    })
 
     // Mock fetch
     global.fetch = vi.fn()
@@ -35,6 +40,7 @@ describe('auth.ts', () => {
     const state = useAuth.getState()
     expect(state.user).toEqual(mockUser)
     expect(state.isLoading).toBe(false)
+    expect(state.memberships).toEqual([])
   })
 
   it('logout calls API and resets auth state', async () => {
@@ -57,12 +63,13 @@ describe('auth.ts', () => {
     const state = useAuth.getState()
     expect(state.user).toBeNull()
     expect(state.isLoading).toBe(false)
+    expect(state.memberships).toEqual([])
   })
 
   it('checkAuth sets user on success', async () => {
     ;(fetch as Mock).mockResolvedValue({
       ok: true,
-      json: async () => ({ user: mockUser })
+      json: async () => ({ user: mockUser, memberships: [] })
     })
 
     await act(async () => {
@@ -72,6 +79,7 @@ describe('auth.ts', () => {
     const state = useAuth.getState()
     expect(state.user).toEqual(mockUser)
     expect(state.isLoading).toBe(false)
+    expect(state.memberships).toEqual([])
   })
 
   it('checkAuth clears user on error', async () => {
@@ -84,5 +92,6 @@ describe('auth.ts', () => {
     const state = useAuth.getState()
     expect(state.user).toBeNull()
     expect(state.isLoading).toBe(false)
+    expect(state.memberships).toEqual([])
   })
 })

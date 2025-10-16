@@ -238,8 +238,6 @@ export default function Dashboard() {
     switch (planTier) {
       case 'workspace':
         return 'Workspace plan: invite teammates to collaborate inside your shared workspace.'
-      case 'organization':
-        return 'Organization plan: manage multiple workspaces and assign teams across your organization.'
       default: {
         if (hiddenWorkflowCount > 0) {
           return `Solo plan is a monitored sandbox. Only your first three workflows stay active—${hiddenWorkflowCount} additional workflow${hiddenWorkflowCount > 1 ? 's are' : ' is'} read-only. Upgrade in Settings → Plan to unlock more capacity and premium integrations.`

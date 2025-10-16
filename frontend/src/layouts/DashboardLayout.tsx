@@ -16,14 +16,12 @@ import IntegrationsTab, {
 } from '@/components/Settings/tabs/IntegrationsTab'
 import PlanTab from '@/components/Settings/tabs/PlanTab'
 import MembersTab from '@/components/Settings/tabs/MembersTab'
-import TeamsTab from '@/components/Settings/tabs/TeamsTab'
 import { DsentrLogo } from '@/components/DsentrLogo'
 import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
-import { normalizePlanTier } from '@/lib/planTiers'
 
 export default function DashboardLayout() {
-  const { user, memberships } = useAuth()
+  const { user } = useAuth()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [initialSettingsTab, setInitialSettingsTab] = useState<
     string | undefined
@@ -34,8 +32,6 @@ export default function DashboardLayout() {
   const navigate = useNavigate()
   // Preferences removed
 
-  const planTier = useMemo(() => normalizePlanTier(user?.plan), [user?.plan])
-
   const planLabel = useMemo(() => {
     if (!user?.plan) return null
     const normalized = user.plan.trim()
@@ -43,68 +39,19 @@ export default function DashboardLayout() {
     return normalized.charAt(0).toUpperCase() + normalized.slice(1)
   }, [user?.plan])
 
-  const settingsTabs = useMemo(() => {
-    const base = [
+  const settingsTabs = useMemo(
+    () => [
       { key: 'plan', label: 'Plan & Billing' },
       { key: 'members', label: 'Members' },
-      { key: 'teams', label: 'Teams' },
       { key: 'engine', label: 'Engine' },
       { key: 'logs', label: 'Logs' },
       { key: 'webhooks', label: 'Webhooks' },
       { key: 'options', label: 'Secrets & API Keys' },
       { key: 'integrations', label: 'Integrations' },
       { key: 'workflows', label: 'Workflows' }
-    ]
-    if (planTier === 'solo') {
-      return base.filter((tab) => tab.key !== 'members' && tab.key !== 'teams')
-    }
-    return base
-  }, [planTier])
-
-  // Workspace / Team switchers (local context)
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
-  const [workspaceTeams, setWorkspaceTeams] = useState<{ id: string; name: string }[]>([])
-  const [activeTeamId, setActiveTeamId] = useState<string | null>(null)
-
-  useEffect(() => {
-    // Initialize workspace from first membership if not set
-    if (planTier === 'solo') {
-      setActiveWorkspaceId(null)
-      return
-    }
-    if (!activeWorkspaceId && Array.isArray(memberships) && memberships[0]) {
-      setActiveWorkspaceId(memberships[0].workspace.id)
-    }
-  }, [activeWorkspaceId, memberships, planTier])
-
-  useEffect(() => {
-    // Load teams whenever workspace changes
-    const load = async () => {
-      try {
-        if (!activeWorkspaceId || planTier === 'solo') {
-          setWorkspaceTeams([])
-          setActiveTeamId(null)
-          return
-        }
-        const res = await fetch(
-          `${import.meta.env.VITE_API_BASE_URL || ''}/api/workspaces/${activeWorkspaceId}/teams`,
-          { credentials: 'include' }
-        )
-        const body = await res.json().catch(() => null)
-        if (res.ok && body?.teams) {
-          setWorkspaceTeams(body.teams)
-          setActiveTeamId(body.teams[0]?.id ?? null)
-        } else {
-          setWorkspaceTeams([])
-          setActiveTeamId(null)
-        }
-      } catch {
-        setWorkspaceTeams([])
-        setActiveTeamId(null)
-      }
-    }
-    load()
-  }, [activeWorkspaceId, planTier])
+    ],
+    []
+  )
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -167,39 +114,6 @@ export default function DashboardLayout() {
           </div>
           {user && (
             <div className="flex items-center gap-3">
-              {planTier !== 'solo' && Array.isArray(memberships) && memberships.length > 0 && (
-                <>
-                  {planTier === 'organization' && (
-                    <select
-                      value={activeWorkspaceId ?? ''}
-                      onChange={(e) => setActiveWorkspaceId(e.target.value || null)}
-                      className="px-2 py-1 text-xs border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
-                      title="Active workspace"
-                    >
-                      {memberships.map((m) => (
-                        <option key={m.workspace.id} value={m.workspace.id}>
-                          {m.workspace.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <select
-                    value={activeTeamId ?? ''}
-                    onChange={(e) => setActiveTeamId(e.target.value || null)}
-                    className="px-2 py-1 text-xs border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
-                    title="Active team"
-                  >
-                    {workspaceTeams.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                    {workspaceTeams.length === 0 && (
-                      <option value="">No teams</option>
-                    )}
-                  </select>
-                </>
-              )}
               {planLabel ? (
                 <span className="rounded-full border border-indigo-500 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:border-indigo-400 dark:text-indigo-300">
                   {planLabel}
@@ -234,8 +148,7 @@ export default function DashboardLayout() {
           tabs={settingsTabs}
           renderTab={(key) => {
             if (key === 'plan') return <PlanTab />
-            if (key === 'members') return planTier === 'solo' ? <div /> : <MembersTab />
-            if (key === 'teams') return planTier === 'solo' ? <div /> : <TeamsTab />
+            if (key === 'members') return <MembersTab />
             if (key === 'engine') return <EngineTab />
             if (key === 'logs') return <LogsTab />
             if (key === 'webhooks') return <WebhooksTab />

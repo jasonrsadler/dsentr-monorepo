@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/stores/auth'
 import { API_BASE_URL, loginWithEmail } from '@/lib'
-import { acceptInviteToken, acceptJoinToken } from '@/lib/orgWorkspaceApi'
+import { acceptInviteToken } from '@/lib/orgWorkspaceApi'
 import { FormButton } from '@/components/UI/Buttons/FormButton'
 import LoginIcon from '@/assets/svg-components/LoginIcon'
 import GoogleLoginButton from './components/GoogleLoginButton'
@@ -48,12 +48,8 @@ export default function Login() {
       try {
         const params = new URLSearchParams(window.location.search)
         const invite = params.get('invite')
-        const join = params.get('join')
         if (invite) {
           await acceptInviteToken(invite)
-        }
-        if (join) {
-          await acceptJoinToken(join)
         }
       } catch (e) {
         // swallow errors; user can retry from Settings

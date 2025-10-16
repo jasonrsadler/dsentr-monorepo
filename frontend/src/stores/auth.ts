@@ -24,17 +24,6 @@ type WorkspaceSummary = {
   role: 'owner' | 'admin' | 'user' | 'viewer'
 }
 
-type OrganizationSummary = {
-  organization: {
-    id: string
-    name: string
-    created_by: string
-    created_at: string
-    updated_at: string
-  }
-  role: 'owner' | 'admin' | 'user' | 'viewer'
-}
-
 type CheckAuthOptions = {
   silent?: boolean
 }
@@ -43,13 +32,11 @@ type AuthState = {
   user: User | null
   isLoading: boolean
   memberships: WorkspaceSummary[]
-  organizationMemberships: OrganizationSummary[]
   requiresOnboarding: boolean
 
   login: (
     user: User,
     memberships?: WorkspaceSummary[],
-    organizationMemberships?: OrganizationSummary[],
     requiresOnboarding?: boolean
   ) => void
   logout: () => void
@@ -60,19 +47,12 @@ export const useAuth = create<AuthState>((set) => ({
   user: null,
   isLoading: true,
   memberships: [],
-  organizationMemberships: [],
   requiresOnboarding: false,
 
-  login: (
-    user,
-    memberships = [],
-    organizationMemberships = [],
-    requiresOnboarding = false
-  ) =>
+  login: (user, memberships = [], requiresOnboarding = false) =>
     set({
       user,
       memberships,
-      organizationMemberships,
       requiresOnboarding,
       isLoading: false
     }),
@@ -90,7 +70,6 @@ export const useAuth = create<AuthState>((set) => ({
     set({
       user: null,
       memberships: [],
-      organizationMemberships: [],
       requiresOnboarding: false,
       isLoading: false
     })
@@ -117,7 +96,6 @@ export const useAuth = create<AuthState>((set) => ({
       set({
         user: normalizedUser,
         memberships: data?.memberships ?? [],
-        organizationMemberships: data?.organization_memberships ?? [],
         requiresOnboarding: Boolean(data?.requires_onboarding),
         isLoading: false
       })
@@ -125,7 +103,6 @@ export const useAuth = create<AuthState>((set) => ({
       set({
         user: null,
         memberships: [],
-        organizationMemberships: [],
         requiresOnboarding: false,
         isLoading: false
       })

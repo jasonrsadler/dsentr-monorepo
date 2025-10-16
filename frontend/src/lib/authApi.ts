@@ -83,7 +83,6 @@ export async function loginWithEmail({
       login(
         normalizedUser,
         data.memberships ?? [],
-        data.organization_memberships ?? [],
         Boolean(data.requires_onboarding)
       )
     }

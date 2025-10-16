@@ -7,125 +7,83 @@ import {
   createWorkspaceInvite,
   listWorkspaceInvites,
   revokeWorkspaceInvite,
-  listOrganizationMembers,
-  updateOrganizationMemberRole,
   type WorkspaceMember,
-  type WorkspaceInvitation,
-  type OrganizationMember
+  type WorkspaceInvitation
 } from '@/lib/orgWorkspaceApi'
 import { normalizePlanTier } from '@/lib/planTiers'
 
 export default function MembersTab() {
-  const { memberships, organizationMemberships, user, checkAuth } = useAuth()
-  const [teams, setTeams] = useState<{ id: string; name: string }[]>([])
+  const { memberships, user, checkAuth } = useAuth()
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
   const [members, setMembers] = useState<WorkspaceMember[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [orgMembers, setOrgMembers] = useState<OrganizationMember[]>([])
-  const [orgBusy, setOrgBusy] = useState(false)
-  const [orgError, setOrgError] = useState<string | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'user' | 'viewer'>(
     'user'
   )
-  const [inviteTeamId, setInviteTeamId] = useState<string | ''>('')
   const [inviteExpires, setInviteExpires] = useState<number>(14)
   const [pendingInvites, setPendingInvites] = useState<WorkspaceInvitation[]>(
     []
   )
 
-  const workspaceOptions = useMemo(
-    () =>
-      Array.isArray(memberships) ? memberships.map((m) => m.workspace) : [],
+  const planTier = useMemo(() => normalizePlanTier(user?.plan), [user?.plan])
+  const availableWorkspaces = useMemo(
+    () => (Array.isArray(memberships) ? memberships : []),
     [memberships]
   )
-  const planTier = useMemo(() => normalizePlanTier(user?.plan), [user?.plan])
-  const primaryWorkspace = workspaceOptions[0]
-  const showWorkspaceSelect =
-    planTier === 'organization' && workspaceOptions.length > 0
-  const organizationId = useMemo(() => {
-    if (!Array.isArray(organizationMemberships)) return null
-    return organizationMemberships[0]?.organization.id ?? null
-  }, [organizationMemberships])
-  const currentWorkspaceMembership = useMemo(() => {
-    if (!workspaceId || !Array.isArray(memberships)) return null
-    return memberships.find((m) => m.workspace.id === workspaceId) ?? null
-  }, [memberships, workspaceId])
-  const isWorkspaceOwner = currentWorkspaceMembership?.role === 'owner'
-  const currentOrgMembership = useMemo(() => {
-    if (!organizationId || !Array.isArray(organizationMemberships)) return null
+  const currentWorkspace = useMemo(() => {
+    if (!workspaceId) return availableWorkspaces[0] ?? null
     return (
-      organizationMemberships.find(
-        (m) => m.organization.id === organizationId
-      ) ?? null
+      availableWorkspaces.find((m) => m.workspace.id === workspaceId) ?? null
     )
-  }, [organizationId, organizationMemberships])
-  const isOrgOwner = currentOrgMembership?.role === 'owner'
-  const allowWorkspaceOwnerTransfers =
-    planTier === 'workspace' && isWorkspaceOwner
+  }, [availableWorkspaces, workspaceId])
+
+  const resolvedWorkspaceId = currentWorkspace?.workspace?.id ?? null
+  const resolvedWorkspaceName = currentWorkspace?.workspace?.name ?? ''
+  const isWorkspaceOwner = currentWorkspace?.role === 'owner'
+  const canManageMembers =
+    planTier === 'workspace' && Boolean(resolvedWorkspaceId)
 
   useEffect(() => {
-    if (!workspaceId && workspaceOptions[0])
-      setWorkspaceId(workspaceOptions[0].id)
-  }, [workspaceId, workspaceOptions])
+    if (!workspaceId && availableWorkspaces[0]) {
+      setWorkspaceId(availableWorkspaces[0].workspace.id)
+    }
+  }, [workspaceId, availableWorkspaces])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!resolvedWorkspaceId) {
+      setMembers([])
+      setPendingInvites([])
+      return
+    }
     setBusy(true)
     setError(null)
     Promise.all([
-      listWorkspaceMembers(workspaceId),
-      listWorkspaceInvites(workspaceId),
-      (async () => {
-        try {
-          const res = await import('@/lib/orgWorkspaceApi')
-          const list = await res.listTeams(workspaceId)
-          return list
-        } catch {
-          return []
-        }
-      })()
+      listWorkspaceMembers(resolvedWorkspaceId),
+      listWorkspaceInvites(resolvedWorkspaceId)
     ])
-      .then(([m, inv, t]) => {
+      .then(([m, inv]) => {
         setMembers(m)
         setPendingInvites(inv)
-        setTeams(t)
       })
-      .catch((e) => setError(e.message || 'Failed to load'))
+      .catch((e) => setError(e.message || 'Failed to load members'))
       .finally(() => setBusy(false))
-  }, [workspaceId])
-
-  useEffect(() => {
-    if (planTier !== 'organization' || !organizationId) {
-      setOrgMembers([])
-      return
-    }
-    setOrgBusy(true)
-    setOrgError(null)
-    listOrganizationMembers(organizationId)
-      .then((list) => setOrgMembers(list))
-      .catch((e: any) =>
-        setOrgError(e?.message || 'Failed to load organization members')
-      )
-      .finally(() => setOrgBusy(false))
-  }, [planTier, organizationId])
+  }, [resolvedWorkspaceId])
 
   const handleInvite = async () => {
-    if (!workspaceId || !inviteEmail.trim()) return
+    if (!resolvedWorkspaceId || !inviteEmail.trim() || !canManageMembers) return
     try {
       setBusy(true)
       setError(null)
-      const inv = await createWorkspaceInvite(workspaceId, {
+      const inv = await createWorkspaceInvite(resolvedWorkspaceId, {
         email: inviteEmail.trim(),
         role: inviteRole,
-        team_id: inviteTeamId || undefined,
         expires_in_days: inviteExpires
       })
       setPendingInvites((prev) => [inv, ...prev])
       setInviteEmail('')
       setInviteRole('user')
-      setInviteTeamId('')
     } catch (e: any) {
       setError(e.message || 'Failed to create invitation')
     } finally {
@@ -134,24 +92,24 @@ export default function MembersTab() {
   }
 
   const handleRemove = async (uid: string) => {
-    if (!workspaceId) return
+    if (!resolvedWorkspaceId || !canManageMembers) return
     try {
       setBusy(true)
-      await removeWorkspaceMember(workspaceId, uid)
+      await removeWorkspaceMember(resolvedWorkspaceId, uid)
       setMembers((prev) => prev.filter((m) => m.user_id !== uid))
     } catch (e: any) {
-      setError(e.message || 'Failed to remove')
+      setError(e.message || 'Failed to remove member')
     } finally {
       setBusy(false)
     }
   }
 
   const handleRole = async (uid: string, role: WorkspaceMember['role']) => {
-    if (!workspaceId) return
+    if (!resolvedWorkspaceId || !canManageMembers) return
     try {
       setBusy(true)
       setError(null)
-      await updateWorkspaceMemberRole(workspaceId, uid, role)
+      await updateWorkspaceMemberRole(resolvedWorkspaceId, uid, role)
       setMembers((prev) => {
         const previous = prev.find((m) => m.user_id === uid)
         if (!previous) return prev
@@ -181,76 +139,59 @@ export default function MembersTab() {
     }
   }
 
-  const handleOrgRole = async (
-    uid: string,
-    role: OrganizationMember['role']
-  ) => {
-    if (!organizationId) return
-    try {
-      setOrgBusy(true)
-      setOrgError(null)
-      await updateOrganizationMemberRole(organizationId, uid, role)
-      setOrgMembers((prev) => {
-        const previous = prev.find((m) => m.user_id === uid)
-        if (!previous) return prev
-        if (role === 'owner') {
-          return prev.map((m) => {
-            if (m.user_id === uid) {
-              return { ...m, role }
-            }
-            if (m.role === 'owner') {
-              return { ...m, role: 'admin' }
-            }
-            if (user && m.user_id === user.id && m.role === 'owner') {
-              return { ...m, role: 'admin' }
-            }
-            return m
-          })
-        }
-        return prev.map((m) => (m.user_id === uid ? { ...m, role } : m))
-      })
-      if (role === 'owner') {
-        await checkAuth({ silent: true }).catch(() => null)
-      }
-    } catch (e: any) {
-      setOrgError(e?.message || 'Failed to update organization role')
-    } finally {
-      setOrgBusy(false)
-    }
+  if (!resolvedWorkspaceId) {
+    return (
+      <div className="space-y-4">
+        {planTier === 'solo' ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+            Upgrade to the workspace plan to invite additional members.
+          </div>
+        ) : (
+          <div className="text-sm text-zinc-600 dark:text-zinc-300">
+            Workspace details are still loading. Refresh the page if this
+            persists.
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
     <div className="space-y-4">
-      {showWorkspaceSelect ? (
-        <div className="flex items-center gap-2">
-          <label className="text-sm">Workspace</label>
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-zinc-600 dark:text-zinc-300">
+          Workspace:{' '}
+          <span className="font-medium text-zinc-900 dark:text-zinc-100">
+            {resolvedWorkspaceName || 'Unnamed workspace'}
+          </span>
+        </div>
+        {availableWorkspaces.length > 1 ? (
           <select
-            value={workspaceId ?? ''}
-            onChange={(e) => setWorkspaceId(e.target.value || null)}
-            className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+            value={resolvedWorkspaceId}
+            onChange={(e) => setWorkspaceId(e.target.value)}
+            className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 text-sm"
           >
-            {workspaceOptions.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
+            {availableWorkspaces.map((membership) => (
+              <option
+                key={membership.workspace.id}
+                value={membership.workspace.id}
+              >
+                {membership.workspace.name}
               </option>
             ))}
           </select>
-        </div>
-      ) : primaryWorkspace ? (
-        <div className="text-sm text-zinc-600 dark:text-zinc-300">
-          Workspace:{' '}
-          <span className="font-medium">{primaryWorkspace.name}</span>
+        ) : null}
+      </div>
+
+      {planTier === 'solo' ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+          Upgrade to the workspace plan to invite additional members.
         </div>
       ) : null}
 
       {error ? (
         <div className="rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
           {error}
-        </div>
-      ) : null}
-      {orgError ? (
-        <div className="rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
-          {orgError}
         </div>
       ) : null}
 
@@ -261,7 +202,8 @@ export default function MembersTab() {
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             placeholder="name@example.com"
-            className="mt-1 w-full px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+            disabled={!canManageMembers}
+            className="mt-1 w-full px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
           />
         </div>
         <div>
@@ -269,26 +211,12 @@ export default function MembersTab() {
           <select
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value as any)}
-            className="mt-1 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+            disabled={!canManageMembers}
+            className="mt-1 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
           >
             <option value="user">User</option>
             <option value="viewer">Viewer</option>
             <option value="admin">Admin</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm">Team (optional)</label>
-          <select
-            value={inviteTeamId}
-            onChange={(e) => setInviteTeamId(e.target.value)}
-            className="mt-1 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
-          >
-            <option value="">—</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
           </select>
         </div>
         <div>
@@ -299,12 +227,13 @@ export default function MembersTab() {
             max={60}
             value={inviteExpires}
             onChange={(e) => setInviteExpires(Number(e.target.value))}
-            className="mt-1 w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+            disabled={!canManageMembers}
+            className="mt-1 w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
           />
         </div>
         <button
           onClick={handleInvite}
-          disabled={busy}
+          disabled={!canManageMembers || busy}
           className="h-9 px-3 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
         >
           Invite
@@ -337,13 +266,14 @@ export default function MembersTab() {
                   <td className="py-2 text-right">
                     <button
                       onClick={async () => {
-                        if (!workspaceId) return
-                        await revokeWorkspaceInvite(workspaceId, inv.id)
+                        if (!resolvedWorkspaceId) return
+                        await revokeWorkspaceInvite(resolvedWorkspaceId, inv.id)
                         setPendingInvites((prev) =>
                           prev.filter((i) => i.id !== inv.id)
                         )
                       }}
-                      className="px-2 py-1 text-xs rounded border"
+                      disabled={!canManageMembers}
+                      className="px-2 py-1 text-xs rounded border disabled:opacity-60"
                     >
                       Revoke
                     </button>
@@ -372,11 +302,13 @@ export default function MembersTab() {
                 'admin'
               ]
               const roleOptions =
-                allowWorkspaceOwnerTransfers || m.role === 'owner'
+                isWorkspaceOwner || m.role === 'owner'
                   ? [...baseRoles, 'owner' as WorkspaceMember['role']]
                   : baseRoles
-              const disableSelect = busy || m.role === 'owner'
-              const disableRemove = busy || m.role === 'owner'
+              const disableSelect =
+                busy || !canManageMembers || m.role === 'owner'
+              const disableRemove =
+                busy || !canManageMembers || m.role === 'owner'
               return (
                 <tr
                   key={m.user_id}
@@ -396,13 +328,7 @@ export default function MembersTab() {
                       className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
                     >
                       {roleOptions.map((option) => (
-                        <option
-                          key={option}
-                          value={option}
-                          disabled={
-                            option === 'owner' && !allowWorkspaceOwnerTransfers
-                          }
-                        >
+                        <option key={option} value={option}>
                           {option.charAt(0).toUpperCase() + option.slice(1)}
                         </option>
                       ))}
@@ -430,71 +356,6 @@ export default function MembersTab() {
           </tbody>
         </table>
       </div>
-      {planTier === 'organization' && organizationId ? (
-        <div className="border-t pt-3">
-          <h4 className="font-semibold mb-2">Organization members</h4>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left">
-                <th className="py-2">User</th>
-                <th className="py-2">Role</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orgMembers.map((m) => {
-                const baseRoles: OrganizationMember['role'][] = [
-                  'viewer',
-                  'user',
-                  'admin'
-                ]
-                const roleOptions =
-                  isOrgOwner || m.role === 'owner'
-                    ? [...baseRoles, 'owner' as OrganizationMember['role']]
-                    : baseRoles
-                const disableSelect = orgBusy || m.role === 'owner'
-                return (
-                  <tr
-                    key={m.user_id}
-                    className="border-t border-zinc-200 dark:border-zinc-700"
-                  >
-                    <td className="py-2 font-mono text-xs">{m.user_id}</td>
-                    <td className="py-2">
-                      <select
-                        value={m.role}
-                        disabled={disableSelect}
-                        onChange={(e) =>
-                          handleOrgRole(
-                            m.user_id,
-                            e.target.value as OrganizationMember['role']
-                          )
-                        }
-                        className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
-                      >
-                        {roleOptions.map((option) => (
-                          <option
-                            key={option}
-                            value={option}
-                            disabled={option === 'owner' && !isOrgOwner}
-                          >
-                            {option.charAt(0).toUpperCase() + option.slice(1)}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                )
-              })}
-              {orgMembers.length === 0 && (
-                <tr>
-                  <td colSpan={2} className="py-4 text-center text-zinc-500">
-                    {orgBusy ? 'Loading...' : 'No organization members yet.'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
     </div>
   )
 }

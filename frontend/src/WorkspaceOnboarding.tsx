@@ -30,29 +30,18 @@ type OnboardingContext = {
   planOptions: PlanOption[]
 }
 
-type TeamDraft = {
-  id: string
-  name: string
-}
-
 const FALLBACK_PLAN_OPTIONS: PlanOption[] = [
   {
     tier: 'solo',
     name: 'Solo',
-    description: 'For individuals building personal automations.',
+    description: 'For individuals automating personal workflows.',
     price: 'Free'
   },
   {
     tier: 'workspace',
     name: 'Workspace',
-    description: 'Invite collaborators into a single shared workspace.',
+    description: 'Invite collaborators into one shared workspace.',
     price: '$29/mo'
-  },
-  {
-    tier: 'organization',
-    name: 'Organization',
-    description: 'Manage multiple workspaces under one organization.',
-    price: '$99/mo'
   }
 ]
 
@@ -62,20 +51,12 @@ function defaultWorkspaceName(user: OnboardingContext['user']): string {
   return candidate && candidate.length > 0 ? `${candidate} Workspace` : fallback
 }
 
-function createLocalId() {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2)
-}
-
 export default function WorkspaceOnboarding() {
   const navigate = useNavigate()
   const { checkAuth } = useAuth()
   const [context, setContext] = useState<OnboardingContext | null>(null)
   const [planTier, setPlanTier] = useState<PlanTier>('solo')
   const [workspaceName, setWorkspaceName] = useState('')
-  const [organizationName, setOrganizationName] = useState('')
-  const [teams, setTeams] = useState<TeamDraft[]>([])
   const [selectedWorkflows, setSelectedWorkflows] = useState<Set<string>>(
     new Set()
   )
@@ -99,20 +80,31 @@ export default function WorkspaceOnboarding() {
 
         const planOptions: PlanOption[] = Array.isArray(data.plan_options)
           ? data.plan_options
-            .map((option: any) => ({
-              tier: normalizePlanTier(option?.tier),
-              name: typeof option?.name === 'string' ? option.name : 'Plan',
-              description:
-                typeof option?.description === 'string'
-                  ? option.description
-                  : ''
-            }))
-            .filter(
-              (option): option is PlanOption =>
-                option.tier === 'solo' ||
-                option.tier === 'workspace' ||
-                option.tier === 'organization'
-            )
+              .map((option: any) => {
+                const tier = normalizePlanTier(option?.tier)
+                const fallback = FALLBACK_PLAN_OPTIONS.find(
+                  (candidate) => candidate.tier === tier
+                )
+                return {
+                  tier,
+                  name:
+                    typeof option?.name === 'string' && option.name.trim()
+                      ? option.name
+                      : (fallback?.name ?? 'Plan'),
+                  description:
+                    typeof option?.description === 'string'
+                      ? option.description
+                      : (fallback?.description ?? ''),
+                  price:
+                    typeof option?.price === 'string' && option.price.trim()
+                      ? option.price
+                      : (fallback?.price ?? '')
+                }
+              })
+              .filter(
+                (option): option is PlanOption =>
+                  option.tier === 'solo' || option.tier === 'workspace'
+              )
           : FALLBACK_PLAN_OPTIONS
 
         const user = data.user ?? {
@@ -130,8 +122,6 @@ export default function WorkspaceOnboarding() {
         const detectedPlan = normalizePlanTier(user.plan)
         setPlanTier(detectedPlan)
         setWorkspaceName(defaultWorkspaceName(user))
-        setOrganizationName(user.company_name?.trim() ?? '')
-        setTeams([])
         setSelectedWorkflows(
           new Set(
             workflows
@@ -152,6 +142,11 @@ export default function WorkspaceOnboarding() {
     load()
   }, [])
 
+  useEffect(() => {
+    const normalized = normalizePlanTier(context?.user?.plan ?? null)
+    setPlanTier(normalized)
+  }, [context?.user?.plan])
+
   const availablePlanOptions = useMemo(
     () => context?.planOptions ?? FALLBACK_PLAN_OPTIONS,
     [context]
@@ -159,13 +154,7 @@ export default function WorkspaceOnboarding() {
 
   const availableWorkflows = useMemo(() => context?.workflows ?? [], [context])
 
-  const canConfigureWorkspace = planTier !== 'solo'
-  const needsOrganizationName = planTier === 'organization'
-
-  useEffect(() => {
-    const normalized = normalizePlanTier(context?.user?.plan ?? null)
-    setPlanTier(normalized)
-  }, [context?.user?.plan])
+  const canConfigureWorkspace = planTier === 'workspace'
 
   const toggleWorkflow = (id: string) => {
     if (!canConfigureWorkspace) return
@@ -180,21 +169,6 @@ export default function WorkspaceOnboarding() {
     })
   }
 
-  const updateTeamName = (id: string, name: string) => {
-    setTeams((prev) =>
-      prev.map((team) => (team.id === id ? { ...team, name } : team))
-    )
-  }
-
-  const addTeam = () => {
-    if (!canConfigureWorkspace) return
-    setTeams((prev) => [...prev, { id: createLocalId(), name: '' }])
-  }
-
-  const removeTeam = (id: string) => {
-    setTeams((prev) => prev.filter((team) => team.id !== id))
-  }
-
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setError(null)
@@ -204,30 +178,15 @@ export default function WorkspaceOnboarding() {
       return
     }
 
-    if (needsOrganizationName && !organizationName.trim()) {
-      setError('Organization name is required for this plan')
-      return
-    }
-
     setIsSubmitting(true)
     try {
       const payload: Record<string, any> = {
-        plan_tier: planTier,
-        teams: canConfigureWorkspace
-          ? teams
-            .filter((team) => team.name.trim().length > 0)
-            .map((team) => ({ name: team.name.trim(), member_ids: [] }))
-          : [],
-        shared_workflow_ids: canConfigureWorkspace
-          ? Array.from(selectedWorkflows)
-          : []
+        plan_tier: planTier
       }
 
       if (canConfigureWorkspace) {
         payload.workspace_name = workspaceName.trim()
-      }
-      if (needsOrganizationName) {
-        payload.organization_name = organizationName.trim()
+        payload.shared_workflow_ids = Array.from(selectedWorkflows)
       }
 
       const csrfToken = await getCsrfToken()
@@ -275,13 +234,13 @@ export default function WorkspaceOnboarding() {
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 py-12">
-      <div className="max-w-4xl mx-auto bg-white dark:bg-zinc-900 shadow-sm border border-zinc-200/60 dark:border-zinc-800 rounded-xl p-8">
+      <div className="max-w-3xl mx-auto bg-white dark:bg-zinc-900 shadow-sm border border-zinc-200/60 dark:border-zinc-800 rounded-xl p-8">
         <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
-          Configure your DSentr environment
+          Set up your DSentr account
         </h1>
         <p className="text-zinc-600 dark:text-zinc-400 mb-8">
-          Choose the plan that fits your team and decide how you want to share
-          workflows on day one.
+          Pick the plan that fits and finish configuring your personal or shared
+          workspace.
         </p>
 
         {error ? (
@@ -293,13 +252,13 @@ export default function WorkspaceOnboarding() {
         <form className="space-y-8" onSubmit={handleSubmit}>
           <section className="space-y-4">
             <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-              Pick a plan
+              Choose a plan
             </h2>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Plan tiers determine how many collaborators and workspaces you can
-              manage.
+              Plans determine whether you automate solo or invite collaborators
+              into one workspace.
             </p>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2">
               {availablePlanOptions.map((option) => {
                 const isSelected = option.tier === planTier
                 return (
@@ -307,10 +266,11 @@ export default function WorkspaceOnboarding() {
                     key={option.tier}
                     type="button"
                     onClick={() => setPlanTier(option.tier)}
-                    className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isSelected
+                    className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                      isSelected
                         ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400/70 dark:bg-indigo-500/10'
                         : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-300'
-                      }`}
+                    }`}
                   >
                     <span className="block text-base font-semibold text-zinc-900 dark:text-zinc-100">
                       {option.name}
@@ -327,7 +287,7 @@ export default function WorkspaceOnboarding() {
             </div>
             {selectedPlanDetails ? (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                You have selected the{' '}
+                You selected the{' '}
                 <span className="font-medium text-zinc-900 dark:text-zinc-100">
                   {selectedPlanDetails.name}
                 </span>{' '}
@@ -336,11 +296,11 @@ export default function WorkspaceOnboarding() {
             ) : null}
           </section>
 
-          {canConfigureWorkspace ? (
-            <section className="space-y-4">
-              <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-                Workspace basics
-              </h2>
+          <section className="space-y-4">
+            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+              Workspace basics
+            </h2>
+            {canConfigureWorkspace ? (
               <label className="block">
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Workspace name
@@ -350,109 +310,15 @@ export default function WorkspaceOnboarding() {
                   value={workspaceName}
                   onChange={(event) => setWorkspaceName(event.target.value)}
                   className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                  placeholder="Acme Automation"
+                  placeholder="Acme Workspace"
                 />
               </label>
-
-              {needsOrganizationName ? (
-                <label className="block">
-                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                    Organization name
-                  </span>
-                  <input
-                    type="text"
-                    value={organizationName}
-                    onChange={(event) =>
-                      setOrganizationName(event.target.value)
-                    }
-                    className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                    placeholder="Acme Holdings"
-                  />
-                </label>
-              ) : null}
-            </section>
-          ) : (
-            <section className="space-y-2">
-              <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-                Workspace basics
-              </h2>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                The solo plan keeps everything private to your personal account.
-                Upgrade later to collaborate with a team.
-              </p>
-            </section>
-          )}
-
-          <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-                Teams
-              </h2>
-              <button
-                type="button"
-                onClick={addTeam}
-                disabled={!canConfigureWorkspace}
-                className={`inline-flex items-center rounded-md border px-3 py-1 text-sm font-medium transition ${canConfigureWorkspace
-                    ? 'border-indigo-500 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/10'
-                    : 'cursor-not-allowed border-zinc-300 text-zinc-400 dark:border-zinc-700 dark:text-zinc-500'
-                  }`}
-              >
-                + Add team
-              </button>
-            </div>
-
-            {canConfigureWorkspace ? (
-              teams.length === 0 ? (
-                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  Create teams to organize permissions. You can invite
-                  additional members later.
-                </p>
-              ) : null
             ) : (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Upgrade to a workspace or organization plan to group
-                collaborators into teams.
+                The solo plan keeps everything private to you. Upgrade later to
+                collaborate in a shared workspace.
               </p>
             )}
-
-            {canConfigureWorkspace ? (
-              <div className="space-y-3">
-                {teams.map((team) => (
-                  <div
-                    key={team.id}
-                    className="rounded-lg border border-zinc-200/70 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="flex-1 space-y-2">
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                          Team name
-                          <input
-                            type="text"
-                            value={team.name}
-                            onChange={(event) =>
-                              updateTeamName(team.id, event.target.value)
-                            }
-                            className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                            placeholder="Growth Ops"
-                          />
-                        </label>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeTeam(team.id)}
-                        className="text-sm text-red-500 hover:text-red-600"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                      Members can be invited after onboarding. For now, teams
-                      act as folders for shared workflows.
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </section>
 
           <section className="space-y-4">
@@ -494,8 +360,8 @@ export default function WorkspaceOnboarding() {
               )
             ) : (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Shared workflows are disabled on the solo plan. Upgrade at any
-                time from Settings → Plan to collaborate with your team.
+                Shared workflows are available when you upgrade to the workspace
+                plan.
               </p>
             )}
           </section>
@@ -506,7 +372,7 @@ export default function WorkspaceOnboarding() {
               disabled={isSubmitting}
               className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {isSubmitting ? 'Saving...' : 'Save and continue'}
+              {isSubmitting ? 'Saving...' : 'Complete setup'}
             </button>
           </div>
         </form>

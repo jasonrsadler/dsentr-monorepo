@@ -1,8 +1,14 @@
-export type PlanTier = 'solo' | 'workspace' | 'organization'
+export type PlanTier = 'solo' | 'workspace'
 
 const SOLO_HINTS = ['solo', 'free', 'personal', 'individual']
-const WORKSPACE_HINTS = ['workspace', 'team']
-const ORGANIZATION_HINTS = ['organization', 'organisation', 'org', 'enterprise']
+const WORKSPACE_HINTS = [
+  'workspace',
+  'team',
+  'organization',
+  'organisation',
+  'org',
+  'enterprise'
+]
 
 function extractKey(value: string): string {
   if (!value) return ''
@@ -22,10 +28,6 @@ export function normalizePlanTier(plan?: string | null): PlanTier {
     return 'workspace'
   }
 
-  if (ORGANIZATION_HINTS.includes(key)) {
-    return 'organization'
-  }
-
   if (SOLO_HINTS.includes(key)) {
     return 'solo'
   }
@@ -36,9 +38,10 @@ export function normalizePlanTier(plan?: string | null): PlanTier {
 
   if (
     normalized.includes('organization') ||
-    normalized.includes('organisation')
+    normalized.includes('organisation') ||
+    normalized.includes('enterprise')
   ) {
-    return 'organization'
+    return 'workspace'
   }
 
   return 'solo'
