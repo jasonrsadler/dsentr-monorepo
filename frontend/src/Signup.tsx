@@ -1,13 +1,39 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import PlugIcon from '@/assets/svg-components/PlugIcon'
 import ClockIcon from '@/assets/svg-components/ClockIcon'
 import ShieldIcon from '@/assets/svg-components/ShieldIcon'
 import { WorkflowIllustration } from '@/assets/svg-components/WorkflowIllustration'
-import { API_BASE_URL, signupUser } from '@/lib'
+import { API_BASE_URL, parseInviteQuery, signupUser } from '@/lib'
 import { FormButton } from './components/UI/Buttons/FormButton'
 import GoogleSignupButton from './components/GoogleSignupButton'
 import GithubLoginButton from './components/GithubLoginButton'
+
+const INVITE_ERROR_MESSAGE = 'Invalid or expired invite link'
+
+type InvitePreviewResponse = {
+  success: boolean
+  invitation: {
+    id: string
+    workspace_id: string
+    email: string
+    role: string
+    token: string
+    expires_at: string
+    created_at: string
+    accepted_at: string | null
+    revoked_at: string | null
+    ignored_at: string | null
+  }
+  expired: boolean
+  revoked: boolean
+  accepted: boolean
+  ignored?: boolean
+}
+
+type SignupRequest = Parameters<typeof signupUser>[0]
+
+type InviteStatus = 'none' | 'loading' | 'valid' | 'invalid'
 
 function validateName(name: string) {
   return /^[a-zA-Z]{1,50}$/.test(name)
@@ -33,7 +59,15 @@ function evaluatePasswordStrength(password: string): {
   return { label: 'Strong', color: 'text-green-500' }
 }
 
+function formatRole(role: string | null | undefined) {
+  if (!role) return null
+  const normalized = role.toLowerCase()
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
 export default function SignupPage() {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [form, setForm] = useState({
     first_name: '',
     last_name: '',
@@ -43,18 +77,119 @@ export default function SignupPage() {
     company_name: '',
     country: '',
     tax_id: '',
-    settings: {}
+    settings: {} as Record<string, any>
   })
-  const navigate = useNavigate()
-
   const [message, setMessage] = useState<string | null>(null)
   const [errors, setErrors] = useState<string[]>([])
   const [fieldErrors, setFieldErrors] = useState<{ [key: string]: boolean }>({})
   const [loading, setLoading] = useState(false)
   const [serverError, setServerError] = useState<boolean>(false)
 
+  const [inviteToken, setInviteToken] = useState<string | null>(null)
+  const [inviteStatus, setInviteStatus] = useState<InviteStatus>('none')
+  const [inviteDetails, setInviteDetails] =
+    useState<InvitePreviewResponse | null>(null)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+  const [inviteDecision, setInviteDecision] = useState<'join' | 'solo'>('join')
+
+  useEffect(() => {
+    const result = parseInviteQuery(location.search)
+    if (result.needsRedirect && result.canonicalSearch) {
+      navigate(`/signup?${result.canonicalSearch}`, { replace: true })
+      return
+    }
+
+    if (result.conflict) {
+      setInviteToken(null)
+      setInviteStatus('invalid')
+      setInviteDetails(null)
+      setInviteError(INVITE_ERROR_MESSAGE)
+      setInviteDecision('join')
+      setForm((prev) => ({ ...prev, email: '' }))
+      return
+    }
+
+    if (result.token) {
+      setInviteToken(result.token)
+      setInviteStatus('loading')
+      setInviteError(null)
+    } else {
+      setInviteToken(null)
+      setInviteStatus('none')
+      setInviteDetails(null)
+      setInviteError(null)
+      setInviteDecision('join')
+      setForm((prev) => ({ ...prev, email: '' }))
+    }
+  }, [location.search, navigate])
+
+  useEffect(() => {
+    if (!inviteToken) {
+      return
+    }
+
+    let cancelled = false
+    const controller = new AbortController()
+
+    const load = async () => {
+      setInviteStatus('loading')
+      setInviteError(null)
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/invites/${encodeURIComponent(inviteToken)}`,
+          {
+            signal: controller.signal
+          }
+        )
+        if (!res.ok) {
+          throw new Error('Invite lookup failed')
+        }
+        const data: InvitePreviewResponse = await res.json()
+        if (cancelled) return
+
+        const invalid =
+          !data.success ||
+          !data.invitation ||
+          data.expired ||
+          data.revoked ||
+          data.accepted ||
+          Boolean(data.ignored)
+
+        if (invalid) {
+          setInviteStatus('invalid')
+          setInviteDetails(null)
+          setInviteError(INVITE_ERROR_MESSAGE)
+          return
+        }
+
+        setInviteDetails(data)
+        setInviteStatus('valid')
+        setInviteDecision('join')
+        setForm((prev) => ({
+          ...prev,
+          email: data.invitation.email.toLowerCase()
+        }))
+      } catch (error: any) {
+        if (cancelled || error?.name === 'AbortError') return
+        setInviteStatus('invalid')
+        setInviteDetails(null)
+        setInviteError(INVITE_ERROR_MESSAGE)
+      }
+    }
+
+    load()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [inviteToken])
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
+    if (inviteStatus === 'valid' && name === 'email') {
+      return
+    }
     setForm((prev) => ({ ...prev, [name]: value }))
   }
 
@@ -62,6 +197,7 @@ export default function SignupPage() {
     e.preventDefault()
     const validationErrors: string[] = []
     const newFieldErrors: { [key: string]: boolean } = {}
+
     if (!validateName(form.first_name)) {
       validationErrors.push('Valid First Name is required (letters only).')
       newFieldErrors.first_name = true
@@ -103,8 +239,26 @@ export default function SignupPage() {
     setErrors([])
     setFieldErrors({})
     setLoading(true)
+
     try {
-      const result = await signupUser({ ...form })
+      const { confirmPassword: _ignored, ...rest } = form
+      const baseRequest = rest as Omit<
+        SignupRequest,
+        'invite_token' | 'invite_decision'
+      >
+      const request = {
+        ...baseRequest,
+        invite_token:
+          inviteStatus === 'valid' && inviteToken ? inviteToken : undefined,
+        invite_decision:
+          inviteStatus === 'valid' && inviteToken
+            ? inviteDecision === 'join'
+              ? 'join'
+              : 'ignore'
+            : undefined
+      } as SignupRequest
+
+      const result = await signupUser(request)
       if (result.success) {
         navigate('/check-email')
       } else {
@@ -120,6 +274,16 @@ export default function SignupPage() {
   }
 
   const passwordStrength = evaluatePasswordStrength(form.password)
+  const inviteRoleLabel = useMemo(
+    () => formatRole(inviteDetails?.invitation?.role),
+    [inviteDetails?.invitation?.role]
+  )
+  const submitLabel = useMemo(() => {
+    if (inviteStatus === 'valid') {
+      return inviteDecision === 'join' ? 'Join workspace' : 'Create account'
+    }
+    return 'Sign Up'
+  }, [inviteDecision, inviteStatus])
 
   return (
     <div className="relative flex flex-col items-start justify-center px-4 py-4 md:py-8 min-h-[calc(100vh-120px)] bg-white dark:bg-zinc-900 transition-colors">
@@ -147,6 +311,56 @@ export default function SignupPage() {
             <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4 text-center">
               Build automations with zero code.
             </p>
+
+            {inviteStatus === 'valid' && inviteDetails && (
+              <div className="mb-4 rounded-md border border-indigo-200 dark:border-indigo-500/40 bg-indigo-50 dark:bg-indigo-500/10 p-4 text-sm text-indigo-900 dark:text-indigo-100">
+                <p className="font-semibold">
+                  You're invited to join a workspace
+                  {inviteRoleLabel ? ` as ${inviteRoleLabel}` : ''}.
+                </p>
+                <p className="mt-1 text-indigo-800 dark:text-indigo-100/80">
+                  We'll use the invitation email{' '}
+                  {inviteDetails.invitation.email} for your account.
+                </p>
+                <div className="mt-3 flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setInviteDecision('join')}
+                    className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                      inviteDecision === 'join'
+                        ? 'border-indigo-500 bg-indigo-500 text-white'
+                        : 'border-indigo-200 dark:border-indigo-500/40 bg-white dark:bg-transparent text-indigo-700 dark:text-indigo-100'
+                    }`}
+                  >
+                    Join workspace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInviteDecision('solo')}
+                    className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                      inviteDecision === 'solo'
+                        ? 'border-indigo-500 bg-indigo-500 text-white'
+                        : 'border-indigo-200 dark:border-indigo-500/40 bg-white dark:bg-transparent text-indigo-700 dark:text-indigo-100'
+                    }`}
+                  >
+                    Create my own workspace
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {inviteStatus === 'loading' && (
+              <p className="mb-4 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200">
+                Verifying invite link…
+              </p>
+            )}
+
+            {inviteStatus === 'invalid' && inviteError && (
+              <p className="mb-4 rounded-md border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-100">
+                {inviteError}
+              </p>
+            )}
+
             <div className="flex flex-col gap-3">
               <GoogleSignupButton
                 className="w-full h-full"
@@ -189,6 +403,7 @@ export default function SignupPage() {
                   { name: 'country', label: 'Country' },
                   { name: 'tax_id', label: 'Tax ID' }
                 ].map(({ name, label, required, type }) => {
+                  const value = (form as Record<string, string>)[name] ?? ''
                   return (
                     <div key={name}>
                       <label
@@ -204,13 +419,18 @@ export default function SignupPage() {
                         id={name}
                         type={type || 'text'}
                         name={name}
-                        value={(form as any)[name]}
+                        value={value}
                         onChange={handleChange}
+                        readOnly={inviteStatus === 'valid' && name === 'email'}
                         className={`w-full border ${
                           fieldErrors[name]
                             ? 'border-red-500 dark:border-red-500'
                             : 'border-zinc-300 dark:border-zinc-600'
-                        } bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 rounded px-3 py-2 mt-1 text-sm transition-colors`}
+                        } bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 rounded px-3 py-2 mt-1 text-sm transition-colors ${
+                          inviteStatus === 'valid' && name === 'email'
+                            ? 'bg-zinc-100 dark:bg-zinc-800 cursor-not-allowed'
+                            : ''
+                        }`}
                       />
                       {name === 'password' && form.password && (
                         <div className="mt-2">
@@ -244,7 +464,7 @@ export default function SignupPage() {
                     : 'bg-indigo-600 hover:bg-indigo-500'
                 }`}
               >
-                {loading ? 'Signing up…' : 'Sign Up'}
+                {loading ? 'Signing up…' : submitLabel}
               </FormButton>
               {message &&
                 (serverError ? (

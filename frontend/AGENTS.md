@@ -19,3 +19,4 @@ seCallback`, `useMemo`) to prevent infinite renders.
   - useCallback for handlers.
   - Only call parent onUpdate when deep-equality shows change.
   - Debounce inputs that propagate to parent.
+- Signup flows that accept workspace invites must route all query parsing through `parseInviteQuery` in `src/lib/inviteQuery.ts` so redirects and conflict detection stay consistent with backend expectations.

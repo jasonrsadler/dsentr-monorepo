@@ -19,3 +19,4 @@
 - Reuse `JsonResponse` helpers for consistent error handling; the frontend depends on the `success/message` contract.
 - Any new handler that needs authentication should accept `AuthSession` and derive the user ID via `claims.id`.
 - Password hashing/verification lives in `utils::password`; keep crypto concerns centralized there.
+- Signup handlers must honor workspace invitations: call `workspace_repo.find_invitation_by_token` to validate incoming tokens, attach members or mark invites ignored accordingly, and provision a Solo workspace when no invite is accepted.

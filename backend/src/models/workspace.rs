@@ -59,4 +59,6 @@ pub struct WorkspaceInvitation {
     pub accepted_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub revoked_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub ignored_at: Option<OffsetDateTime>,
 }

@@ -687,6 +687,7 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
             created_at: OffsetDateTime::now_utc(),
             accepted_at: None,
             revoked_at: None,
+            ignored_at: None,
         })
     }
 
@@ -709,6 +710,10 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
     }
 
     async fn mark_invitation_accepted(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn mark_invitation_ignored(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
     }
 }

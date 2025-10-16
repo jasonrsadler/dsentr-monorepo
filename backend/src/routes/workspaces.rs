@@ -778,12 +778,14 @@ pub async fn preview_invitation(
             let expired = inv.expires_at <= now;
             let revoked = inv.revoked_at.is_some();
             let accepted = inv.accepted_at.is_some();
+            let ignored = inv.ignored_at.is_some();
             Json(json!({
                 "success": true,
                 "invitation": inv,
                 "expired": expired,
                 "revoked": revoked,
                 "accepted": accepted,
+                "ignored": ignored,
             }))
             .into_response()
         }
@@ -812,7 +814,11 @@ pub async fn accept_invitation(
         Err(_) => return JsonResponse::server_error("Failed to load invite").into_response(),
     };
     let now = OffsetDateTime::now_utc();
-    if invite.revoked_at.is_some() || invite.accepted_at.is_some() || invite.expires_at <= now {
+    if invite.revoked_at.is_some()
+        || invite.accepted_at.is_some()
+        || invite.ignored_at.is_some()
+        || invite.expires_at <= now
+    {
         return JsonResponse::bad_request("Invitation is not valid").into_response();
     }
     // Add workspace membership

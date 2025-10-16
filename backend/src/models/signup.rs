@@ -2,6 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use super::user::OauthProvider;
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SignupInviteDecision {
+    Join,
+    Ignore,
+}
+
 #[derive(Deserialize, Serialize)]
 pub struct SignupPayload {
     pub email: String,
@@ -13,4 +20,8 @@ pub struct SignupPayload {
     pub tax_id: Option<String>,
     #[serde(default)]
     pub provider: Option<OauthProvider>,
+    #[serde(default)]
+    pub invite_token: Option<String>,
+    #[serde(default)]
+    pub invite_decision: Option<SignupInviteDecision>,
 }

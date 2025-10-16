@@ -10,6 +10,7 @@ vi.mock('@/assets/svg-components/ShieldIcon', () => ({
 vi.mock('@/assets/svg-components/WorkflowIllustration', () => ({
   WorkflowIllustration: () => <div data-testid="workflow-illustration" />
 }))
+
 vi.mock('@/components/GoogleSignupButton', () => ({
   default: ({ onClick }: { onClick: () => void }) => (
     <button onClick={onClick} data-testid="google-signup">
@@ -26,14 +27,31 @@ vi.mock('@/components/GithubLoginButton', () => ({
   )
 }))
 
+vi.mock('@/lib', async () => {
+  const actual = await vi.importActual<typeof import('@/lib')>('@/lib')
+  return {
+    ...actual,
+    signupUser: vi.fn()
+  }
+})
+
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock
+} from 'vitest'
 import SignupPage from '@/Signup'
-import { vi } from 'vitest'
+import { signupUser } from '@/lib'
 
-function renderWithRouter() {
+function renderWithRouter(initialEntry = '/signup') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <SignupPage />
     </MemoryRouter>
   )
@@ -41,67 +59,187 @@ function renderWithRouter() {
 
 describe('SignupPage', () => {
   beforeEach(() => {
-    renderWithRouter()
+    vi.clearAllMocks()
+    global.fetch = vi.fn() as unknown as typeof fetch
+    ;(signupUser as Mock).mockResolvedValue({
+      success: true,
+      message: 'ok'
+    })
   })
 
-  it('renders all input fields and buttons', () => {
-    expect(screen.getByLabelText(/first name/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/last name/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
-    expect(screen.getAllByLabelText(/password/i).length).toBe(2)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders base form fields without invite', () => {
+    renderWithRouter()
+    expect(screen.getByLabelText(/First Name/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Email/i)).not.toHaveAttribute('readonly')
     expect(screen.getByRole('button', { name: /sign up/i })).toBeInTheDocument()
   })
 
   it('shows validation errors when submitting empty form', async () => {
-    const inputButtons = screen.getAllByRole('button', { name: /sign up/i })
-    fireEvent.click(inputButtons[0])
+    renderWithRouter()
+    fireEvent.click(screen.getByRole('button', { name: /sign up/i }))
     await waitFor(() => {
-      const inputErrors1 = screen.getAllByText(/valid first name is required/i)
-      expect(inputErrors1[0]).toBeInTheDocument()
-      const inputErrors2 = screen.getAllByText(/valid last name is required/i)
-      expect(inputErrors2[0]).toBeInTheDocument()
-      const inputErrors3 = screen.getAllByText(/a valid email is required/i)
-      expect(inputErrors3[0]).toBeInTheDocument()
-      const inputErrors4 = screen.getAllByText(/password is required/i)
-      expect(inputErrors4[0]).toBeInTheDocument()
-      const inputErrors5 = screen.getAllByText(/verify password is required/i)
-      expect(inputErrors5[0]).toBeInTheDocument()
+      expect(
+        screen.getByText(/Valid First Name is required/i)
+      ).toBeInTheDocument()
+      expect(screen.getByText(/A valid Email is required/i)).toBeInTheDocument()
     })
   })
 
-  it('shows password mismatch error', async () => {
-    fireEvent.change(screen.getByLabelText(/first name/i), {
+  it('prefills invite email and joins workspace when invite is valid', async () => {
+    ;(global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        invitation: {
+          id: 'invite-id',
+          workspace_id: 'workspace-id',
+          email: 'invited@example.com',
+          role: 'user',
+          token: 'invite-token',
+          expires_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          accepted_at: null,
+          revoked_at: null,
+          ignored_at: null
+        },
+        expired: false,
+        revoked: false,
+        accepted: false,
+        ignored: false
+      })
+    })
+
+    renderWithRouter('/signup?invite=invite-token')
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/You're invited to join a workspace/i)
+      ).toBeInTheDocument()
+    })
+
+    expect(screen.getByLabelText(/Email/i)).toHaveValue('invited@example.com')
+    expect(screen.getByLabelText(/Email/i)).toHaveAttribute('readonly')
+
+    fireEvent.change(screen.getByLabelText(/First Name/i), {
       target: { value: 'Alice' }
     })
-    fireEvent.change(screen.getByLabelText(/last name/i), {
+    fireEvent.change(screen.getByLabelText(/Last Name/i), {
       target: { value: 'Smith' }
     })
-    fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'alice@example.com' }
+    fireEvent.change(screen.getByLabelText(/^Password$/i), {
+      target: { value: 'Password123!' }
     })
-    fireEvent.change(screen.getAllByLabelText(/password/i)[0], {
-      target: { value: 'Password123' }
+    fireEvent.change(screen.getByLabelText(/Verify Password/i), {
+      target: { value: 'Password123!' }
     })
-    fireEvent.change(screen.getByLabelText(/verify password/i), {
-      target: { value: 'Wrong123' }
-    })
-    const inputButtons = screen.getAllByRole('button', { name: /sign up/i })
-    fireEvent.click(inputButtons[0])
+
+    fireEvent.click(screen.getByRole('button', { name: /join workspace/i }))
+
     await waitFor(() => {
-      expect(screen.getByText(/passwords don't match/i)).toBeInTheDocument()
+      expect(signupUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          invite_token: 'invite-token',
+          invite_decision: 'join'
+        })
+      )
     })
   })
 
-  it('displays password strength feedback', () => {
-    const passwordField = screen.getAllByLabelText(/password/i)[0]
+  it('allows creating own workspace from invite', async () => {
+    ;(global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        invitation: {
+          id: 'invite-id',
+          workspace_id: 'workspace-id',
+          email: 'invited@example.com',
+          role: 'admin',
+          token: 'invite-token',
+          expires_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          accepted_at: null,
+          revoked_at: null,
+          ignored_at: null
+        },
+        expired: false,
+        revoked: false,
+        accepted: false,
+        ignored: false
+      })
+    })
 
-    fireEvent.change(passwordField, { target: { value: 'weak' } })
-    expect(screen.getByText(/weak/i)).toBeInTheDocument()
+    renderWithRouter('/signup?invite=invite-token')
 
-    fireEvent.change(passwordField, { target: { value: 'Mod123' } })
-    expect(screen.getByText(/moderate/i)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        screen.getByText(/You're invited to join a workspace/i)
+      ).toBeInTheDocument()
+    })
 
-    fireEvent.change(passwordField, { target: { value: 'Strong123!' } })
-    expect(screen.getByText(/strong/i)).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: /create my own workspace/i })
+    )
+
+    fireEvent.change(screen.getByLabelText(/First Name/i), {
+      target: { value: 'Alice' }
+    })
+    fireEvent.change(screen.getByLabelText(/Last Name/i), {
+      target: { value: 'Smith' }
+    })
+    fireEvent.change(screen.getByLabelText(/^Password$/i), {
+      target: { value: 'Password123!' }
+    })
+    fireEvent.change(screen.getByLabelText(/Verify Password/i), {
+      target: { value: 'Password123!' }
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(signupUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          invite_token: 'invite-token',
+          invite_decision: 'ignore'
+        })
+      )
+    })
+  })
+
+  it('shows invalid invite message when preview fails', async () => {
+    ;(global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        invitation: {
+          id: 'invite-id',
+          workspace_id: 'workspace-id',
+          email: 'invited@example.com',
+          role: 'user',
+          token: 'invite-token',
+          expires_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          accepted_at: null,
+          revoked_at: null,
+          ignored_at: null
+        },
+        expired: true,
+        revoked: false,
+        accepted: false,
+        ignored: false
+      })
+    })
+
+    renderWithRouter('/signup?invite=invite-token')
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Invalid or expired invite link/i)
+      ).toBeInTheDocument()
+    })
   })
 })

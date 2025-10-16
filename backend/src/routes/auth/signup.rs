@@ -8,19 +8,83 @@ use time::{Duration, OffsetDateTime};
 
 use crate::utils::password::hash_password;
 use crate::{
-    models::{signup::SignupPayload, user::OauthProvider},
+    models::{
+        signup::{SignupInviteDecision, SignupPayload},
+        user::OauthProvider,
+        workspace::WorkspaceRole,
+    },
     responses::JsonResponse,
     state,
 };
+
+const INVALID_INVITE_MESSAGE: &str = "Invalid or expired invite link";
+
+fn default_workspace_name(payload: &SignupPayload) -> String {
+    if let Some(company) = payload
+        .company_name
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        return format!("{} Workspace", company);
+    }
+
+    let first = payload.first_name.trim();
+    if !first.is_empty() {
+        let suffix = if first.ends_with('s') { "'" } else { "'s" };
+        return format!("{}{} Workspace", first, suffix);
+    }
+
+    "My Workspace".to_string()
+}
 
 pub async fn handle_signup(
     State(state): State<state::AppState>,
     Json(payload): Json<SignupPayload>,
 ) -> Response {
     let repo = &state.db;
+    let workspace_repo = &state.workspace_repo;
+
+    let mut payload = payload;
+    payload.email = payload.email.trim().to_lowercase();
 
     if let Ok(true) = repo.is_email_taken(&payload.email).await {
         return JsonResponse::conflict("User already registered").into_response();
+    }
+
+    let invite_token = payload
+        .invite_token
+        .as_ref()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty());
+    let invite_decision = payload
+        .invite_decision
+        .unwrap_or(SignupInviteDecision::Join);
+
+    let mut invite_record = None;
+    if let Some(token) = invite_token.as_ref() {
+        match workspace_repo.find_invitation_by_token(token).await {
+            Ok(Some(invite)) => {
+                let now = OffsetDateTime::now_utc();
+                let email_mismatch = !invite.email.eq_ignore_ascii_case(&payload.email);
+                if invite.revoked_at.is_some()
+                    || invite.accepted_at.is_some()
+                    || invite.ignored_at.is_some()
+                    || invite.expires_at <= now
+                    || email_mismatch
+                {
+                    return JsonResponse::bad_request(INVALID_INVITE_MESSAGE).into_response();
+                }
+                invite_record = Some(invite);
+            }
+            Ok(None) => {
+                return JsonResponse::bad_request(INVALID_INVITE_MESSAGE).into_response();
+            }
+            Err(err) => {
+                eprintln!("Failed to load invite: {:?}", err);
+                return JsonResponse::server_error("Could not validate invitation").into_response();
+            }
+        }
     }
 
     let password_hash = match hash_password(&payload.password) {
@@ -49,11 +113,60 @@ pub async fn handle_signup(
 
     let expires_at = OffsetDateTime::now_utc() + Duration::hours(24);
 
+    if invite_record.is_none() || matches!(invite_decision, SignupInviteDecision::Ignore) {
+        let workspace_name = default_workspace_name(&payload);
+        let workspace = match workspace_repo
+            .create_workspace(&workspace_name, user_id)
+            .await
+        {
+            Ok(workspace) => workspace,
+            Err(err) => {
+                eprintln!("Failed to create default workspace: {:?}", err);
+                let _ = repo.cleanup_user_and_token(user_id, &token).await;
+                return JsonResponse::server_error("Could not provision workspace").into_response();
+            }
+        };
+
+        if let Err(err) = workspace_repo
+            .add_member(workspace.id, user_id, WorkspaceRole::Owner)
+            .await
+        {
+            eprintln!("Failed to attach owner membership: {:?}", err);
+            let _ = repo.cleanup_user_and_token(user_id, &token).await;
+            return JsonResponse::server_error("Could not provision workspace").into_response();
+        }
+    }
+
+    if let Some(invite) = invite_record.clone() {
+        match invite_decision {
+            SignupInviteDecision::Join => {
+                if let Err(err) = workspace_repo
+                    .add_member(invite.workspace_id, user_id, invite.role)
+                    .await
+                {
+                    eprintln!("Failed to add invited member: {:?}", err);
+                    let _ = repo.cleanup_user_and_token(user_id, &token).await;
+                    return JsonResponse::server_error("Could not attach workspace membership")
+                        .into_response();
+                }
+                if let Err(err) = workspace_repo.mark_invitation_accepted(invite.id).await {
+                    eprintln!("Failed to mark invite accepted: {:?}", err);
+                }
+            }
+            SignupInviteDecision::Ignore => {
+                if let Err(err) = workspace_repo.mark_invitation_ignored(invite.id).await {
+                    eprintln!("Failed to mark invite ignored: {:?}", err);
+                }
+            }
+        }
+    }
+
     if let Err(e) = repo
         .insert_verification_token(user_id, &token, expires_at)
         .await
     {
         eprintln!("Failed to insert verification token: {:?}", e);
+        let _ = repo.cleanup_user_and_token(user_id, &token).await;
         return JsonResponse::server_error("Could not create verification token").into_response();
     }
 
@@ -90,10 +203,14 @@ mod tests {
         db::{
             mock_db::{NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::{UserId, UserRepository},
+            workspace_repository::WorkspaceRepository,
         },
         models::{
-            signup::SignupPayload,
+            signup::{SignupInviteDecision, SignupPayload},
             user::{OauthProvider, PublicUser, User, UserRole},
+            workspace::{
+                Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole,
+            },
         },
         services::{
             oauth::{
@@ -303,6 +420,180 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingWorkspaceRepo {
+        invite: Mutex<Option<WorkspaceInvitation>>,
+        created: Arc<Mutex<Vec<Workspace>>>,
+        add_calls: Arc<Mutex<Vec<(Uuid, Uuid, WorkspaceRole)>>>,
+        accepted: Arc<Mutex<Vec<Uuid>>>,
+        ignored: Arc<Mutex<Vec<Uuid>>>,
+        fail_create_workspace: bool,
+        fail_join_membership: bool,
+    }
+
+    impl RecordingWorkspaceRepo {
+        fn with_invite(invite: WorkspaceInvitation) -> Self {
+            Self {
+                invite: Mutex::new(Some(invite)),
+                ..Default::default()
+            }
+        }
+
+        fn record(
+            &self,
+        ) -> (
+            Vec<Workspace>,
+            Vec<(Uuid, Uuid, WorkspaceRole)>,
+            Vec<Uuid>,
+            Vec<Uuid>,
+        ) {
+            (
+                self.created.lock().unwrap().clone(),
+                self.add_calls.lock().unwrap().clone(),
+                self.accepted.lock().unwrap().clone(),
+                self.ignored.lock().unwrap().clone(),
+            )
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceRepository for RecordingWorkspaceRepo {
+        async fn create_workspace(
+            &self,
+            name: &str,
+            created_by: Uuid,
+        ) -> Result<Workspace, sqlx::Error> {
+            if self.fail_create_workspace {
+                return Err(sqlx::Error::Protocol("fail_create_workspace".into()));
+            }
+            let workspace = Workspace {
+                id: Uuid::new_v4(),
+                name: name.to_string(),
+                created_by,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            };
+            self.created.lock().unwrap().push(workspace.clone());
+            Ok(workspace)
+        }
+
+        async fn update_workspace_name(
+            &self,
+            workspace_id: Uuid,
+            name: &str,
+        ) -> Result<Workspace, sqlx::Error> {
+            Ok(Workspace {
+                id: workspace_id,
+                name: name.to_string(),
+                created_by: Uuid::nil(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            })
+        }
+
+        async fn find_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Option<Workspace>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn add_member(
+            &self,
+            workspace_id: Uuid,
+            user_id: Uuid,
+            role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            let should_fail = self.fail_join_membership
+                && self
+                    .invite
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|invite| invite.workspace_id == workspace_id)
+                    .unwrap_or(false);
+            if should_fail {
+                return Err(sqlx::Error::Protocol("fail_add_member".into()));
+            }
+            self.add_calls
+                .lock()
+                .unwrap()
+                .push((workspace_id, user_id, role));
+            Ok(())
+        }
+
+        async fn set_member_role(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+            _role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn remove_member(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn list_members(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn list_memberships_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn create_workspace_invitation(
+            &self,
+            _workspace_id: Uuid,
+            _email: &str,
+            _role: WorkspaceRole,
+            _token: &str,
+            _expires_at: OffsetDateTime,
+            _created_by: Uuid,
+        ) -> Result<WorkspaceInvitation, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_workspace_invitations(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn revoke_workspace_invitation(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn find_invitation_by_token(
+            &self,
+            token: &str,
+        ) -> Result<Option<WorkspaceInvitation>, sqlx::Error> {
+            let invite = self.invite.lock().unwrap().clone();
+            Ok(invite.filter(|inv| inv.token == token))
+        }
+
+        async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+            self.accepted.lock().unwrap().push(invite_id);
+            Ok(())
+        }
+
+        async fn mark_invitation_ignored(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+            self.ignored.lock().unwrap().push(invite_id);
+            Ok(())
+        }
+    }
     fn test_payload() -> SignupPayload {
         SignupPayload {
             email: "test@example.com".into(),
@@ -313,11 +604,30 @@ mod tests {
             company_name: None,
             country: None,
             tax_id: None,
+            invite_token: None,
+            invite_decision: None,
+        }
+    }
+
+    fn invite_fixture(token: &str, email: &str, expires_at: OffsetDateTime) -> WorkspaceInvitation {
+        WorkspaceInvitation {
+            id: Uuid::new_v4(),
+            workspace_id: Uuid::new_v4(),
+            email: email.to_string(),
+            role: WorkspaceRole::User,
+            token: token.to_string(),
+            expires_at,
+            created_by: Uuid::new_v4(),
+            created_at: OffsetDateTime::now_utc(),
+            accepted_at: None,
+            revoked_at: None,
+            ignored_at: None,
         }
     }
 
     async fn run_signup(
         repo: impl UserRepository + 'static,
+        workspace_repo: Arc<dyn WorkspaceRepository>,
         mailer: impl Mailer + 'static,
         payload: SignupPayload,
     ) -> axum::response::Response {
@@ -326,7 +636,7 @@ mod tests {
             .with_state(AppState {
                 db: Arc::new(repo),
                 workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-                workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+                workspace_repo,
                 mailer: Arc::new(mailer),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),
@@ -357,7 +667,13 @@ mod tests {
         };
 
         let mailer = MockMailer::default();
-        let res = run_signup(repo, mailer, test_payload()).await;
+        let res = run_signup(
+            repo,
+            Arc::new(NoopWorkspaceRepository::default()),
+            mailer,
+            test_payload(),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::CONFLICT);
     }
 
@@ -374,7 +690,13 @@ mod tests {
         };
 
         let mailer = MockMailer::default();
-        let res = run_signup(repo, mailer, payload).await;
+        let res = run_signup(
+            repo,
+            Arc::new(NoopWorkspaceRepository::default()),
+            mailer,
+            payload,
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -388,7 +710,13 @@ mod tests {
         };
 
         let mailer = MockMailer::default();
-        let res = run_signup(repo, mailer, test_payload()).await;
+        let res = run_signup(
+            repo,
+            Arc::new(NoopWorkspaceRepository::default()),
+            mailer,
+            test_payload(),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -402,7 +730,13 @@ mod tests {
         };
 
         let mailer = MockMailer::default();
-        let res = run_signup(repo, mailer, test_payload()).await;
+        let res = run_signup(
+            repo,
+            Arc::new(NoopWorkspaceRepository::default()),
+            mailer,
+            test_payload(),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -420,7 +754,13 @@ mod tests {
         let mut mailer = MockMailer::default();
         mailer.fail_send = true;
 
-        let res = run_signup(repo, mailer, test_payload()).await;
+        let res = run_signup(
+            repo,
+            Arc::new(NoopWorkspaceRepository::default()),
+            mailer,
+            test_payload(),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert!(*cleaned_up.lock().unwrap());
     }
@@ -435,7 +775,14 @@ mod tests {
         };
 
         let mailer = MockMailer::default();
-        let res = run_signup(repo, mailer, test_payload()).await;
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let res = run_signup(
+            repo,
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+            mailer,
+            test_payload(),
+        )
+        .await;
 
         assert_eq!(res.status(), StatusCode::OK);
         let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
@@ -445,5 +792,157 @@ mod tests {
             json["message"],
             "User created. Check your email to verify your account."
         );
+
+        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].name, "Test's Workspace");
+        assert_eq!(add_calls.len(), 1);
+        assert_eq!(add_calls[0].2, WorkspaceRole::Owner);
+        assert!(accepted.is_empty());
+        assert!(ignored.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_invite_join_attaches_membership() {
+        let repo = MockRepo {
+            email_taken: false,
+            fail_create_user: false,
+            fail_insert_token: false,
+            cleaned_up: Arc::new(Mutex::new(false)),
+        };
+        let invite = invite_fixture(
+            "join-token",
+            "test@example.com",
+            OffsetDateTime::now_utc() + Duration::hours(1),
+        );
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::with_invite(invite.clone()));
+        let mailer = MockMailer::default();
+        let mut payload = test_payload();
+        payload.invite_token = Some(invite.token.clone());
+        payload.invite_decision = Some(SignupInviteDecision::Join);
+
+        let res = run_signup(
+            repo,
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+            mailer,
+            payload,
+        )
+        .await;
+
+        assert_eq!(res.status(), StatusCode::OK);
+        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        assert!(created.is_empty());
+        assert_eq!(add_calls.len(), 1);
+        assert_eq!(add_calls[0].0, invite.workspace_id);
+        assert_eq!(add_calls[0].2, invite.role);
+        assert_eq!(accepted, vec![invite.id]);
+        assert!(ignored.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_invite_ignore_marks_ignored_and_creates_workspace() {
+        let repo = MockRepo {
+            email_taken: false,
+            fail_create_user: false,
+            fail_insert_token: false,
+            cleaned_up: Arc::new(Mutex::new(false)),
+        };
+        let invite = invite_fixture(
+            "ignore-token",
+            "test@example.com",
+            OffsetDateTime::now_utc() + Duration::hours(1),
+        );
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::with_invite(invite.clone()));
+        let mailer = MockMailer::default();
+        let mut payload = test_payload();
+        payload.invite_token = Some(invite.token.clone());
+        payload.invite_decision = Some(SignupInviteDecision::Ignore);
+
+        let res = run_signup(
+            repo,
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+            mailer,
+            payload,
+        )
+        .await;
+
+        assert_eq!(res.status(), StatusCode::OK);
+        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        assert_eq!(created.len(), 1);
+        assert_eq!(add_calls.len(), 1);
+        assert_ne!(add_calls[0].0, invite.workspace_id);
+        assert_eq!(add_calls[0].2, WorkspaceRole::Owner);
+        assert!(accepted.is_empty());
+        assert_eq!(ignored, vec![invite.id]);
+    }
+
+    #[tokio::test]
+    async fn test_invite_email_mismatch_rejected() {
+        let repo = MockRepo {
+            email_taken: false,
+            fail_create_user: false,
+            fail_insert_token: false,
+            cleaned_up: Arc::new(Mutex::new(false)),
+        };
+        let invite = invite_fixture(
+            "mismatch-token",
+            "other@example.com",
+            OffsetDateTime::now_utc() + Duration::hours(1),
+        );
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::with_invite(invite));
+        let mailer = MockMailer::default();
+        let mut payload = test_payload();
+        payload.invite_token = Some("mismatch-token".into());
+        payload.invite_decision = Some(SignupInviteDecision::Join);
+
+        let res = run_signup(
+            repo,
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+            mailer,
+            payload,
+        )
+        .await;
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        assert!(created.is_empty());
+        assert!(add_calls.is_empty());
+        assert!(accepted.is_empty());
+        assert!(ignored.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_expired_invite_rejected() {
+        let repo = MockRepo {
+            email_taken: false,
+            fail_create_user: false,
+            fail_insert_token: false,
+            cleaned_up: Arc::new(Mutex::new(false)),
+        };
+        let invite = invite_fixture(
+            "expired-token",
+            "test@example.com",
+            OffsetDateTime::now_utc() - Duration::hours(1),
+        );
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::with_invite(invite));
+        let mailer = MockMailer::default();
+        let mut payload = test_payload();
+        payload.invite_token = Some("expired-token".into());
+        payload.invite_decision = Some(SignupInviteDecision::Join);
+
+        let res = run_signup(
+            repo,
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+            mailer,
+            payload,
+        )
+        .await;
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        assert!(created.is_empty());
+        assert!(add_calls.is_empty());
+        assert!(accepted.is_empty());
+        assert!(ignored.is_empty());
     }
 }

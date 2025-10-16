@@ -199,7 +199,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
             r#"
             INSERT INTO workspace_invitations (workspace_id, email, role, token, expires_at, created_by, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, now())
-            RETURNING id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at
+            RETURNING id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at, ignored_at
             "#,
             workspace_id,
             email,
@@ -219,7 +219,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         sqlx::query_as!(
             WorkspaceInvitation,
             r#"
-            SELECT id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at
+            SELECT id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at, ignored_at
             FROM workspace_invitations
             WHERE workspace_id = $1
             ORDER BY created_at DESC
@@ -247,7 +247,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         sqlx::query_as!(
             WorkspaceInvitation,
             r#"
-            SELECT id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at
+            SELECT id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at, ignored_at
             FROM workspace_invitations
             WHERE token = $1
             "#,
@@ -260,6 +260,16 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
     async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query!(
             r#"UPDATE workspace_invitations SET accepted_at = now() WHERE id = $1"#,
+            invite_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn mark_invitation_ignored(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"UPDATE workspace_invitations SET ignored_at = now() WHERE id = $1"#,
             invite_id
         )
         .execute(&self.pool)

@@ -2,7 +2,7 @@ import { useAuth } from '@/stores/auth'
 import { API_BASE_URL } from './config'
 import { getCsrfToken } from './csrfCache'
 
-export async function signupUser(formData: {
+type SignupRequest = {
   first_name: string
   last_name: string
   email: string
@@ -11,8 +11,17 @@ export async function signupUser(formData: {
   country?: string
   tax_id?: string
   settings?: Record<string, any>
-}): Promise<{ success: boolean; message: string }> {
-  formData.email = formData.email.toLocaleLowerCase()
+  invite_token?: string
+  invite_decision?: 'join' | 'ignore'
+}
+
+export async function signupUser(
+  formData: SignupRequest
+): Promise<{ success: boolean; message: string }> {
+  const payload: SignupRequest = {
+    ...formData,
+    email: formData.email.toLocaleLowerCase()
+  }
   try {
     const csrfToken = await getCsrfToken()
     const res = await fetch(`${API_BASE_URL}/api/auth/signup`, {
@@ -21,7 +30,7 @@ export async function signupUser(formData: {
         'Content-Type': 'application/json',
         'x-csrf-token': csrfToken
       },
-      body: JSON.stringify(formData),
+      body: JSON.stringify(payload),
       credentials: 'include'
     })
 
