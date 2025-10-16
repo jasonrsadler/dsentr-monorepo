@@ -27,6 +27,11 @@ pub trait WorkspaceRepository: Send + Sync {
         organization_id: Option<Uuid>,
     ) -> Result<Workspace, sqlx::Error>;
 
+    async fn find_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Option<Workspace>, sqlx::Error>;
+
     async fn add_member(
         &self,
         workspace_id: Uuid,

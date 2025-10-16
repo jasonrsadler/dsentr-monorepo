@@ -230,13 +230,54 @@ async fn process_plan_change(
                     }
                 };
 
+                let members = match app_state
+                    .organization_repo
+                    .list_members(organization.id)
+                    .await
+                {
+                    Ok(members) => members,
+                    Err(err) => {
+                        tracing::error!(
+                            "failed to inspect organization members during plan change: {:?}",
+                            err
+                        );
+                        return Err(JsonResponse::server_error(
+                            "Failed to configure organization membership",
+                        )
+                        .into_response());
+                    }
+                };
+
+                for member in members {
+                    if member.role == OrganizationRole::Owner && member.user_id != user_id {
+                        if let Err(err) = app_state
+                            .organization_repo
+                            .set_member_role(
+                                organization.id,
+                                member.user_id,
+                                OrganizationRole::Admin,
+                            )
+                            .await
+                        {
+                            tracing::error!(
+                                "failed to demote previous organization owner during plan change: {:?}",
+                                err
+                            );
+                            return Err(JsonResponse::server_error(
+                                "Failed to configure organization membership",
+                            )
+                            .into_response());
+                        }
+                    }
+                }
+
                 if let Err(err) = app_state
                     .organization_repo
-                    .add_member(organization.id, user_id, OrganizationRole::Admin)
+                    .add_member(organization.id, user_id, OrganizationRole::Owner)
                     .await
                 {
                     tracing::error!(
-                        "failed to add admin membership during plan change: {:?}",
+                        "failed to assign organization owner during plan change: {:?}",
                         err
                     );
                     return Err(JsonResponse::server_error(
@@ -353,16 +394,87 @@ async fn process_plan_change(
                 };
             }
 
-            if let Err(err) = app_state
-                .workspace_repo
-                .add_member(workspace.id, user_id, WorkspaceRole::Admin)
-                .await
-            {
-                tracing::error!("failed to add onboarding user to workspace: {:?}", err);
-                return Err(
-                    JsonResponse::server_error("Failed to configure workspace membership")
-                        .into_response(),
-                );
+            if payload.plan_tier == PlanTier::Workspace {
+                let workspace_members = match app_state.workspace_repo.list_members(workspace.id).await {
+                    Ok(members) => members,
+                    Err(err) => {
+                        tracing::warn!(
+                            "failed to inspect workspace members during plan change: {:?}",
+                            err
+                        );
+                        Vec::new()
+                    }
+                };
+
+                let desired_role = workspace_members
+                    .iter()
+                    .find(|member| member.role == WorkspaceRole::Owner)
+                    .map(|owner| {
+                        if owner.user_id == user_id {
+                            WorkspaceRole::Owner
+                        } else {
+                            WorkspaceRole::Admin
+                        }
+                    })
+                    .unwrap_or(WorkspaceRole::Owner);
+
+                if let Err(err) = app_state
+                    .workspace_repo
+                    .add_member(workspace.id, user_id, desired_role)
+                    .await
+                {
+                    tracing::error!("failed to add onboarding user to workspace: {:?}", err);
+                    return Err(
+                        JsonResponse::server_error("Failed to configure workspace membership")
+                            .into_response(),
+                    );
+                }
+            } else {
+                if let Err(err) = app_state
+                    .workspace_repo
+                    .add_member(workspace.id, user_id, WorkspaceRole::Admin)
+                    .await
+                {
+                    tracing::error!("failed to add onboarding user to workspace: {:?}", err);
+                    return Err(
+                        JsonResponse::server_error("Failed to configure workspace membership")
+                            .into_response(),
+                    );
+                }
+
+                let workspace_members = match app_state.workspace_repo.list_members(workspace.id).await {
+                    Ok(members) => members,
+                    Err(err) => {
+                        tracing::error!(
+                            "failed to inspect workspace members during plan change: {:?}",
+                            err
+                        );
+                        return Err(
+                            JsonResponse::server_error("Failed to configure workspace membership")
+                                .into_response(),
+                        );
+                    }
+                };
+                for member in workspace_members {
+                    if member.role == WorkspaceRole::Owner {
+                        if let Err(err) = app_state
+                            .workspace_repo
+                            .set_member_role(workspace.id, member.user_id, WorkspaceRole::Admin)
+                            .await
+                        {
+                            tracing::error!(
+                                "failed to demote workspace owner during organization plan change: {:?}",
+                                err
+                            );
+                            return Err(
+                                JsonResponse::server_error(
+                                    "Failed to configure workspace membership",
+                                )
+                                .into_response(),
+                            );
+                        }
+                    }
+                }
             }
 
             workspace_id = Some(workspace.id);
@@ -396,7 +508,7 @@ async fn process_plan_change(
                 .await
             {
                 tracing::error!(
-                    "failed to add workspace owner to team during plan change: {:?}",
+                    "failed to add primary workspace member to team during plan change: {:?}",
                     err
                 );
                 return Err(JsonResponse::server_error("Failed to add team member").into_response());
@@ -655,8 +767,42 @@ pub struct UpdateWorkspaceMemberRolePayload {
     pub role: WorkspaceRole,
 }
 
-fn is_admin_or_owner(role: WorkspaceRole) -> bool {
-    matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
+async fn fetch_workspace_role(
+    app_state: &AppState,
+    user_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<Option<WorkspaceRole>, Response> {
+    let memberships = app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+        .map_err(|_| JsonResponse::server_error("Failed to load memberships").into_response())?;
+    Ok(memberships
+        .into_iter()
+        .find(|m| m.workspace.id == workspace_id)
+        .map(|m| m.role))
+}
+
+async fn ensure_workspace_admin(
+    app_state: &AppState,
+    acting_user: Uuid,
+    workspace_id: Uuid,
+) -> Result<WorkspaceRole, Response> {
+    match fetch_workspace_role(app_state, acting_user, workspace_id).await? {
+        Some(role) if matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin) => Ok(role),
+        _ => Err(JsonResponse::forbidden("Admin permissions required").into_response()),
+    }
+}
+
+async fn ensure_workspace_owner(
+    app_state: &AppState,
+    acting_user: Uuid,
+    workspace_id: Uuid,
+) -> Result<(), Response> {
+    match fetch_workspace_role(app_state, acting_user, workspace_id).await? {
+        Some(WorkspaceRole::Owner) => Ok(()),
+        _ => Err(JsonResponse::forbidden("Owner permissions required").into_response()),
+    }
 }
 
 async fn require_workspace_admin(
@@ -664,17 +810,57 @@ async fn require_workspace_admin(
     acting_user: Uuid,
     workspace_id: Uuid,
 ) -> Result<(), Response> {
-    let memberships = app_state
-        .workspace_repo
-        .list_memberships_for_user(acting_user)
+    ensure_workspace_admin(app_state, acting_user, workspace_id)
         .await
-        .map_err(|_| JsonResponse::server_error("Failed to load memberships").into_response())?;
-    for m in memberships {
-        if m.workspace.id == workspace_id && is_admin_or_owner(m.role) {
-            return Ok(());
-        }
+        .map(|_| ())
+}
+
+async fn fetch_org_role(
+    app_state: &AppState,
+    user_id: Uuid,
+    organization_id: Uuid,
+) -> Result<Option<OrganizationRole>, Response> {
+    let memberships = app_state
+        .organization_repo
+        .list_memberships_for_user(user_id)
+        .await
+        .map_err(|_| JsonResponse::server_error("Failed to load org memberships").into_response())?;
+    Ok(memberships
+        .into_iter()
+        .find(|m| m.organization.id == organization_id)
+        .map(|m| m.role))
+}
+
+async fn ensure_org_admin(
+    app_state: &AppState,
+    acting_user: Uuid,
+    organization_id: Uuid,
+) -> Result<OrganizationRole, Response> {
+    match fetch_org_role(app_state, acting_user, organization_id).await? {
+        Some(role) if matches!(role, OrganizationRole::Owner | OrganizationRole::Admin) => Ok(role),
+        _ => Err(JsonResponse::forbidden("Admin permissions required").into_response()),
     }
-    Err(JsonResponse::forbidden("Admin permissions required").into_response())
+}
+
+async fn ensure_org_owner(
+    app_state: &AppState,
+    acting_user: Uuid,
+    organization_id: Uuid,
+) -> Result<(), Response> {
+    match fetch_org_role(app_state, acting_user, organization_id).await? {
+        Some(OrganizationRole::Owner) => Ok(()),
+        _ => Err(JsonResponse::forbidden("Owner permissions required").into_response()),
+    }
+}
+
+async fn require_org_admin(
+    app_state: &AppState,
+    acting_user: Uuid,
+    organization_id: Uuid,
+) -> Result<(), Response> {
+    ensure_org_admin(app_state, acting_user, organization_id)
+        .await
+        .map(|_| ())
 }
 
 pub async fn list_workspace_members(
@@ -686,7 +872,7 @@ pub async fn list_workspace_members(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+    if let Err(resp) = ensure_workspace_admin(&app_state, user_id, workspace_id).await {
         return resp;
     }
     match app_state.workspace_repo.list_members(workspace_id).await {
@@ -705,11 +891,35 @@ pub async fn add_workspace_member(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
-        return resp;
-    }
+    let acting_role = match ensure_workspace_admin(&app_state, user_id, workspace_id).await {
+        Ok(role) => role,
+        Err(resp) => return resp,
+    };
     if payload.role == WorkspaceRole::Owner {
-        // rely on DB unique partial index to enforce single owner; attempt is allowed
+        let workspace = match app_state.workspace_repo.find_workspace(workspace_id).await {
+            Ok(Some(ws)) => ws,
+            Ok(None) => return JsonResponse::not_found("Workspace not found").into_response(),
+            Err(_) => {
+                return JsonResponse::server_error("Failed to load workspace details")
+                    .into_response()
+            }
+        };
+        if workspace.organization_id.is_some() {
+            return JsonResponse::bad_request(
+                "Organization workspaces do not have an owner role",
+            )
+            .into_response();
+        }
+        if acting_role != WorkspaceRole::Owner {
+            return JsonResponse::forbidden(
+                "Only the current owner can initiate ownership transfers",
+            )
+            .into_response();
+        }
+        return JsonResponse::bad_request(
+            "Invite members as admin, user, or viewer and transfer ownership after they join",
+        )
+        .into_response();
     }
     match app_state
         .workspace_repo
@@ -731,16 +941,93 @@ pub async fn update_workspace_member_role(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
-        return resp;
+    let acting_role = match ensure_workspace_admin(&app_state, user_id, workspace_id).await {
+        Ok(role) => role,
+        Err(resp) => return resp,
+    };
+
+    let members = match app_state.workspace_repo.list_members(workspace_id).await {
+        Ok(list) => list,
+        Err(_) => return JsonResponse::server_error("Failed to list members").into_response(),
+    };
+
+    let current_member = match members.into_iter().find(|m| m.user_id == member_id) {
+        Some(member) => member,
+        None => return JsonResponse::not_found("Member not found").into_response(),
+    };
+
+    if payload.role == current_member.role {
+        return Json(json!({"success": true})).into_response();
     }
-    match app_state
-        .workspace_repo
-        .set_member_role(workspace_id, member_id, payload.role)
-        .await
-    {
-        Ok(_) => Json(json!({"success": true})).into_response(),
-        Err(_) => JsonResponse::server_error("Failed to update role").into_response(),
+
+    if current_member.role == WorkspaceRole::Owner && payload.role != WorkspaceRole::Owner {
+        return JsonResponse::bad_request(
+            "Transfer ownership to another member before changing this role",
+        )
+        .into_response();
+    }
+
+    if payload.role == WorkspaceRole::Owner {
+        let workspace = match app_state.workspace_repo.find_workspace(workspace_id).await {
+            Ok(Some(ws)) => ws,
+            Ok(None) => return JsonResponse::not_found("Workspace not found").into_response(),
+            Err(_) => {
+                return JsonResponse::server_error("Failed to load workspace details")
+                    .into_response()
+            }
+        };
+        if workspace.organization_id.is_some() {
+            return JsonResponse::bad_request(
+                "Organization workspaces do not have an owner role",
+            )
+            .into_response();
+        }
+        if acting_role != WorkspaceRole::Owner {
+            return JsonResponse::forbidden(
+                "Only the current owner can transfer ownership",
+            )
+            .into_response();
+        }
+        if member_id == user_id {
+            return Json(json!({"success": true})).into_response();
+        }
+
+        if let Err(err) = app_state
+            .workspace_repo
+            .set_member_role(workspace_id, user_id, WorkspaceRole::Admin)
+            .await
+        {
+            tracing::error!(
+                "failed to demote current owner before transfer: {:?}",
+                err
+            );
+            return JsonResponse::server_error("Failed to transfer ownership").into_response();
+        }
+
+        match app_state
+            .workspace_repo
+            .set_member_role(workspace_id, member_id, WorkspaceRole::Owner)
+            .await
+        {
+            Ok(_) => Json(json!({"success": true})).into_response(),
+            Err(err) => {
+                tracing::error!("failed to assign new workspace owner: {:?}", err);
+                let _ = app_state
+                    .workspace_repo
+                    .set_member_role(workspace_id, user_id, WorkspaceRole::Owner)
+                    .await;
+                JsonResponse::server_error("Failed to transfer ownership").into_response()
+            }
+        }
+    } else {
+        match app_state
+            .workspace_repo
+            .set_member_role(workspace_id, member_id, payload.role)
+            .await
+        {
+            Ok(_) => Json(json!({"success": true})).into_response(),
+            Err(_) => JsonResponse::server_error("Failed to update role").into_response(),
+        }
     }
 }
 
@@ -756,6 +1043,20 @@ pub async fn remove_workspace_member(
     if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
         return resp;
     }
+    let members = match app_state.workspace_repo.list_members(workspace_id).await {
+        Ok(list) => list,
+        Err(_) => return JsonResponse::server_error("Failed to list members").into_response(),
+    };
+    let target_member = match members.into_iter().find(|m| m.user_id == member_id) {
+        Some(member) => member,
+        None => return JsonResponse::not_found("Member not found").into_response(),
+    };
+    if target_member.role == WorkspaceRole::Owner {
+        return JsonResponse::bad_request(
+            "Transfer ownership to another member before removing this user",
+        )
+        .into_response();
+    }
     match app_state
         .workspace_repo
         .remove_member(workspace_id, member_id)
@@ -763,6 +1064,117 @@ pub async fn remove_workspace_member(
     {
         Ok(_) => Json(json!({"success": true})).into_response(),
         Err(_) => JsonResponse::server_error("Failed to remove member").into_response(),
+    }
+}
+
+// --- Organization members management ---
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateOrganizationMemberRolePayload {
+    pub role: OrganizationRole,
+}
+
+pub async fn list_organization_members(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(organization_id): axum::extract::Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    if let Err(resp) = ensure_org_admin(&app_state, user_id, organization_id).await {
+        return resp;
+    }
+    match app_state.organization_repo.list_members(organization_id).await {
+        Ok(members) => Json(json!({"success": true, "members": members})).into_response(),
+        Err(_) => JsonResponse::server_error("Failed to list members").into_response(),
+    }
+}
+
+pub async fn update_organization_member_role(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path((organization_id, member_id)): axum::extract::Path<(Uuid, Uuid)>,
+    Json(payload): Json<UpdateOrganizationMemberRolePayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+    let acting_role = match ensure_org_admin(&app_state, user_id, organization_id).await {
+        Ok(role) => role,
+        Err(resp) => return resp,
+    };
+
+    let members = match app_state.organization_repo.list_members(organization_id).await {
+        Ok(list) => list,
+        Err(_) => return JsonResponse::server_error("Failed to list members").into_response(),
+    };
+
+    let current_member = match members.into_iter().find(|m| m.user_id == member_id) {
+        Some(member) => member,
+        None => return JsonResponse::not_found("Member not found").into_response(),
+    };
+
+    if payload.role == current_member.role {
+        return Json(json!({"success": true})).into_response();
+    }
+
+    if current_member.role == OrganizationRole::Owner && payload.role != OrganizationRole::Owner {
+        return JsonResponse::bad_request(
+            "Transfer ownership before changing this member's role",
+        )
+        .into_response();
+    }
+
+    if payload.role == OrganizationRole::Owner {
+        if acting_role != OrganizationRole::Owner {
+            return JsonResponse::forbidden(
+                "Only the current owner can transfer ownership",
+            )
+            .into_response();
+        }
+        if member_id == user_id {
+            return Json(json!({"success": true})).into_response();
+        }
+
+        if let Err(err) = app_state
+            .organization_repo
+            .set_member_role(organization_id, user_id, OrganizationRole::Admin)
+            .await
+        {
+            tracing::error!(
+                "failed to demote current organization owner before transfer: {:?}",
+                err
+            );
+            return JsonResponse::server_error("Failed to transfer ownership").into_response();
+        }
+
+        match app_state
+            .organization_repo
+            .set_member_role(organization_id, member_id, OrganizationRole::Owner)
+            .await
+        {
+            Ok(_) => Json(json!({"success": true})).into_response(),
+            Err(err) => {
+                tracing::error!("failed to assign new organization owner: {:?}", err);
+                let _ = app_state
+                    .organization_repo
+                    .set_member_role(organization_id, user_id, OrganizationRole::Owner)
+                    .await;
+                JsonResponse::server_error("Failed to transfer ownership").into_response()
+            }
+        }
+    } else {
+        match app_state
+            .organization_repo
+            .set_member_role(organization_id, member_id, payload.role)
+            .await
+        {
+            Ok(_) => Json(json!({"success": true})).into_response(),
+            Err(_) => JsonResponse::server_error("Failed to update role").into_response(),
+        }
     }
 }
 
@@ -919,12 +1331,42 @@ fn random_token() -> String {
 
 pub async fn create_workspace_invitation(
     State(app_state): State<AppState>,
-    AuthSession(claims): AuthSession,
-    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
-    Json(payload): Json<CreateInvitationPayload>,
+   AuthSession(claims): AuthSession,
+   axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+   Json(payload): Json<CreateInvitationPayload>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) { Ok(id) => id, Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response() };
-    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await { return resp; }
+    let acting_role = match ensure_workspace_admin(&app_state, user_id, workspace_id).await {
+        Ok(role) => role,
+        Err(resp) => return resp,
+    };
+
+    if payload.role == WorkspaceRole::Owner {
+        let workspace = match app_state.workspace_repo.find_workspace(workspace_id).await {
+            Ok(Some(ws)) => ws,
+            Ok(None) => return JsonResponse::not_found("Workspace not found").into_response(),
+            Err(_) => {
+                return JsonResponse::server_error("Failed to load workspace details")
+                    .into_response()
+            }
+        };
+        if workspace.organization_id.is_some() {
+            return JsonResponse::bad_request(
+                "Organization workspaces do not have an owner role",
+            )
+            .into_response();
+        }
+        if acting_role != WorkspaceRole::Owner {
+            return JsonResponse::forbidden(
+                "Only the current owner can initiate ownership transfers",
+            )
+            .into_response();
+        }
+        return JsonResponse::bad_request(
+            "Invite members as admin, user, or viewer and transfer ownership after they join",
+        )
+        .into_response();
+    }
 
     let email = payload.email.trim();
     if email.is_empty() { return JsonResponse::bad_request("Email is required").into_response(); }
@@ -1175,26 +1617,6 @@ pub struct OrgDowngradePreviewResult {
     pub will_disable_users: Vec<Uuid>,
 }
 
-async fn require_org_admin(
-    app_state: &AppState,
-    acting_user: Uuid,
-    organization_id: Uuid,
-) -> Result<(), Response> {
-    let org_memberships = app_state
-        .organization_repo
-        .list_memberships_for_user(acting_user)
-        .await
-        .map_err(|_| JsonResponse::server_error("Failed to load org memberships").into_response())?;
-    let mut ok = false;
-    for m in org_memberships {
-        if m.organization.id == organization_id {
-            ok = matches!(m.role, OrganizationRole::Owner | OrganizationRole::Admin);
-            break;
-        }
-    }
-    if ok { Ok(()) } else { Err(JsonResponse::forbidden("Admin permissions required").into_response()) }
-}
-
 pub async fn org_downgrade_preview(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -1204,7 +1626,7 @@ pub async fn org_downgrade_preview(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    if let Err(resp) = require_org_admin(&app_state, user_id, payload.organization_id).await {
+    if let Err(resp) = ensure_org_owner(&app_state, user_id, payload.organization_id).await {
         return resp;
     }
 
@@ -1281,7 +1703,7 @@ pub async fn org_downgrade_execute(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    if let Err(resp) = require_org_admin(&app_state, acting_user, payload.organization_id).await {
+    if let Err(resp) = ensure_org_owner(&app_state, acting_user, payload.organization_id).await {
         return resp;
     }
 
@@ -1391,7 +1813,7 @@ pub async fn workspace_to_solo_preview(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    if let Err(resp) = require_workspace_admin(&app_state, acting, payload.workspace_id).await {
+    if let Err(resp) = ensure_workspace_owner(&app_state, acting, payload.workspace_id).await {
         return resp;
     }
     match app_state.workspace_repo.list_members(payload.workspace_id).await {
@@ -1419,7 +1841,7 @@ pub async fn workspace_to_solo_execute(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    if let Err(resp) = require_workspace_admin(&app_state, acting, payload.workspace_id).await {
+    if let Err(resp) = ensure_workspace_owner(&app_state, acting, payload.workspace_id).await {
         return resp;
     }
     // Remove all members except acting user

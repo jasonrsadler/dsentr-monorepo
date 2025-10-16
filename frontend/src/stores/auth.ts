@@ -21,7 +21,7 @@ type WorkspaceSummary = {
     created_at: string
     updated_at: string
   }
-  role: 'admin' | 'user' | 'viewer'
+  role: 'owner' | 'admin' | 'user' | 'viewer'
 }
 
 type OrganizationSummary = {
@@ -32,7 +32,7 @@ type OrganizationSummary = {
     created_at: string
     updated_at: string
   }
-  role: 'admin' | 'user' | 'viewer'
+  role: 'owner' | 'admin' | 'user' | 'viewer'
 }
 
 type CheckAuthOptions = {

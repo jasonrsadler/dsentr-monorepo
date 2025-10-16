@@ -406,6 +406,17 @@ async fn main() {
         )
         .layer(csrf_layer.clone());
 
+    let organization_routes = Router::new()
+        .route(
+            "/{organization_id}/members",
+            get(routes::workspaces::list_organization_members),
+        )
+        .route(
+            "/{organization_id}/members/{member_id}",
+            put(routes::workspaces::update_organization_member_role),
+        )
+        .layer(csrf_layer.clone());
+
     let options_routes = Router::new()
         .route("/secrets", get(list_secrets))
         .route(
@@ -461,6 +472,7 @@ async fn main() {
             workflow_routes.merge(public_workflow_routes),
         )
         .nest("/api/workspaces", workspace_routes)
+        .nest("/api/organizations", organization_routes)
         .merge(Router::new().nest("/api", public_invite_routes))
         .nest("/api/oauth", oauth_routes)
         .nest("/api/microsoft", microsoft_routes)

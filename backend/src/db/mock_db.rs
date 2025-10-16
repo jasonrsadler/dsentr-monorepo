@@ -647,6 +647,13 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         })
     }
 
+    async fn find_workspace(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<Option<Workspace>, sqlx::Error> {
+        Ok(None)
+    }
+
     async fn add_member(
         &self,
         _workspace_id: Uuid,

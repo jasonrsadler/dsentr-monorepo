@@ -76,6 +76,23 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .await
     }
 
+    async fn find_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Option<Workspace>, sqlx::Error> {
+        sqlx::query_as!(
+            Workspace,
+            r#"
+            SELECT id, name, created_by, organization_id, created_at, updated_at
+            FROM workspaces
+            WHERE id = $1
+            "#,
+            workspace_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     async fn add_member(
         &self,
         workspace_id: Uuid,

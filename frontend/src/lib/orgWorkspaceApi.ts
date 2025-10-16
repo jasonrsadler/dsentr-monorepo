@@ -43,12 +43,23 @@ export type TeamInviteLink = {
   allowed_domain?: string | null
 }
 
+export type OrganizationMember = {
+  organization_id: string
+  user_id: string
+  role: 'owner' | 'admin' | 'user' | 'viewer'
+  joined_at: string
+}
+
 export async function listWorkspaceMembers(workspaceId: string) {
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/${workspaceId}/members`, {
-    credentials: 'include'
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/members`,
+    {
+      credentials: 'include'
+    }
+  )
   const body = await res.json()
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to list members')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to list members')
   return (body.members ?? []) as WorkspaceMember[]
 }
 
@@ -58,14 +69,18 @@ export async function addWorkspaceMember(
   role: 'owner' | 'admin' | 'user' | 'viewer'
 ) {
   const csrf = await getCsrfToken()
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/${workspaceId}/members`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
-    body: JSON.stringify({ user_id: userId, role })
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/members`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({ user_id: userId, role })
+    }
+  )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to add member')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to add member')
 }
 
 export async function updateWorkspaceMemberRole(
@@ -88,47 +103,67 @@ export async function updateWorkspaceMemberRole(
     throw new Error(body?.message || 'Failed to update role')
 }
 
-export async function removeWorkspaceMember(workspaceId: string, memberId: string) {
+export async function removeWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+) {
   const csrf = await getCsrfToken()
   const res = await fetch(
     `${API_BASE_URL}/api/workspaces/${workspaceId}/members/${memberId}`,
-    { method: 'DELETE', credentials: 'include', headers: { 'x-csrf-token': csrf } }
+    {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'x-csrf-token': csrf }
+    }
   )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to remove')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to remove')
 }
 
 export async function listTeams(workspaceId: string) {
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/${workspaceId}/teams`, {
-    credentials: 'include'
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/teams`,
+    {
+      credentials: 'include'
+    }
+  )
   const body = await res.json()
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to list teams')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to list teams')
   return (body.teams ?? []) as Team[]
 }
 
 export async function createTeam(workspaceId: string, name: string) {
   const csrf = await getCsrfToken()
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/${workspaceId}/teams`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
-    body: JSON.stringify({ name })
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/teams`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({ name })
+    }
+  )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to create team')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to create team')
   return body.team as Team
 }
 
 export async function deleteTeam(workspaceId: string, teamId: string) {
   const csrf = await getCsrfToken()
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/${workspaceId}/teams/${teamId}`, {
-    method: 'DELETE',
-    credentials: 'include',
-    headers: { 'x-csrf-token': csrf }
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/teams/${teamId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'x-csrf-token': csrf }
+    }
+  )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to delete team')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to delete team')
 }
 
 export async function listTeamMembers(workspaceId: string, teamId: string) {
@@ -137,11 +172,20 @@ export async function listTeamMembers(workspaceId: string, teamId: string) {
     { credentials: 'include' }
   )
   const body = await res.json()
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to list team members')
-  return (body.members ?? []) as { team_id: string; user_id: string; added_at: string }[]
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to list team members')
+  return (body.members ?? []) as {
+    team_id: string
+    user_id: string
+    added_at: string
+  }[]
 }
 
-export async function addTeamMember(workspaceId: string, teamId: string, userId: string) {
+export async function addTeamMember(
+  workspaceId: string,
+  teamId: string,
+  userId: string
+) {
   const csrf = await getCsrfToken()
   const res = await fetch(
     `${API_BASE_URL}/api/workspaces/${workspaceId}/teams/${teamId}/members`,
@@ -165,7 +209,11 @@ export async function removeTeamMember(
   const csrf = await getCsrfToken()
   const res = await fetch(
     `${API_BASE_URL}/api/workspaces/${workspaceId}/teams/${teamId}/members/${userId}`,
-    { method: 'DELETE', credentials: 'include', headers: { 'x-csrf-token': csrf } }
+    {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'x-csrf-token': csrf }
+    }
   )
   const body = await res.json().catch(() => null)
   if (!res.ok || body?.success === false)
@@ -175,35 +223,56 @@ export async function removeTeamMember(
 // Invitations (email-based)
 export async function createWorkspaceInvite(
   workspaceId: string,
-  payload: { email: string; role: WorkspaceMember['role']; team_id?: string | null; expires_in_days?: number }
+  payload: {
+    email: string
+    role: WorkspaceMember['role']
+    team_id?: string | null
+    expires_in_days?: number
+  }
 ) {
   const csrf = await getCsrfToken()
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/${workspaceId}/invites`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
-    body: JSON.stringify(payload)
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/invites`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify(payload)
+    }
+  )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to create invitation')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to create invitation')
   return body.invitation as WorkspaceInvitation
 }
 
 export async function listWorkspaceInvites(workspaceId: string) {
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/${workspaceId}/invites`, { credentials: 'include' })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/invites`,
+    { credentials: 'include' }
+  )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to list invitations')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to list invitations')
   return (body.invitations ?? []) as WorkspaceInvitation[]
 }
 
-export async function revokeWorkspaceInvite(workspaceId: string, inviteId: string) {
+export async function revokeWorkspaceInvite(
+  workspaceId: string,
+  inviteId: string
+) {
   const csrf = await getCsrfToken()
   const res = await fetch(
     `${API_BASE_URL}/api/workspaces/${workspaceId}/invites/${inviteId}/revoke`,
-    { method: 'POST', credentials: 'include', headers: { 'x-csrf-token': csrf } }
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'x-csrf-token': csrf }
+    }
   )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to revoke invitation')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to revoke invitation')
 }
 
 // Join links
@@ -213,14 +282,19 @@ export async function listTeamInviteLinks(workspaceId: string, teamId: string) {
     { credentials: 'include' }
   )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to list links')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to list links')
   return (body.links ?? []) as TeamInviteLink[]
 }
 
 export async function createTeamInviteLink(
   workspaceId: string,
   teamId: string,
-  payload: { expires_in_days?: number; max_uses?: number; allowed_domain?: string }
+  payload: {
+    expires_in_days?: number
+    max_uses?: number
+    allowed_domain?: string
+  }
 ) {
   const csrf = await getCsrfToken()
   const res = await fetch(
@@ -233,36 +307,54 @@ export async function createTeamInviteLink(
     }
   )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to create link')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to create link')
   return body.link as TeamInviteLink
 }
 
-export async function revokeTeamInviteLink(workspaceId: string, teamId: string, linkId: string) {
+export async function revokeTeamInviteLink(
+  workspaceId: string,
+  teamId: string,
+  linkId: string
+) {
   const csrf = await getCsrfToken()
   const res = await fetch(
     `${API_BASE_URL}/api/workspaces/${workspaceId}/teams/${teamId}/invite-links/${linkId}`,
-    { method: 'DELETE', credentials: 'include', headers: { 'x-csrf-token': csrf } }
+    {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'x-csrf-token': csrf }
+    }
   )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to revoke link')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to revoke link')
 }
 
 export async function acceptInviteToken(token: string) {
-  const res = await fetch(`${API_BASE_URL}/api/invites/${encodeURIComponent(token)}`, {
-    method: 'POST',
-    credentials: 'include'
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/invites/${encodeURIComponent(token)}`,
+    {
+      method: 'POST',
+      credentials: 'include'
+    }
+  )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to accept invitation')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to accept invitation')
 }
 
 export async function acceptJoinToken(token: string) {
-  const res = await fetch(`${API_BASE_URL}/api/join/${encodeURIComponent(token)}`, {
-    method: 'POST',
-    credentials: 'include'
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/join/${encodeURIComponent(token)}`,
+    {
+      method: 'POST',
+      credentials: 'include'
+    }
+  )
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false) throw new Error(body?.message || 'Failed to accept join link')
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to accept join link')
 }
 
 export async function orgDowngradePreview(
@@ -270,12 +362,18 @@ export async function orgDowngradePreview(
   targetWorkspaceId: string
 ) {
   const csrf = await getCsrfToken()
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/plan/downgrade-preview`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
-    body: JSON.stringify({ organization_id: organizationId, target_workspace_id: targetWorkspaceId })
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/plan/downgrade-preview`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({
+        organization_id: organizationId,
+        target_workspace_id: targetWorkspaceId
+      })
+    }
+  )
   const body = await res.json().catch(() => null)
   if (!res.ok || body?.success === false)
     throw new Error(body?.message || 'Failed to preview downgrade')
@@ -292,15 +390,55 @@ export async function orgDowngradeExecute(
   transfers: { user_id: string; team_id?: string | null }[]
 ) {
   const csrf = await getCsrfToken()
-  const res = await fetch(`${API_BASE_URL}/api/workspaces/plan/downgrade-execute`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
-    body: JSON.stringify({ organization_id: organizationId, target_workspace_id: targetWorkspaceId, transfers })
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/plan/downgrade-execute`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({
+        organization_id: organizationId,
+        target_workspace_id: targetWorkspaceId,
+        transfers
+      })
+    }
+  )
   const body = await res.json().catch(() => null)
   if (!res.ok || body?.success === false)
     throw new Error(body?.message || 'Failed to execute downgrade')
+}
+
+export async function listOrganizationMembers(organizationId: string) {
+  const res = await fetch(
+    `${API_BASE_URL}/api/organizations/${organizationId}/members`,
+    { credentials: 'include' }
+  )
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to list organization members')
+  return (body?.members ?? []) as OrganizationMember[]
+}
+
+export async function updateOrganizationMemberRole(
+  organizationId: string,
+  memberId: string,
+  role: OrganizationMember['role']
+) {
+  const csrf = await getCsrfToken()
+  const res = await fetch(
+    `${API_BASE_URL}/api/organizations/${organizationId}/members/${memberId}`,
+    {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({ role })
+    }
+  )
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.success === false)
+    throw new Error(
+      body?.message || 'Failed to update organization member role'
+    )
 }
 
 export async function workspaceToSoloPreview(workspaceId: string) {
