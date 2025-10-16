@@ -459,9 +459,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
-    use crate::db::mock_db::{
-        MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
-    };
+    use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
     use crate::models::user::UserRole;
     use crate::routes::auth::{claims::Claims, session::AuthSession};
     use crate::services::{
@@ -498,7 +496,6 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
-            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

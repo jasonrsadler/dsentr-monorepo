@@ -6,10 +6,8 @@ use uuid::Uuid;
 
 use super::user_repository::{UserId, UserRepository};
 use crate::db::{
-    organization_repository::OrganizationRepository, workflow_repository::WorkflowRepository,
-    workspace_repository::WorkspaceRepository,
+    workflow_repository::WorkflowRepository, workspace_repository::WorkspaceRepository,
 };
-use crate::models::organization::{Organization, OrganizationMembershipSummary, OrganizationRole};
 use crate::models::signup::SignupPayload;
 use crate::models::workflow::Workflow;
 use crate::models::workflow_node_run::WorkflowNodeRun;
@@ -605,13 +603,11 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         &self,
         name: &str,
         created_by: Uuid,
-        organization_id: Option<Uuid>,
     ) -> Result<Workspace, sqlx::Error> {
         Ok(Workspace {
             id: Uuid::new_v4(),
             name: name.to_string(),
             created_by,
-            organization_id,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
         })
@@ -625,32 +621,13 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         Ok(Workspace {
             id: workspace_id,
             name: name.to_string(),
-            created_by: created_by_placeholder(),
-            organization_id: None,
+            created_by: Uuid::nil(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
         })
     }
 
-    async fn update_workspace_organization(
-        &self,
-        workspace_id: Uuid,
-        organization_id: Option<Uuid>,
-    ) -> Result<Workspace, sqlx::Error> {
-        Ok(Workspace {
-            id: workspace_id,
-            name: String::new(),
-            created_by: created_by_placeholder(),
-            organization_id,
-            created_at: OffsetDateTime::now_utc(),
-            updated_at: OffsetDateTime::now_utc(),
-        })
-    }
-
-    async fn find_workspace(
-        &self,
-        _workspace_id: Uuid,
-    ) -> Result<Option<Workspace>, sqlx::Error> {
+    async fn find_workspace(&self, _workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
         Ok(None)
     }
 
@@ -727,13 +704,6 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
 
     async fn delete_team(&self, _team_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
-    }
-
-    async fn list_workspaces_by_organization(
-        &self,
-        _organization_id: Uuid,
-    ) -> Result<Vec<Workspace>, sqlx::Error> {
-        Ok(vec![])
     }
 
     async fn create_workspace_invitation(
@@ -828,78 +798,4 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
     async fn increment_team_invite_use(&self, _link_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
     }
-}
-
-#[derive(Default)]
-pub struct NoopOrganizationRepository;
-
-#[async_trait]
-impl OrganizationRepository for NoopOrganizationRepository {
-    async fn create_organization(
-        &self,
-        name: &str,
-        created_by: Uuid,
-    ) -> Result<Organization, sqlx::Error> {
-        Ok(Organization {
-            id: Uuid::new_v4(),
-            name: name.to_string(),
-            created_by,
-            created_at: OffsetDateTime::now_utc(),
-            updated_at: OffsetDateTime::now_utc(),
-        })
-    }
-
-    async fn update_organization_name(
-        &self,
-        organization_id: Uuid,
-        name: &str,
-    ) -> Result<Organization, sqlx::Error> {
-        Ok(Organization {
-            id: organization_id,
-            name: name.to_string(),
-            created_by: created_by_placeholder(),
-            created_at: OffsetDateTime::now_utc(),
-            updated_at: OffsetDateTime::now_utc(),
-        })
-    }
-
-    async fn add_member(
-        &self,
-        _organization_id: Uuid,
-        _user_id: Uuid,
-        _role: OrganizationRole,
-    ) -> Result<(), sqlx::Error> {
-        Ok(())
-    }
-
-    async fn set_member_role(
-        &self,
-        _organization_id: Uuid,
-        _user_id: Uuid,
-        _role: OrganizationRole,
-    ) -> Result<(), sqlx::Error> {
-        Ok(())
-    }
-
-    async fn remove_member(&self, _organization_id: Uuid, _user_id: Uuid) -> Result<(), sqlx::Error> {
-        Ok(())
-    }
-
-    async fn list_memberships_for_user(
-        &self,
-        _user_id: Uuid,
-    ) -> Result<Vec<OrganizationMembershipSummary>, sqlx::Error> {
-        Ok(vec![])
-    }
-
-    async fn list_members(
-        &self,
-        _organization_id: Uuid,
-    ) -> Result<Vec<crate::models::organization::OrganizationMember>, sqlx::Error> {
-        Ok(vec![])
-    }
-}
-
-fn created_by_placeholder() -> Uuid {
-    Uuid::nil()
 }

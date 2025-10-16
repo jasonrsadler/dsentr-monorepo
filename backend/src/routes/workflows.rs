@@ -668,7 +668,6 @@ fn plan_tier_str(tier: NormalizedPlanTier) -> &'static str {
     match tier {
         NormalizedPlanTier::Solo => "solo",
         NormalizedPlanTier::Workspace => "workspace",
-        NormalizedPlanTier::Organization => "organization",
     }
 }
 

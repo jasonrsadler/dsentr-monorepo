@@ -5,7 +5,6 @@ use std::borrow::Cow;
 pub enum NormalizedPlanTier {
     Solo,
     Workspace,
-    Organization,
 }
 
 impl NormalizedPlanTier {
@@ -21,18 +20,18 @@ impl NormalizedPlanTier {
             .unwrap_or_else(|| normalized.as_str());
 
         match key {
-            "workspace" | "team" => Self::Workspace,
-            "organization" | "organisation" | "org" | "enterprise" => Self::Organization,
+            "workspace" | "team" | "organization" | "organisation" | "org" | "enterprise" => {
+                Self::Workspace
+            }
             "solo" | "free" | "personal" | "individual" => Self::Solo,
             _ => {
-                if normalized.contains("workspace") {
-                    Self::Workspace
-                } else if normalized.contains("organization")
+                if normalized.contains("workspace")
+                    || normalized.contains("organization")
                     || normalized.contains("organisation")
                     || normalized.contains("org:")
                     || normalized.contains("org_")
                 {
-                    Self::Organization
+                    Self::Workspace
                 } else {
                     Self::Solo
                 }
@@ -218,19 +217,19 @@ mod tests {
         );
         assert_eq!(
             NormalizedPlanTier::from_str(Some("organization")),
-            NormalizedPlanTier::Organization
+            NormalizedPlanTier::Workspace
         );
         assert_eq!(
             NormalizedPlanTier::from_str(Some("organization-pro")),
-            NormalizedPlanTier::Organization
+            NormalizedPlanTier::Workspace
         );
         assert_eq!(
             NormalizedPlanTier::from_str(Some("org_premium")),
-            NormalizedPlanTier::Organization
+            NormalizedPlanTier::Workspace
         );
         assert_eq!(
             NormalizedPlanTier::from_str(Some("enterprise")),
-            NormalizedPlanTier::Organization
+            NormalizedPlanTier::Workspace
         );
     }
 

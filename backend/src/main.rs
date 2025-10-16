@@ -21,7 +21,6 @@ use axum::{
 use config::Config;
 use db::oauth_token_repository::UserOAuthTokenRepository;
 use db::postgres_oauth_token_repository::PostgresUserOAuthTokenRepository;
-use db::postgres_organization_repository::PostgresOrganizationRepository;
 use db::postgres_user_repository::PostgresUserRepository;
 use db::postgres_workflow_repository::PostgresWorkflowRepository;
 use db::postgres_workspace_repository::PostgresWorkspaceRepository;
@@ -69,8 +68,8 @@ use tracing_subscriber::FmtSubscriber;
 use utils::csrf::{get_csrf_token, validate_csrf};
 
 use crate::db::{
-    organization_repository::OrganizationRepository, user_repository::UserRepository,
-    workflow_repository::WorkflowRepository, workspace_repository::WorkspaceRepository,
+    user_repository::UserRepository, workflow_repository::WorkflowRepository,
+    workspace_repository::WorkspaceRepository,
 };
 use crate::services::smtp_mailer::SmtpMailer;
 use crate::state::AppState;
@@ -169,10 +168,6 @@ async fn main() {
         pool: pg_pool.clone(),
     }) as Arc<dyn WorkspaceRepository>;
 
-    let organization_repo = Arc::new(PostgresOrganizationRepository {
-        pool: pg_pool.clone(),
-    }) as Arc<dyn OrganizationRepository>;
-
     // Initialize mailer
     let mailer = Arc::new(SmtpMailer::new().expect("Failed to initialize mailer"));
     let http_client = Client::new();
@@ -200,7 +195,6 @@ async fn main() {
         db: user_repo,
         workflow_repo,
         workspace_repo,
-        organization_repo,
         mailer,
         google_oauth,
         github_oauth,
@@ -363,20 +357,11 @@ async fn main() {
         )
         .route(
             "/{workspace_id}/teams/{team_id}/members",
-            get(routes::workspaces::list_team_members)
-                .post(routes::workspaces::add_team_member),
+            get(routes::workspaces::list_team_members).post(routes::workspaces::add_team_member),
         )
         .route(
             "/{workspace_id}/teams/{team_id}/members/{member_id}",
             delete(routes::workspaces::remove_team_member),
-        )
-        .route(
-            "/plan/downgrade-preview",
-            post(routes::workspaces::org_downgrade_preview),
-        )
-        .route(
-            "/plan/downgrade-execute",
-            post(routes::workspaces::org_downgrade_execute),
         )
         .route(
             "/plan/workspace-to-solo-preview",
@@ -403,17 +388,6 @@ async fn main() {
         .route(
             "/{workspace_id}/teams/{team_id}/invite-links/{link_id}",
             delete(routes::workspaces::revoke_team_join_link),
-        )
-        .layer(csrf_layer.clone());
-
-    let organization_routes = Router::new()
-        .route(
-            "/{organization_id}/members",
-            get(routes::workspaces::list_organization_members),
-        )
-        .route(
-            "/{organization_id}/members/{member_id}",
-            put(routes::workspaces::update_organization_member_role),
         )
         .layer(csrf_layer.clone());
 
@@ -460,8 +434,14 @@ async fn main() {
     let public_workflow_routes =
         Router::new().route("/{workflow_id}/trigger/{token}", post(webhook_trigger));
     let public_invite_routes = Router::new()
-        .route("/invites/{token}", get(routes::workspaces::preview_invitation).post(routes::workspaces::accept_invitation))
-        .route("/join/{token}", get(routes::workspaces::preview_join_link).post(routes::workspaces::accept_join_link));
+        .route(
+            "/invites/{token}",
+            get(routes::workspaces::preview_invitation).post(routes::workspaces::accept_invitation),
+        )
+        .route(
+            "/join/{token}",
+            get(routes::workspaces::preview_join_link).post(routes::workspaces::accept_join_link),
+        );
     let app = Router::new()
         .route("/", get(root))
         .route("/api/early-access", post(handle_early_access))
@@ -472,7 +452,6 @@ async fn main() {
             workflow_routes.merge(public_workflow_routes),
         )
         .nest("/api/workspaces", workspace_routes)
-        .nest("/api/organizations", organization_routes)
         .merge(Router::new().nest("/api", public_invite_routes))
         .nest("/api/oauth", oauth_routes)
         .nest("/api/microsoft", microsoft_routes)

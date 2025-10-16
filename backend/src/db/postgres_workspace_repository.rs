@@ -4,7 +4,8 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::models::workspace::{
-    Team, TeamInviteLink, TeamMember, Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole,
+    Team, TeamInviteLink, TeamMember, Workspace, WorkspaceInvitation, WorkspaceMembershipSummary,
+    WorkspaceRole,
 };
 
 use super::workspace_repository::WorkspaceRepository;
@@ -19,18 +20,16 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         &self,
         name: &str,
         created_by: Uuid,
-        organization_id: Option<Uuid>,
     ) -> Result<Workspace, sqlx::Error> {
         sqlx::query_as!(
             Workspace,
             r#"
-            INSERT INTO workspaces (name, created_by, organization_id, created_at, updated_at)
-            VALUES ($1, $2, $3, now(), now())
-            RETURNING id, name, created_by, organization_id, created_at, updated_at
+            INSERT INTO workspaces (name, created_by, created_at, updated_at)
+            VALUES ($1, $2, now(), now())
+            RETURNING id, name, created_by, created_at, updated_at
             "#,
             name,
-            created_by,
-            organization_id
+            created_by
         )
         .fetch_one(&self.pool)
         .await
@@ -47,7 +46,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
             UPDATE workspaces
             SET name = $2, updated_at = now()
             WHERE id = $1
-            RETURNING id, name, created_by, organization_id, created_at, updated_at
+            RETURNING id, name, created_by, created_at, updated_at
             "#,
             workspace_id,
             name
@@ -56,34 +55,11 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .await
     }
 
-    async fn update_workspace_organization(
-        &self,
-        workspace_id: Uuid,
-        organization_id: Option<Uuid>,
-    ) -> Result<Workspace, sqlx::Error> {
+    async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
         sqlx::query_as!(
             Workspace,
             r#"
-            UPDATE workspaces
-            SET organization_id = $2, updated_at = now()
-            WHERE id = $1
-            RETURNING id, name, created_by, organization_id, created_at, updated_at
-            "#,
-            workspace_id,
-            organization_id
-        )
-        .fetch_one(&self.pool)
-        .await
-    }
-
-    async fn find_workspace(
-        &self,
-        workspace_id: Uuid,
-    ) -> Result<Option<Workspace>, sqlx::Error> {
-        sqlx::query_as!(
-            Workspace,
-            r#"
-            SELECT id, name, created_by, organization_id, created_at, updated_at
+            SELECT id, name, created_by, created_at, updated_at
             FROM workspaces
             WHERE id = $1
             "#,
@@ -181,7 +157,6 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
             SELECT w.id,
                    w.name,
                    w.created_by,
-                   w.organization_id,
                    w.created_at,
                    w.updated_at,
                     m.role as "role: WorkspaceRole"
@@ -202,7 +177,6 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                     id: row.id,
                     name: row.name,
                     created_by: row.created_by,
-                    organization_id: row.organization_id,
                     created_at: row.created_at,
                     updated_at: row.updated_at,
                 },
@@ -290,31 +264,10 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
     }
 
     async fn delete_team(&self, team_id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query!(
-            r#"DELETE FROM teams WHERE id = $1"#,
-            team_id
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query!(r#"DELETE FROM teams WHERE id = $1"#, team_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
-    }
-
-    async fn list_workspaces_by_organization(
-        &self,
-        organization_id: Uuid,
-    ) -> Result<Vec<Workspace>, sqlx::Error> {
-        sqlx::query_as!(
-            Workspace,
-            r#"
-            SELECT id, name, created_by, organization_id, created_at, updated_at
-            FROM workspaces
-            WHERE organization_id = $1
-            ORDER BY created_at ASC
-            "#,
-            organization_id
-        )
-        .fetch_all(&self.pool)
-        .await
     }
 
     async fn create_workspace_invitation(
@@ -430,7 +383,10 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .await
     }
 
-    async fn list_team_invite_links(&self, team_id: Uuid) -> Result<Vec<TeamInviteLink>, sqlx::Error> {
+    async fn list_team_invite_links(
+        &self,
+        team_id: Uuid,
+    ) -> Result<Vec<TeamInviteLink>, sqlx::Error> {
         sqlx::query_as!(
             TeamInviteLink,
             r#"
@@ -456,7 +412,10 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         Ok(())
     }
 
-    async fn find_team_invite_by_token(&self, token: &str) -> Result<Option<TeamInviteLink>, sqlx::Error> {
+    async fn find_team_invite_by_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<TeamInviteLink>, sqlx::Error> {
         sqlx::query_as!(
             TeamInviteLink,
             r#"

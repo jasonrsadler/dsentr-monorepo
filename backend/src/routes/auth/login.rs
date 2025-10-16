@@ -142,23 +142,6 @@ pub async fn handle_me(
                 }
             };
 
-            let organization_memberships = match app_state
-                .organization_repo
-                .list_memberships_for_user(user.id)
-                .await
-            {
-                Ok(data) => data,
-                Err(err) => {
-                    tracing::error!(
-                        "failed to load organization memberships for user {}: {:?}",
-                        user.id,
-                        err
-                    );
-                    return JsonResponse::server_error("Failed to load organization context")
-                        .into_response();
-                }
-            };
-
             let requires_onboarding = user.onboarded_at.is_none()
                 || user.plan.as_ref().map(|p| p.is_empty()).unwrap_or(true);
 
@@ -167,7 +150,6 @@ pub async fn handle_me(
                 "success": true,
                 "user": user_json,
                 "memberships": memberships,
-                "organization_memberships": organization_memberships,
                 "requires_onboarding": requires_onboarding
             }))
             .into_response()
@@ -201,9 +183,7 @@ mod tests {
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
         db::{
-            mock_db::{
-                MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
-            },
+            mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::UserRepository,
         },
         models::user::{OauthProvider, User, UserRole},
@@ -268,7 +248,6 @@ mod tests {
             db: Arc::new(db),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
-            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer: Arc::new(MockMailer::default()), // Not used in these tests
             google_oauth: Arc::new(MockGoogleOAuth::default()), // Not used in these tests
             github_oauth: Arc::new(MockGitHubOAuth::default()), // Not used in these tests

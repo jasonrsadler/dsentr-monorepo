@@ -1,7 +1,6 @@
 pub mod early_access;
 pub mod egress_block_event;
 pub mod oauth_token;
-pub mod organization;
 pub mod signup;
 pub mod user;
 pub mod workflow;

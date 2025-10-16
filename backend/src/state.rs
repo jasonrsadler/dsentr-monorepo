@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::db::{
-    organization_repository::OrganizationRepository, user_repository::UserRepository,
-    workflow_repository::WorkflowRepository, workspace_repository::WorkspaceRepository,
+    user_repository::UserRepository, workflow_repository::WorkflowRepository,
+    workspace_repository::WorkspaceRepository,
 };
 use crate::services::oauth::{
     account_service::OAuthAccountService, github::service::GitHubOAuthService,
@@ -19,7 +19,6 @@ pub struct AppState {
     pub db: Arc<dyn UserRepository>,
     pub workflow_repo: Arc<dyn WorkflowRepository>,
     pub workspace_repo: Arc<dyn WorkspaceRepository>,
-    pub organization_repo: Arc<dyn OrganizationRepository>,
     pub mailer: Arc<dyn Mailer>,
     pub google_oauth: Arc<dyn GoogleOAuthService>,
     pub github_oauth: Arc<dyn GitHubOAuthService + Send + Sync>,
@@ -55,9 +54,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::mock_db::{
-        MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
-    };
+    use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
     use crate::models::user::{OauthProvider, User, UserRole};
     use crate::services::{
         oauth::{
@@ -142,7 +139,6 @@ mod tests {
             db: Arc::new(db),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
-            organization_repo: Arc::new(NoopOrganizationRepository),
             mailer: Arc::new(NoopMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

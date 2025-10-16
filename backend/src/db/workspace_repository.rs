@@ -12,7 +12,6 @@ pub trait WorkspaceRepository: Send + Sync {
         &self,
         name: &str,
         created_by: Uuid,
-        organization_id: Option<Uuid>,
     ) -> Result<Workspace, sqlx::Error>;
 
     async fn update_workspace_name(
@@ -21,16 +20,7 @@ pub trait WorkspaceRepository: Send + Sync {
         name: &str,
     ) -> Result<Workspace, sqlx::Error>;
 
-    async fn update_workspace_organization(
-        &self,
-        workspace_id: Uuid,
-        organization_id: Option<Uuid>,
-    ) -> Result<Workspace, sqlx::Error>;
-
-    async fn find_workspace(
-        &self,
-        workspace_id: Uuid,
-    ) -> Result<Option<Workspace>, sqlx::Error>;
+    async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error>;
 
     async fn add_member(
         &self,
@@ -46,13 +36,12 @@ pub trait WorkspaceRepository: Send + Sync {
         role: WorkspaceRole,
     ) -> Result<(), sqlx::Error>;
 
-    async fn remove_member(
+    async fn remove_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn list_members(
         &self,
         workspace_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<(), sqlx::Error>;
-
-    async fn list_members(&self, workspace_id: Uuid) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error>;
+    ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error>;
 
     async fn list_memberships_for_user(
         &self,
@@ -75,11 +64,6 @@ pub trait WorkspaceRepository: Send + Sync {
     async fn remove_team_member(&self, team_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error>;
 
     async fn delete_team(&self, team_id: Uuid) -> Result<(), sqlx::Error>;
-
-    async fn list_workspaces_by_organization(
-        &self,
-        organization_id: Uuid,
-    ) -> Result<Vec<Workspace>, sqlx::Error>;
 
     // Invitations (email-based)
     async fn create_workspace_invitation(

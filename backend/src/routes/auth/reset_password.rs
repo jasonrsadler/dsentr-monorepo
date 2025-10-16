@@ -90,9 +90,7 @@ mod tests {
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
         db::{
-            mock_db::{
-                NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
-            },
+            mock_db::{NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::{UserId, UserRepository},
         },
         models::{
@@ -274,7 +272,6 @@ mod tests {
             db,
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
-            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer: Arc::new(crate::services::smtp_mailer::MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

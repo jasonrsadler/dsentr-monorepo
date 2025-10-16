@@ -937,9 +937,7 @@ pub(crate) async fn execute_email(
 mod tests {
     use super::*;
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
-    use crate::db::mock_db::{
-        MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
-    };
+    use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
     use crate::services::oauth::account_service::OAuthAccountService;
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
@@ -1007,7 +1005,6 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
-            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

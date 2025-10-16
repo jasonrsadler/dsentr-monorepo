@@ -232,9 +232,7 @@ mod tests {
 
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
-        db::mock_db::{
-            MockDb, NoopOrganizationRepository, NoopWorkflowRepository, NoopWorkspaceRepository,
-        },
+        db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
         routes::auth::google_login::{google_callback, google_login},
         services::{
             oauth::{
@@ -310,7 +308,6 @@ mod tests {
             db: repo,
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
-            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer,
             google_oauth,
             github_oauth,
@@ -386,7 +383,6 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
-            organization_repo: Arc::new(NoopOrganizationRepository::default()),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(FailingGoogleOAuth),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
