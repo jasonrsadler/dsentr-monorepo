@@ -13,9 +13,10 @@ import {
   type Team,
   type TeamInviteLink
 } from '@/lib/orgWorkspaceApi'
+import { normalizePlanTier } from '@/lib/planTiers'
 
 export default function TeamsTab() {
-  const { memberships } = useAuth()
+  const { memberships, user } = useAuth()
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
   const [teams, setTeams] = useState<Team[]>([])
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
@@ -33,6 +34,10 @@ export default function TeamsTab() {
     () => (Array.isArray(memberships) ? memberships.map((m) => m.workspace) : []),
     [memberships]
   )
+  const planTier = useMemo(() => normalizePlanTier(user?.plan), [user?.plan])
+  const primaryWorkspace = workspaceOptions[0]
+  const showWorkspaceSelect =
+    planTier === 'organization' && workspaceOptions.length > 0
 
   useEffect(() => {
     if (!workspaceId && workspaceOptions[0]) setWorkspaceId(workspaceOptions[0].id)
@@ -130,20 +135,26 @@ export default function TeamsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <label className="text-sm">Workspace</label>
-        <select
-          value={workspaceId ?? ''}
-          onChange={(e) => setWorkspaceId(e.target.value || null)}
-          className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
-        >
-          {workspaceOptions.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {showWorkspaceSelect ? (
+        <div className="flex items-center gap-2">
+          <label className="text-sm">Workspace</label>
+          <select
+            value={workspaceId ?? ''}
+            onChange={(e) => setWorkspaceId(e.target.value || null)}
+            className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+          >
+            {workspaceOptions.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : primaryWorkspace ? (
+        <div className="text-sm text-zinc-600 dark:text-zinc-300">
+          Workspace: <span className="font-medium">{primaryWorkspace.name}</span>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
