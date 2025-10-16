@@ -2,9 +2,7 @@ use async_trait::async_trait;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::models::workspace::{
-    Team, TeamMember, Workspace, WorkspaceMembershipSummary, WorkspaceRole,
-};
+use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
 
 #[async_trait]
 pub trait WorkspaceRepository: Send + Sync {
@@ -48,28 +46,10 @@ pub trait WorkspaceRepository: Send + Sync {
         user_id: Uuid,
     ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error>;
 
-    async fn create_team(&self, workspace_id: Uuid, name: &str) -> Result<Team, sqlx::Error>;
-
-    async fn add_team_member(
-        &self,
-        team_id: Uuid,
-        user_id: Uuid,
-        added_at: OffsetDateTime,
-    ) -> Result<TeamMember, sqlx::Error>;
-
-    async fn list_teams(&self, workspace_id: Uuid) -> Result<Vec<Team>, sqlx::Error>;
-
-    async fn list_team_members(&self, team_id: Uuid) -> Result<Vec<TeamMember>, sqlx::Error>;
-
-    async fn remove_team_member(&self, team_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error>;
-
-    async fn delete_team(&self, team_id: Uuid) -> Result<(), sqlx::Error>;
-
     // Invitations (email-based)
     async fn create_workspace_invitation(
         &self,
         workspace_id: Uuid,
-        team_id: Option<Uuid>,
         email: &str,
         role: WorkspaceRole,
         token: &str,
@@ -90,30 +70,4 @@ pub trait WorkspaceRepository: Send + Sync {
     ) -> Result<Option<crate::models::workspace::WorkspaceInvitation>, sqlx::Error>;
 
     async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error>;
-
-    // Team join links
-    async fn create_team_invite_link(
-        &self,
-        workspace_id: Uuid,
-        team_id: Uuid,
-        token: &str,
-        created_by: Uuid,
-        expires_at: Option<OffsetDateTime>,
-        max_uses: Option<i32>,
-        allowed_domain: Option<&str>,
-    ) -> Result<crate::models::workspace::TeamInviteLink, sqlx::Error>;
-
-    async fn list_team_invite_links(
-        &self,
-        team_id: Uuid,
-    ) -> Result<Vec<crate::models::workspace::TeamInviteLink>, sqlx::Error>;
-
-    async fn revoke_team_invite_link(&self, link_id: Uuid) -> Result<(), sqlx::Error>;
-
-    async fn find_team_invite_by_token(
-        &self,
-        token: &str,
-    ) -> Result<Option<crate::models::workspace::TeamInviteLink>, sqlx::Error>;
-
-    async fn increment_team_invite_use(&self, link_id: Uuid) -> Result<(), sqlx::Error>;
 }

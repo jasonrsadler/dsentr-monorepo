@@ -41,29 +41,9 @@ pub struct WorkspaceMembershipSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct Team {
-    pub id: Uuid,
-    pub workspace_id: Uuid,
-    pub name: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    pub updated_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct TeamMember {
-    pub team_id: Uuid,
-    pub user_id: Uuid,
-    #[serde(with = "time::serde::rfc3339")]
-    pub added_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct WorkspaceInvitation {
     pub id: Uuid,
     pub workspace_id: Uuid,
-    pub team_id: Option<Uuid>,
     pub email: String,
     pub role: WorkspaceRole,
     pub token: String,
@@ -76,20 +56,4 @@ pub struct WorkspaceInvitation {
     pub accepted_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub revoked_at: Option<OffsetDateTime>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct TeamInviteLink {
-    pub id: Uuid,
-    pub workspace_id: Uuid,
-    pub team_id: Uuid,
-    pub token: String,
-    pub created_by: Uuid,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub expires_at: Option<OffsetDateTime>,
-    pub max_uses: Option<i32>,
-    pub used_count: i32,
-    pub allowed_domain: Option<String>,
 }

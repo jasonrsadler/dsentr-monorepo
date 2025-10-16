@@ -13,9 +13,7 @@ use crate::models::workflow::Workflow;
 use crate::models::workflow_node_run::WorkflowNodeRun;
 use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_schedule::WorkflowSchedule;
-use crate::models::workspace::{
-    Team, TeamMember, Workspace, WorkspaceMembershipSummary, WorkspaceRole,
-};
+use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
 use serde_json::Value;
 
 #[allow(dead_code)]
@@ -667,49 +665,9 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         Ok(vec![])
     }
 
-    async fn create_team(&self, workspace_id: Uuid, name: &str) -> Result<Team, sqlx::Error> {
-        Ok(Team {
-            id: Uuid::new_v4(),
-            workspace_id,
-            name: name.to_string(),
-            created_at: OffsetDateTime::now_utc(),
-            updated_at: OffsetDateTime::now_utc(),
-        })
-    }
-
-    async fn add_team_member(
-        &self,
-        team_id: Uuid,
-        user_id: Uuid,
-        added_at: OffsetDateTime,
-    ) -> Result<TeamMember, sqlx::Error> {
-        Ok(TeamMember {
-            team_id,
-            user_id,
-            added_at,
-        })
-    }
-
-    async fn list_teams(&self, _workspace_id: Uuid) -> Result<Vec<Team>, sqlx::Error> {
-        Ok(vec![])
-    }
-
-    async fn list_team_members(&self, _team_id: Uuid) -> Result<Vec<TeamMember>, sqlx::Error> {
-        Ok(vec![])
-    }
-
-    async fn remove_team_member(&self, _team_id: Uuid, _user_id: Uuid) -> Result<(), sqlx::Error> {
-        Ok(())
-    }
-
-    async fn delete_team(&self, _team_id: Uuid) -> Result<(), sqlx::Error> {
-        Ok(())
-    }
-
     async fn create_workspace_invitation(
         &self,
         workspace_id: Uuid,
-        team_id: Option<Uuid>,
         email: &str,
         role: WorkspaceRole,
         token: &str,
@@ -719,7 +677,6 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         Ok(crate::models::workspace::WorkspaceInvitation {
             id: Uuid::new_v4(),
             workspace_id,
-            team_id,
             email: email.to_string(),
             role,
             token: token.to_string(),
@@ -750,52 +707,6 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
     }
 
     async fn mark_invitation_accepted(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
-        Ok(())
-    }
-
-    async fn create_team_invite_link(
-        &self,
-        workspace_id: Uuid,
-        team_id: Uuid,
-        token: &str,
-        created_by: Uuid,
-        expires_at: Option<OffsetDateTime>,
-        max_uses: Option<i32>,
-        allowed_domain: Option<&str>,
-    ) -> Result<crate::models::workspace::TeamInviteLink, sqlx::Error> {
-        Ok(crate::models::workspace::TeamInviteLink {
-            id: Uuid::new_v4(),
-            workspace_id,
-            team_id,
-            token: token.to_string(),
-            created_by,
-            created_at: OffsetDateTime::now_utc(),
-            expires_at,
-            max_uses,
-            used_count: 0,
-            allowed_domain: allowed_domain.map(|s| s.to_string()),
-        })
-    }
-
-    async fn list_team_invite_links(
-        &self,
-        _team_id: Uuid,
-    ) -> Result<Vec<crate::models::workspace::TeamInviteLink>, sqlx::Error> {
-        Ok(vec![])
-    }
-
-    async fn revoke_team_invite_link(&self, _link_id: Uuid) -> Result<(), sqlx::Error> {
-        Ok(())
-    }
-
-    async fn find_team_invite_by_token(
-        &self,
-        _token: &str,
-    ) -> Result<Option<crate::models::workspace::TeamInviteLink>, sqlx::Error> {
-        Ok(None)
-    }
-
-    async fn increment_team_invite_use(&self, _link_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
     }
 }
