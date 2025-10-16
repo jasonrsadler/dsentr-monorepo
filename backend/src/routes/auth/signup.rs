@@ -539,6 +539,24 @@ mod tests {
             Ok(())
         }
 
+        async fn leave_workspace(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn revoke_member(
+            &self,
+            _workspace_id: Uuid,
+            _member_id: Uuid,
+            _revoked_by: Uuid,
+            _reason: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
         async fn list_members(
             &self,
             _workspace_id: Uuid,
@@ -547,6 +565,13 @@ mod tests {
         }
 
         async fn list_memberships_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn list_user_workspaces(
             &self,
             _user_id: Uuid,
         ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
@@ -592,6 +617,13 @@ mod tests {
         async fn mark_invitation_declined(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
             self.declined.lock().unwrap().push(invite_id);
             Ok(())
+        }
+
+        async fn list_pending_invitations_for_email(
+            &self,
+            _: &str,
+        ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+            Ok(vec![])
         }
     }
     fn test_payload() -> SignupPayload {

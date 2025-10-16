@@ -22,6 +22,30 @@ export type WorkspaceInvitation = {
   created_at: string
   accepted_at?: string | null
   revoked_at?: string | null
+  declined_at?: string | null
+}
+
+export type Workspace = {
+  id: string
+  name: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type WorkspaceMembershipSummary = {
+  workspace: Workspace
+  role: WorkspaceMember['role']
+}
+
+export async function listWorkspaces() {
+  const res = await fetch(`${API_BASE_URL}/api/workspaces`, {
+    credentials: 'include'
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to load workspaces')
+  return (body.workspaces ?? []) as WorkspaceMembershipSummary[]
 }
 
 export async function listWorkspaceMembers(workspaceId: string) {
@@ -95,6 +119,41 @@ export async function removeWorkspaceMember(
     throw new Error(body?.message || 'Failed to remove member')
 }
 
+export async function revokeWorkspaceMember(
+  workspaceId: string,
+  memberId: string,
+  payload?: { reason?: string }
+) {
+  const csrf = await getCsrfToken()
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/revoke`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({ member_id: memberId, reason: payload?.reason })
+    }
+  )
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to revoke member')
+}
+
+export async function leaveWorkspace(workspaceId: string) {
+  const csrf = await getCsrfToken()
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/leave`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'x-csrf-token': csrf }
+    }
+  )
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to leave workspace')
+}
+
 export async function createWorkspaceInvite(
   workspaceId: string,
   payload: {
@@ -127,6 +186,16 @@ export async function listWorkspaceInvites(workspaceId: string) {
   const body = await res.json().catch(() => null)
   if (!res.ok || body?.success === false)
     throw new Error(body?.message || 'Failed to list invitations')
+  return (body.invitations ?? []) as WorkspaceInvitation[]
+}
+
+export async function listPendingInvites() {
+  const res = await fetch(`${API_BASE_URL}/api/invites`, {
+    credentials: 'include'
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.success === false)
+    throw new Error(body?.message || 'Failed to load invitations')
   return (body.invitations ?? []) as WorkspaceInvitation[]
 }
 

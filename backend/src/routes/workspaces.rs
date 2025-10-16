@@ -8,13 +8,15 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::OffsetDateTime;
+use tracing::{error, warn};
 use urlencoding::encode;
 use uuid::Uuid;
 
 use crate::{
     models::{
+        user::PublicUser,
         workflow::Workflow,
-        workspace::{Workspace, WorkspaceRole},
+        workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole},
     },
     responses::JsonResponse,
     routes::auth::session::AuthSession,
@@ -408,6 +410,45 @@ pub struct UpdateWorkspaceMemberRolePayload {
     pub role: WorkspaceRole,
 }
 
+pub async fn list_workspaces(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    match app_state.workspace_repo.list_user_workspaces(user_id).await {
+        Ok(workspaces) => {
+            Json(json!({ "success": true, "workspaces": workspaces })).into_response()
+        }
+        Err(err) => {
+            error!(?err, %user_id, "failed to list workspaces for user");
+            JsonResponse::server_error("Failed to load workspaces").into_response()
+        }
+    }
+}
+
+pub async fn list_pending_invites(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+) -> Response {
+    let email = claims.email.trim();
+
+    match app_state
+        .workspace_repo
+        .list_pending_invitations_for_email(email)
+        .await
+    {
+        Ok(invites) => Json(json!({ "success": true, "invitations": invites })).into_response(),
+        Err(err) => {
+            error!(?err, email, "failed to list pending invites");
+            JsonResponse::server_error("Failed to load invitations").into_response()
+        }
+    }
+}
+
 async fn fetch_workspace_role(
     app_state: &AppState,
     user_id: Uuid,
@@ -454,6 +495,82 @@ async fn require_workspace_admin(
     ensure_workspace_admin(app_state, acting_user, workspace_id)
         .await
         .map(|_| ())
+}
+
+fn solo_workspace_name(user: &PublicUser) -> String {
+    if let Some(company) = user
+        .company_name
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        return format!("{} Workspace", company);
+    }
+
+    let first = user.first_name.trim();
+    if !first.is_empty() {
+        let suffix = if first.ends_with('s') { "'" } else { "'s" };
+        return format!("{}{} Workspace", first, suffix);
+    }
+
+    "My Workspace".to_string()
+}
+
+async fn provision_solo_workspace(
+    app_state: &AppState,
+    user: &PublicUser,
+) -> Result<(), sqlx::Error> {
+    let name = solo_workspace_name(user);
+    let workspace = app_state
+        .workspace_repo
+        .create_workspace(&name, user.id)
+        .await?;
+
+    app_state
+        .workspace_repo
+        .add_member(workspace.id, user.id, WorkspaceRole::Owner)
+        .await?;
+
+    app_state
+        .db
+        .update_user_plan(user.id, PlanTier::Solo.as_str())
+        .await?;
+
+    Ok(())
+}
+
+async fn ensure_solo_workspace_for_user(
+    app_state: &AppState,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let user = app_state
+        .db
+        .find_public_user_by_id(user_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+
+    provision_solo_workspace(app_state, &user).await
+}
+
+async fn load_membership_for_user(
+    app_state: &AppState,
+    user_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<(WorkspaceMembershipSummary, Vec<WorkspaceMembershipSummary>), Response> {
+    let memberships = app_state
+        .workspace_repo
+        .list_user_workspaces(user_id)
+        .await
+        .map_err(|_| JsonResponse::server_error("Failed to load memberships").into_response())?;
+
+    match memberships
+        .iter()
+        .find(|summary| summary.workspace.id == workspace_id)
+        .cloned()
+    {
+        Some(summary) => Ok((summary, memberships)),
+        None => Err(JsonResponse::not_found("Membership not found").into_response()),
+    }
 }
 
 pub async fn list_workspace_members(
@@ -625,6 +742,203 @@ pub async fn remove_workspace_member(
         Ok(_) => Json(json!({"success": true})).into_response(),
         Err(_) => JsonResponse::server_error("Failed to remove member").into_response(),
     }
+}
+
+pub async fn leave_workspace(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    let (membership, memberships) =
+        match load_membership_for_user(&app_state, user_id, workspace_id).await {
+            Ok(data) => data,
+            Err(response) => return response,
+        };
+
+    if membership.role == WorkspaceRole::Owner {
+        return JsonResponse::bad_request("Transfer ownership before leaving this workspace")
+            .into_response();
+    }
+
+    let should_provision_solo = memberships.len() == 1;
+
+    if let Err(err) = app_state
+        .workspace_repo
+        .leave_workspace(workspace_id, user_id)
+        .await
+    {
+        error!(?err, %workspace_id, %user_id, "failed to leave workspace");
+        return JsonResponse::server_error("Failed to leave workspace").into_response();
+    }
+
+    if should_provision_solo {
+        if let Err(err) = ensure_solo_workspace_for_user(&app_state, user_id).await {
+            error!(?err, %user_id, %workspace_id, "failed to provision solo workspace after leaving");
+            let _ = app_state
+                .workspace_repo
+                .add_member(workspace_id, user_id, membership.role)
+                .await;
+            return JsonResponse::server_error("Failed to provision Solo workspace")
+                .into_response();
+        }
+    }
+
+    Json(json!({"success": true})).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RevokeWorkspaceMemberPayload {
+    pub member_id: Uuid,
+    pub reason: Option<String>,
+}
+
+pub async fn revoke_workspace_member(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+    Json(payload): Json<RevokeWorkspaceMemberPayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    if let Err(resp) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+
+    let workspace = match app_state.workspace_repo.find_workspace(workspace_id).await {
+        Ok(Some(ws)) => ws,
+        Ok(None) => return JsonResponse::not_found("Workspace not found").into_response(),
+        Err(err) => {
+            error!(?err, %workspace_id, "failed to load workspace during revocation");
+            return JsonResponse::server_error("Failed to load workspace").into_response();
+        }
+    };
+
+    let members = match app_state.workspace_repo.list_members(workspace_id).await {
+        Ok(list) => list,
+        Err(err) => {
+            error!(?err, %workspace_id, "failed to list workspace members");
+            return JsonResponse::server_error("Failed to list members").into_response();
+        }
+    };
+
+    let target_member = match members
+        .into_iter()
+        .find(|member| member.user_id == payload.member_id)
+    {
+        Some(member) => member,
+        None => return JsonResponse::not_found("Member not found").into_response(),
+    };
+
+    if target_member.role == WorkspaceRole::Owner {
+        return JsonResponse::bad_request(
+            "Transfer ownership to another member before revoking this user",
+        )
+        .into_response();
+    }
+
+    let memberships = match app_state
+        .workspace_repo
+        .list_user_workspaces(payload.member_id)
+        .await
+    {
+        Ok(list) => list,
+        Err(err) => {
+            error!(?err, member_id = %payload.member_id, "failed to load member memberships");
+            return JsonResponse::server_error("Failed to revoke member").into_response();
+        }
+    };
+
+    let should_provision_solo = memberships.len() == 1;
+
+    let reason_clean = payload
+        .reason
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    match app_state
+        .workspace_repo
+        .revoke_member(
+            workspace_id,
+            payload.member_id,
+            user_id,
+            reason_clean.as_deref(),
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(sqlx::Error::RowNotFound) => {
+            return JsonResponse::not_found("Member not found").into_response();
+        }
+        Err(err) => {
+            error!(?err, %workspace_id, member_id = %payload.member_id, "failed to revoke member");
+            return JsonResponse::server_error("Failed to revoke member").into_response();
+        }
+    }
+
+    if should_provision_solo {
+        if let Err(err) = ensure_solo_workspace_for_user(&app_state, payload.member_id).await {
+            error!(?err, member_id = %payload.member_id, %workspace_id, "failed to provision solo workspace after revocation");
+            let _ = app_state
+                .workspace_repo
+                .add_member(workspace_id, payload.member_id, target_member.role)
+                .await;
+            return JsonResponse::server_error("Failed to provision Solo workspace")
+                .into_response();
+        }
+    }
+
+    let subject = format!("Removed from {}", workspace.name);
+    let mut body = format!(
+        "You have been removed from the {} workspace on DSentr.",
+        workspace.name
+    );
+
+    if let Some(reason) = reason_clean.as_deref() {
+        body.push_str("\n\nReason provided: ");
+        body.push_str(reason);
+    }
+
+    if should_provision_solo {
+        body.push_str(
+            "\n\nWe've provisioned a personal Solo workspace so you can continue building automations.",
+        );
+    }
+
+    if !claims.first_name.trim().is_empty() || !claims.last_name.trim().is_empty() {
+        body.push_str("\n\nInitiated by: ");
+        body.push_str(claims.first_name.trim());
+        let last = claims.last_name.trim();
+        if !last.is_empty() {
+            if !claims.first_name.trim().is_empty() {
+                body.push(' ');
+            }
+            body.push_str(last);
+        }
+    }
+
+    if let Err(err) = app_state
+        .mailer
+        .send_email_generic(&target_member.email, &subject, &body)
+        .await
+    {
+        warn!(
+            ?err,
+            member_email = target_member.email,
+            "failed to send revocation email"
+        );
+    }
+
+    Json(json!({"success": true})).into_response()
 }
 
 // --- Email-based invitations ---
@@ -980,14 +1294,21 @@ pub async fn workspace_to_solo_execute(
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_invitation, build_invite_signup_url, decline_invitation, InvitationDecisionPayload,
+        accept_invitation, build_invite_signup_url, decline_invitation, leave_workspace,
+        revoke_workspace_member, InvitationDecisionPayload, RevokeWorkspaceMemberPayload,
     };
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
     use crate::db::{
         mock_db::{MockDb, NoopWorkflowRepository},
         workspace_repository::WorkspaceRepository,
     };
-    use crate::models::workspace::{WorkspaceInvitation, WorkspaceRole};
+    use crate::models::{
+        user::{OauthProvider, User, UserRole},
+        workspace::{
+            Workspace, WorkspaceInvitation, WorkspaceMember, WorkspaceMembershipSummary,
+            WorkspaceRole,
+        },
+    };
     use crate::routes::auth::{claims::Claims, session::AuthSession};
     use crate::services::{
         oauth::{
@@ -1001,7 +1322,10 @@ mod tests {
     use axum::{body::to_bytes, extract::State, http::StatusCode, Json};
     use reqwest::Client;
     use serde_json::Value;
-    use std::sync::{Arc, Mutex};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
     use time::OffsetDateTime;
     use uuid::Uuid;
 
@@ -1019,6 +1343,59 @@ mod tests {
         }
 
         async fn send_email_generic(&self, _: &str, _: &str, _: &str) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_email_with_config(
+            &self,
+            _: &SmtpConfig,
+            _: &[String],
+            _: &str,
+            _: &str,
+        ) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[derive(Default, Clone)]
+    struct RecordingMailer {
+        sent: Arc<Mutex<Vec<(String, String, String)>>>,
+    }
+
+    impl RecordingMailer {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn sent(&self) -> Vec<(String, String, String)> {
+            self.sent.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl Mailer for RecordingMailer {
+        async fn send_verification_email(&self, _: &str, _: &str) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_reset_email(&self, _: &str, _: &str) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_email_generic(
+            &self,
+            to: &str,
+            subject: &str,
+            body: &str,
+        ) -> Result<(), MailError> {
+            self.sent
+                .lock()
+                .unwrap()
+                .push((to.to_string(), subject.to_string(), body.to_string()));
             Ok(())
         }
 
@@ -1115,6 +1492,20 @@ mod tests {
             unimplemented!()
         }
 
+        async fn leave_workspace(&self, _: Uuid, _: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn revoke_member(
+            &self,
+            _: Uuid,
+            _: Uuid,
+            _: Uuid,
+            _: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
         async fn list_members(
             &self,
             _: Uuid,
@@ -1128,6 +1519,14 @@ mod tests {
         ) -> Result<Vec<crate::models::workspace::WorkspaceMembershipSummary>, sqlx::Error>
         {
             unimplemented!()
+        }
+
+        async fn list_user_workspaces(
+            &self,
+            _: Uuid,
+        ) -> Result<Vec<crate::models::workspace::WorkspaceMembershipSummary>, sqlx::Error>
+        {
+            Ok(vec![])
         }
 
         async fn create_workspace_invitation(
@@ -1170,6 +1569,301 @@ mod tests {
             self.declined.lock().unwrap().push(invite_id);
             Ok(())
         }
+
+        async fn list_pending_invitations_for_email(
+            &self,
+            _: &str,
+        ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingWorkspaceRepo {
+        workspaces: Arc<Mutex<HashMap<Uuid, Workspace>>>,
+        members: Arc<Mutex<HashMap<Uuid, Vec<WorkspaceMember>>>>,
+        audits: Arc<Mutex<Vec<(Uuid, Uuid, Uuid, Option<String>)>>>,
+    }
+
+    impl RecordingWorkspaceRepo {
+        fn seeded(workspace: Workspace, members: Vec<WorkspaceMember>) -> Self {
+            let mut workspace_map = HashMap::new();
+            workspace_map.insert(workspace.id, workspace);
+
+            let mut member_map: HashMap<Uuid, Vec<WorkspaceMember>> = HashMap::new();
+            for member in members {
+                member_map
+                    .entry(member.workspace_id)
+                    .or_default()
+                    .push(member);
+            }
+
+            Self {
+                workspaces: Arc::new(Mutex::new(workspace_map)),
+                members: Arc::new(Mutex::new(member_map)),
+                audits: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn audit_records(&self) -> Vec<(Uuid, Uuid, Uuid, Option<String>)> {
+            self.audits.lock().unwrap().clone()
+        }
+
+        fn membership_count(&self, user_id: Uuid) -> usize {
+            let members = self.members.lock().unwrap();
+            members
+                .values()
+                .flat_map(|list| list.iter())
+                .filter(|member| member.user_id == user_id)
+                .count()
+        }
+
+        fn member_exists(&self, workspace_id: Uuid, user_id: Uuid) -> bool {
+            self.members
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .map(|list| list.iter().any(|member| member.user_id == user_id))
+                .unwrap_or(false)
+        }
+
+        fn workspace_count(&self) -> usize {
+            self.workspaces.lock().unwrap().len()
+        }
+
+        fn copy_member_profile(&self, user_id: Uuid) -> (String, String, String) {
+            let members = self.members.lock().unwrap();
+            members
+                .values()
+                .flat_map(|list| list.iter())
+                .find(|member| member.user_id == user_id)
+                .map(|member| {
+                    (
+                        member.email.clone(),
+                        member.first_name.clone(),
+                        member.last_name.clone(),
+                    )
+                })
+                .unwrap_or_else(|| (String::new(), String::new(), String::new()))
+        }
+
+        fn delete_member(&self, workspace_id: Uuid, user_id: Uuid) -> bool {
+            let mut members = self.members.lock().unwrap();
+            if let Some(list) = members.get_mut(&workspace_id) {
+                let before = list.len();
+                list.retain(|member| member.user_id != user_id);
+                return list.len() != before;
+            }
+            false
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceRepository for RecordingWorkspaceRepo {
+        async fn create_workspace(
+            &self,
+            name: &str,
+            created_by: Uuid,
+        ) -> Result<Workspace, sqlx::Error> {
+            let workspace = Workspace {
+                id: Uuid::new_v4(),
+                name: name.to_string(),
+                created_by,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            };
+            self.workspaces
+                .lock()
+                .unwrap()
+                .insert(workspace.id, workspace.clone());
+            Ok(workspace)
+        }
+
+        async fn update_workspace_name(
+            &self,
+            workspace_id: Uuid,
+            name: &str,
+        ) -> Result<Workspace, sqlx::Error> {
+            let mut workspaces = self.workspaces.lock().unwrap();
+            if let Some(ws) = workspaces.get_mut(&workspace_id) {
+                ws.name = name.to_string();
+                ws.updated_at = OffsetDateTime::now_utc();
+                return Ok(ws.clone());
+            }
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn find_workspace(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Option<Workspace>, sqlx::Error> {
+            Ok(self.workspaces.lock().unwrap().get(&workspace_id).cloned())
+        }
+
+        async fn add_member(
+            &self,
+            workspace_id: Uuid,
+            user_id: Uuid,
+            role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            let (email, first_name, last_name) = self.copy_member_profile(user_id);
+            let mut members = self.members.lock().unwrap();
+            let entry = members.entry(workspace_id).or_default();
+            entry.retain(|member| member.user_id != user_id);
+            entry.push(WorkspaceMember {
+                workspace_id,
+                user_id,
+                role,
+                joined_at: OffsetDateTime::now_utc(),
+                email,
+                first_name,
+                last_name,
+            });
+            Ok(())
+        }
+
+        async fn set_member_role(
+            &self,
+            workspace_id: Uuid,
+            user_id: Uuid,
+            role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            let mut members = self.members.lock().unwrap();
+            if let Some(list) = members.get_mut(&workspace_id) {
+                if let Some(member) = list.iter_mut().find(|member| member.user_id == user_id) {
+                    member.role = role;
+                    return Ok(());
+                }
+            }
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn remove_member(
+            &self,
+            workspace_id: Uuid,
+            user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            if self.delete_member(workspace_id, user_id) {
+                Ok(())
+            } else {
+                Err(sqlx::Error::RowNotFound)
+            }
+        }
+
+        async fn leave_workspace(
+            &self,
+            workspace_id: Uuid,
+            user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            self.remove_member(workspace_id, user_id).await
+        }
+
+        async fn revoke_member(
+            &self,
+            workspace_id: Uuid,
+            member_id: Uuid,
+            revoked_by: Uuid,
+            reason: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            if self.delete_member(workspace_id, member_id) {
+                self.audits.lock().unwrap().push((
+                    workspace_id,
+                    member_id,
+                    revoked_by,
+                    reason.map(|value| value.to_string()),
+                ));
+                Ok(())
+            } else {
+                Err(sqlx::Error::RowNotFound)
+            }
+        }
+
+        async fn list_members(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Vec<WorkspaceMember>, sqlx::Error> {
+            Ok(self
+                .members
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        async fn list_memberships_for_user(
+            &self,
+            user_id: Uuid,
+        ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+            self.list_user_workspaces(user_id).await
+        }
+
+        async fn list_user_workspaces(
+            &self,
+            user_id: Uuid,
+        ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+            let workspaces = self.workspaces.lock().unwrap();
+            let members = self.members.lock().unwrap();
+
+            let mut summaries = Vec::new();
+            for (workspace_id, list) in members.iter() {
+                if let Some(member) = list.iter().find(|member| member.user_id == user_id) {
+                    if let Some(workspace) = workspaces.get(workspace_id) {
+                        summaries.push(WorkspaceMembershipSummary {
+                            workspace: workspace.clone(),
+                            role: member.role,
+                        });
+                    }
+                }
+            }
+
+            Ok(summaries)
+        }
+
+        async fn create_workspace_invitation(
+            &self,
+            _: Uuid,
+            _: &str,
+            _: WorkspaceRole,
+            _: &str,
+            _: OffsetDateTime,
+            _: Uuid,
+        ) -> Result<WorkspaceInvitation, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_workspace_invitations(
+            &self,
+            _: Uuid,
+        ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn revoke_workspace_invitation(&self, _: Uuid) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn find_invitation_by_token(
+            &self,
+            _: &str,
+        ) -> Result<Option<WorkspaceInvitation>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn mark_invitation_accepted(&self, _: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn mark_invitation_declined(&self, _: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn list_pending_invitations_for_email(
+            &self,
+            _: &str,
+        ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+            Ok(vec![])
+        }
     }
 
     fn test_config() -> Arc<Config> {
@@ -1198,6 +1892,26 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository::default()),
             workspace_repo: repo,
             mailer: Arc::new(NoopMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
+            worker_id: Arc::new("worker-1".into()),
+            worker_lease_seconds: 30,
+        }
+    }
+
+    fn state_with_components(
+        repo: Arc<dyn WorkspaceRepository>,
+        mailer: Arc<dyn Mailer>,
+        db: Arc<MockDb>,
+    ) -> AppState {
+        AppState {
+            db: db.clone(),
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            workspace_repo: repo,
+            mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
@@ -1306,5 +2020,238 @@ mod tests {
         assert!(members.is_empty());
         assert!(accepted.is_empty());
         assert_eq!(declined, vec![invite.id]);
+    }
+
+    #[tokio::test]
+    async fn leave_workspace_blocks_owner() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let admin_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team Workspace".into(),
+            created_by: owner_id,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let members = vec![
+            WorkspaceMember {
+                workspace_id,
+                user_id: owner_id,
+                role: WorkspaceRole::Owner,
+                joined_at: now,
+                email: "owner@example.com".into(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+            },
+            WorkspaceMember {
+                workspace_id,
+                user_id: admin_id,
+                role: WorkspaceRole::Admin,
+                joined_at: now,
+                email: "admin@example.com".into(),
+                first_name: "Admin".into(),
+                last_name: "User".into(),
+            },
+        ];
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
+
+        let mut db = MockDb::default();
+        db.find_user_result = Some(User {
+            id: owner_id,
+            email: "owner@example.com".into(),
+            password_hash: String::new(),
+            first_name: "Owner".into(),
+            last_name: "User".into(),
+            role: Some(UserRole::User),
+            plan: None,
+            company_name: None,
+            oauth_provider: Some(OauthProvider::Email),
+            onboarded_at: Some(now),
+            created_at: now,
+        });
+
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer::default()) as Arc<dyn Mailer>,
+            Arc::new(db),
+        );
+
+        let response = leave_workspace(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "owner@example.com")),
+            axum::extract::Path(workspace_id),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(repo.member_exists(workspace_id, owner_id));
+    }
+
+    #[tokio::test]
+    async fn leave_workspace_provisions_solo_for_last_membership() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Shared Automation".into(),
+            created_by: owner_id,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let members = vec![
+            WorkspaceMember {
+                workspace_id,
+                user_id: owner_id,
+                role: WorkspaceRole::Owner,
+                joined_at: now,
+                email: "owner@example.com".into(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+            },
+            WorkspaceMember {
+                workspace_id,
+                user_id: member_id,
+                role: WorkspaceRole::Admin,
+                joined_at: now,
+                email: "member@example.com".into(),
+                first_name: "Member".into(),
+                last_name: "User".into(),
+            },
+        ];
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
+
+        let mut db = MockDb::default();
+        db.find_user_result = Some(User {
+            id: member_id,
+            email: "member@example.com".into(),
+            password_hash: String::new(),
+            first_name: "Member".into(),
+            last_name: "User".into(),
+            role: Some(UserRole::User),
+            plan: None,
+            company_name: None,
+            oauth_provider: Some(OauthProvider::Email),
+            onboarded_at: Some(now),
+            created_at: now,
+        });
+
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer::default()) as Arc<dyn Mailer>,
+            Arc::new(db),
+        );
+
+        let response = leave_workspace(
+            State(state),
+            AuthSession(claims_fixture(member_id, "member@example.com")),
+            axum::extract::Path(workspace_id),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(!repo.member_exists(workspace_id, member_id));
+        assert_eq!(repo.membership_count(member_id), 1);
+        assert!(repo.workspace_count() >= 2);
+    }
+
+    #[tokio::test]
+    async fn revoke_workspace_member_logs_audit_and_sends_notification() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Growth Team".into(),
+            created_by: owner_id,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let members = vec![
+            WorkspaceMember {
+                workspace_id,
+                user_id: owner_id,
+                role: WorkspaceRole::Owner,
+                joined_at: now,
+                email: "owner@example.com".into(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+            },
+            WorkspaceMember {
+                workspace_id,
+                user_id: member_id,
+                role: WorkspaceRole::Viewer,
+                joined_at: now,
+                email: "member@example.com".into(),
+                first_name: "Member".into(),
+                last_name: "User".into(),
+            },
+        ];
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace.clone(), members));
+        let mailer = Arc::new(RecordingMailer::new());
+
+        let mut db = MockDb::default();
+        db.find_user_result = Some(User {
+            id: member_id,
+            email: "member@example.com".into(),
+            password_hash: String::new(),
+            first_name: "Member".into(),
+            last_name: "User".into(),
+            role: Some(UserRole::User),
+            plan: None,
+            company_name: None,
+            oauth_provider: Some(OauthProvider::Email),
+            onboarded_at: Some(now),
+            created_at: now,
+        });
+
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
+            mailer.clone() as Arc<dyn Mailer>,
+            Arc::new(db),
+        );
+
+        let payload = RevokeWorkspaceMemberPayload {
+            member_id,
+            reason: Some("Compliance issue".into()),
+        };
+
+        let response = revoke_workspace_member(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "owner@example.com")),
+            axum::extract::Path(workspace_id),
+            Json(payload),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(!repo.member_exists(workspace_id, member_id));
+        assert_eq!(repo.membership_count(member_id), 1);
+
+        let audits = repo.audit_records();
+        assert_eq!(audits.len(), 1);
+        assert_eq!(audits[0].0, workspace_id);
+        assert_eq!(audits[0].1, member_id);
+        assert_eq!(audits[0].2, owner_id);
+        assert_eq!(audits[0].3.as_deref(), Some("Compliance issue"));
+
+        let sent = mailer.sent();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "member@example.com");
+        assert_eq!(sent[0].1, format!("Removed from {}", workspace.name));
+        assert!(sent[0].2.contains("Compliance issue"));
     }
 }

@@ -37,12 +37,27 @@ pub trait WorkspaceRepository: Send + Sync {
 
     async fn remove_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error>;
 
+    async fn leave_workspace(&self, workspace_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn revoke_member(
+        &self,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        revoked_by: Uuid,
+        reason: Option<&str>,
+    ) -> Result<(), sqlx::Error>;
+
     async fn list_members(
         &self,
         workspace_id: Uuid,
     ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error>;
 
     async fn list_memberships_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error>;
+
+    async fn list_user_workspaces(
         &self,
         user_id: Uuid,
     ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error>;
@@ -73,4 +88,9 @@ pub trait WorkspaceRepository: Send + Sync {
     async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error>;
 
     async fn mark_invitation_declined(&self, invite_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn list_pending_invitations_for_email(
+        &self,
+        email: &str,
+    ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error>;
 }

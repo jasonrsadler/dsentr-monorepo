@@ -122,6 +122,50 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         Ok(())
     }
 
+    async fn leave_workspace(&self, workspace_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error> {
+        self.remove_member(workspace_id, user_id).await
+    }
+
+    async fn revoke_member(
+        &self,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        revoked_by: Uuid,
+        reason: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        let result = sqlx::query!(
+            r#"DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"#,
+            workspace_id,
+            member_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Err(sqlx::Error::RowNotFound);
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO workspace_member_audit (workspace_id, user_id, action, acted_by, reason)
+            VALUES ($1, $2, 'revoked', $3, $4)
+            "#,
+            workspace_id,
+            member_id,
+            revoked_by,
+            reason
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(())
+    }
+
     async fn list_members(
         &self,
         workspace_id: Uuid,
@@ -149,6 +193,13 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
     }
 
     async fn list_memberships_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+        self.list_user_workspaces(user_id).await
+    }
+
+    async fn list_user_workspaces(
         &self,
         user_id: Uuid,
     ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
@@ -275,5 +326,37 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn list_pending_invitations_for_email(
+        &self,
+        email: &str,
+    ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+        sqlx::query_as!(
+            WorkspaceInvitation,
+            r#"
+            SELECT id,
+                   workspace_id,
+                   email,
+                   role as "role: WorkspaceRole",
+                   token,
+                   expires_at,
+                   created_by,
+                   created_at,
+                   accepted_at,
+                   revoked_at,
+                   ignored_at as "declined_at?: OffsetDateTime"
+            FROM workspace_invitations
+            WHERE lower(email) = lower($1)
+              AND accepted_at IS NULL
+              AND revoked_at IS NULL
+              AND ignored_at IS NULL
+              AND expires_at > now()
+            ORDER BY created_at DESC
+            "#,
+            email
+        )
+        .fetch_all(&self.pool)
+        .await
     }
 }

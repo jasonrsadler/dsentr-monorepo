@@ -653,6 +653,24 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         Ok(())
     }
 
+    async fn leave_workspace(
+        &self,
+        _workspace_id: Uuid,
+        _user_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn revoke_member(
+        &self,
+        _workspace_id: Uuid,
+        _member_id: Uuid,
+        _revoked_by: Uuid,
+        _reason: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
     async fn list_members(
         &self,
         _workspace_id: Uuid,
@@ -661,6 +679,13 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
     }
 
     async fn list_memberships_for_user(
+        &self,
+        _user_id: Uuid,
+    ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn list_user_workspaces(
         &self,
         _user_id: Uuid,
     ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
@@ -715,5 +740,12 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
 
     async fn mark_invitation_declined(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
+    }
+
+    async fn list_pending_invitations_for_email(
+        &self,
+        _email: &str,
+    ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+        Ok(vec![])
     }
 }

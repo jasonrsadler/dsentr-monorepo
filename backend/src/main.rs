@@ -330,6 +330,7 @@ async fn main() {
         .layer(csrf_layer.clone());
 
     let workspace_routes = Router::new()
+        .route("/", get(routes::workspaces::list_workspaces))
         .route(
             "/onboarding",
             get(routes::workspaces::get_onboarding_context)
@@ -345,6 +346,14 @@ async fn main() {
             "/{workspace_id}/members/{member_id}",
             put(routes::workspaces::update_workspace_member_role)
                 .delete(routes::workspaces::remove_workspace_member),
+        )
+        .route(
+            "/{workspace_id}/leave",
+            post(routes::workspaces::leave_workspace),
+        )
+        .route(
+            "/{workspace_id}/revoke",
+            post(routes::workspaces::revoke_workspace_member),
         )
         .route(
             "/plan/workspace-to-solo-preview",
@@ -408,6 +417,7 @@ async fn main() {
     let public_workflow_routes =
         Router::new().route("/{workflow_id}/trigger/{token}", post(webhook_trigger));
     let invite_routes = Router::new()
+        .route("/invites", get(routes::workspaces::list_pending_invites))
         .route(
             "/invites/{token}",
             get(routes::workspaces::preview_invitation),
