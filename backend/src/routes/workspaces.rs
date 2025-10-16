@@ -8,6 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::OffsetDateTime;
+use urlencoding::encode;
 use uuid::Uuid;
 
 use crate::{
@@ -640,6 +641,10 @@ fn random_token() -> String {
     Uuid::new_v4().to_string().replace('-', "")
 }
 
+fn build_invite_signup_url(frontend_origin: &str, token: &str) -> String {
+    format!("{}/signup?invite={}", frontend_origin, encode(token))
+}
+
 pub async fn create_workspace_invitation(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -697,7 +702,7 @@ pub async fn create_workspace_invitation(
 
     // Send email with invite link
     let frontend = &app_state.config.frontend_origin;
-    let accept_url = format!("{}/login?invite={}", frontend, invite.token);
+    let accept_url = build_invite_signup_url(frontend, &invite.token);
     let subject = format!("You're invited to join {} on DSentr", workspace_id);
     let body = format!(
         "You've been invited to join a workspace on DSentr.\n\nOpen this link to accept: {}\n\nThis link expires in {} days.",
@@ -896,4 +901,15 @@ pub async fn workspace_to_solo_execute(
         .update_user_plan(acting, PlanTier::Solo.as_str())
         .await;
     Json(json!({"success": true})).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_invite_signup_url;
+
+    #[test]
+    fn invite_urls_target_signup_with_encoded_token() {
+        let url = build_invite_signup_url("https://app.example.com", "abc+/=?");
+        assert_eq!(url, "https://app.example.com/signup?invite=abc%2B%2F%3D%3F");
+    }
 }

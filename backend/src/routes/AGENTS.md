@@ -18,3 +18,4 @@
 - Handlers expect `AppState` and often an `AuthSession` extractor; ensure new routes reuse these patterns for authorization.
 - For APIs returning JSON, use `responses::JsonResponse` helpers to keep status/message structure consistent.
 - When adding new route groups, update `main.rs` to mount them and consider rate-limit layer alignment (`auth_governor_conf` vs global).
+- Workspace invitation emails must link to `/signup?invite=…` and use URL-encoded tokens—update the dedicated test if this contract changes.
