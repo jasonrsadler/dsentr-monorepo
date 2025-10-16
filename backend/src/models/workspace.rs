@@ -32,6 +32,9 @@ pub struct WorkspaceMember {
     pub role: WorkspaceRole,
     #[serde(with = "time::serde::rfc3339")]
     pub joined_at: OffsetDateTime,
+    pub email: String,
+    pub first_name: String,
+    pub last_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

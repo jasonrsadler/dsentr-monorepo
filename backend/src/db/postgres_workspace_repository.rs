@@ -129,10 +129,18 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         sqlx::query_as!(
             crate::models::workspace::WorkspaceMember,
             r#"
-            SELECT workspace_id, user_id, role as "role: WorkspaceRole", joined_at
-            FROM workspace_members
-            WHERE workspace_id = $1
-            ORDER BY joined_at ASC
+            SELECT
+                m.workspace_id,
+                m.user_id,
+                m.role as "role: WorkspaceRole",
+                m.joined_at,
+                u.email,
+                u.first_name,
+                u.last_name
+            FROM workspace_members m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.workspace_id = $1
+            ORDER BY m.joined_at ASC
             "#,
             workspace_id
         )

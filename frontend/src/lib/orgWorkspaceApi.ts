@@ -6,6 +6,9 @@ export type WorkspaceMember = {
   user_id: string
   role: 'owner' | 'admin' | 'user' | 'viewer'
   joined_at: string
+  email?: string | null
+  first_name?: string | null
+  last_name?: string | null
 }
 
 export type WorkspaceInvitation = {

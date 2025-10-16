@@ -12,6 +12,17 @@ import {
 } from '@/lib/orgWorkspaceApi'
 import { normalizePlanTier } from '@/lib/planTiers'
 
+const resolveMemberIdentity = (member: WorkspaceMember) => {
+  const firstName = member.first_name?.trim() ?? ''
+  const lastName = member.last_name?.trim() ?? ''
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim()
+  const email = member.email?.trim() ?? ''
+  const primary = fullName || email || member.user_id
+  const secondary = fullName && email ? email : undefined
+  const identifier = primary !== member.user_id ? member.user_id : undefined
+  return { primary, secondary, identifier }
+}
+
 export default function MembersTab() {
   const { memberships, user, checkAuth } = useAuth()
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
@@ -289,7 +300,7 @@ export default function MembersTab() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left">
-              <th className="py-2">User</th>
+              <th className="py-2">Member</th>
               <th className="py-2">Role</th>
               <th className="py-2"></th>
             </tr>
@@ -309,12 +320,29 @@ export default function MembersTab() {
                 busy || !canManageMembers || m.role === 'owner'
               const disableRemove =
                 busy || !canManageMembers || m.role === 'owner'
+              const identity = resolveMemberIdentity(m)
               return (
                 <tr
                   key={m.user_id}
                   className="border-t border-zinc-200 dark:border-zinc-700"
                 >
-                  <td className="py-2 font-mono text-xs">{m.user_id}</td>
+                  <td className="py-2">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {identity.primary}
+                      </span>
+                      {identity.secondary && (
+                        <span className="text-xs text-zinc-500">
+                          {identity.secondary}
+                        </span>
+                      )}
+                      {identity.identifier && (
+                        <span className="text-[11px] font-mono text-zinc-500 break-all">
+                          {identity.identifier}
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="py-2">
                     <select
                       value={m.role}
