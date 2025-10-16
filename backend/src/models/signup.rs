@@ -6,7 +6,7 @@ use super::user::OauthProvider;
 #[serde(rename_all = "snake_case")]
 pub enum SignupInviteDecision {
     Join,
-    Ignore,
+    Decline,
 }
 
 #[derive(Deserialize, Serialize)]

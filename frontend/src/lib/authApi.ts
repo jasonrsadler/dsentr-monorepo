@@ -12,7 +12,7 @@ type SignupRequest = {
   tax_id?: string
   settings?: Record<string, any>
   invite_token?: string
-  invite_decision?: 'join' | 'ignore'
+  invite_decision?: 'join' | 'decline'
 }
 
 export async function signupUser(

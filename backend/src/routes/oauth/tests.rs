@@ -1,4 +1,3 @@
-use super::*;
 use axum::{
     extract::State,
     http::{header, StatusCode},
@@ -12,12 +11,22 @@ use crate::models::user::UserRole;
 use crate::routes::auth::{claims::Claims, session::AuthSession};
 use crate::services::{
     oauth::{
-        account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
+        account_service::{OAuthAccountError, OAuthAccountService},
+        github::mock_github_oauth::MockGitHubOAuth,
         google::mock_google_oauth::MockGoogleOAuth,
     },
     smtp_mailer::MockMailer,
 };
 use crate::state::AppState;
+
+use super::{
+    connect::google_connect_start,
+    helpers::{
+        build_state_cookie, default_provider_statuses, error_message_for_redirect, handle_callback,
+        parse_provider, CallbackQuery, GOOGLE_STATE_COOKIE,
+    },
+    prelude::ConnectedOAuthProvider,
+};
 
 fn stub_config() -> Arc<Config> {
     Arc::new(Config {

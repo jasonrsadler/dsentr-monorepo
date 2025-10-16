@@ -104,12 +104,12 @@ describe('SignupPage', () => {
           created_at: new Date().toISOString(),
           accepted_at: null,
           revoked_at: null,
-          ignored_at: null
+          declined_at: null
         },
         expired: false,
         revoked: false,
         accepted: false,
-        ignored: false
+        declined: false
       })
     })
 
@@ -164,12 +164,12 @@ describe('SignupPage', () => {
           created_at: new Date().toISOString(),
           accepted_at: null,
           revoked_at: null,
-          ignored_at: null
+          declined_at: null
         },
         expired: false,
         revoked: false,
         accepted: false,
-        ignored: false
+        declined: false
       })
     })
 
@@ -204,7 +204,7 @@ describe('SignupPage', () => {
       expect(signupUser).toHaveBeenCalledWith(
         expect.objectContaining({
           invite_token: 'invite-token',
-          invite_decision: 'ignore'
+          invite_decision: 'decline'
         })
       )
     })
@@ -225,12 +225,12 @@ describe('SignupPage', () => {
           created_at: new Date().toISOString(),
           accepted_at: null,
           revoked_at: null,
-          ignored_at: null
+          declined_at: null
         },
         expired: true,
         revoked: false,
         accepted: false,
-        ignored: false
+        declined: false
       })
     })
 

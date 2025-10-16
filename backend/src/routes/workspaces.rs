@@ -778,14 +778,14 @@ pub async fn preview_invitation(
             let expired = inv.expires_at <= now;
             let revoked = inv.revoked_at.is_some();
             let accepted = inv.accepted_at.is_some();
-            let ignored = inv.ignored_at.is_some();
+            let declined = inv.declined_at.is_some();
             Json(json!({
                 "success": true,
                 "invitation": inv,
                 "expired": expired,
                 "revoked": revoked,
                 "accepted": accepted,
-                "ignored": ignored,
+                "declined": declined,
             }))
             .into_response()
         }
@@ -794,43 +794,111 @@ pub async fn preview_invitation(
     }
 }
 
-// Public: accept invite (requires login)
+#[derive(Debug, Deserialize)]
+pub struct InvitationDecisionPayload {
+    pub token: String,
+}
+
+async fn load_active_invitation(
+    app_state: &AppState,
+    token: &str,
+) -> Result<crate::models::workspace::WorkspaceInvitation, Response> {
+    let invite = match app_state
+        .workspace_repo
+        .find_invitation_by_token(token)
+        .await
+    {
+        Ok(Some(invite)) => invite,
+        Ok(None) => return Err(JsonResponse::not_found("Invite not found").into_response()),
+        Err(_) => return Err(JsonResponse::server_error("Failed to load invite").into_response()),
+    };
+
+    let now = OffsetDateTime::now_utc();
+    if invite.revoked_at.is_some()
+        || invite.accepted_at.is_some()
+        || invite.declined_at.is_some()
+        || invite.expires_at <= now
+    {
+        return Err(JsonResponse::bad_request("Invitation is not valid").into_response());
+    }
+
+    Ok(invite)
+}
+
+// Authenticated: accept invite
 pub async fn accept_invitation(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
-    axum::extract::Path(token): axum::extract::Path<String>,
+    Json(payload): Json<InvitationDecisionPayload>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    let invite = match app_state
-        .workspace_repo
-        .find_invitation_by_token(&token)
-        .await
-    {
-        Ok(Some(i)) => i,
-        Ok(None) => return JsonResponse::not_found("Invite not found").into_response(),
-        Err(_) => return JsonResponse::server_error("Failed to load invite").into_response(),
+
+    let invite = match load_active_invitation(&app_state, payload.token.trim()).await {
+        Ok(invite) => invite,
+        Err(resp) => return resp,
     };
-    let now = OffsetDateTime::now_utc();
-    if invite.revoked_at.is_some()
-        || invite.accepted_at.is_some()
-        || invite.ignored_at.is_some()
-        || invite.expires_at <= now
-    {
-        return JsonResponse::bad_request("Invitation is not valid").into_response();
+
+    if !invite.email.eq_ignore_ascii_case(&claims.email) {
+        return JsonResponse::forbidden("Invitation email mismatch").into_response();
     }
-    // Add workspace membership
-    let _ = app_state
+
+    if let Err(err) = app_state
         .workspace_repo
         .add_member(invite.workspace_id, user_id, invite.role)
-        .await;
-    let _ = app_state
+        .await
+    {
+        tracing::error!(?err, invite_id = %invite.id, "failed to add invited member");
+        return JsonResponse::server_error("Failed to attach workspace membership").into_response();
+    }
+
+    if let Err(err) = app_state
         .workspace_repo
         .mark_invitation_accepted(invite.id)
-        .await;
-    Json(json!({"success": true})).into_response()
+        .await
+    {
+        tracing::error!(?err, invite_id = %invite.id, "failed to mark invite accepted");
+        return JsonResponse::server_error("Failed to update invitation").into_response();
+    }
+
+    Json(json!({
+        "success": true,
+        "workspace_id": invite.workspace_id,
+    }))
+    .into_response()
+}
+
+// Authenticated: decline invite
+pub async fn decline_invitation(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Json(payload): Json<InvitationDecisionPayload>,
+) -> Response {
+    let invite = match load_active_invitation(&app_state, payload.token.trim()).await {
+        Ok(invite) => invite,
+        Err(resp) => return resp,
+    };
+
+    if !invite.email.eq_ignore_ascii_case(&claims.email) {
+        return JsonResponse::forbidden("Invitation email mismatch").into_response();
+    }
+
+    if let Err(err) = app_state
+        .workspace_repo
+        .mark_invitation_declined(invite.id)
+        .await
+    {
+        tracing::error!(?err, invite_id = %invite.id, "failed to mark invite declined");
+        return JsonResponse::server_error("Failed to update invitation").into_response();
+    }
+
+    Json(json!({
+        "success": true,
+        "message": "Invite declined",
+    }))
+    .into_response()
 }
 
 // Workspace -> Solo downgrade
@@ -911,11 +979,332 @@ pub async fn workspace_to_solo_execute(
 
 #[cfg(test)]
 mod tests {
-    use super::build_invite_signup_url;
+    use super::{
+        accept_invitation, build_invite_signup_url, decline_invitation, InvitationDecisionPayload,
+    };
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
+    use crate::db::{
+        mock_db::{MockDb, NoopWorkflowRepository},
+        workspace_repository::WorkspaceRepository,
+    };
+    use crate::models::workspace::{WorkspaceInvitation, WorkspaceRole};
+    use crate::routes::auth::{claims::Claims, session::AuthSession};
+    use crate::services::{
+        oauth::{
+            account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
+            google::mock_google_oauth::MockGoogleOAuth,
+        },
+        smtp_mailer::{MailError, Mailer, SmtpConfig},
+    };
+    use crate::state::AppState;
+    use async_trait::async_trait;
+    use axum::{body::to_bytes, extract::State, http::StatusCode, Json};
+    use reqwest::Client;
+    use serde_json::Value;
+    use std::sync::{Arc, Mutex};
+    use time::OffsetDateTime;
+    use uuid::Uuid;
+
+    #[derive(Default)]
+    struct NoopMailer;
+
+    #[async_trait]
+    impl Mailer for NoopMailer {
+        async fn send_verification_email(&self, _: &str, _: &str) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_reset_email(&self, _: &str, _: &str) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_email_generic(&self, _: &str, _: &str, _: &str) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        async fn send_email_with_config(
+            &self,
+            _: &SmtpConfig,
+            _: &[String],
+            _: &str,
+            _: &str,
+        ) -> Result<(), MailError> {
+            Ok(())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[derive(Clone)]
+    struct TestWorkspaceRepo {
+        invitation: Arc<Mutex<Option<WorkspaceInvitation>>>,
+        members: Arc<Mutex<Vec<(Uuid, Uuid, WorkspaceRole)>>>,
+        accepted: Arc<Mutex<Vec<Uuid>>>,
+        declined: Arc<Mutex<Vec<Uuid>>>,
+    }
+
+    impl TestWorkspaceRepo {
+        fn new(invite: WorkspaceInvitation) -> Self {
+            Self {
+                invitation: Arc::new(Mutex::new(Some(invite))),
+                members: Arc::new(Mutex::new(Vec::new())),
+                accepted: Arc::new(Mutex::new(Vec::new())),
+                declined: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn records(&self) -> (Vec<(Uuid, Uuid, WorkspaceRole)>, Vec<Uuid>, Vec<Uuid>) {
+            (
+                self.members.lock().unwrap().clone(),
+                self.accepted.lock().unwrap().clone(),
+                self.declined.lock().unwrap().clone(),
+            )
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceRepository for TestWorkspaceRepo {
+        async fn create_workspace(
+            &self,
+            _: &str,
+            _: Uuid,
+        ) -> Result<crate::models::workspace::Workspace, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn update_workspace_name(
+            &self,
+            _: Uuid,
+            _: &str,
+        ) -> Result<crate::models::workspace::Workspace, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn find_workspace(
+            &self,
+            _: Uuid,
+        ) -> Result<Option<crate::models::workspace::Workspace>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn add_member(
+            &self,
+            workspace_id: Uuid,
+            user_id: Uuid,
+            role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            self.members
+                .lock()
+                .unwrap()
+                .push((workspace_id, user_id, role));
+            Ok(())
+        }
+
+        async fn set_member_role(
+            &self,
+            _: Uuid,
+            _: Uuid,
+            _: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn remove_member(&self, _: Uuid, _: Uuid) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_members(
+            &self,
+            _: Uuid,
+        ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_memberships_for_user(
+            &self,
+            _: Uuid,
+        ) -> Result<Vec<crate::models::workspace::WorkspaceMembershipSummary>, sqlx::Error>
+        {
+            unimplemented!()
+        }
+
+        async fn create_workspace_invitation(
+            &self,
+            _: Uuid,
+            _: &str,
+            _: WorkspaceRole,
+            _: &str,
+            _: OffsetDateTime,
+            _: Uuid,
+        ) -> Result<WorkspaceInvitation, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_workspace_invitations(
+            &self,
+            _: Uuid,
+        ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn revoke_workspace_invitation(&self, _: Uuid) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn find_invitation_by_token(
+            &self,
+            token: &str,
+        ) -> Result<Option<WorkspaceInvitation>, sqlx::Error> {
+            let stored = self.invitation.lock().unwrap().clone();
+            Ok(stored.filter(|inv| inv.token == token))
+        }
+
+        async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+            self.accepted.lock().unwrap().push(invite_id);
+            Ok(())
+        }
+
+        async fn mark_invitation_declined(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+            self.declined.lock().unwrap().push(invite_id);
+            Ok(())
+        }
+    }
+
+    fn test_config() -> Arc<Config> {
+        Arc::new(Config {
+            database_url: "postgres://localhost/test".into(),
+            frontend_origin: "https://app.example.com".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/microsoft".into(),
+                },
+                token_encryption_key: vec![0; 32],
+            },
+        })
+    }
+
+    fn test_state(repo: Arc<TestWorkspaceRepo>) -> AppState {
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            workspace_repo: repo,
+            mailer: Arc::new(NoopMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
+            worker_id: Arc::new("worker-1".into()),
+            worker_lease_seconds: 30,
+        }
+    }
+
+    fn invite_fixture(email: &str) -> WorkspaceInvitation {
+        WorkspaceInvitation {
+            id: Uuid::new_v4(),
+            workspace_id: Uuid::new_v4(),
+            email: email.to_string(),
+            role: WorkspaceRole::Admin,
+            token: "inv-token".into(),
+            expires_at: OffsetDateTime::now_utc() + time::Duration::hours(1),
+            created_by: Uuid::new_v4(),
+            created_at: OffsetDateTime::now_utc(),
+            accepted_at: None,
+            revoked_at: None,
+            declined_at: None,
+        }
+    }
+
+    fn claims_fixture(user_id: Uuid, email: &str) -> Claims {
+        Claims {
+            id: user_id.to_string(),
+            email: email.to_string(),
+            exp: OffsetDateTime::now_utc().unix_timestamp() as usize + 3600,
+            first_name: "Test".into(),
+            last_name: "User".into(),
+            role: None,
+            plan: None,
+            company_name: None,
+        }
+    }
 
     #[test]
     fn invite_urls_target_signup_with_encoded_token() {
         let url = build_invite_signup_url("https://app.example.com", "abc+/=?");
         assert_eq!(url, "https://app.example.com/signup?invite=abc%2B%2F%3D%3F");
+    }
+
+    #[tokio::test]
+    async fn accept_invitation_adds_membership_and_marks_status() {
+        let email = "member@example.com";
+        let invite = invite_fixture(email);
+        let repo = Arc::new(TestWorkspaceRepo::new(invite.clone()));
+        let state = test_state(repo.clone());
+        let user_id = Uuid::new_v4();
+        let claims = claims_fixture(user_id, email);
+
+        let response = accept_invitation(
+            State(state),
+            AuthSession(claims),
+            Json(InvitationDecisionPayload {
+                token: invite.token.clone(),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["success"], Value::Bool(true));
+        assert_eq!(
+            json["workspace_id"],
+            Value::String(invite.workspace_id.to_string())
+        );
+
+        let (members, accepted, declined) = repo.records();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].0, invite.workspace_id);
+        assert_eq!(members[0].1, user_id);
+        assert_eq!(members[0].2, invite.role);
+        assert_eq!(accepted, vec![invite.id]);
+        assert!(declined.is_empty());
+    }
+
+    #[tokio::test]
+    async fn decline_invitation_marks_declined_without_membership() {
+        let email = "member@example.com";
+        let invite = invite_fixture(email);
+        let repo = Arc::new(TestWorkspaceRepo::new(invite.clone()));
+        let state = test_state(repo.clone());
+        let claims = claims_fixture(Uuid::new_v4(), email);
+
+        let response = decline_invitation(
+            State(state),
+            AuthSession(claims),
+            Json(InvitationDecisionPayload {
+                token: invite.token.clone(),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["success"], Value::Bool(true));
+        assert_eq!(json["message"], Value::String("Invite declined".into()));
+
+        let (members, accepted, declined) = repo.records();
+        assert!(members.is_empty());
+        assert!(accepted.is_empty());
+        assert_eq!(declined, vec![invite.id]);
     }
 }

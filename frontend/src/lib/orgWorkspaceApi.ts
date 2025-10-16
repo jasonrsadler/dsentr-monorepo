@@ -148,15 +148,36 @@ export async function revokeWorkspaceInvite(
     throw new Error(body?.message || 'Failed to revoke invitation')
 }
 
-export async function acceptInviteToken(token: string) {
-  const res = await fetch(
-    `${API_BASE_URL}/api/invites/${encodeURIComponent(token)}`,
-    {
-      method: 'POST',
-      credentials: 'include'
-    }
-  )
+async function postInviteDecision(
+  path: string,
+  token: string,
+  errorMessage: string
+) {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token })
+  })
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to accept invitation')
+  if (!res.ok || body?.success === false) {
+    throw new Error(body?.message || errorMessage)
+  }
+  return body
+}
+
+export async function acceptInviteToken(token: string) {
+  return postInviteDecision(
+    '/api/invites/accept',
+    token,
+    'Failed to accept invitation'
+  )
+}
+
+export async function declineInviteToken(token: string) {
+  return postInviteDecision(
+    '/api/invites/decline',
+    token,
+    'Failed to decline invitation'
+  )
 }

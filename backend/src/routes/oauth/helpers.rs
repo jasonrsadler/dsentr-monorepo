@@ -188,7 +188,7 @@ pub fn map_oauth_error(err: OAuthAccountError) -> Response {
     }
 }
 
-fn error_message_for_redirect(err: &OAuthAccountError) -> String {
+pub(crate) fn error_message_for_redirect(err: &OAuthAccountError) -> String {
     match err {
         OAuthAccountError::NotFound => "Connection not found".to_string(),
         OAuthAccountError::Database(_) => {

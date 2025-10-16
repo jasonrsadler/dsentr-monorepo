@@ -23,12 +23,12 @@ type InvitePreviewResponse = {
     created_at: string
     accepted_at: string | null
     revoked_at: string | null
-    ignored_at: string | null
+    declined_at: string | null
   }
   expired: boolean
   revoked: boolean
   accepted: boolean
-  ignored?: boolean
+  declined?: boolean
 }
 
 type SignupRequest = Parameters<typeof signupUser>[0]
@@ -153,7 +153,7 @@ export default function SignupPage() {
           data.expired ||
           data.revoked ||
           data.accepted ||
-          Boolean(data.ignored)
+          Boolean(data.declined)
 
         if (invalid) {
           setInviteStatus('invalid')
@@ -241,7 +241,7 @@ export default function SignupPage() {
     setLoading(true)
 
     try {
-      const { confirmPassword: _ignored, ...rest } = form
+      const { confirmPassword: _declined, ...rest } = form
       const baseRequest = rest as Omit<
         SignupRequest,
         'invite_token' | 'invite_decision'
@@ -254,7 +254,7 @@ export default function SignupPage() {
           inviteStatus === 'valid' && inviteToken
             ? inviteDecision === 'join'
               ? 'join'
-              : 'ignore'
+              : 'decline'
             : undefined
       } as SignupRequest
 

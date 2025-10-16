@@ -69,7 +69,7 @@ pub async fn handle_signup(
                 let email_mismatch = !invite.email.eq_ignore_ascii_case(&payload.email);
                 if invite.revoked_at.is_some()
                     || invite.accepted_at.is_some()
-                    || invite.ignored_at.is_some()
+                    || invite.declined_at.is_some()
                     || invite.expires_at <= now
                     || email_mismatch
                 {
@@ -113,7 +113,7 @@ pub async fn handle_signup(
 
     let expires_at = OffsetDateTime::now_utc() + Duration::hours(24);
 
-    if invite_record.is_none() || matches!(invite_decision, SignupInviteDecision::Ignore) {
+    if invite_record.is_none() || matches!(invite_decision, SignupInviteDecision::Decline) {
         let workspace_name = default_workspace_name(&payload);
         let workspace = match workspace_repo
             .create_workspace(&workspace_name, user_id)
@@ -153,9 +153,9 @@ pub async fn handle_signup(
                     eprintln!("Failed to mark invite accepted: {:?}", err);
                 }
             }
-            SignupInviteDecision::Ignore => {
-                if let Err(err) = workspace_repo.mark_invitation_ignored(invite.id).await {
-                    eprintln!("Failed to mark invite ignored: {:?}", err);
+            SignupInviteDecision::Decline => {
+                if let Err(err) = workspace_repo.mark_invitation_declined(invite.id).await {
+                    eprintln!("Failed to mark invite declined: {:?}", err);
                 }
             }
         }
@@ -426,7 +426,7 @@ mod tests {
         created: Arc<Mutex<Vec<Workspace>>>,
         add_calls: Arc<Mutex<Vec<(Uuid, Uuid, WorkspaceRole)>>>,
         accepted: Arc<Mutex<Vec<Uuid>>>,
-        ignored: Arc<Mutex<Vec<Uuid>>>,
+        declined: Arc<Mutex<Vec<Uuid>>>,
         fail_create_workspace: bool,
         fail_join_membership: bool,
     }
@@ -451,7 +451,7 @@ mod tests {
                 self.created.lock().unwrap().clone(),
                 self.add_calls.lock().unwrap().clone(),
                 self.accepted.lock().unwrap().clone(),
-                self.ignored.lock().unwrap().clone(),
+                self.declined.lock().unwrap().clone(),
             )
         }
     }
@@ -589,8 +589,8 @@ mod tests {
             Ok(())
         }
 
-        async fn mark_invitation_ignored(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
-            self.ignored.lock().unwrap().push(invite_id);
+        async fn mark_invitation_declined(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+            self.declined.lock().unwrap().push(invite_id);
             Ok(())
         }
     }
@@ -621,7 +621,7 @@ mod tests {
             created_at: OffsetDateTime::now_utc(),
             accepted_at: None,
             revoked_at: None,
-            ignored_at: None,
+            declined_at: None,
         }
     }
 
@@ -793,13 +793,13 @@ mod tests {
             "User created. Check your email to verify your account."
         );
 
-        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        let (created, add_calls, accepted, declined) = workspace_repo.record();
         assert_eq!(created.len(), 1);
         assert_eq!(created[0].name, "Test's Workspace");
         assert_eq!(add_calls.len(), 1);
         assert_eq!(add_calls[0].2, WorkspaceRole::Owner);
         assert!(accepted.is_empty());
-        assert!(ignored.is_empty());
+        assert!(declined.is_empty());
     }
 
     #[tokio::test]
@@ -830,17 +830,17 @@ mod tests {
         .await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        let (created, add_calls, accepted, declined) = workspace_repo.record();
         assert!(created.is_empty());
         assert_eq!(add_calls.len(), 1);
         assert_eq!(add_calls[0].0, invite.workspace_id);
         assert_eq!(add_calls[0].2, invite.role);
         assert_eq!(accepted, vec![invite.id]);
-        assert!(ignored.is_empty());
+        assert!(declined.is_empty());
     }
 
     #[tokio::test]
-    async fn test_invite_ignore_marks_ignored_and_creates_workspace() {
+    async fn test_invite_decline_marks_declined_and_creates_workspace() {
         let repo = MockRepo {
             email_taken: false,
             fail_create_user: false,
@@ -848,7 +848,7 @@ mod tests {
             cleaned_up: Arc::new(Mutex::new(false)),
         };
         let invite = invite_fixture(
-            "ignore-token",
+            "decline-token",
             "test@example.com",
             OffsetDateTime::now_utc() + Duration::hours(1),
         );
@@ -856,7 +856,7 @@ mod tests {
         let mailer = MockMailer::default();
         let mut payload = test_payload();
         payload.invite_token = Some(invite.token.clone());
-        payload.invite_decision = Some(SignupInviteDecision::Ignore);
+        payload.invite_decision = Some(SignupInviteDecision::Decline);
 
         let res = run_signup(
             repo,
@@ -867,13 +867,13 @@ mod tests {
         .await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        let (created, add_calls, accepted, declined) = workspace_repo.record();
         assert_eq!(created.len(), 1);
         assert_eq!(add_calls.len(), 1);
         assert_ne!(add_calls[0].0, invite.workspace_id);
         assert_eq!(add_calls[0].2, WorkspaceRole::Owner);
         assert!(accepted.is_empty());
-        assert_eq!(ignored, vec![invite.id]);
+        assert_eq!(declined, vec![invite.id]);
     }
 
     #[tokio::test]
@@ -904,11 +904,11 @@ mod tests {
         .await;
 
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        let (created, add_calls, accepted, declined) = workspace_repo.record();
         assert!(created.is_empty());
         assert!(add_calls.is_empty());
         assert!(accepted.is_empty());
-        assert!(ignored.is_empty());
+        assert!(declined.is_empty());
     }
 
     #[tokio::test]
@@ -939,10 +939,10 @@ mod tests {
         .await;
 
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-        let (created, add_calls, accepted, ignored) = workspace_repo.record();
+        let (created, add_calls, accepted, declined) = workspace_repo.record();
         assert!(created.is_empty());
         assert!(add_calls.is_empty());
         assert!(accepted.is_empty());
-        assert!(ignored.is_empty());
+        assert!(declined.is_empty());
     }
 }

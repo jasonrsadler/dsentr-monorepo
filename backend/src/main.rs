@@ -407,10 +407,19 @@ async fn main() {
     // Public webhook route (no CSRF, no auth)
     let public_workflow_routes =
         Router::new().route("/{workflow_id}/trigger/{token}", post(webhook_trigger));
-    let public_invite_routes = Router::new().route(
-        "/invites/{token}",
-        get(routes::workspaces::preview_invitation).post(routes::workspaces::accept_invitation),
-    );
+    let invite_routes = Router::new()
+        .route(
+            "/invites/{token}",
+            get(routes::workspaces::preview_invitation),
+        )
+        .route(
+            "/invites/accept",
+            post(routes::workspaces::accept_invitation),
+        )
+        .route(
+            "/invites/decline",
+            post(routes::workspaces::decline_invitation),
+        );
     let app = Router::new()
         .route("/", get(root))
         .route("/api/early-access", post(handle_early_access))
@@ -421,7 +430,7 @@ async fn main() {
             workflow_routes.merge(public_workflow_routes),
         )
         .nest("/api/workspaces", workspace_routes)
-        .merge(Router::new().nest("/api", public_invite_routes))
+        .merge(Router::new().nest("/api", invite_routes))
         .nest("/api/oauth", oauth_routes)
         .nest("/api/microsoft", microsoft_routes)
         .nest("/api/options", options_routes)

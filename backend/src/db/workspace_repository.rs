@@ -72,5 +72,5 @@ pub trait WorkspaceRepository: Send + Sync {
 
     async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error>;
 
-    async fn mark_invitation_ignored(&self, invite_id: Uuid) -> Result<(), sqlx::Error>;
+    async fn mark_invitation_declined(&self, invite_id: Uuid) -> Result<(), sqlx::Error>;
 }
