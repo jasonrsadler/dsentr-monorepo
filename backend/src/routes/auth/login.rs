@@ -72,6 +72,9 @@ pub async fn handle_login(
                 company_name: user.company_name.clone(),
             };
 
+            let requires_onboarding = user.onboarded_at.is_none()
+                || user.plan.as_ref().map(|p| p.is_empty()).unwrap_or(true);
+
             match create_jwt(&claims) {
                 Ok(token) => {
                     let cookie = Cookie::build(("auth_token", token))
@@ -93,7 +96,8 @@ pub async fn handle_login(
                         headers,
                         Json(json!({
                             "success": true,
-                            "user": user_json
+                            "user": user_json,
+                            "requires_onboarding": requires_onboarding
                         })),
                     )
                         .into_response()
@@ -297,6 +301,42 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["success"], true);
         assert_eq!(json["user"]["email"], user.email);
+        assert_eq!(json["requires_onboarding"], true);
+    }
+
+    #[tokio::test]
+    async fn test_login_requires_onboarding_when_missing_plan() {
+        let password = "password123";
+        let (mut user, _) = test_user_with_password(password);
+        user.plan = None;
+        user.onboarded_at = None;
+        std::env::set_var("JWT_SECRET", "test_secret_key");
+
+        let app = build_app(MockDb {
+            find_user_result: Some(user.clone()),
+            ..Default::default()
+        });
+
+        let payload = LoginPayload {
+            email: user.email.clone(),
+            password: password.to_string(),
+            remember: false,
+        };
+
+        let res = app
+            .oneshot(
+                Request::post("/login")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["requires_onboarding"], true);
     }
 
     #[tokio::test]
