@@ -18,6 +18,7 @@ pub trait WorkspaceRepository: Send + Sync {
         name: &str,
     ) -> Result<Workspace, sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error>;
 
     async fn add_member(

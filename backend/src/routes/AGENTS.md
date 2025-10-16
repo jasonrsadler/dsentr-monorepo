@@ -1,0 +1,20 @@
+# Routes Agent Notes
+
+## Purpose
+- HTTP handlers grouped by feature area. Each module exposes functions wired in `main.rs`.
+
+## Key Modules
+- `admin.rs`: Admin-only maintenance endpoints (currently purge stale runs).
+- `dashboard.rs`: Simple authenticated health check that returns a welcome message and disables caching.
+- `early_access.rs`: Public endpoint that records early-access emails with duplicate handling.
+- `microsoft.rs`: Authenticated helpers that surface Microsoft Teams metadata using stored OAuth tokens.
+- `options/`: User settings APIs (secrets management).
+- `auth/`: Authentication/login flows, session management, password reset, etc.
+- `oauth/`: Connected account management and OAuth callbacks for Google/Microsoft integrations.
+- `workflows/`: Core workflow CRUD, execution controls, logs, SSE streams, webhooks.
+- `workspaces.rs`: Workspace CRUD and membership APIs.
+
+## Usage Tips
+- Handlers expect `AppState` and often an `AuthSession` extractor; ensure new routes reuse these patterns for authorization.
+- For APIs returning JSON, use `responses::JsonResponse` helpers to keep status/message structure consistent.
+- When adding new route groups, update `main.rs` to mount them and consider rate-limit layer alignment (`auth_governor_conf` vs global).

@@ -169,6 +169,7 @@ impl UserRepository for MockDb {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct NoopWorkflowRepository;
 
@@ -592,6 +593,7 @@ impl WorkflowRepository for NoopWorkflowRepository {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct NoopWorkspaceRepository;
 

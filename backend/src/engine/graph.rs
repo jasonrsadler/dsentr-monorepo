@@ -11,7 +11,9 @@ pub(crate) struct Node {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Edge {
+    #[allow(dead_code)]
     pub(crate) id: String,
+    #[allow(dead_code)]
     pub(crate) source: String,
     pub(crate) target: String,
     pub(crate) source_handle: Option<String>,

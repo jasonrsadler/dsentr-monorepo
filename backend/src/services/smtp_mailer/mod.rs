@@ -65,6 +65,7 @@ pub trait Mailer: Send + Sync {
         subject: &str,
         body: &str,
     ) -> Result<(), MailError>;
+    #[allow(dead_code)]
     fn as_any(&self) -> &dyn Any;
 }
 

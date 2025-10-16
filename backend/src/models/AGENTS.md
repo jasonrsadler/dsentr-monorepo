@@ -1,0 +1,24 @@
+# Models Agent Notes
+
+## Purpose
+- Typed representations of database rows and API payloads shared across repositories, services, and routes.
+- Each module maps closely to a SQL table or response DTO.
+
+## Key Modules
+- `early_access.rs`: Shape of the early-access signup payload collected from the marketing form.
+- `egress_block_event.rs`: Records for blocked outbound requests, including node metadata and timestamps.
+- `oauth_token.rs`: Enum of connected OAuth providers plus `UserOAuthToken` row type (fields match `user_oauth_tokens` table).
+- `signup.rs`: Incoming signup payload (supports optional OAuth provider override).
+- `user.rs`: Core `User` and `PublicUser` structs, along with `OauthProvider`/`UserRole` enums.
+- `verification_token.rs`: `EmailVerificationToken` row that powers email verification logic.
+- `workflow.rs`: Primary workflow model and DTO for creation requests.
+- `workflow_dead_letter.rs`: Representation of dead-lettered runs (snapshot + error).
+- `workflow_log.rs`: Change history entries tied to workflows.
+- `workflow_node_run.rs`: Individual node execution records persisted during runs.
+- `workflow_run.rs`: Workflow run metadata, status tracking, and stored snapshot.
+- `workflow_schedule.rs`: Schedule configuration rows with next/last run timestamps.
+- `workspace.rs`: Workspace entities, memberships, invitations, and enum for workspace roles.
+
+## Usage Tips
+- These structs derive `sqlx::FromRow` where applicable, so SQLx queries can hydrate them directly.
+- When adding new columns in migrations, update the corresponding struct and ensure serde/time annotations stay in sync with API expectations.

@@ -10,6 +10,7 @@ pub enum ConnectedOAuthProvider {
     Microsoft,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserOAuthToken {
     pub id: Uuid,

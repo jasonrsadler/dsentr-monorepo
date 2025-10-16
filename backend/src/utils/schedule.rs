@@ -139,10 +139,7 @@ pub fn parse_schedule_config(value: &serde_json::Value) -> Option<ScheduleConfig
 }
 
 pub fn offset_to_utc(dt: OffsetDateTime) -> Option<DateTime<Utc>> {
-    let seconds = dt.unix_timestamp();
-    let nano_part = dt.nanosecond();
-    let naive = NaiveDateTime::from_timestamp_opt(seconds, nano_part)?;
-    Some(DateTime::<Utc>::from_utc(naive, Utc))
+    DateTime::<Utc>::from_timestamp(dt.unix_timestamp(), dt.nanosecond())
 }
 
 pub fn utc_to_offset(dt: DateTime<Utc>) -> Option<OffsetDateTime> {

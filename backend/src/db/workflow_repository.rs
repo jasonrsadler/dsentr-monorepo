@@ -119,6 +119,7 @@ pub trait WorkflowRepository: Send + Sync {
         error: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn insert_node_run(
         &self,
         run_id: Uuid,
@@ -131,6 +132,7 @@ pub trait WorkflowRepository: Send + Sync {
         error: Option<&str>,
     ) -> Result<WorkflowNodeRun, sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn update_node_run(
         &self,
         node_run_id: Uuid,
@@ -303,6 +305,7 @@ pub trait WorkflowRepository: Send + Sync {
         signature: &str,
     ) -> Result<bool, sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn purge_old_webhook_replays(&self, older_than_seconds: i64) -> Result<u64, sqlx::Error>;
 
     // Egress block events
