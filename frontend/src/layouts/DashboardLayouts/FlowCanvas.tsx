@@ -23,7 +23,6 @@ function normalizeNode(n: any) {
   }
 }
 function normalizeEdge(e: any) {
-  // Coalesce potentially undefined fields to stable values so snapshots match
   const label = (e as any).label ?? null
   const animated = Boolean((e as any).animated)
   return {
@@ -94,16 +93,12 @@ function shallowEqualData(
   a: Record<string, any> | undefined,
   b: Record<string, any>
 ): boolean {
-  if (!a) {
-    return Object.keys(b).length === 0
-  }
+  if (!a) return Object.keys(b).length === 0
   const keysA = Object.keys(a)
   const keysB = Object.keys(b)
   if (keysA.length !== keysB.length) return false
   for (const key of keysA) {
-    if (a[key] !== b[key]) {
-      return false
-    }
+    if (a[key] !== b[key]) return false
   }
   return true
 }
@@ -138,10 +133,7 @@ function reconcileNodeLabels(nodes: FlowNode[]): FlowNode[] {
       (prevData.labelError ?? null) !== labelError ||
       Boolean(prevData.hasLabelValidationError) !== hasLabelValidationError
 
-    if (!nextDataShouldChange) {
-      return node
-    }
-
+    if (!nextDataShouldChange) return node
     hasChanges = true
     return {
       ...node,
@@ -198,21 +190,28 @@ export default function FlowCanvas({
   )
   const isSoloPlan = normalizedPlanTier === 'solo'
   const rafRef = useRef<number | null>(null)
-  // Keep a stable callable for run to avoid re-creating nodeTypes
+
   const onRunWorkflowRef = useRef(onRunWorkflow)
   useEffect(() => {
     onRunWorkflowRef.current = onRunWorkflow
   }, [onRunWorkflow])
+
   const invokeRunWorkflow = useCallback(() => {
     onRunWorkflowRef.current?.()
   }, [])
+
+  // Keep markWorkflowDirty stable via ref
+  const markWorkflowDirtyRef = useRef(markWorkflowDirty)
+  useEffect(() => {
+    markWorkflowDirtyRef.current = markWorkflowDirty
+  }, [markWorkflowDirty])
+
   useEffect(() => {
     if (!workflowId) {
       setNodes([])
       setEdges([])
       return
     }
-    // Deep clone node data to avoid shared references across workflow switches
     const epoch = Date.now()
     const incomingNodes = (workflowData?.nodes ?? []).map((node: any) => ({
       id: node.id,
@@ -230,6 +229,7 @@ export default function FlowCanvas({
     setNodes(reconcileNodeLabels(incomingNodes))
     setEdges(incomingEdges)
   }, [workflowId, workflowData, setNodes, setEdges])
+
   useEffect(() => {
     if (!onGraphChange) return
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -246,7 +246,6 @@ export default function FlowCanvas({
     }
   }, [nodes, edges, onGraphChange])
 
-  // Keep execution state in refs so `nodeTypes` identity stays stable across polls
   const runningIdsRef = useRef(runningIds)
   const succeededIdsRef = useRef(succeededIds)
   const failedIdsRef = useRef(failedIds)
@@ -268,94 +267,78 @@ export default function FlowCanvas({
           if (n.id !== id) return n
           const prevData = n.data ?? {}
           const mergedData = { ...prevData, ...newData }
-          if (shallowEqualData(prevData, mergedData)) {
-            return n
-          }
+          if (shallowEqualData(prevData, mergedData)) return n
           didChange = true
           return { ...n, data: mergedData }
         })
         const reconciled = reconcileNodeLabels(updated)
-        if (!didChange && reconciled === updated) {
-          return nds
-        }
+        if (!didChange && reconciled === updated) return nds
         return reconciled
       })
-      if (!suppressDirty) markWorkflowDirty()
+      if (!suppressDirty) markWorkflowDirtyRef.current()
     },
-    [setNodes, markWorkflowDirty]
+    [setNodes]
   )
 
   const saveAllNodes = useCallback(() => {
     const clearedNodes = nodes.map((n) => {
       const keys = n.data?.inputs?.map((i) => i.key.trim()) || []
       const values = n.data?.inputs?.map((i) => i.value.trim()) || []
-
       const hasDuplicateKeys =
         new Set(keys.filter((k) => k)).size !== keys.filter((k) => k).length
       const hasInvalidInputs = keys.some((k) => !k) || values.some((v) => !v)
-
       const newDirty = hasDuplicateKeys || hasInvalidInputs
-
-      return {
-        ...n,
-        data: { ...n.data, dirty: newDirty }
-      }
+      return { ...n, data: { ...n.data, dirty: newDirty } }
     })
-
     setNodes(reconcileNodeLabels(clearedNodes))
-
     return clearedNodes
   }, [nodes, setNodes])
+
   useEffect(() => {
-    if (setSaveRef) {
-      setSaveRef({
-        saveAllNodes,
-        getEdges: () => edges,
-        setNodesFromToolbar: (updatedNodes) =>
-          setNodes((nds) => {
-            let changed = false
-            const mapped = nds.map((n) => {
-              const updated = updatedNodes.find((u) => u.id === n.id)
-              if (!updated) return n
-              const prevData = n.data ?? {}
-              const nextData = { ...prevData, ...updated.data }
-              if (shallowEqualData(prevData, nextData)) {
-                return n
-              }
-              changed = true
-              return { ...n, data: nextData }
-            })
-            const reconciled = reconcileNodeLabels(mapped)
-            if (!changed && reconciled === mapped) {
-              return nds
-            }
-            return reconciled
-          }),
-        loadGraph: (graph) => {
-          const epoch = Date.now()
-          const safeNodes = (graph?.nodes ?? []).map((n: any) => ({
-            ...n,
-            data: {
-              ...(n.data ?? {}),
-              dirty: n.data?.dirty ?? false,
-              wfEpoch: epoch
-            }
-          }))
-          setNodes(reconcileNodeLabels(safeNodes))
-          setEdges(graph?.edges ?? [])
-          markWorkflowDirty()
-        }
-      })
-    }
-  }, [edges, saveAllNodes, setSaveRef, setNodes])
+    if (!setSaveRef) return
+    setSaveRef({
+      saveAllNodes,
+      getEdges: () => edges,
+      setNodesFromToolbar: (updatedNodes) =>
+        setNodes((nds) => {
+          let changed = false
+          const mapped = nds.map((n) => {
+            const updated = updatedNodes.find((u) => u.id === n.id)
+            if (!updated) return n
+            const prevData = n.data ?? {}
+            const nextData = { ...prevData, ...updated.data }
+            if (shallowEqualData(prevData, nextData)) return n
+            changed = true
+            return { ...n, data: nextData }
+          })
+          const reconciled = reconcileNodeLabels(mapped)
+          if (!changed && reconciled === mapped) return nds
+          return reconciled
+        }),
+      loadGraph: (graph) => {
+        const epoch = Date.now()
+        const safeNodes = (graph?.nodes ?? []).map((n: any) => ({
+          ...n,
+          data: {
+            ...(n.data ?? {}),
+            dirty: n.data?.dirty ?? false,
+            wfEpoch: epoch
+          }
+        }))
+        setNodes(reconcileNodeLabels(safeNodes))
+        setEdges(graph?.edges ?? [])
+        markWorkflowDirtyRef.current()
+      }
+    })
+  }, [edges, saveAllNodes, setSaveRef, setNodes, setEdges])
 
   const removeNode = useCallback(
     (id) => {
       setNodes((nds) => nds.filter((n) => n.id !== id))
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
-      markWorkflowDirty()
+      markWorkflowDirtyRef.current()
     },
-    [setNodes, setEdges, markWorkflowDirty]
+    [setNodes, setEdges]
   )
 
   const nodeTypes = useMemo(
@@ -368,11 +351,9 @@ export default function FlowCanvas({
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
           onRemove={removeNode}
-          onDirtyChange={markWorkflowDirty}
+          onDirtyChange={markWorkflowDirtyRef.current}
           onUpdateNode={updateNodeData}
-          onRun={() => {
-            invokeRunWorkflow()
-          }}
+          onRun={() => invokeRunWorkflow()}
           planTier={normalizedPlanTier}
           onRestrictionNotice={onRestrictionNotice}
         />
@@ -385,11 +366,9 @@ export default function FlowCanvas({
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
           onRemove={removeNode}
-          onDirtyChange={markWorkflowDirty}
+          onDirtyChange={markWorkflowDirtyRef.current}
           onUpdateNode={updateNodeData}
-          onRun={() => {
-            invokeRunWorkflow()
-          }}
+          onRun={() => invokeRunWorkflow()}
           planTier={normalizedPlanTier}
           onRestrictionNotice={onRestrictionNotice}
         />
@@ -402,17 +381,14 @@ export default function FlowCanvas({
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
           onRemove={removeNode}
-          onDirtyChange={markWorkflowDirty}
+          onDirtyChange={markWorkflowDirtyRef.current}
           onUpdateNode={updateNodeData}
-          onRun={() => {
-            console.log('Run Condition', props.id)
-          }}
+          onRun={() => console.log('Run Condition', props.id)}
         />
       )
     }),
     [
       removeNode,
-      markWorkflowDirty,
       updateNodeData,
       invokeRunWorkflow,
       normalizedPlanTier,
@@ -422,18 +398,18 @@ export default function FlowCanvas({
 
   const onNodesChange = useCallback(
     (changes) => {
-      markWorkflowDirty()
+      markWorkflowDirtyRef.current()
       onNodesChangeInternal(changes)
     },
-    [onNodesChangeInternal, markWorkflowDirty]
+    [onNodesChangeInternal]
   )
 
   const onEdgesChange = useCallback(
     (changes) => {
-      markWorkflowDirty()
+      markWorkflowDirtyRef.current()
       onEdgesChangeInternal(changes)
     },
-    [onEdgesChangeInternal, markWorkflowDirty]
+    [onEdgesChangeInternal]
   )
 
   const onConnect = useCallback(
@@ -467,13 +443,11 @@ export default function FlowCanvas({
       event.preventDefault()
       const type = event.dataTransfer.getData('application/reactflow')
       if (!type) return
-
       const bounds = event.currentTarget.getBoundingClientRect()
       const position = {
         x: event.clientX - bounds.left,
         y: event.clientY - bounds.top
       }
-
       setNodes((nds) => {
         if (isSoloPlan && nds.length >= 10) {
           onRestrictionNotice?.(
@@ -500,9 +474,9 @@ export default function FlowCanvas({
         const withNewNode = [...nds, newNode]
         return reconcileNodeLabels(withNewNode)
       })
-      markWorkflowDirty()
+      markWorkflowDirtyRef.current()
     },
-    [setNodes, markWorkflowDirty, isSoloPlan, onRestrictionNotice]
+    [setNodes, isSoloPlan, onRestrictionNotice]
   )
 
   const onDragOver = useCallback((event) => {
