@@ -1,5 +1,5 @@
 // src/layouts/DashboardLayout.tsx
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
@@ -37,6 +37,7 @@ export default function DashboardLayout() {
 
   const hasWorkspaces = memberships.length > 0
   const hasMultipleWorkspaces = memberships.length > 1
+  const previousSearchRef = useRef<string | null>(null)
 
   const currentWorkspace = useMemo(() => {
     if (!hasWorkspaces) return null
@@ -64,6 +65,10 @@ export default function DashboardLayout() {
   }, [memberships, currentWorkspaceId, setCurrentWorkspaceId])
 
   useEffect(() => {
+    if (previousSearchRef.current === location.search) {
+      return
+    }
+    previousSearchRef.current = location.search
     const params = new URLSearchParams(location.search)
     const workspaceFromQuery = params.get('workspace')
     if (!workspaceFromQuery) return

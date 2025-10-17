@@ -10,8 +10,13 @@ import type { WorkspaceMembershipSummary } from '@/lib/orgWorkspaceApi'
 type LocationLike = ReturnType<typeof useLocation>
 
 const initialStore = useAuth.getState()
-const { login, logout, checkAuth, setCurrentWorkspaceId, refreshMemberships } =
-  initialStore
+const {
+  login,
+  logout,
+  checkAuth,
+  setCurrentWorkspaceId: originalSetCurrentWorkspaceId,
+  refreshMemberships
+} = initialStore
 
 function resetAuthStore() {
   useAuth.setState(
@@ -24,7 +29,7 @@ function resetAuthStore() {
       login,
       logout,
       checkAuth,
-      setCurrentWorkspaceId,
+      setCurrentWorkspaceId: originalSetCurrentWorkspaceId,
       refreshMemberships
     },
     true
@@ -168,6 +173,64 @@ describe('DashboardLayout workspace switcher', () => {
     })
     const updatedLocation = onLocationChange.mock.calls.at(-1)?.[0]
     expect(updatedLocation?.search).toContain('workspace=workspace-b')
+  })
+
+  it('does not resync to the previous workspace after manual selection', async () => {
+    const memberships = [
+      createMembership('workspace-a', 'Workspace A', 'workspace', 'owner'),
+      createMembership('workspace-b', 'Workspace B', 'workspace', 'admin')
+    ]
+    const setCurrentWorkspaceIdSpy = vi.fn((workspaceId: string) =>
+      originalSetCurrentWorkspaceId(workspaceId)
+    )
+
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'user-4',
+          email: 'stable@example.com',
+          first_name: 'Stable',
+          last_name: 'Member',
+          plan: 'workspace',
+          role: 'admin',
+          companyName: null
+        },
+        memberships,
+        currentWorkspaceId: 'workspace-a',
+        setCurrentWorkspaceId: setCurrentWorkspaceIdSpy
+      }))
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']} initialIndex={0}>
+        <Routes>
+          <Route path="/dashboard" element={<DashboardLayout />}>
+            <Route index element={<div>Dashboard</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    )
+
+    const switcher = await screen.findByLabelText(/workspace switcher/i)
+
+    await waitFor(() => {
+      expect(useAuth.getState().currentWorkspaceId).toBe('workspace-a')
+    })
+
+    setCurrentWorkspaceIdSpy.mockClear()
+
+    const user = userEvent.setup()
+    await user.selectOptions(switcher, 'workspace-b')
+
+    await waitFor(() => {
+      expect(useAuth.getState().currentWorkspaceId).toBe('workspace-b')
+    })
+
+    expect(setCurrentWorkspaceIdSpy).toHaveBeenCalled()
+    const calls = setCurrentWorkspaceIdSpy.mock.calls.flat()
+    expect(calls).toContain('workspace-b')
+    expect(calls).not.toContain('workspace-a')
   })
 
   it('prefers workspace specified in the query string when available', async () => {
