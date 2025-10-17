@@ -34,6 +34,7 @@ const CONCURRENCY_RESTRICTION_MESSAGE =
 export default function EngineTab() {
   const user = useAuth((state) => state.user)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const activeWorkspaceId = currentWorkspace?.workspace.id ?? null
   const isAdmin = (user?.role ?? '').toLowerCase() === 'admin'
   const workspaceRole = (currentWorkspace?.role ?? '').toLowerCase()
   const canAdministerEngine =
@@ -62,18 +63,23 @@ export default function EngineTab() {
   useEffect(() => {
     let alive = true
     setLoading(true)
-    listWorkflows()
+    listWorkflows(activeWorkspaceId)
       .then((ws) => {
         if (!alive) return
         setItems(ws)
-        if (!selectedId && ws[0]) setSelectedId(ws[0].id)
+        setSelectedId((prev) => {
+          if (prev && ws.some((w) => w.id === prev)) {
+            return prev
+          }
+          return ws[0]?.id ?? null
+        })
       })
       .catch(() => {})
       .finally(() => setLoading(false))
     return () => {
       alive = false
     }
-  }, [])
+  }, [activeWorkspaceId])
 
   const selected = useMemo(
     () => items.find((w) => w.id === selectedId) ?? null,

@@ -190,6 +190,7 @@ export default function Dashboard() {
   const [lockBusy, setLockBusy] = useState(false)
   const userId = useAuth((state) => state.user?.id ?? null)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const activeWorkspaceId = currentWorkspace?.workspace.id ?? null
   const workspaceRole = (currentWorkspace?.role ?? 'owner') as
     | 'owner'
     | 'admin'
@@ -357,7 +358,7 @@ export default function Dashboard() {
       try {
         setLoadingWorkflows(true)
         setError(null)
-        const data = await listWorkflows()
+        const data = await listWorkflows(activeWorkspaceId)
         const visible =
           planTier === 'solo'
             ? [...data]
@@ -419,7 +420,7 @@ export default function Dashboard() {
 
     fetchWorkflows()
     refreshPlanUsage()
-  }, [normalizeWorkflowData, planTier, refreshPlanUsage])
+  }, [normalizeWorkflowData, planTier, refreshPlanUsage, activeWorkspaceId])
 
   const markWorkflowDirty = useCallback(() => {
     setError(null)
@@ -452,7 +453,7 @@ export default function Dashboard() {
       // Always try to fetch fresh data for the selected workflow to avoid shared references/stale state
       ;(async () => {
         try {
-          const fresh = await getWorkflow(id)
+          const fresh = await getWorkflow(id, activeWorkspaceId)
           // Update list cache with fresh record
           setWorkflows((prev) =>
             prev.map((w) => (w.id === fresh.id ? fresh : w))
@@ -491,7 +492,7 @@ export default function Dashboard() {
         }
       })()
     },
-    [workflows, normalizeWorkflowData]
+    [workflows, normalizeWorkflowData, activeWorkspaceId]
   )
 
   // Confirm-to-switch dialog state
@@ -576,7 +577,7 @@ export default function Dashboard() {
         data: createEmptyGraph()
       }
 
-      const created = await createWorkflowApi(payload)
+      const created = await createWorkflowApi(payload, activeWorkspaceId)
       setWorkflows((prev) => [created, ...prev])
       setCurrentWorkflowId(created.id)
 
@@ -607,7 +608,8 @@ export default function Dashboard() {
     workflows,
     planTier,
     refreshPlanUsage,
-    canEditCurrentWorkflow
+    canEditCurrentWorkflow,
+    activeWorkspaceId
   ])
 
   const handleGraphChange = useCallback(
@@ -1081,11 +1083,15 @@ export default function Dashboard() {
 
     saveRef.current.setNodesFromToolbar?.(nodesData)
     try {
-      const updated = await updateWorkflowApi(currentWorkflow.id, {
-        name: currentWorkflow.name,
-        description: currentWorkflow.description ?? null,
-        data: payloadGraph
-      })
+      const updated = await updateWorkflowApi(
+        currentWorkflow.id,
+        {
+          name: currentWorkflow.name,
+          description: currentWorkflow.description ?? null,
+          data: payloadGraph
+        },
+        activeWorkspaceId
+      )
 
       setWorkflows((prev) =>
         prev.map((workflow) =>
@@ -1172,7 +1178,8 @@ export default function Dashboard() {
     isSaving,
     normalizeWorkflowData,
     handleGraphChange,
-    setRestrictionNotice
+    setRestrictionNotice,
+    activeWorkspaceId
   ])
 
   const handleLockWorkflow = useCallback(async () => {
@@ -1180,7 +1187,10 @@ export default function Dashboard() {
     try {
       setLockBusy(true)
       setError(null)
-      const updated = await lockWorkflowApi(currentWorkflow.id)
+      const updated = await lockWorkflowApi(
+        currentWorkflow.id,
+        activeWorkspaceId
+      )
       setWorkflows((prev) =>
         prev.map((workflow) =>
           workflow.id === updated.id ? { ...workflow, ...updated } : workflow
@@ -1192,14 +1202,17 @@ export default function Dashboard() {
     } finally {
       setLockBusy(false)
     }
-  }, [canLockWorkflow, currentWorkflow, lockBusy])
+  }, [canLockWorkflow, currentWorkflow, lockBusy, activeWorkspaceId])
 
   const handleUnlockWorkflow = useCallback(async () => {
     if (!currentWorkflow || lockBusy || !canUnlockWorkflow) return
     try {
       setLockBusy(true)
       setError(null)
-      const updated = await unlockWorkflowApi(currentWorkflow.id)
+      const updated = await unlockWorkflowApi(
+        currentWorkflow.id,
+        activeWorkspaceId
+      )
       setWorkflows((prev) =>
         prev.map((workflow) =>
           workflow.id === updated.id ? { ...workflow, ...updated } : workflow
@@ -1211,7 +1224,7 @@ export default function Dashboard() {
     } finally {
       setLockBusy(false)
     }
-  }, [canUnlockWorkflow, currentWorkflow, lockBusy])
+  }, [canUnlockWorkflow, currentWorkflow, lockBusy, activeWorkspaceId])
 
   const toolbarWorkflow = useMemo(() => {
     if (!currentWorkflow) {

@@ -22,19 +22,25 @@ export default function WebhooksTab() {
   const [replayWindow, setReplayWindow] = useState(300)
   const [signingKey, setSigningKey] = useState('')
   const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const activeWorkspaceId = currentWorkspace?.workspace.id ?? null
   const canManageWebhooks =
     currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'admin'
   const manageWebhooksPermissionMessage =
     'Only workspace admins or owners can manage webhook settings.'
 
   useEffect(() => {
-    listWorkflows()
+    listWorkflows(activeWorkspaceId)
       .then((ws) => {
         setWorkflows(ws)
-        if (ws[0]) setWorkflowId(ws[0].id)
+        setWorkflowId((prev) => {
+          if (prev && ws.some((w) => w.id === prev)) {
+            return prev
+          }
+          return ws[0]?.id ?? ''
+        })
       })
       .catch(() => {})
-  }, [])
+  }, [activeWorkspaceId])
 
   useEffect(() => {
     if (!workflowId) {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::prelude::*;
 
@@ -213,5 +213,254 @@ pub(crate) fn plan_tier_str(tier: NormalizedPlanTier) -> &'static str {
     match tier {
         NormalizedPlanTier::Solo => "solo",
         NormalizedPlanTier::Workspace => "workspace",
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanContext {
+    Solo,
+    WorkspaceOwned { workspace_id: Uuid },
+    WorkspaceMember { workspace_id: Uuid },
+    WorkspaceUnknown,
+}
+
+fn extract_workspace_id_from_plan(plan: Option<&str>) -> Option<Uuid> {
+    let raw = plan?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let segments =
+        raw.split(|c: char| matches!(c, ':' | '/' | '|' | ',' | ';' | '\n' | '\r' | '\t' | ' '));
+    for segment in segments {
+        let candidate = segment
+            .trim_matches(|c: char| matches!(c, '[' | ']' | '{' | '}' | '(' | ')' | '"' | '\''));
+        if candidate.len() == 36 {
+            if let Ok(id) = Uuid::parse_str(candidate) {
+                return Some(id);
+            }
+        }
+    }
+
+    None
+}
+
+pub(crate) fn membership_roles_map(
+    memberships: &[WorkspaceMembershipSummary],
+) -> HashMap<Uuid, WorkspaceRole> {
+    memberships
+        .iter()
+        .map(|membership| (membership.workspace.id, membership.role))
+        .collect()
+}
+
+pub(crate) fn plan_context_for_user(
+    plan: Option<&str>,
+    memberships: &[WorkspaceMembershipSummary],
+    explicit_workspace: Option<Uuid>,
+) -> PlanContext {
+    if let Some(workspace_id) = explicit_workspace.or_else(|| extract_workspace_id_from_plan(plan))
+    {
+        if let Some(summary) = memberships.iter().find(|m| m.workspace.id == workspace_id) {
+            if summary.role == WorkspaceRole::Owner {
+                PlanContext::WorkspaceOwned { workspace_id }
+            } else {
+                PlanContext::WorkspaceMember { workspace_id }
+            }
+        } else {
+            PlanContext::WorkspaceUnknown
+        }
+    } else if NormalizedPlanTier::from_str(plan).is_solo() {
+        PlanContext::Solo
+    } else {
+        PlanContext::WorkspaceUnknown
+    }
+}
+
+pub(crate) fn can_access_workspace_in_context(
+    context: PlanContext,
+    workspace_id: Uuid,
+    roles: &HashMap<Uuid, WorkspaceRole>,
+) -> bool {
+    match context {
+        PlanContext::Solo => matches!(roles.get(&workspace_id), Some(WorkspaceRole::Owner)),
+        PlanContext::WorkspaceOwned {
+            workspace_id: active,
+        } => {
+            if active == workspace_id {
+                true
+            } else {
+                matches!(roles.get(&workspace_id), Some(WorkspaceRole::Owner))
+            }
+        }
+        PlanContext::WorkspaceMember {
+            workspace_id: active,
+        } => active == workspace_id,
+        PlanContext::WorkspaceUnknown => roles.contains_key(&workspace_id),
+    }
+}
+
+pub(crate) fn can_access_workflow_in_context(
+    workflow: &Workflow,
+    context: PlanContext,
+    roles: &HashMap<Uuid, WorkspaceRole>,
+) -> bool {
+    match workflow.workspace_id {
+        Some(workspace_id) => can_access_workspace_in_context(context, workspace_id, roles),
+        None => !matches!(context, PlanContext::WorkspaceMember { .. }),
+    }
+}
+
+pub(crate) async fn membership_role_for(
+    state: &AppState,
+    user_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<Option<WorkspaceRole>, sqlx::Error> {
+    let memberships = state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await?;
+
+    Ok(memberships
+        .into_iter()
+        .find(|membership| membership.workspace.id == workspace_id)
+        .map(|membership| membership.role))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::workspace::Workspace;
+    use time::OffsetDateTime;
+
+    fn make_membership(
+        workspace_id: Uuid,
+        role: WorkspaceRole,
+        owner_id: Uuid,
+    ) -> WorkspaceMembershipSummary {
+        WorkspaceMembershipSummary {
+            workspace: Workspace {
+                id: workspace_id,
+                name: "Test".into(),
+                created_by: owner_id,
+                owner_id,
+                plan: "workspace".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+                deleted_at: None,
+            },
+            role,
+        }
+    }
+
+    #[test]
+    fn context_identifies_workspace_member() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let memberships = vec![make_membership(workspace_id, WorkspaceRole::User, owner_id)];
+
+        let context = plan_context_for_user(
+            Some(&format!("workspace:{}", workspace_id)),
+            &memberships,
+            None,
+        );
+
+        assert_eq!(context, PlanContext::WorkspaceMember { workspace_id });
+    }
+
+    #[test]
+    fn context_identifies_workspace_owner() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let memberships = vec![make_membership(
+            workspace_id,
+            WorkspaceRole::Owner,
+            owner_id,
+        )];
+
+        let context = plan_context_for_user(
+            Some(&format!("workspace:{}", workspace_id)),
+            &memberships,
+            None,
+        );
+
+        assert_eq!(context, PlanContext::WorkspaceOwned { workspace_id });
+    }
+
+    #[test]
+    fn non_owned_workflow_inaccessible_in_solo_context() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let memberships = vec![make_membership(workspace_id, WorkspaceRole::User, owner_id)];
+        let roles = membership_roles_map(&memberships);
+        let workflow = Workflow {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            workspace_id: Some(workspace_id),
+            name: "Sample".into(),
+            description: None,
+            data: json!({}),
+            concurrency_limit: 1,
+            egress_allowlist: Vec::new(),
+            require_hmac: false,
+            hmac_replay_window_sec: 0,
+            webhook_salt: Uuid::new_v4(),
+            locked_by: None,
+            locked_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        assert!(!can_access_workflow_in_context(
+            &workflow,
+            PlanContext::Solo,
+            &roles
+        ));
+    }
+
+    #[test]
+    fn member_context_limited_to_active_workspace() {
+        let workspace_a = Uuid::new_v4();
+        let workspace_b = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let memberships = vec![
+            make_membership(workspace_a, WorkspaceRole::User, owner_id),
+            make_membership(workspace_b, WorkspaceRole::Owner, owner_id),
+        ];
+        let roles = membership_roles_map(&memberships);
+
+        let workflow_a = Workflow {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            workspace_id: Some(workspace_a),
+            name: "A".into(),
+            description: None,
+            data: json!({}),
+            concurrency_limit: 1,
+            egress_allowlist: Vec::new(),
+            require_hmac: false,
+            hmac_replay_window_sec: 0,
+            webhook_salt: Uuid::new_v4(),
+            locked_by: None,
+            locked_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let workflow_b = Workflow {
+            workspace_id: Some(workspace_b),
+            ..workflow_a.clone()
+        };
+
+        let context = PlanContext::WorkspaceMember {
+            workspace_id: workspace_a,
+        };
+
+        assert!(can_access_workflow_in_context(&workflow_a, context, &roles));
+        assert!(!can_access_workflow_in_context(
+            &workflow_b,
+            context,
+            &roles
+        ));
     }
 }

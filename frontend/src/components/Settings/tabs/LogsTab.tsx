@@ -9,8 +9,11 @@ import {
   WorkflowRecord
 } from '@/lib/workflowApi'
 import { flattenSecretValues, maskValueForPath } from '@/lib/secretMask'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
 export default function LogsTab() {
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const activeWorkspaceId = currentWorkspace?.workspace.id ?? null
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
   const [workflowId, setWorkflowId] = useState<string>('')
   const [logs, setLogs] = useState<WorkflowLogEntry[]>([])
@@ -20,13 +23,18 @@ export default function LogsTab() {
   const secretValues = useMemo(() => flattenSecretValues(secrets), [secrets])
 
   useEffect(() => {
-    listWorkflows()
+    listWorkflows(activeWorkspaceId)
       .then((ws) => {
         setWorkflows(ws)
-        if (ws[0]) setWorkflowId(ws[0].id)
+        setWorkflowId((prev) => {
+          if (prev && ws.some((w) => w.id === prev)) {
+            return prev
+          }
+          return ws[0]?.id ?? ''
+        })
       })
       .catch(() => {})
-  }, [])
+  }, [activeWorkspaceId])
 
   useEffect(() => {
     if (!workflowId) {

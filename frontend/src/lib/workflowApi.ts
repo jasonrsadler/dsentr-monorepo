@@ -18,6 +18,7 @@ export interface WorkflowPayload {
   name: string
   description: string | null
   data: Record<string, any>
+  workspace_id?: string | null
 }
 
 export interface WorkflowLogEntry {
@@ -59,28 +60,48 @@ async function handleJsonResponse(response: Response) {
   return body
 }
 
-export async function listWorkflows(): Promise<WorkflowRecord[]> {
-  const res = await fetch(`${API_BASE_URL}/api/workflows`, {
-    credentials: 'include'
-  })
+function buildWorkspaceQuery(workspaceId?: string | null) {
+  return workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''
+}
+
+export async function listWorkflows(
+  workspaceId?: string | null
+): Promise<WorkflowRecord[]> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows${buildWorkspaceQuery(workspaceId)}`,
+    {
+      credentials: 'include'
+    }
+  )
 
   const data = await handleJsonResponse(res)
   return data.workflows ?? []
 }
 
-export async function getWorkflow(id: string): Promise<WorkflowRecord> {
-  const res = await fetch(`${API_BASE_URL}/api/workflows/${id}`, {
-    credentials: 'include'
-  })
+export async function getWorkflow(
+  id: string,
+  workspaceId?: string | null
+): Promise<WorkflowRecord> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/${id}${buildWorkspaceQuery(workspaceId)}`,
+    {
+      credentials: 'include'
+    }
+  )
 
   const data = await handleJsonResponse(res)
   return data.workflow
 }
 
 export async function createWorkflow(
-  payload: WorkflowPayload
+  payload: WorkflowPayload,
+  workspaceId?: string | null
 ): Promise<WorkflowRecord> {
   const csrfToken = await getCsrfToken()
+  const requestBody = {
+    ...payload,
+    workspace_id: workspaceId ?? payload.workspace_id ?? null
+  }
 
   const res = await fetch(`${API_BASE_URL}/api/workflows`, {
     method: 'POST',
@@ -89,7 +110,7 @@ export async function createWorkflow(
       'x-csrf-token': csrfToken
     },
     credentials: 'include',
-    body: JSON.stringify(payload)
+    body: JSON.stringify(requestBody)
   })
   let body: any = null
   try {
@@ -109,19 +130,23 @@ export async function createWorkflow(
 
 export async function updateWorkflow(
   id: string,
-  payload: WorkflowPayload
+  payload: WorkflowPayload,
+  workspaceId?: string | null
 ): Promise<WorkflowRecord> {
   const csrfToken = await getCsrfToken()
 
-  const res = await fetch(`${API_BASE_URL}/api/workflows/${id}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-csrf-token': csrfToken
-    },
-    credentials: 'include',
-    body: JSON.stringify(payload)
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/${id}${buildWorkspaceQuery(workspaceId)}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-csrf-token': csrfToken
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    }
+  )
   let body: any = null
   try {
     body = await res.json()
@@ -138,49 +163,65 @@ export async function updateWorkflow(
   return body.workflow
 }
 
-export async function lockWorkflow(id: string): Promise<WorkflowRecord> {
+export async function lockWorkflow(
+  id: string,
+  workspaceId?: string | null
+): Promise<WorkflowRecord> {
   const csrfToken = await getCsrfToken()
 
-  const res = await fetch(`${API_BASE_URL}/api/workflows/${id}/lock`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-csrf-token': csrfToken
-    },
-    credentials: 'include'
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/${id}/lock${buildWorkspaceQuery(workspaceId)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-csrf-token': csrfToken
+      },
+      credentials: 'include'
+    }
+  )
 
   const data = await handleJsonResponse(res)
   return data.workflow
 }
 
-export async function unlockWorkflow(id: string): Promise<WorkflowRecord> {
+export async function unlockWorkflow(
+  id: string,
+  workspaceId?: string | null
+): Promise<WorkflowRecord> {
   const csrfToken = await getCsrfToken()
 
-  const res = await fetch(`${API_BASE_URL}/api/workflows/${id}/lock`, {
-    method: 'DELETE',
-    headers: {
-      'x-csrf-token': csrfToken
-    },
-    credentials: 'include'
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/${id}/lock${buildWorkspaceQuery(workspaceId)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'x-csrf-token': csrfToken
+      },
+      credentials: 'include'
+    }
+  )
 
   const data = await handleJsonResponse(res)
   return data.workflow
 }
 
 export async function deleteWorkflow(
-  id: string
+  id: string,
+  workspaceId?: string | null
 ): Promise<{ success: boolean }> {
   const csrfToken = await getCsrfToken()
 
-  const res = await fetch(`${API_BASE_URL}/api/workflows/${id}`, {
-    method: 'DELETE',
-    headers: {
-      'x-csrf-token': csrfToken
-    },
-    credentials: 'include'
-  })
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/${id}${buildWorkspaceQuery(workspaceId)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'x-csrf-token': csrfToken
+      },
+      credentials: 'include'
+    }
+  )
 
   const data = await handleJsonResponse(res)
   return { success: Boolean(data?.success ?? true) }

@@ -4,6 +4,7 @@ import {
   listWorkflows,
   WorkflowRecord
 } from '@/lib/workflowApi'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
 type Props = {
   workflows?: WorkflowRecord[]
@@ -14,17 +15,19 @@ export default function WorkflowsTab({
   workflows: propWorkflows,
   onDeleted
 }: Props) {
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const activeWorkspaceId = currentWorkspace?.workspace.id ?? null
   const [items, setItems] = useState<WorkflowRecord[]>(propWorkflows ?? [])
   useEffect(() => {
     setItems(propWorkflows ?? [])
   }, [propWorkflows])
   useEffect(() => {
     if (!propWorkflows || propWorkflows.length === 0) {
-      listWorkflows()
+      listWorkflows(activeWorkspaceId)
         .then(setItems)
         .catch(() => {})
     }
-  }, [])
+  }, [propWorkflows, activeWorkspaceId])
 
   const [selectedId, setSelectedId] = useState<string | null>(
     items[0]?.id ?? null
@@ -46,7 +49,7 @@ export default function WorkflowsTab({
     if (!selected || !canDelete) return
     try {
       setBusy(true)
-      await deleteWorkflow(selected.id)
+      await deleteWorkflow(selected.id, activeWorkspaceId)
       if (onDeleted) onDeleted(selected.id)
       setItems((prev) => prev.filter((w) => w.id !== selected.id))
       // Try to select the next available workflow locally

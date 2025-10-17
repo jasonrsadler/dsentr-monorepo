@@ -24,7 +24,7 @@ pub(crate) use uuid::Uuid;
 
 pub(crate) use crate::{
     models::workflow::{CreateWorkflow, Workflow},
-    models::workspace::WorkspaceRole,
+    models::workspace::{WorkspaceMembershipSummary, WorkspaceRole},
     responses::JsonResponse,
     routes::{auth::session::AuthSession, options::secrets::sync_secrets_from_workflow},
     state::AppState,

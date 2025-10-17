@@ -1,25 +1,16 @@
 use super::{
     helpers::{
-        diff_user_nodes_only, enforce_solo_workflow_limit, is_unique_violation,
-        plan_violation_response, sync_workflow_schedule,
+        can_access_workflow_in_context, can_access_workspace_in_context, diff_user_nodes_only,
+        enforce_solo_workflow_limit, is_unique_violation, membership_roles_map,
+        plan_context_for_user, plan_violation_response, sync_workflow_schedule, PlanContext,
     },
     prelude::*,
 };
 
-async fn membership_role_for(
-    state: &AppState,
-    user_id: Uuid,
-    workspace_id: Uuid,
-) -> Result<Option<WorkspaceRole>, sqlx::Error> {
-    let memberships = state
-        .workspace_repo
-        .list_memberships_for_user(user_id)
-        .await?;
-
-    Ok(memberships
-        .into_iter()
-        .find(|membership| membership.workspace.id == workspace_id)
-        .map(|membership| membership.role))
+#[derive(Default, Deserialize)]
+pub struct WorkflowContextQuery {
+    #[serde(default)]
+    workspace: Option<Uuid>,
 }
 
 pub async fn create_workflow(
@@ -38,6 +29,7 @@ pub async fn create_workflow(
         data,
         workspace_id,
     } = payload;
+    let mut workspace_id = workspace_id;
     let plan_tier = app_state
         .resolve_plan_tier(user_id, claims.plan.as_deref())
         .await;
@@ -69,21 +61,39 @@ pub async fn create_workflow(
         }
     }
 
+    let memberships = match app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+    {
+        Ok(memberships) => memberships,
+        Err(err) => {
+            eprintln!("Failed to load workspace memberships: {:?}", err);
+            return JsonResponse::server_error("Failed to create workflow").into_response();
+        }
+    };
+    let roles_map = membership_roles_map(&memberships);
+    let context = plan_context_for_user(claims.plan.as_deref(), &memberships, workspace_id);
+
+    if workspace_id.is_none() {
+        workspace_id = match context {
+            PlanContext::WorkspaceOwned { workspace_id }
+            | PlanContext::WorkspaceMember { workspace_id } => Some(workspace_id),
+            PlanContext::Solo | PlanContext::WorkspaceUnknown => None,
+        };
+    }
+
     if let Some(workspace_id) = workspace_id {
-        match membership_role_for(&app_state, user_id, workspace_id).await {
-            Ok(Some(role)) => {
+        match roles_map.get(&workspace_id).copied() {
+            Some(role) => {
                 if matches!(role, WorkspaceRole::Viewer) {
                     return JsonResponse::forbidden("Workspace viewers cannot create workflows.")
                         .into_response();
                 }
             }
-            Ok(None) => {
+            None => {
                 return JsonResponse::forbidden("You do not have access to this workspace.")
                     .into_response();
-            }
-            Err(err) => {
-                eprintln!("Failed to verify workspace membership: {:?}", err);
-                return JsonResponse::server_error("Failed to create workflow").into_response();
             }
         }
     }
@@ -120,6 +130,7 @@ pub async fn create_workflow(
 pub async fn list_workflows(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
+    Query(params): Query<WorkflowContextQuery>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
@@ -141,37 +152,57 @@ pub async fn list_workflows(
         }
     };
 
-    let workspace_ids: Vec<Uuid> = match app_state
+    let memberships = match app_state
         .workspace_repo
         .list_memberships_for_user(user_id)
         .await
     {
-        Ok(memberships) => memberships
-            .into_iter()
-            .map(|membership| membership.workspace.id)
-            .collect(),
+        Ok(memberships) => memberships,
         Err(err) => {
             eprintln!("Failed to load workspace memberships: {:?}", err);
             return JsonResponse::server_error("Failed to fetch workflows").into_response();
         }
     };
 
-    let mut combined: HashMap<Uuid, Workflow> =
-        owned_workflows.into_iter().map(|wf| (wf.id, wf)).collect();
+    let roles_map = membership_roles_map(&memberships);
+    let context = plan_context_for_user(claims.plan.as_deref(), &memberships, params.workspace);
+
+    if params.workspace.is_some()
+        && !matches!(
+            context,
+            PlanContext::WorkspaceOwned { .. } | PlanContext::WorkspaceMember { .. }
+        )
+    {
+        return JsonResponse::forbidden("You do not have access to this workspace.")
+            .into_response();
+    }
+
+    let mut combined: HashMap<Uuid, Workflow> = HashMap::new();
+    for workflow in owned_workflows {
+        if can_access_workflow_in_context(&workflow, context, &roles_map) {
+            combined.insert(workflow.id, workflow);
+        }
+    }
+
+    let mut workspace_ids: Vec<Uuid> = memberships
+        .iter()
+        .map(|membership| membership.workspace.id)
+        .filter(|workspace_id| can_access_workspace_in_context(context, *workspace_id, &roles_map))
+        .collect();
+    workspace_ids.sort_unstable();
+    workspace_ids.dedup();
 
     if !workspace_ids.is_empty() {
-        let mut ids: Vec<Uuid> = workspace_ids.into_iter().collect();
-        ids.sort_unstable();
-        ids.dedup();
-
         match app_state
             .workflow_repo
-            .list_workflows_by_workspace_ids(&ids)
+            .list_workflows_by_workspace_ids(&workspace_ids)
             .await
         {
             Ok(workflows) => {
                 for workflow in workflows {
-                    combined.entry(workflow.id).or_insert(workflow);
+                    if can_access_workflow_in_context(&workflow, context, &roles_map) {
+                        combined.entry(workflow.id).or_insert(workflow);
+                    }
                 }
             }
             Err(err) => {
@@ -216,6 +247,7 @@ pub async fn get_workflow(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
+    Query(params): Query<WorkflowContextQuery>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
@@ -231,6 +263,38 @@ pub async fn get_workflow(
         .await
     {
         Ok(Some(workflow)) => {
+            let memberships = match app_state
+                .workspace_repo
+                .list_memberships_for_user(user_id)
+                .await
+            {
+                Ok(memberships) => memberships,
+                Err(err) => {
+                    eprintln!("Failed to load workspace memberships: {:?}", err);
+                    return JsonResponse::server_error("Failed to fetch workflow").into_response();
+                }
+            };
+            let roles_map = membership_roles_map(&memberships);
+            let context =
+                plan_context_for_user(claims.plan.as_deref(), &memberships, params.workspace);
+
+            if params.workspace.is_some()
+                && !matches!(
+                    context,
+                    PlanContext::WorkspaceOwned { .. } | PlanContext::WorkspaceMember { .. }
+                )
+            {
+                return JsonResponse::forbidden("You do not have access to this workspace.")
+                    .into_response();
+            }
+
+            if !can_access_workflow_in_context(&workflow, context, &roles_map) {
+                return JsonResponse::forbidden(
+                    "This workflow is not available in the current plan context.",
+                )
+                .into_response();
+            }
+
             if plan_tier.is_solo() && workflow.user_id == user_id {
                 match app_state
                     .workflow_repo
@@ -277,6 +341,7 @@ pub async fn update_workflow(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
+    Query(params): Query<WorkflowContextQuery>,
     Json(payload): Json<CreateWorkflow>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
@@ -314,17 +379,40 @@ pub async fn update_workflow(
         }
     };
 
-    let workspace_role = if let Some(workspace_id) = existing.workspace_id {
-        match membership_role_for(&app_state, user_id, workspace_id).await {
-            Ok(role) => role,
-            Err(err) => {
-                eprintln!("Failed to verify workspace membership: {:?}", err);
-                return JsonResponse::server_error("Failed to update workflow").into_response();
-            }
+    let memberships = match app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+    {
+        Ok(memberships) => memberships,
+        Err(err) => {
+            eprintln!("Failed to load workspace memberships: {:?}", err);
+            return JsonResponse::server_error("Failed to update workflow").into_response();
         }
-    } else {
-        None
     };
+    let roles_map = membership_roles_map(&memberships);
+    let context = plan_context_for_user(claims.plan.as_deref(), &memberships, params.workspace);
+
+    if params.workspace.is_some()
+        && !matches!(
+            context,
+            PlanContext::WorkspaceOwned { .. } | PlanContext::WorkspaceMember { .. }
+        )
+    {
+        return JsonResponse::forbidden("You do not have access to this workspace.")
+            .into_response();
+    }
+
+    if !can_access_workflow_in_context(&existing, context, &roles_map) {
+        return JsonResponse::forbidden(
+            "This workflow is not available in the current plan context.",
+        )
+        .into_response();
+    }
+
+    let workspace_role = existing
+        .workspace_id
+        .and_then(|workspace_id| roles_map.get(&workspace_id).copied());
 
     if matches!(workspace_role, Some(WorkspaceRole::Viewer)) {
         return JsonResponse::forbidden("Workspace viewers cannot modify workflows.")
@@ -418,6 +506,7 @@ pub async fn lock_workflow(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
+    Query(params): Query<WorkflowContextQuery>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
@@ -436,6 +525,37 @@ pub async fn lock_workflow(
             return JsonResponse::server_error("Failed to lock workflow").into_response();
         }
     };
+
+    let memberships = match app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+    {
+        Ok(memberships) => memberships,
+        Err(err) => {
+            eprintln!("Failed to load workspace memberships: {:?}", err);
+            return JsonResponse::server_error("Failed to lock workflow").into_response();
+        }
+    };
+    let roles_map = membership_roles_map(&memberships);
+    let context = plan_context_for_user(claims.plan.as_deref(), &memberships, params.workspace);
+
+    if params.workspace.is_some()
+        && !matches!(
+            context,
+            PlanContext::WorkspaceOwned { .. } | PlanContext::WorkspaceMember { .. }
+        )
+    {
+        return JsonResponse::forbidden("You do not have access to this workspace.")
+            .into_response();
+    }
+
+    if !can_access_workflow_in_context(&workflow, context, &roles_map) {
+        return JsonResponse::forbidden(
+            "This workflow is not available in the current plan context.",
+        )
+        .into_response();
+    }
 
     if workflow.user_id != user_id {
         return JsonResponse::forbidden("Only the creator can lock this workflow.").into_response();
@@ -463,6 +583,7 @@ pub async fn unlock_workflow(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
+    Query(params): Query<WorkflowContextQuery>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
@@ -482,21 +603,44 @@ pub async fn unlock_workflow(
         }
     };
 
+    let memberships = match app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+    {
+        Ok(memberships) => memberships,
+        Err(err) => {
+            eprintln!("Failed to load workspace memberships: {:?}", err);
+            return JsonResponse::server_error("Failed to unlock workflow").into_response();
+        }
+    };
+    let roles_map = membership_roles_map(&memberships);
+    let context = plan_context_for_user(claims.plan.as_deref(), &memberships, params.workspace);
+
+    if params.workspace.is_some()
+        && !matches!(
+            context,
+            PlanContext::WorkspaceOwned { .. } | PlanContext::WorkspaceMember { .. }
+        )
+    {
+        return JsonResponse::forbidden("You do not have access to this workspace.")
+            .into_response();
+    }
+
+    if !can_access_workflow_in_context(&workflow, context, &roles_map) {
+        return JsonResponse::forbidden(
+            "This workflow is not available in the current plan context.",
+        )
+        .into_response();
+    }
+
     if workflow.locked_by.is_none() {
         return Json(json!({ "success": true, "workflow": workflow })).into_response();
     }
 
-    let workspace_role = if let Some(workspace_id) = workflow.workspace_id {
-        match membership_role_for(&app_state, user_id, workspace_id).await {
-            Ok(role) => role,
-            Err(err) => {
-                eprintln!("Failed to verify workspace membership: {:?}", err);
-                return JsonResponse::server_error("Failed to unlock workflow").into_response();
-            }
-        }
-    } else {
-        None
-    };
+    let workspace_role = workflow
+        .workspace_id
+        .and_then(|workspace_id| roles_map.get(&workspace_id).copied());
 
     let is_workspace_admin = matches!(
         workspace_role,
@@ -530,11 +674,56 @@ pub async fn delete_workflow(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
+    Query(params): Query<WorkflowContextQuery>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+
+    let workflow = match app_state
+        .workflow_repo
+        .find_workflow_for_member(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(workflow)) => workflow,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(err) => {
+            eprintln!("Failed to load workflow for deletion: {:?}", err);
+            return JsonResponse::server_error("Failed to delete workflow").into_response();
+        }
+    };
+
+    let memberships = match app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+    {
+        Ok(memberships) => memberships,
+        Err(err) => {
+            eprintln!("Failed to load workspace memberships: {:?}", err);
+            return JsonResponse::server_error("Failed to delete workflow").into_response();
+        }
+    };
+    let roles_map = membership_roles_map(&memberships);
+    let context = plan_context_for_user(claims.plan.as_deref(), &memberships, params.workspace);
+
+    if params.workspace.is_some()
+        && !matches!(
+            context,
+            PlanContext::WorkspaceOwned { .. } | PlanContext::WorkspaceMember { .. }
+        )
+    {
+        return JsonResponse::forbidden("You do not have access to this workspace.")
+            .into_response();
+    }
+
+    if !can_access_workflow_in_context(&workflow, context, &roles_map) {
+        return JsonResponse::forbidden(
+            "This workflow is not available in the current plan context.",
+        )
+        .into_response();
+    }
 
     match app_state
         .workflow_repo
