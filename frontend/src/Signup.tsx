@@ -16,6 +16,7 @@ type InvitePreviewResponse = {
   invitation: {
     id: string
     workspace_id: string
+    workspace_name?: string
     email: string
     role: string
     token: string

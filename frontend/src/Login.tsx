@@ -12,6 +12,7 @@ type InvitePreviewResponse = {
   success: boolean
   invitation: {
     workspace_id: string
+    workspace_name?: string
     email: string
     role: string
   } | null
@@ -231,6 +232,8 @@ export default function Login() {
   const acceptLoading = inviteActionLoading === 'accept'
   const declineLoading = inviteActionLoading === 'decline'
   const invitation = invitePreview?.invitation ?? null
+  const workspaceLabel =
+    invitation?.workspace_name?.trim() || invitation?.workspace_id || ''
   const showInviteModal = inviteModalOpen && Boolean(invitation)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -272,7 +275,7 @@ export default function Login() {
             </h2>
             <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
               You are about to join workspace
-              <span className="font-medium"> {invitation.workspace_id}</span>
+              <span className="font-medium"> {workspaceLabel}</span>
               {formattedInviteRole && (
                 <span>
                   {' '}

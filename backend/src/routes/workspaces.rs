@@ -17,7 +17,8 @@ use crate::{
         user::PublicUser,
         workflow::Workflow,
         workspace::{
-            Workspace, WorkspaceMembershipSummary, WorkspaceRole, INVITATION_STATUS_PENDING,
+            Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole,
+            INVITATION_STATUS_PENDING,
         },
     },
     responses::JsonResponse,
@@ -962,6 +963,13 @@ fn build_invite_accept_url(frontend_origin: &str, token: &str, has_account: bool
     format!("{}/{}?invite={}", frontend_origin, path, encode(token))
 }
 
+#[derive(Debug, Serialize, Clone)]
+struct WorkspaceInvitationPreview {
+    #[serde(flatten)]
+    invitation: WorkspaceInvitation,
+    workspace_name: Option<String>,
+}
+
 pub async fn create_workspace_invitation(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -1112,9 +1120,29 @@ pub async fn preview_invitation(
             let revoked = inv.revoked_at.is_some();
             let accepted = inv.accepted_at.is_some();
             let declined = inv.declined_at.is_some();
+            let workspace_name = match app_state
+                .workspace_repo
+                .find_workspace(inv.workspace_id)
+                .await
+            {
+                Ok(Some(workspace)) => Some(workspace.name),
+                Ok(None) => None,
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        workspace_id = %inv.workspace_id,
+                        "failed to load workspace name for invitation preview"
+                    );
+                    None
+                }
+            };
+            let response_payload = WorkspaceInvitationPreview {
+                invitation: inv,
+                workspace_name,
+            };
             Json(json!({
                 "success": true,
-                "invitation": inv,
+                "invitation": response_payload,
                 "expired": expired,
                 "revoked": revoked,
                 "accepted": accepted,
@@ -1315,7 +1343,8 @@ pub async fn workspace_to_solo_execute(
 mod tests {
     use super::{
         accept_invitation, build_invite_accept_url, decline_invitation, leave_workspace,
-        revoke_workspace_member, InvitationDecisionPayload, RevokeWorkspaceMemberPayload,
+        preview_invitation, revoke_workspace_member, InvitationDecisionPayload,
+        RevokeWorkspaceMemberPayload,
     };
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
     use crate::db::{
@@ -1440,6 +1469,7 @@ mod tests {
         members: Arc<Mutex<Vec<(Uuid, Uuid, WorkspaceRole)>>>,
         accepted: Arc<Mutex<Vec<Uuid>>>,
         declined: Arc<Mutex<Vec<Uuid>>>,
+        workspace: Arc<Mutex<Option<Workspace>>>,
     }
 
     impl TestWorkspaceRepo {
@@ -1449,7 +1479,14 @@ mod tests {
                 members: Arc::new(Mutex::new(Vec::new())),
                 accepted: Arc::new(Mutex::new(Vec::new())),
                 declined: Arc::new(Mutex::new(Vec::new())),
+                workspace: Arc::new(Mutex::new(None)),
             }
+        }
+
+        fn with_workspace(invite: WorkspaceInvitation, workspace: Workspace) -> Self {
+            let repo = Self::new(invite);
+            repo.set_workspace(workspace);
+            repo
         }
 
         fn records(&self) -> (Vec<(Uuid, Uuid, WorkspaceRole)>, Vec<Uuid>, Vec<Uuid>) {
@@ -1462,6 +1499,10 @@ mod tests {
 
         fn current_invitation(&self) -> Option<WorkspaceInvitation> {
             self.invitation.lock().unwrap().clone()
+        }
+
+        fn set_workspace(&self, workspace: Workspace) {
+            *self.workspace.lock().unwrap() = Some(workspace);
         }
     }
 
@@ -1486,9 +1527,10 @@ mod tests {
 
         async fn find_workspace(
             &self,
-            _: Uuid,
+            workspace_id: Uuid,
         ) -> Result<Option<crate::models::workspace::Workspace>, sqlx::Error> {
-            unimplemented!()
+            let stored = self.workspace.lock().unwrap();
+            Ok(stored.as_ref().filter(|ws| ws.id == workspace_id).cloned())
         }
 
         async fn add_member(
@@ -2012,6 +2054,48 @@ mod tests {
             signup_url,
             "https://app.example.com/signup?invite=abc%2B%2F%3D%3F"
         );
+    }
+
+    #[tokio::test]
+    async fn preview_invitation_includes_workspace_name() {
+        let email = "member@example.com";
+        let invite = invite_fixture(email);
+        let workspace_id = invite.workspace_id;
+        let invite_email = invite.email.clone();
+        let now = OffsetDateTime::now_utc();
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Growth Team".into(),
+            created_by: invite.created_by,
+            owner_id: invite.created_by,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let repo = Arc::new(TestWorkspaceRepo::with_workspace(
+            invite.clone(),
+            workspace.clone(),
+        ));
+        let state = test_state(repo.clone());
+
+        let response =
+            preview_invitation(State(state), axum::extract::Path(invite.token.clone())).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["invitation"]["workspace_name"],
+            Value::String(workspace.name.clone())
+        );
+        assert_eq!(
+            json["invitation"]["workspace_id"],
+            Value::String(workspace_id.to_string())
+        );
+        // Ensure other fields are still present
+        assert_eq!(json["invitation"]["email"], Value::String(invite_email));
     }
 
     #[tokio::test]
