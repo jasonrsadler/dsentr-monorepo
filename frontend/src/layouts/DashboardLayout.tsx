@@ -1,5 +1,5 @@
 // src/layouts/DashboardLayout.tsx
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
@@ -21,7 +21,10 @@ import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
 
 export default function DashboardLayout() {
-  const { user } = useAuth()
+  const user = useAuth((state) => state.user)
+  const memberships = useAuth((state) => state.memberships)
+  const currentWorkspaceId = useAuth((state) => state.currentWorkspaceId)
+  const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [initialSettingsTab, setInitialSettingsTab] = useState<
     string | undefined
@@ -31,6 +34,75 @@ export default function DashboardLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   // Preferences removed
+
+  const hasWorkspaces = memberships.length > 0
+  const hasMultipleWorkspaces = memberships.length > 1
+
+  const currentWorkspace = useMemo(() => {
+    if (!hasWorkspaces) return null
+    if (!currentWorkspaceId) return memberships[0]
+    return (
+      memberships.find((membership) => {
+        return membership.workspace.id === currentWorkspaceId
+      }) ?? memberships[0]
+    )
+  }, [currentWorkspaceId, hasWorkspaces, memberships])
+
+  const currentWorkspaceName = useMemo(() => {
+    if (!currentWorkspace) return ''
+    const name = currentWorkspace.workspace.name?.trim()
+    return name || 'Unnamed workspace'
+  }, [currentWorkspace])
+
+  useEffect(() => {
+    if (memberships.length === 1) {
+      const soleId = memberships[0]?.workspace.id
+      if (soleId && soleId !== currentWorkspaceId) {
+        setCurrentWorkspaceId(soleId)
+      }
+    }
+  }, [memberships, currentWorkspaceId, setCurrentWorkspaceId])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const workspaceFromQuery = params.get('workspace')
+    if (!workspaceFromQuery) return
+    if (!memberships.some((m) => m.workspace.id === workspaceFromQuery)) return
+    if (workspaceFromQuery !== currentWorkspaceId) {
+      setCurrentWorkspaceId(workspaceFromQuery)
+    }
+  }, [currentWorkspaceId, location.search, memberships, setCurrentWorkspaceId])
+
+  const syncWorkspaceParam = useCallback(
+    (workspaceId: string | null, replace = false) => {
+      const params = new URLSearchParams(location.search)
+      const existing = params.get('workspace')
+      if (workspaceId) {
+        if (existing === workspaceId) return
+        params.set('workspace', workspaceId)
+      } else {
+        if (!existing) return
+        params.delete('workspace')
+      }
+      navigate(
+        { pathname: location.pathname, search: params.toString() },
+        { replace }
+      )
+    },
+    [location.pathname, location.search, navigate]
+  )
+
+  useEffect(() => {
+    syncWorkspaceParam(currentWorkspace?.workspace.id ?? null, true)
+  }, [currentWorkspace, syncWorkspaceParam])
+
+  const handleWorkspaceChange = useCallback(
+    (workspaceId: string) => {
+      if (!workspaceId || workspaceId === currentWorkspaceId) return
+      setCurrentWorkspaceId(workspaceId)
+    },
+    [currentWorkspaceId, setCurrentWorkspaceId]
+  )
 
   const planLabel = useMemo(() => {
     if (!user?.plan) return null
@@ -114,6 +186,36 @@ export default function DashboardLayout() {
           </div>
           {user && (
             <div className="flex items-center gap-3">
+              {hasWorkspaces ? (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Workspace
+                  </span>
+                  {hasMultipleWorkspaces ? (
+                    <select
+                      aria-label="Workspace switcher"
+                      value={currentWorkspace?.workspace.id ?? ''}
+                      onChange={(event) =>
+                        handleWorkspaceChange(event.target.value)
+                      }
+                      className="px-2 py-1 border rounded-md bg-white text-sm dark:bg-zinc-800 dark:border-zinc-700"
+                    >
+                      {memberships.map((membership) => (
+                        <option
+                          key={membership.workspace.id}
+                          value={membership.workspace.id}
+                        >
+                          {membership.workspace.name || 'Unnamed workspace'}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-sm text-zinc-700 dark:text-zinc-200">
+                      {currentWorkspaceName}
+                    </span>
+                  )}
+                </div>
+              ) : null}
               {planLabel ? (
                 <span className="rounded-full border border-indigo-500 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:border-indigo-400 dark:text-indigo-300">
                   {planLabel}

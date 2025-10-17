@@ -1,6 +1,33 @@
 import { API_BASE_URL } from './config'
 import { getCsrfToken } from './csrfCache'
 
+export class HttpError extends Error {
+  status?: number
+
+  constructor(message: string, status?: number) {
+    super(message)
+    this.name = 'HttpError'
+    this.status = status
+  }
+}
+
+async function parseJson(response: Response) {
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
+function raiseForStatus(
+  response: Response,
+  body: any,
+  fallbackMessage: string
+): never {
+  const message = body?.message || fallbackMessage
+  throw new HttpError(message, response.status)
+}
+
 export type WorkspaceMember = {
   workspace_id: string
   user_id: string
@@ -46,10 +73,11 @@ export async function listWorkspaces() {
   const res = await fetch(`${API_BASE_URL}/api/workspaces`, {
     credentials: 'include'
   })
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to load workspaces')
-  return (body.workspaces ?? []) as WorkspaceMembershipSummary[]
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to load workspaces')
+  }
+  return (body?.workspaces ?? []) as WorkspaceMembershipSummary[]
 }
 
 export async function listWorkspaceMembers(workspaceId: string) {
@@ -59,10 +87,11 @@ export async function listWorkspaceMembers(workspaceId: string) {
       credentials: 'include'
     }
   )
-  const body = await res.json()
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to list members')
-  return (body.members ?? []) as WorkspaceMember[]
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to list members')
+  }
+  return (body?.members ?? []) as WorkspaceMember[]
 }
 
 export async function addWorkspaceMember(
@@ -80,9 +109,10 @@ export async function addWorkspaceMember(
       body: JSON.stringify({ user_id: userId, role })
     }
   )
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to add member')
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to add member')
+  }
 }
 
 export async function updateWorkspaceMemberRole(
@@ -100,9 +130,10 @@ export async function updateWorkspaceMemberRole(
       body: JSON.stringify({ role })
     }
   )
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to update role')
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to update role')
+  }
 }
 
 export async function removeWorkspaceMember(
@@ -118,9 +149,10 @@ export async function removeWorkspaceMember(
       headers: { 'x-csrf-token': csrf }
     }
   )
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to remove member')
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to remove member')
+  }
 }
 
 export async function revokeWorkspaceMember(
@@ -138,9 +170,10 @@ export async function revokeWorkspaceMember(
       body: JSON.stringify({ member_id: memberId, reason: payload?.reason })
     }
   )
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to revoke member')
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to revoke member')
+  }
 }
 
 export async function leaveWorkspace(workspaceId: string) {
@@ -153,9 +186,10 @@ export async function leaveWorkspace(workspaceId: string) {
       headers: { 'x-csrf-token': csrf }
     }
   )
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to leave workspace')
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to leave workspace')
+  }
 }
 
 export async function createWorkspaceInvite(
@@ -176,10 +210,11 @@ export async function createWorkspaceInvite(
       body: JSON.stringify(payload)
     }
   )
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to create invitation')
-  return body.invitation as WorkspaceInvitation
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to create invitation')
+  }
+  return body?.invitation as WorkspaceInvitation
 }
 
 export async function listWorkspaceInvites(workspaceId: string) {
@@ -187,20 +222,22 @@ export async function listWorkspaceInvites(workspaceId: string) {
     `${API_BASE_URL}/api/workspaces/${workspaceId}/invites`,
     { credentials: 'include' }
   )
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to list invitations')
-  return (body.invitations ?? []) as WorkspaceInvitation[]
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to list invitations')
+  }
+  return (body?.invitations ?? []) as WorkspaceInvitation[]
 }
 
 export async function listPendingInvites() {
   const res = await fetch(`${API_BASE_URL}/api/invites`, {
     credentials: 'include'
   })
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to load invitations')
-  return (body.invitations ?? []) as WorkspaceInvitation[]
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to load invitations')
+  }
+  return (body?.invitations ?? []) as WorkspaceInvitation[]
 }
 
 export async function revokeWorkspaceInvite(
@@ -216,9 +253,10 @@ export async function revokeWorkspaceInvite(
       headers: { 'x-csrf-token': csrf }
     }
   )
-  const body = await res.json().catch(() => null)
-  if (!res.ok || body?.success === false)
-    throw new Error(body?.message || 'Failed to revoke invitation')
+  const body = await parseJson(res)
+  if (!res.ok || body?.success === false) {
+    raiseForStatus(res, body, 'Failed to revoke invitation')
+  }
 }
 
 async function postInviteDecision(
@@ -232,9 +270,9 @@ async function postInviteDecision(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token })
   })
-  const body = await res.json().catch(() => null)
+  const body = await parseJson(res)
   if (!res.ok || body?.success === false) {
-    throw new Error(body?.message || errorMessage)
+    raiseForStatus(res, body, errorMessage)
   }
   return body
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/stores/auth'
 import {
   listWorkspaceMembers,
@@ -7,8 +7,11 @@ import {
   createWorkspaceInvite,
   listWorkspaceInvites,
   revokeWorkspaceInvite,
+  leaveWorkspace,
+  HttpError,
   type WorkspaceMember,
-  type WorkspaceInvitation
+  type WorkspaceInvitation,
+  type WorkspaceMembershipSummary
 } from '@/lib/orgWorkspaceApi'
 import { normalizePlanTier } from '@/lib/planTiers'
 
@@ -24,11 +27,16 @@ const resolveMemberIdentity = (member: WorkspaceMember) => {
 }
 
 export default function MembersTab() {
-  const { memberships, user, checkAuth } = useAuth()
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+  const memberships = useAuth((state) => state.memberships)
+  const user = useAuth((state) => state.user)
+  const checkAuth = useAuth((state) => state.checkAuth)
+  const currentWorkspaceId = useAuth((state) => state.currentWorkspaceId)
+  const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
+  const refreshMemberships = useAuth((state) => state.refreshMemberships)
   const [members, setMembers] = useState<WorkspaceMember[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'user' | 'viewer'>(
     'user'
@@ -44,23 +52,31 @@ export default function MembersTab() {
     [memberships]
   )
   const currentWorkspace = useMemo(() => {
-    if (!workspaceId) return availableWorkspaces[0] ?? null
+    if (availableWorkspaces.length === 0) return null
+    if (!currentWorkspaceId) {
+      return availableWorkspaces[0] ?? null
+    }
     return (
-      availableWorkspaces.find((m) => m.workspace.id === workspaceId) ?? null
+      availableWorkspaces.find(
+        (membership) => membership.workspace.id === currentWorkspaceId
+      ) ??
+      availableWorkspaces[0] ??
+      null
     )
-  }, [availableWorkspaces, workspaceId])
+  }, [availableWorkspaces, currentWorkspaceId])
 
   const resolvedWorkspaceId = currentWorkspace?.workspace?.id ?? null
   const resolvedWorkspaceName = currentWorkspace?.workspace?.name ?? ''
   const isWorkspaceOwner = currentWorkspace?.role === 'owner'
   const canManageMembers =
     planTier === 'workspace' && Boolean(resolvedWorkspaceId)
+  const canLeaveWorkspace = Boolean(resolvedWorkspaceId) && !isWorkspaceOwner
 
   useEffect(() => {
-    if (!workspaceId && availableWorkspaces[0]) {
-      setWorkspaceId(availableWorkspaces[0].workspace.id)
+    if (!currentWorkspaceId && availableWorkspaces[0]) {
+      setCurrentWorkspaceId(availableWorkspaces[0].workspace.id)
     }
-  }, [workspaceId, availableWorkspaces])
+  }, [availableWorkspaces, currentWorkspaceId, setCurrentWorkspaceId])
 
   useEffect(() => {
     if (!resolvedWorkspaceId) {
@@ -70,6 +86,7 @@ export default function MembersTab() {
     }
     setBusy(true)
     setError(null)
+    setNotice(null)
     Promise.all([
       listWorkspaceMembers(resolvedWorkspaceId),
       listWorkspaceInvites(resolvedWorkspaceId)
@@ -78,9 +95,58 @@ export default function MembersTab() {
         setMembers(m)
         setPendingInvites(inv)
       })
-      .catch((e) => setError(e.message || 'Failed to load members'))
+      .catch(async (error: unknown) => {
+        if (error instanceof HttpError && error.status === 403) {
+          setMembers([])
+          setPendingInvites([])
+          setError(null)
+          const membershipsList = await refreshMemberships().catch(() => [])
+          let fallbackWorkspace: WorkspaceMembershipSummary | null = null
+          let message =
+            'Access to this workspace was revoked. Redirected to your Solo workspace.'
+          if (Array.isArray(membershipsList) && membershipsList.length > 0) {
+            const soloWorkspace = membershipsList.find((membership) => {
+              return membership.workspace.plan === 'solo'
+            })
+            if (soloWorkspace) {
+              fallbackWorkspace = soloWorkspace
+              message =
+                'Access to this workspace was revoked. Redirected to your Solo workspace.'
+            } else {
+              fallbackWorkspace = membershipsList[0]
+              message =
+                'Access to this workspace was revoked. Switched to your next available workspace.'
+            }
+          } else {
+            message =
+              'Access to this workspace was revoked and no other workspaces are available.'
+          }
+          if (fallbackWorkspace) {
+            setCurrentWorkspaceId(fallbackWorkspace.workspace.id)
+          }
+          setNotice(message)
+          await checkAuth({ silent: true }).catch(() => null)
+          return
+        }
+        const message =
+          error instanceof Error ? error.message : 'Failed to load members'
+        setError(message)
+      })
       .finally(() => setBusy(false))
-  }, [resolvedWorkspaceId])
+  }, [
+    checkAuth,
+    refreshMemberships,
+    resolvedWorkspaceId,
+    setCurrentWorkspaceId
+  ])
+
+  const handleWorkspaceSelect = useCallback(
+    (workspaceId: string) => {
+      if (!workspaceId || workspaceId === resolvedWorkspaceId) return
+      setCurrentWorkspaceId(workspaceId)
+    },
+    [resolvedWorkspaceId, setCurrentWorkspaceId]
+  )
 
   const handleInvite = async () => {
     if (!resolvedWorkspaceId || !inviteEmail.trim() || !canManageMembers) return
@@ -150,6 +216,47 @@ export default function MembersTab() {
     }
   }
 
+  const handleLeaveWorkspace = useCallback(async () => {
+    if (!resolvedWorkspaceId || !canLeaveWorkspace) return
+    try {
+      setBusy(true)
+      setError(null)
+      setNotice(null)
+      await leaveWorkspace(resolvedWorkspaceId)
+      const membershipsList = await refreshMemberships().catch(() => [])
+      let message = 'You left the workspace.'
+      if (Array.isArray(membershipsList) && membershipsList.length > 0) {
+        const soloWorkspace = membershipsList.find((membership) => {
+          return membership.workspace.plan === 'solo'
+        })
+        const nextWorkspace = soloWorkspace ?? membershipsList[0]
+        if (nextWorkspace) {
+          setCurrentWorkspaceId(nextWorkspace.workspace.id)
+          message = soloWorkspace
+            ? 'You left the workspace. Redirected to your Solo workspace.'
+            : 'You left the workspace. Switched to your next available workspace.'
+        }
+      }
+      setNotice(message)
+      await checkAuth({ silent: true }).catch(() => null)
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message || 'Failed to leave workspace'
+          : 'Failed to leave workspace'
+      setError(message)
+      setNotice(null)
+    } finally {
+      setBusy(false)
+    }
+  }, [
+    canLeaveWorkspace,
+    checkAuth,
+    refreshMemberships,
+    resolvedWorkspaceId,
+    setCurrentWorkspaceId
+  ])
+
   if (!resolvedWorkspaceId) {
     return (
       <div className="space-y-4">
@@ -176,27 +283,42 @@ export default function MembersTab() {
             {resolvedWorkspaceName || 'Unnamed workspace'}
           </span>
         </div>
-        {availableWorkspaces.length > 1 ? (
-          <select
-            value={resolvedWorkspaceId}
-            onChange={(e) => setWorkspaceId(e.target.value)}
-            className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 text-sm"
+        <div className="flex items-center gap-2">
+          {availableWorkspaces.length > 1 ? (
+            <select
+              value={resolvedWorkspaceId}
+              onChange={(event) => handleWorkspaceSelect(event.target.value)}
+              className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 text-sm"
+            >
+              {availableWorkspaces.map((membership) => (
+                <option
+                  key={membership.workspace.id}
+                  value={membership.workspace.id}
+                >
+                  {membership.workspace.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <button
+            onClick={handleLeaveWorkspace}
+            disabled={!canLeaveWorkspace || busy}
+            className="px-3 py-1 text-xs font-medium rounded border border-red-400 text-red-600 disabled:opacity-50"
           >
-            {availableWorkspaces.map((membership) => (
-              <option
-                key={membership.workspace.id}
-                value={membership.workspace.id}
-              >
-                {membership.workspace.name}
-              </option>
-            ))}
-          </select>
-        ) : null}
+            Leave workspace
+          </button>
+        </div>
       </div>
 
       {planTier === 'solo' ? (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
           Upgrade to the workspace plan to invite additional members.
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className="rounded-md border border-blue-300 bg-blue-50 p-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
+          {notice}
         </div>
       ) : null}
 
