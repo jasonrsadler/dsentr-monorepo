@@ -201,7 +201,22 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(vec![])
     }
 
+    async fn list_workflows_by_workspace_ids(
+        &self,
+        _workspace_ids: &[Uuid],
+    ) -> Result<Vec<Workflow>, sqlx::Error> {
+        Ok(vec![])
+    }
+
     async fn find_workflow_by_id(
+        &self,
+        _user_id: Uuid,
+        _workflow_id: Uuid,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn find_workflow_for_member(
         &self,
         _user_id: Uuid,
         _workflow_id: Uuid,
@@ -240,6 +255,14 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _user_id: Uuid,
         _workflow_id: Uuid,
         _workspace_id: Option<Uuid>,
+    ) -> Result<Option<Workflow>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn set_workflow_lock(
+        &self,
+        _workflow_id: Uuid,
+        _locked_by: Option<Uuid>,
     ) -> Result<Option<Workflow>, sqlx::Error> {
         Ok(None)
     }

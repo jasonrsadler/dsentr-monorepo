@@ -11,7 +11,10 @@ mod sse;
 mod webhooks;
 
 pub use concurrency::set_concurrency_limit;
-pub use crud::{create_workflow, delete_workflow, get_workflow, list_workflows, update_workflow};
+pub use crud::{
+    create_workflow, delete_workflow, get_workflow, list_workflows, lock_workflow, unlock_workflow,
+    update_workflow,
+};
 pub use dead_letters::{clear_dead_letters_api, list_dead_letters, requeue_dead_letter};
 pub use egress::{
     clear_egress_block_events, get_egress_allowlist, list_egress_block_events, set_egress_allowlist,

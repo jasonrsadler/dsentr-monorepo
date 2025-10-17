@@ -6,6 +6,22 @@ use super::{
     prelude::*,
 };
 
+async fn membership_role_for(
+    state: &AppState,
+    user_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<Option<WorkspaceRole>, sqlx::Error> {
+    let memberships = state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await?;
+
+    Ok(memberships
+        .into_iter()
+        .find(|membership| membership.workspace.id == workspace_id)
+        .map(|membership| membership.role))
+}
+
 pub async fn create_workflow(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -53,6 +69,25 @@ pub async fn create_workflow(
         }
     }
 
+    if let Some(workspace_id) = workspace_id {
+        match membership_role_for(&app_state, user_id, workspace_id).await {
+            Ok(Some(role)) => {
+                if matches!(role, WorkspaceRole::Viewer) {
+                    return JsonResponse::forbidden("Workspace viewers cannot create workflows.")
+                        .into_response();
+                }
+            }
+            Ok(None) => {
+                return JsonResponse::forbidden("You do not have access to this workspace.")
+                    .into_response();
+            }
+            Err(err) => {
+                eprintln!("Failed to verify workspace membership: {:?}", err);
+                return JsonResponse::server_error("Failed to create workflow").into_response();
+            }
+        }
+    }
+
     let result = app_state
         .workflow_repo
         .create_workflow(user_id, workspace_id, &name, description.as_deref(), data)
@@ -94,33 +129,87 @@ pub async fn list_workflows(
         .resolve_plan_tier(user_id, claims.plan.as_deref())
         .await;
 
-    match app_state
+    let owned_workflows = match app_state
         .workflow_repo
         .list_workflows_by_user(user_id)
         .await
     {
-        Ok(workflows) => {
-            let (visible, hidden_count) = if plan_tier.is_solo() {
-                let limited = enforce_solo_workflow_limit(&workflows);
-                let hidden = workflows.len().saturating_sub(limited.len());
-                (limited, hidden)
-            } else {
-                (workflows, 0)
-            };
-            let mut payload = json!({
-                "success": true,
-                "workflows": visible,
-            });
-            if plan_tier.is_solo() {
-                payload["hidden_count"] = json!(hidden_count);
-            }
-            (StatusCode::OK, Json(payload)).into_response()
-        }
+        Ok(workflows) => workflows,
         Err(e) => {
-            eprintln!("DB error listing workflows: {:?}", e);
-            JsonResponse::server_error("Failed to fetch workflows").into_response()
+            eprintln!("DB error listing user workflows: {:?}", e);
+            return JsonResponse::server_error("Failed to fetch workflows").into_response();
+        }
+    };
+
+    let workspace_ids: Vec<Uuid> = match app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+    {
+        Ok(memberships) => memberships
+            .into_iter()
+            .map(|membership| membership.workspace.id)
+            .collect(),
+        Err(err) => {
+            eprintln!("Failed to load workspace memberships: {:?}", err);
+            return JsonResponse::server_error("Failed to fetch workflows").into_response();
+        }
+    };
+
+    let mut combined: HashMap<Uuid, Workflow> =
+        owned_workflows.into_iter().map(|wf| (wf.id, wf)).collect();
+
+    if !workspace_ids.is_empty() {
+        let mut ids: Vec<Uuid> = workspace_ids.into_iter().collect();
+        ids.sort_unstable();
+        ids.dedup();
+
+        match app_state
+            .workflow_repo
+            .list_workflows_by_workspace_ids(&ids)
+            .await
+        {
+            Ok(workflows) => {
+                for workflow in workflows {
+                    combined.entry(workflow.id).or_insert(workflow);
+                }
+            }
+            Err(err) => {
+                eprintln!("DB error listing workspace workflows: {:?}", err);
+                return JsonResponse::server_error("Failed to fetch workflows").into_response();
+            }
         }
     }
+
+    let mut workflows: Vec<Workflow> = combined.into_values().collect();
+    workflows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+    let mut hidden_count = 0usize;
+    let visible = if plan_tier.is_solo() {
+        let owned: Vec<_> = workflows
+            .iter()
+            .filter(|wf| wf.user_id == user_id)
+            .cloned()
+            .collect();
+        let allowed_owned = enforce_solo_workflow_limit(&owned);
+        let allowed_ids: HashSet<_> = allowed_owned.iter().map(|wf| wf.id).collect();
+        hidden_count = owned.len().saturating_sub(allowed_owned.len());
+        workflows
+            .into_iter()
+            .filter(|wf| wf.workspace_id.is_some() || allowed_ids.contains(&wf.id))
+            .collect()
+    } else {
+        workflows
+    };
+
+    let mut payload = json!({
+        "success": true,
+        "workflows": visible,
+    });
+    if plan_tier.is_solo() {
+        payload["hidden_count"] = json!(hidden_count);
+    }
+    (StatusCode::OK, Json(payload)).into_response()
 }
 
 pub async fn get_workflow(
@@ -138,11 +227,11 @@ pub async fn get_workflow(
 
     match app_state
         .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
+        .find_workflow_for_member(user_id, workflow_id)
         .await
     {
         Ok(Some(workflow)) => {
-            if plan_tier.is_solo() {
+            if plan_tier.is_solo() && workflow.user_id == user_id {
                 match app_state
                     .workflow_repo
                     .list_workflows_by_user(user_id)
@@ -212,14 +301,58 @@ pub async fn update_workflow(
         }
     }
 
-    let allowed_ids = if plan_tier.is_solo() {
+    let existing = match app_state
+        .workflow_repo
+        .find_workflow_for_member(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(workflow)) => workflow,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(err) => {
+            eprintln!("Failed to load workflow for update: {:?}", err);
+            return JsonResponse::server_error("Failed to update workflow").into_response();
+        }
+    };
+
+    let workspace_role = if let Some(workspace_id) = existing.workspace_id {
+        match membership_role_for(&app_state, user_id, workspace_id).await {
+            Ok(role) => role,
+            Err(err) => {
+                eprintln!("Failed to verify workspace membership: {:?}", err);
+                return JsonResponse::server_error("Failed to update workflow").into_response();
+            }
+        }
+    } else {
+        None
+    };
+
+    if matches!(workspace_role, Some(WorkspaceRole::Viewer)) {
+        return JsonResponse::forbidden("Workspace viewers cannot modify workflows.")
+            .into_response();
+    }
+
+    let is_workspace_admin = matches!(
+        workspace_role,
+        Some(WorkspaceRole::Admin | WorkspaceRole::Owner)
+    );
+    if let Some(locker) = existing.locked_by {
+        if locker != user_id && !is_workspace_admin {
+            return JsonResponse::forbidden(
+                "This workflow is locked and can only be modified by the creator or an admin.",
+            )
+            .into_response();
+        }
+    }
+
+    let is_creator = existing.user_id == user_id;
+    let allowed_ids = if plan_tier.is_solo() && is_creator {
         match app_state
             .workflow_repo
-            .list_workflows_by_user(user_id)
+            .list_workflows_by_user(existing.user_id)
             .await
         {
-            Ok(existing) => {
-                let allowed = enforce_solo_workflow_limit(&existing);
+            Ok(existing_workflows) => {
+                let allowed = enforce_solo_workflow_limit(&existing_workflows);
                 Some(allowed.into_iter().map(|wf| wf.id).collect::<HashSet<_>>())
             }
             Err(err) => {
@@ -231,14 +364,12 @@ pub async fn update_workflow(
         None
     };
 
-    let before = app_state
-        .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
-        .await;
+    let owner_id = existing.user_id;
+    let before = existing.clone();
 
     match app_state
         .workflow_repo
-        .update_workflow(user_id, workflow_id, &name, description.as_deref(), data)
+        .update_workflow(owner_id, workflow_id, &name, description.as_deref(), data)
         .await
     {
         Ok(Some(workflow)) => {
@@ -253,15 +384,13 @@ pub async fn update_workflow(
                 }
             }
             sync_workflow_schedule(&app_state, &workflow).await;
-            if let Ok(Some(before_wf)) = before {
-                let diffs = diff_user_nodes_only(&before_wf.data, &workflow.data);
-                if let Err(e) = app_state
-                    .workflow_repo
-                    .insert_workflow_log(user_id, workflow.id, diffs)
-                    .await
-                {
-                    eprintln!("Failed to insert workflow log: {:?}", e);
-                }
+            let diffs = diff_user_nodes_only(&before.data, &workflow.data);
+            if let Err(e) = app_state
+                .workflow_repo
+                .insert_workflow_log(owner_id, workflow.id, diffs)
+                .await
+            {
+                eprintln!("Failed to insert workflow log: {:?}", e);
             }
             sync_secrets_from_workflow(&app_state, user_id, &workflow.data).await;
             (
@@ -281,6 +410,118 @@ pub async fn update_workflow(
             } else {
                 JsonResponse::server_error("Failed to update workflow").into_response()
             }
+        }
+    }
+}
+
+pub async fn lock_workflow(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    let workflow = match app_state
+        .workflow_repo
+        .find_workflow_for_member(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(workflow)) => workflow,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(err) => {
+            eprintln!("Failed to load workflow for locking: {:?}", err);
+            return JsonResponse::server_error("Failed to lock workflow").into_response();
+        }
+    };
+
+    if workflow.user_id != user_id {
+        return JsonResponse::forbidden("Only the creator can lock this workflow.").into_response();
+    }
+
+    match app_state
+        .workflow_repo
+        .set_workflow_lock(workflow_id, Some(user_id))
+        .await
+    {
+        Ok(Some(updated)) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "workflow": updated })),
+        )
+            .into_response(),
+        Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
+        Err(err) => {
+            eprintln!("Failed to lock workflow: {:?}", err);
+            JsonResponse::server_error("Failed to lock workflow").into_response()
+        }
+    }
+}
+
+pub async fn unlock_workflow(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    let workflow = match app_state
+        .workflow_repo
+        .find_workflow_for_member(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(workflow)) => workflow,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(err) => {
+            eprintln!("Failed to load workflow for unlocking: {:?}", err);
+            return JsonResponse::server_error("Failed to unlock workflow").into_response();
+        }
+    };
+
+    if workflow.locked_by.is_none() {
+        return Json(json!({ "success": true, "workflow": workflow })).into_response();
+    }
+
+    let workspace_role = if let Some(workspace_id) = workflow.workspace_id {
+        match membership_role_for(&app_state, user_id, workspace_id).await {
+            Ok(role) => role,
+            Err(err) => {
+                eprintln!("Failed to verify workspace membership: {:?}", err);
+                return JsonResponse::server_error("Failed to unlock workflow").into_response();
+            }
+        }
+    } else {
+        None
+    };
+
+    let is_workspace_admin = matches!(
+        workspace_role,
+        Some(WorkspaceRole::Admin | WorkspaceRole::Owner)
+    );
+
+    if workflow.user_id != user_id && !is_workspace_admin {
+        return JsonResponse::forbidden("Only the creator or an admin can unlock this workflow.")
+            .into_response();
+    }
+
+    match app_state
+        .workflow_repo
+        .set_workflow_lock(workflow_id, None)
+        .await
+    {
+        Ok(Some(updated)) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "workflow": updated })),
+        )
+            .into_response(),
+        Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
+        Err(err) => {
+            eprintln!("Failed to unlock workflow: {:?}", err);
+            JsonResponse::server_error("Failed to unlock workflow").into_response()
         }
     }
 }

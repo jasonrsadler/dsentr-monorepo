@@ -263,6 +263,10 @@ async fn main() {
                 .put(update_workflow)
                 .delete(delete_workflow),
         )
+        .route(
+            "/{workflow_id}/lock",
+            post(routes::workflows::lock_workflow).delete(routes::workflows::unlock_workflow),
+        )
         .route("/{workflow_id}/run", post(start_workflow_run))
         .route("/{workflow_id}/runs/{run_id}", get(get_workflow_run_status))
         .route(

@@ -22,7 +22,18 @@ pub trait WorkflowRepository: Send + Sync {
 
     async fn list_workflows_by_user(&self, user_id: Uuid) -> Result<Vec<Workflow>, sqlx::Error>;
 
+    async fn list_workflows_by_workspace_ids(
+        &self,
+        workspace_ids: &[Uuid],
+    ) -> Result<Vec<Workflow>, sqlx::Error>;
+
     async fn find_workflow_by_id(
+        &self,
+        user_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<Option<Workflow>, sqlx::Error>;
+
+    async fn find_workflow_for_member(
         &self,
         user_id: Uuid,
         workflow_id: Uuid,
@@ -55,6 +66,12 @@ pub trait WorkflowRepository: Send + Sync {
         user_id: Uuid,
         workflow_id: Uuid,
         workspace_id: Option<Uuid>,
+    ) -> Result<Option<Workflow>, sqlx::Error>;
+
+    async fn set_workflow_lock(
+        &self,
+        workflow_id: Uuid,
+        locked_by: Option<Uuid>,
     ) -> Result<Option<Workflow>, sqlx::Error>;
 
     // Logging methods

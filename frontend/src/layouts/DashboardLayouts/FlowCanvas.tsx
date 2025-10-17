@@ -166,6 +166,7 @@ interface FlowCanvasProps {
   failedIds?: Set<string>
   planTier?: string | null
   onRestrictionNotice?: (message: string) => void
+  canEdit?: boolean
 }
 
 export default function FlowCanvas({
@@ -180,7 +181,8 @@ export default function FlowCanvas({
   succeededIds = new Set(),
   failedIds = new Set(),
   planTier,
-  onRestrictionNotice
+  onRestrictionNotice,
+  canEdit = true
 }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
   const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
@@ -190,6 +192,11 @@ export default function FlowCanvas({
   )
   const isSoloPlan = normalizedPlanTier === 'solo'
   const rafRef = useRef<number | null>(null)
+  const canEditRef = useRef<boolean>(canEdit)
+
+  useEffect(() => {
+    canEditRef.current = canEdit
+  }, [canEdit])
 
   const onRunWorkflowRef = useRef(onRunWorkflow)
   useEffect(() => {
@@ -261,6 +268,7 @@ export default function FlowCanvas({
 
   const updateNodeData = useCallback(
     (id: string, newData: any, suppressDirty = false) => {
+      if (!canEditRef.current) return
       setNodes((nds) => {
         let didChange = false
         const updated = nds.map((n) => {
@@ -275,12 +283,15 @@ export default function FlowCanvas({
         if (!didChange && reconciled === updated) return nds
         return reconciled
       })
-      if (!suppressDirty) markWorkflowDirtyRef.current()
+      if (!suppressDirty && canEditRef.current) markWorkflowDirtyRef.current()
     },
     [setNodes]
   )
 
   const saveAllNodes = useCallback(() => {
+    if (!canEditRef.current) {
+      return nodes
+    }
     const clearedNodes = nodes.map((n) => {
       const keys = n.data?.inputs?.map((i) => i.key.trim()) || []
       const values = n.data?.inputs?.map((i) => i.value.trim()) || []
@@ -301,6 +312,7 @@ export default function FlowCanvas({
       getEdges: () => edges,
       setNodesFromToolbar: (updatedNodes) =>
         setNodes((nds) => {
+          if (!canEditRef.current) return nds
           let changed = false
           const mapped = nds.map((n) => {
             const updated = updatedNodes.find((u) => u.id === n.id)
@@ -327,13 +339,16 @@ export default function FlowCanvas({
         }))
         setNodes(reconcileNodeLabels(safeNodes))
         setEdges(graph?.edges ?? [])
-        markWorkflowDirtyRef.current()
+        if (canEditRef.current) {
+          markWorkflowDirtyRef.current()
+        }
       }
     })
   }, [edges, saveAllNodes, setSaveRef, setNodes, setEdges])
 
   const removeNode = useCallback(
     (id) => {
+      if (!canEditRef.current) return
       setNodes((nds) => nds.filter((n) => n.id !== id))
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
       markWorkflowDirtyRef.current()
@@ -398,6 +413,7 @@ export default function FlowCanvas({
 
   const onNodesChange = useCallback(
     (changes) => {
+      if (!canEditRef.current) return
       markWorkflowDirtyRef.current()
       onNodesChangeInternal(changes)
     },
@@ -406,6 +422,7 @@ export default function FlowCanvas({
 
   const onEdgesChange = useCallback(
     (changes) => {
+      if (!canEditRef.current) return
       markWorkflowDirtyRef.current()
       onEdgesChangeInternal(changes)
     },
@@ -414,6 +431,7 @@ export default function FlowCanvas({
 
   const onConnect = useCallback(
     (params) => {
+      if (!canEditRef.current) return
       const outcomeLabel =
         params?.sourceHandle === 'cond-true'
           ? 'True'
@@ -441,6 +459,7 @@ export default function FlowCanvas({
   const onDrop = useCallback(
     (event) => {
       event.preventDefault()
+      if (!canEditRef.current) return
       const type = event.dataTransfer.getData('application/reactflow')
       if (!type) return
       const bounds = event.currentTarget.getBoundingClientRect()
@@ -486,6 +505,7 @@ export default function FlowCanvas({
 
   const handleEdgeTypeChange = useCallback(
     (edgeId, newType) => {
+      if (!canEditRef.current) return
       setEdges((eds) =>
         eds.map((e) =>
           e.id === edgeId ? { ...e, data: { ...e.data, edgeType: newType } } : e
@@ -497,6 +517,7 @@ export default function FlowCanvas({
 
   const handleEdgeDelete = useCallback(
     (edgeId) => {
+      if (!canEditRef.current) return
       setEdges((eds) => eds.filter((e) => e.id !== edgeId))
     },
     [setEdges]
@@ -529,7 +550,8 @@ export default function FlowCanvas({
       onDragOver={onDragOver}
       fitView
       proOptions={{ hideAttribution: true }}
-      nodesDraggable
+      nodesDraggable={canEdit}
+      nodesConnectable={canEdit}
       className="flex-1"
     >
       <Background gap={16} size={1} />

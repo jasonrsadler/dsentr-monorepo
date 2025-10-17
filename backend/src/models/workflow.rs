@@ -17,6 +17,9 @@ pub struct Workflow {
     pub hmac_replay_window_sec: i32,
     #[serde(skip_serializing)]
     pub webhook_salt: Uuid,
+    pub locked_by: Option<Uuid>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub locked_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]

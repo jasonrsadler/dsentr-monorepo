@@ -1,4 +1,8 @@
-pub(crate) use std::{collections::HashSet, convert::Infallible, time::Duration};
+pub(crate) use std::{
+    collections::{HashMap, HashSet},
+    convert::Infallible,
+    time::Duration,
+};
 
 pub(crate) use async_stream::stream;
 pub(crate) use axum::response::sse::{Event, KeepAlive, Sse};
@@ -20,6 +24,7 @@ pub(crate) use uuid::Uuid;
 
 pub(crate) use crate::{
     models::workflow::{CreateWorkflow, Workflow},
+    models::workspace::WorkspaceRole,
     responses::JsonResponse,
     routes::{auth::session::AuthSession, options::secrets::sync_secrets_from_workflow},
     state::AppState,

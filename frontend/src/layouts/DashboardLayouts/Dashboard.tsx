@@ -20,6 +20,8 @@ import {
   getWorkflowRunStatus,
   cancelRun,
   listActiveRuns,
+  lockWorkflow as lockWorkflowApi,
+  unlockWorkflow as unlockWorkflowApi,
   type WorkflowRunRecord,
   type WorkflowNodeRunRecord
 } from '@/lib/workflowApi'
@@ -185,7 +187,14 @@ export default function Dashboard() {
   const [restrictionNotice, setRestrictionNotice] = useState<string | null>(
     null
   )
+  const [lockBusy, setLockBusy] = useState(false)
+  const userId = useAuth((state) => state.user?.id ?? null)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const workspaceRole = (currentWorkspace?.role ?? 'owner') as
+    | 'owner'
+    | 'admin'
+    | 'user'
+    | 'viewer'
   const userPlan = useAuth((state) => state.user?.plan ?? null)
   const planTier = useMemo<PlanTier>(
     () =>
@@ -304,6 +313,30 @@ export default function Dashboard() {
       workflows.find((workflow) => workflow.id === currentWorkflowId) ?? null,
     [workflows, currentWorkflowId]
   )
+
+  const isWorkspaceAdmin = useMemo(
+    () => workspaceRole === 'owner' || workspaceRole === 'admin',
+    [workspaceRole]
+  )
+  const isViewer = workspaceRole === 'viewer'
+  const isCreator = useMemo(
+    () => (currentWorkflow ? currentWorkflow.user_id === userId : false),
+    [currentWorkflow, userId]
+  )
+  const isLocked = Boolean(currentWorkflow?.locked_by)
+  const canUnlockWorkflow = Boolean(
+    currentWorkflow && (isCreator || isWorkspaceAdmin)
+  )
+  const canLockWorkflow = Boolean(currentWorkflow && isCreator)
+  const canEditCurrentWorkflow =
+    !isViewer && (!isLocked || isCreator || isWorkspaceAdmin)
+  const canEditRef = useRef(canEditCurrentWorkflow)
+  useEffect(() => {
+    canEditRef.current = canEditCurrentWorkflow
+  }, [canEditCurrentWorkflow])
+  useEffect(() => {
+    setLockBusy(false)
+  }, [currentWorkflow?.id])
 
   const currentMeta = useMemo(
     () => ({
@@ -498,6 +531,7 @@ export default function Dashboard() {
 
   const renameWorkflow = useCallback(
     (id: string, newName: string) => {
+      if (!canEditCurrentWorkflow) return
       setWorkflows((prev) =>
         prev.map((workflow) =>
           workflow.id === id ? { ...workflow, name: newName } : workflow
@@ -507,12 +541,12 @@ export default function Dashboard() {
         setWorkflowDirty(true)
       }
     },
-    [currentWorkflowId]
+    [canEditCurrentWorkflow, currentWorkflowId]
   )
 
   const handleNewWorkflow = useCallback(async () => {
     // Guard against rapid double-clicks while a create is in-flight
-    if (isSavingRef.current || isSaving) return
+    if (isSavingRef.current || isSaving || !canEditCurrentWorkflow) return
     if (planTier === 'solo' && workflows.length >= 3) {
       setRestrictionNotice(
         'You have reached the solo plan limit of 3 saved workflows. Upgrade in Settings → Plan to create additional workflows.'
@@ -567,15 +601,27 @@ export default function Dashboard() {
       setIsSaving(false)
       isSavingRef.current = false
     }
-  }, [normalizeWorkflowData, isSaving, workflows, planTier, refreshPlanUsage])
+  }, [
+    normalizeWorkflowData,
+    isSaving,
+    workflows,
+    planTier,
+    refreshPlanUsage,
+    canEditCurrentWorkflow
+  ])
 
   const handleGraphChange = useCallback(
     (graph: { nodes: any[]; edges: any[] }) => {
+      latestGraphRef.current = graph
       if (isSavingRef.current) {
-        latestGraphRef.current = graph
         return
       }
-      latestGraphRef.current = graph
+      const emptyGraph =
+        (graph?.nodes?.length ?? 0) === 0 && (graph?.edges?.length ?? 0) === 0
+      setIsGraphEmpty(emptyGraph)
+      if (!canEditRef.current) {
+        return
+      }
       const snapshot = serializeSnapshot(currentMeta, graph)
       const baseline =
         pendingSnapshotRef.current ?? lastSavedSnapshotRef.current
@@ -591,9 +637,6 @@ export default function Dashboard() {
         logSnapshotDiff('graphChange', baseline, snapshot)
       }
       setWorkflowDirty(dirty)
-      setIsGraphEmpty(
-        (graph?.nodes?.length ?? 0) === 0 && (graph?.edges?.length ?? 0) === 0
-      )
     },
     [currentMeta]
   )
@@ -996,7 +1039,12 @@ export default function Dashboard() {
   }, [currentMeta, handleGraphChange, activePane])
 
   const handleSave = useCallback(async () => {
-    if (!saveRef.current || !currentWorkflow || isSaving) {
+    if (
+      !saveRef.current ||
+      !currentWorkflow ||
+      isSaving ||
+      !canEditCurrentWorkflow
+    ) {
       return
     }
 
@@ -1119,12 +1167,51 @@ export default function Dashboard() {
       isSavingRef.current = false
     }
   }, [
+    canEditCurrentWorkflow,
     currentWorkflow,
     isSaving,
     normalizeWorkflowData,
     handleGraphChange,
     setRestrictionNotice
   ])
+
+  const handleLockWorkflow = useCallback(async () => {
+    if (!currentWorkflow || lockBusy || !canLockWorkflow) return
+    try {
+      setLockBusy(true)
+      setError(null)
+      const updated = await lockWorkflowApi(currentWorkflow.id)
+      setWorkflows((prev) =>
+        prev.map((workflow) =>
+          workflow.id === updated.id ? { ...workflow, ...updated } : workflow
+        )
+      )
+    } catch (err) {
+      console.error('Failed to lock workflow', err)
+      setError((err as any)?.message || 'Failed to lock workflow.')
+    } finally {
+      setLockBusy(false)
+    }
+  }, [canLockWorkflow, currentWorkflow, lockBusy])
+
+  const handleUnlockWorkflow = useCallback(async () => {
+    if (!currentWorkflow || lockBusy || !canUnlockWorkflow) return
+    try {
+      setLockBusy(true)
+      setError(null)
+      const updated = await unlockWorkflowApi(currentWorkflow.id)
+      setWorkflows((prev) =>
+        prev.map((workflow) =>
+          workflow.id === updated.id ? { ...workflow, ...updated } : workflow
+        )
+      )
+    } catch (err) {
+      console.error('Failed to unlock workflow', err)
+      setError((err as any)?.message || 'Failed to unlock workflow.')
+    } finally {
+      setLockBusy(false)
+    }
+  }, [canUnlockWorkflow, currentWorkflow, lockBusy])
 
   const toolbarWorkflow = useMemo(() => {
     if (!currentWorkflow) {
@@ -1157,20 +1244,29 @@ export default function Dashboard() {
     icon: JSX.Element
     gradient: string
   }) {
+    const allowDrag = canEditCurrentWorkflow
     return (
       <div
-        draggable
-        onDragStart={(e) =>
+        draggable={allowDrag}
+        onDragStart={(e) => {
+          if (!allowDrag) {
+            e.preventDefault()
+            return
+          }
           e.dataTransfer.setData('application/reactflow', type)
-        }
+        }}
         role="button"
         aria-label={`Add ${type}`}
         className={[
-          'group relative overflow-hidden rounded-xl border shadow-sm cursor-grab active:cursor-grabbing select-none',
+          `group relative overflow-hidden rounded-xl border shadow-sm select-none${
+            allowDrag ? ' cursor-grab active:cursor-grabbing' : ''
+          }`,
           'bg-gradient-to-br',
           gradient,
           'p-3 mb-3 text-white',
-          'transition-transform will-change-transform hover:translate-y-[-1px] hover:shadow-md'
+          allowDrag
+            ? 'transition-transform will-change-transform hover:translate-y-[-1px] hover:shadow-md'
+            : 'opacity-60 cursor-not-allowed'
         ].join(' ')}
       >
         <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -1364,7 +1460,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="HTTP Trigger → Webhook"
                   description="Send a webhook when triggered"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1417,7 +1513,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="Email on Trigger"
                   description="Send an email via SMTP"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1468,7 +1564,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="SendGrid Email"
                   description="Send via SendGrid"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1519,7 +1615,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="Amazon SES Email"
                   description="Send via Amazon SES"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1571,7 +1667,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="Mailgun Email"
                   description="Send via Mailgun"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1623,7 +1719,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="Messaging"
                   description="Send a message (SMS/Chat)"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1673,7 +1769,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="Google Sheets Append"
                   description="Append a row on trigger"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1725,7 +1821,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="Run Code → HTTP"
                   description="Process then call an API"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1801,7 +1897,7 @@ export default function Dashboard() {
                 <TemplateButton
                   label="Branch by Condition"
                   description="Split flow into two paths"
-                  disabled={!isGraphEmpty}
+                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                   onClick={() => {
                     if (!saveRef.current?.loadGraph || !isGraphEmpty) return
                     const nodes = [
@@ -1906,6 +2002,14 @@ export default function Dashboard() {
         <div className="flex-1 flex flex-col bg-zinc-50 dark:bg-zinc-900">
           <WorkflowToolbar
             workflow={toolbarWorkflow}
+            role={workspaceRole}
+            canEdit={canEditCurrentWorkflow}
+            canLock={canLockWorkflow}
+            canUnlock={canUnlockWorkflow}
+            isLocked={isLocked}
+            lockBusy={lockBusy}
+            onLock={handleLockWorkflow}
+            onUnlock={handleUnlockWorkflow}
             onSave={handleSave}
             onNew={handleNewWorkflow}
             onSelect={selectWorkflow}
@@ -1961,6 +2065,7 @@ export default function Dashboard() {
                 <FlowCanvas
                   workflowId={currentWorkflow.id}
                   workflowData={workflowData}
+                  canEdit={canEditCurrentWorkflow}
                   markWorkflowDirty={markWorkflowDirty}
                   setSaveRef={(ref) => (saveRef.current = ref)}
                   onGraphChange={handleGraphChange}

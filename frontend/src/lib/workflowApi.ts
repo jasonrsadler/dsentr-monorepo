@@ -7,6 +7,9 @@ export interface WorkflowRecord {
   description: string | null
   data: any
   user_id?: string
+  workspace_id?: string | null
+  locked_by?: string | null
+  locked_at?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -133,6 +136,37 @@ export async function updateWorkflow(
     throw error
   }
   return body.workflow
+}
+
+export async function lockWorkflow(id: string): Promise<WorkflowRecord> {
+  const csrfToken = await getCsrfToken()
+
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${id}/lock`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-csrf-token': csrfToken
+    },
+    credentials: 'include'
+  })
+
+  const data = await handleJsonResponse(res)
+  return data.workflow
+}
+
+export async function unlockWorkflow(id: string): Promise<WorkflowRecord> {
+  const csrfToken = await getCsrfToken()
+
+  const res = await fetch(`${API_BASE_URL}/api/workflows/${id}/lock`, {
+    method: 'DELETE',
+    headers: {
+      'x-csrf-token': csrfToken
+    },
+    credentials: 'include'
+  })
+
+  const data = await handleJsonResponse(res)
+  return data.workflow
 }
 
 export async function deleteWorkflow(
