@@ -55,9 +55,15 @@ export default function MembersTab() {
   const resolvedWorkspaceId = currentWorkspace?.workspace?.id ?? null
   const resolvedWorkspaceName = currentWorkspace?.workspace?.name ?? ''
   const isWorkspaceOwner = currentWorkspace?.role === 'owner'
+  const isWorkspaceAdminOrOwner =
+    currentWorkspace?.role === 'admin' || currentWorkspace?.role === 'owner'
   const canManageMembers =
-    planTier === 'workspace' && Boolean(resolvedWorkspaceId)
+    planTier === 'workspace' &&
+    Boolean(resolvedWorkspaceId) &&
+    isWorkspaceAdminOrOwner
   const canLeaveWorkspace = Boolean(resolvedWorkspaceId) && !isWorkspaceOwner
+  const manageMembersPermissionMessage =
+    'Only workspace admins or owners can manage members.'
 
   useEffect(() => {
     if (!resolvedWorkspaceId) {
@@ -65,19 +71,54 @@ export default function MembersTab() {
       setPendingInvites([])
       return
     }
-    setBusy(true)
-    setError(null)
-    setNotice(null)
-    Promise.all([
-      listWorkspaceMembers(resolvedWorkspaceId),
-      listWorkspaceInvites(resolvedWorkspaceId)
-    ])
-      .then(([m, inv]) => {
-        setMembers(m)
-        setPendingInvites(inv)
-      })
-      .catch(async (error: unknown) => {
-        if (error instanceof HttpError && error.status === 403) {
+
+    let active = true
+
+    const loadWorkspaceData = async () => {
+      setBusy(true)
+      setError(null)
+      setNotice(null)
+
+      try {
+        const loadedMembers = await listWorkspaceMembers(resolvedWorkspaceId)
+        if (active) {
+          setMembers(loadedMembers)
+        }
+
+        if (!isWorkspaceAdminOrOwner) {
+          if (active) {
+            setPendingInvites([])
+          }
+          return
+        }
+
+        try {
+          const invites = await listWorkspaceInvites(resolvedWorkspaceId)
+          if (active) {
+            setPendingInvites(invites)
+          }
+        } catch (error) {
+          if (!active) {
+            return
+          }
+          if (error instanceof HttpError && error.status === 403) {
+            setPendingInvites([])
+          } else {
+            const message =
+              error instanceof Error
+                ? error.message
+                : 'Failed to load invitations'
+            setError(message)
+          }
+        }
+      } catch (error) {
+        if (!active) {
+          return
+        }
+        if (
+          error instanceof HttpError &&
+          (error.status === 403 || error.status === 404)
+        ) {
           setMembers([])
           setPendingInvites([])
           setError(null)
@@ -107,22 +148,39 @@ export default function MembersTab() {
           }
           setNotice(message)
           await checkAuth({ silent: true }).catch(() => null)
-          return
+        } else {
+          const message =
+            error instanceof Error ? error.message : 'Failed to load members'
+          setError(message)
         }
-        const message =
-          error instanceof Error ? error.message : 'Failed to load members'
-        setError(message)
-      })
-      .finally(() => setBusy(false))
+      } finally {
+        if (active) {
+          setBusy(false)
+        }
+      }
+    }
+
+    loadWorkspaceData()
+
+    return () => {
+      active = false
+    }
   }, [
     checkAuth,
+    isWorkspaceAdminOrOwner,
     refreshMemberships,
     resolvedWorkspaceId,
     setCurrentWorkspaceId
   ])
 
   const handleInvite = async () => {
-    if (!resolvedWorkspaceId || !inviteEmail.trim() || !canManageMembers) return
+    if (
+      !resolvedWorkspaceId ||
+      !inviteEmail.trim() ||
+      !isWorkspaceAdminOrOwner
+    ) {
+      return
+    }
     try {
       setBusy(true)
       setError(null)
@@ -142,7 +200,7 @@ export default function MembersTab() {
   }
 
   const handleRemove = async (uid: string) => {
-    if (!resolvedWorkspaceId || !canManageMembers) return
+    if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner) return
     try {
       setBusy(true)
       await removeWorkspaceMember(resolvedWorkspaceId, uid)
@@ -155,7 +213,7 @@ export default function MembersTab() {
   }
 
   const handleRole = async (uid: string, role: WorkspaceMember['role']) => {
-    if (!resolvedWorkspaceId || !canManageMembers) return
+    if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner) return
     try {
       setBusy(true)
       setError(null)
@@ -291,6 +349,11 @@ export default function MembersTab() {
             onChange={(e) => setInviteEmail(e.target.value)}
             placeholder="name@example.com"
             disabled={!canManageMembers}
+            title={
+              !isWorkspaceAdminOrOwner
+                ? manageMembersPermissionMessage
+                : undefined
+            }
             className="mt-1 w-full px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
           />
         </div>
@@ -300,6 +363,11 @@ export default function MembersTab() {
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value as any)}
             disabled={!canManageMembers}
+            title={
+              !isWorkspaceAdminOrOwner
+                ? manageMembersPermissionMessage
+                : undefined
+            }
             className="mt-1 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
           >
             <option value="user">User</option>
@@ -316,17 +384,33 @@ export default function MembersTab() {
             value={inviteExpires}
             onChange={(e) => setInviteExpires(Number(e.target.value))}
             disabled={!canManageMembers}
+            title={
+              !isWorkspaceAdminOrOwner
+                ? manageMembersPermissionMessage
+                : undefined
+            }
             className="mt-1 w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
           />
         </div>
         <button
           onClick={handleInvite}
           disabled={!canManageMembers || busy}
+          title={
+            !isWorkspaceAdminOrOwner
+              ? manageMembersPermissionMessage
+              : undefined
+          }
           className="h-9 px-3 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
         >
           Invite
         </button>
       </div>
+
+      {!isWorkspaceAdminOrOwner && planTier === 'workspace' ? (
+        <p className="text-xs text-zinc-500">
+          {manageMembersPermissionMessage}
+        </p>
+      ) : null}
 
       {pendingInvites.length > 0 && (
         <div className="border-t pt-3">
@@ -354,13 +438,19 @@ export default function MembersTab() {
                   <td className="py-2 text-right">
                     <button
                       onClick={async () => {
-                        if (!resolvedWorkspaceId) return
+                        if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner)
+                          return
                         await revokeWorkspaceInvite(resolvedWorkspaceId, inv.id)
                         setPendingInvites((prev) =>
                           prev.filter((i) => i.id !== inv.id)
                         )
                       }}
                       disabled={!canManageMembers}
+                      title={
+                        !isWorkspaceAdminOrOwner
+                          ? manageMembersPermissionMessage
+                          : undefined
+                      }
                       className="px-2 py-1 text-xs rounded border disabled:opacity-60"
                     >
                       Revoke
@@ -430,6 +520,11 @@ export default function MembersTab() {
                         )
                       }
                       disabled={disableSelect}
+                      title={
+                        !isWorkspaceAdminOrOwner && m.role !== 'owner'
+                          ? manageMembersPermissionMessage
+                          : undefined
+                      }
                       className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
                     >
                       {roleOptions.map((option) => (
@@ -443,6 +538,11 @@ export default function MembersTab() {
                     <button
                       onClick={() => handleRemove(m.user_id)}
                       disabled={disableRemove}
+                      title={
+                        !isWorkspaceAdminOrOwner && m.role !== 'owner'
+                          ? manageMembersPermissionMessage
+                          : undefined
+                      }
                       className="px-2 py-1 text-xs rounded border text-red-600 disabled:opacity-50"
                     >
                       Remove

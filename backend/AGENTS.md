@@ -10,3 +10,6 @@ itly coordinated.
 - Add or update integration/unit tests (`cargo test`) whenever modifying request handlers, data models, or migrations.
 - Prefer strongly typed structures and avoid `unwrap`/`expect` in production paths—propagate errors with `Result` and `thiserror
 `/`anyhow` patterns as appropriate.
+
+## Change Reasons
+- Workspace membership listing now accepts viewer roles so the Members settings tab can display roster data without forcing a workspace switch.

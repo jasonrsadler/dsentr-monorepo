@@ -585,7 +585,7 @@ pub async fn list_workspace_members(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    if let Err(resp) = ensure_workspace_admin(&app_state, user_id, workspace_id).await {
+    if let Err(resp) = load_membership_for_user(&app_state, user_id, workspace_id).await {
         return resp;
     }
     match app_state.workspace_repo.list_members(workspace_id).await {

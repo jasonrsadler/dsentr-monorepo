@@ -26,3 +26,6 @@ seCallback`, `useMemo`) to prevent infinite renders.
 
 ## Change Reasons
 - Removed the Members tab workspace selector so the dashboard header switcher is the single mechanism for context changes.
+- Updated Members tab data loading so workspace viewers don't get redirected when invite lists return 403 responses.
+- Allowed the Members tab to keep viewer contexts active by loading roster data even when invite management remains restricted.
+- Skipped invite fetching for non-admin workspace members so the Members tab avoids unnecessary API calls and 403 responses.

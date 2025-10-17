@@ -73,6 +73,11 @@ const workspaceMembership: WorkspaceMembershipSummary = {
   role: 'admin'
 }
 
+const viewerWorkspaceMembership: WorkspaceMembershipSummary = {
+  workspace: { ...workspaceMembership.workspace },
+  role: 'viewer'
+}
+
 describe('MembersTab workspace actions', () => {
   const listMembersMock = vi.mocked(listWorkspaceMembers)
   const listInvitesMock = vi.mocked(listWorkspaceInvites)
@@ -238,6 +243,135 @@ describe('MembersTab workspace actions', () => {
     expect(checkAuthMock).toHaveBeenCalledWith({ silent: true })
     expect(
       await screen.findByText(/access to this workspace was revoked/i)
+    ).toBeInTheDocument()
+  })
+
+  it('keeps the current workspace for viewer members while listing roster data', async () => {
+    const setCurrentWorkspaceIdMock = vi.fn()
+    listMembersMock.mockResolvedValue([
+      {
+        workspace_id: viewerWorkspaceMembership.workspace.id,
+        user_id: 'member-1',
+        role: 'admin',
+        joined_at: new Date().toISOString(),
+        email: 'member@example.com',
+        first_name: 'Member',
+        last_name: 'Viewer'
+      }
+    ])
+    listInvitesMock.mockRejectedValue(new HttpError('Forbidden', 403))
+
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'viewer-user',
+          email: 'viewer@example.com',
+          first_name: 'View',
+          last_name: 'Only',
+          plan: 'workspace',
+          role: 'user',
+          companyName: null
+        },
+        memberships: [viewerWorkspaceMembership, soloMembership],
+        currentWorkspaceId: viewerWorkspaceMembership.workspace.id,
+        setCurrentWorkspaceId: setCurrentWorkspaceIdMock
+      }))
+    })
+
+    render(<MembersTab />)
+
+    expect(await screen.findByText('Member Viewer')).toBeInTheDocument()
+    expect(setCurrentWorkspaceIdMock).not.toHaveBeenCalled()
+    expect(listMembersMock).toHaveBeenCalledWith(
+      viewerWorkspaceMembership.workspace.id
+    )
+    expect(listInvitesMock).not.toHaveBeenCalled()
+  })
+
+  it('loads pending invites for administrators', async () => {
+    const invite = {
+      id: 'invite-1',
+      email: 'pending@example.com',
+      role: 'user',
+      expires_at: new Date().toISOString()
+    }
+
+    listMembersMock.mockResolvedValue([
+      {
+        workspace_id: workspaceMembership.workspace.id,
+        user_id: 'member-admin',
+        role: 'admin',
+        joined_at: new Date().toISOString(),
+        email: 'member.admin@example.com',
+        first_name: 'Admin',
+        last_name: 'Member'
+      }
+    ])
+    listInvitesMock.mockResolvedValue([invite as any])
+
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'user-admin',
+          email: 'admin@example.com',
+          first_name: 'Admin',
+          last_name: 'User',
+          plan: 'workspace',
+          role: 'admin',
+          companyName: null
+        },
+        memberships: [workspaceMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id
+      }))
+    })
+
+    render(<MembersTab />)
+
+    expect(await screen.findByText('pending@example.com')).toBeInTheDocument()
+    expect(listInvitesMock).toHaveBeenCalledWith(
+      workspaceMembership.workspace.id
+    )
+  })
+
+  it('redirects when workspace membership is no longer available (404)', async () => {
+    const setCurrentWorkspaceIdMock = vi.fn()
+    const refreshMembershipsMock = vi.fn().mockResolvedValue([soloMembership])
+    const checkAuthMock = vi.fn().mockResolvedValue(undefined)
+    listMembersMock.mockRejectedValue(new HttpError('Missing membership', 404))
+
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'user-admin',
+          email: 'admin@example.com',
+          first_name: 'Team',
+          last_name: 'Member',
+          plan: 'workspace',
+          role: 'admin',
+          companyName: null
+        },
+        memberships: [workspaceMembership, soloMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id,
+        setCurrentWorkspaceId: setCurrentWorkspaceIdMock,
+        refreshMemberships: refreshMembershipsMock,
+        checkAuth: checkAuthMock
+      }))
+    })
+
+    render(<MembersTab />)
+
+    await waitFor(() => {
+      expect(refreshMembershipsMock).toHaveBeenCalled()
+    })
+    expect(setCurrentWorkspaceIdMock).toHaveBeenCalledWith(
+      soloMembership.workspace.id
+    )
+    expect(checkAuthMock).toHaveBeenCalledWith({ silent: true })
+    expect(
+      await screen.findByText(/redirected to your solo workspace/i)
     ).toBeInTheDocument()
   })
 })
