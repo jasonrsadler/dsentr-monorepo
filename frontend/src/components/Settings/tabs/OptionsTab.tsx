@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import ConfirmDialog from '@/components/UI/Dialog/ConfirmDialog'
 import {
   SecretStore,
   deleteSecret,
   fetchSecrets,
   upsertSecret
 } from '@/lib/optionsApi'
-import { useAuth } from '@/stores/auth'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
 interface ServiceDescriptor {
   key: string
@@ -167,12 +168,49 @@ export default function OptionsTab() {
   const [serviceErrors, setServiceErrors] = useState<ErrorMap>({})
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [deleteBusyKey, setDeleteBusyKey] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{
+    groupKey: string
+    serviceKey: string
+    name: string
+  } | null>(null)
   const currentUserId = useAuth((state) => state.user?.id ?? null)
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const workspaceId = currentWorkspace?.workspace.id ?? null
+
+  const workspaceRole = currentWorkspace?.role ?? 'viewer'
+  const canCreateSecret = useMemo(
+    () => ['owner', 'admin', 'user'].includes(workspaceRole),
+    [workspaceRole]
+  )
+  const canDeleteAnySecret = useMemo(
+    () => ['owner', 'admin'].includes(workspaceRole),
+    [workspaceRole]
+  )
+
+  const canDeleteSecretEntry = (ownerId: string | null) => {
+    if (canDeleteAnySecret) {
+      return true
+    }
+    if (!canCreateSecret) {
+      return false
+    }
+    if (!ownerId || !currentUserId) {
+      return false
+    }
+    return ownerId === currentUserId
+  }
 
   useEffect(() => {
     let active = true
     setLoading(true)
-    fetchSecrets()
+    if (!workspaceId) {
+      setSecrets({})
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    fetchSecrets(workspaceId)
       .then((result) => {
         if (!active) return
         setSecrets(result)
@@ -190,9 +228,14 @@ export default function OptionsTab() {
     return () => {
       active = false
     }
-  }, [])
+  }, [workspaceId])
 
   const sections = useMemo(() => mergeConfig(secrets), [secrets])
+
+  useEffect(() => {
+    setDrafts({})
+    setServiceErrors({})
+  }, [workspaceId])
 
   const handleAdd = async (
     groupKey: string,
@@ -200,6 +243,13 @@ export default function OptionsTab() {
     draft: { name: string; value: string }
   ) => {
     const key = serviceKey(groupKey, service.key)
+    if (!canCreateSecret) {
+      setServiceErrors((prev) => ({
+        ...prev,
+        [key]: 'You do not have permission to create secrets in this workspace.'
+      }))
+      return
+    }
     const name = draft.name.trim()
     const value = draft.value.trim()
 
@@ -221,7 +271,21 @@ export default function OptionsTab() {
     try {
       setBusyKey(key)
       setServiceErrors((prev) => ({ ...prev, [key]: null }))
-      const response = await upsertSecret(groupKey, service.key, name, value)
+      if (!workspaceId) {
+        setServiceErrors((prev) => ({
+          ...prev,
+          [key]: 'Select a workspace before creating secrets.'
+        }))
+        return
+      }
+
+      const response = await upsertSecret(
+        groupKey,
+        service.key,
+        name,
+        value,
+        workspaceId
+      )
       setSecrets(response.secrets ?? {})
       setDrafts((prev) => ({ ...prev, [key]: { name: '', value: '' } }))
     } catch (err) {
@@ -240,9 +304,35 @@ export default function OptionsTab() {
     name: string
   ) => {
     const key = serviceKey(groupKey, serviceKeyStr)
+    const entryOwnerId =
+      secrets[groupKey]?.[serviceKeyStr]?.[name]?.ownerId ?? null
+
+    if (!canDeleteSecretEntry(entryOwnerId)) {
+      setServiceErrors((prev) => ({
+        ...prev,
+        [key]: canCreateSecret
+          ? 'Only the creator can remove this secret.'
+          : 'You do not have permission to remove secrets in this workspace.'
+      }))
+      return
+    }
     try {
       setDeleteBusyKey(`${key}:${name}`)
-      const response = await deleteSecret(groupKey, serviceKeyStr, name)
+      setServiceErrors((prev) => ({ ...prev, [key]: null }))
+      if (!workspaceId) {
+        setServiceErrors((prev) => ({
+          ...prev,
+          [key]: 'Select a workspace before removing secrets.'
+        }))
+        return
+      }
+
+      const response = await deleteSecret(
+        groupKey,
+        serviceKeyStr,
+        name,
+        workspaceId
+      )
       setSecrets(response.secrets ?? {})
     } catch (err) {
       setServiceErrors((prev) => ({
@@ -252,6 +342,13 @@ export default function OptionsTab() {
     } finally {
       setDeleteBusyKey(null)
     }
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return
+    const { groupKey, serviceKey, name } = pendingDelete
+    setPendingDelete(null)
+    void handleDelete(groupKey, serviceKey, name)
   }
 
   const renderService = (groupKey: string, descriptor: ServiceDescriptor) => {
@@ -303,6 +400,8 @@ export default function OptionsTab() {
                   .concat(value.length > 8 ? '…' : '')
               : '•'
             const deleteKey = `${key}:${name}`
+
+            const canDelete = canDeleteSecretEntry(ownerId)
             return (
               <div
                 key={name}
@@ -320,10 +419,21 @@ export default function OptionsTab() {
                       Created by another workspace member
                     </p>
                   )}
+                  {!canDelete && (
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                      Only the creator can remove this secret.
+                    </p>
+                  )}
                 </div>
                 <button
-                  onClick={() => handleDelete(groupKey, descriptor.key, name)}
-                  disabled={deleteBusyKey === deleteKey}
+                  onClick={() =>
+                    setPendingDelete({
+                      groupKey,
+                      serviceKey: descriptor.key,
+                      name
+                    })
+                  }
+                  disabled={deleteBusyKey === deleteKey || !canDelete}
                   className="text-xs text-red-600 hover:underline disabled:opacity-50"
                 >
                   {deleteBusyKey === deleteKey ? 'Removing…' : 'Remove'}
@@ -363,10 +473,15 @@ export default function OptionsTab() {
           <button
             className="self-start rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
             onClick={() => handleAdd(groupKey, descriptor, draft)}
-            disabled={busy}
+            disabled={busy || !canCreateSecret}
           >
             {busy ? 'Saving…' : 'Save Secret'}
           </button>
+          {!canCreateSecret && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              You do not have permission to create secrets in this workspace.
+            </p>
+          )}
         </div>
       </div>
     )
@@ -410,6 +525,17 @@ export default function OptionsTab() {
           ))}
         </div>
       )}
+      <ConfirmDialog
+        isOpen={Boolean(pendingDelete)}
+        title="Delete secret?"
+        message={`Deleting "${
+          pendingDelete?.name ?? 'this secret'
+        }" cannot be undone and may break workflows that rely on this API key or secret.`}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+        confirmText="Delete"
+        cancelText="Cancel"
+      />
     </div>
   )
 }

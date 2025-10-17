@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from 'react'
 import { type SecretStore, fetchSecrets, upsertSecret } from '@/lib/optionsApi'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
 interface SecretsContextValue {
   secrets: SecretStore
@@ -40,6 +41,8 @@ export function SecretsProvider({
   const [loading, setLoading] = useState<boolean>(fetchOnMount)
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const workspaceId = currentWorkspace?.workspace.id ?? null
 
   useEffect(() => {
     mountedRef.current = true
@@ -49,10 +52,17 @@ export function SecretsProvider({
   }, [])
 
   const refresh = useCallback(async () => {
+    if (!workspaceId) {
+      setSecrets({})
+      setError(null)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError(null)
     try {
-      const result = await fetchSecrets()
+      const result = await fetchSecrets(workspaceId)
       if (mountedRef.current) {
         setSecrets(result)
       }
@@ -65,7 +75,7 @@ export function SecretsProvider({
         setLoading(false)
       }
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => {
     if (!fetchOnMount) {
@@ -74,10 +84,17 @@ export function SecretsProvider({
     }
 
     let active = true
+    if (!workspaceId) {
+      setSecrets({})
+      setError(null)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError(null)
 
-    fetchSecrets()
+    fetchSecrets(workspaceId)
       .then((result) => {
         if (!active) return
         setSecrets(result)
@@ -94,17 +111,27 @@ export function SecretsProvider({
     return () => {
       active = false
     }
-  }, [fetchOnMount])
+  }, [fetchOnMount, workspaceId])
 
   const saveSecret = useCallback(
     async (group: string, service: string, name: string, value: string) => {
+      if (!workspaceId) {
+        throw new Error('Workspace required to save secrets')
+      }
+
       setError(null)
-      const response = await upsertSecret(group, service, name, value)
+      const response = await upsertSecret(
+        group,
+        service,
+        name,
+        value,
+        workspaceId
+      )
       if (mountedRef.current) {
         setSecrets(response.secrets ?? {})
       }
     },
-    []
+    [workspaceId]
   )
 
   const contextValue = useMemo<SecretsContextValue>(

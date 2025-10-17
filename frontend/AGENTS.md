@@ -29,3 +29,5 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Updated Members tab data loading so workspace viewers don't get redirected when invite lists return 403 responses.
 - Allowed the Members tab to keep viewer contexts active by loading roster data even when invite management remains restricted.
 - Skipped invite fetching for non-admin workspace members so the Members tab avoids unnecessary API calls and 403 responses.
+- Secrets tab now scopes API requests by workspace so shared secrets remain visible across members while enforcing creator/admin deletion rules.
+- Secrets tab now opens a confirmation modal before deleting entries, warning that removal is irreversible and may impact dependent workflows.
