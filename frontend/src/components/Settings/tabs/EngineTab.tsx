@@ -35,6 +35,9 @@ export default function EngineTab() {
   const user = useAuth((state) => state.user)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const isAdmin = (user?.role ?? '').toLowerCase() === 'admin'
+  const workspaceRole = (currentWorkspace?.role ?? '').toLowerCase()
+  const canAdministerEngine =
+    workspaceRole === 'owner' || workspaceRole === 'admin'
   const planTier = normalizePlanTier(
     currentWorkspace?.workspace.plan ?? user?.plan ?? undefined
   )
@@ -103,7 +106,12 @@ export default function EngineTab() {
     !busy &&
     limitInputValid &&
     hasLimitChange &&
-    !isSoloPlan
+    !isSoloPlan &&
+    canAdministerEngine
+  const adminOnlyTooltip =
+    'Only workspace owners or admins can perform this action.'
+  const adminOnlySuffix = canAdministerEngine ? '' : ' (owners/admins only)'
+  const adminOnlyTitle = canAdministerEngine ? undefined : adminOnlyTooltip
   const [deadLetters, setDeadLetters] = useState<any[]>([])
   const [dlBusyId, setDlBusyId] = useState<string | null>(null)
   const [purgeBusy, setPurgeBusy] = useState(false)
@@ -144,7 +152,7 @@ export default function EngineTab() {
   )
 
   async function handleSaveLimit() {
-    if (!selected || busy) return
+    if (!selected || busy || !canAdministerEngine) return
     const parsed = Number.parseInt(limitInput || '0', 10)
     if (!Number.isFinite(parsed) || parsed < 1) {
       setError('Limit must be a positive integer')
@@ -188,7 +196,7 @@ export default function EngineTab() {
   }
 
   async function handleCancelAll() {
-    if (!selected || busy) return
+    if (!selected || busy || !canAdministerEngine) return
     try {
       setBusy(true)
       setError(null)
@@ -281,7 +289,7 @@ export default function EngineTab() {
   }, [selectedWorkflowId, sanitizeEgress])
 
   async function handleRequeue(id: string) {
-    if (!selectedWorkflowId) return
+    if (!selectedWorkflowId || !canAdministerEngine) return
     try {
       setDlBusyId(id)
       await requeueDeadLetter(selectedWorkflowId, id)
@@ -347,19 +355,16 @@ export default function EngineTab() {
               }
             }}
             className="w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700"
-            disabled={isSoloPlan}
+            disabled={isSoloPlan || !canAdministerEngine}
           />
           <button
             onClick={handleSaveLimit}
             type="button"
             disabled={!canSaveLimit}
-            className={`px-3 py-1 rounded ${
-              canSaveLimit
-                ? 'bg-green-600 text-white hover:bg-green-700'
-                : 'bg-green-600 text-white opacity-60 cursor-not-allowed'
-            }`}
+            title={adminOnlyTitle}
+            className="px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Save Limit
+            {`Save Limit${adminOnlySuffix}`}
           </button>
         </div>
         {isSoloPlan ? (
@@ -389,10 +394,11 @@ export default function EngineTab() {
         <h3 className="font-semibold mb-2">Queue</h3>
         <button
           onClick={handleCancelAll}
-          disabled={!selected || busy}
-          className={`px-3 py-1 rounded ${busy ? 'opacity-60 cursor-not-allowed' : 'bg-yellow-600 text-white hover:bg-yellow-700'}`}
+          disabled={!selected || busy || !canAdministerEngine}
+          title={adminOnlyTitle}
+          className="px-3 py-1 rounded bg-yellow-600 text-white hover:bg-yellow-700 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          Cancel All Runs
+          {`Cancel All Runs${adminOnlySuffix}`}
         </button>
       </div>
 
@@ -408,11 +414,12 @@ export default function EngineTab() {
           onChange={(e) => setEgressText(e.target.value)}
           rows={5}
           className="w-full px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700 font-mono text-xs"
+          readOnly={!canAdministerEngine}
         />
         <div className="mt-2">
           <button
             onClick={async () => {
-              if (!selected) return
+              if (!selected || !canAdministerEngine) return
               try {
                 setEgressBusy(true)
                 const items = egressText
@@ -424,10 +431,11 @@ export default function EngineTab() {
                 setEgressBusy(false)
               }
             }}
-            disabled={!selected || egressBusy}
-            className={`px-3 py-1 rounded ${egressBusy ? 'opacity-60 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+            disabled={!selected || egressBusy || !canAdministerEngine}
+            title={adminOnlyTitle}
+            className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Save Allowlist
+            {`Save Allowlist${adminOnlySuffix}`}
           </button>
         </div>
       </div>
@@ -578,7 +586,7 @@ export default function EngineTab() {
             </button>
             <button
               onClick={async () => {
-                if (selectedWorkflowId) {
+                if (selectedWorkflowId && canAdministerEngine) {
                   try {
                     await clearDeadLetters(selectedWorkflowId)
                     await refreshDeadLetters()
@@ -587,9 +595,11 @@ export default function EngineTab() {
                   }
                 }
               }}
-              className="text-sm underline text-red-600"
+              disabled={!canAdministerEngine}
+              title={adminOnlyTitle}
+              className="text-sm underline text-red-600 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Clear All
+              {`Clear All${adminOnlySuffix}`}
             </button>
           </div>
         </div>
@@ -618,10 +628,11 @@ export default function EngineTab() {
                     <div className="mt-2 flex gap-2">
                       <button
                         onClick={() => handleRequeue(d.id)}
-                        disabled={dlBusyId === d.id}
-                        className={`px-2 py-1 text-xs rounded ${dlBusyId === d.id ? 'opacity-60 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                        disabled={dlBusyId === d.id || !canAdministerEngine}
+                        title={adminOnlyTitle}
+                        className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
-                        Requeue
+                        {`Requeue${adminOnlySuffix}`}
                       </button>
                     </div>
                   </div>
@@ -664,7 +675,7 @@ export default function EngineTab() {
             </button>
             <button
               onClick={async () => {
-                if (selectedWorkflowId) {
+                if (selectedWorkflowId && canAdministerEngine) {
                   try {
                     await clearEgressBlocks(selectedWorkflowId)
                     const items = await listEgressBlocks(
@@ -678,9 +689,11 @@ export default function EngineTab() {
                   }
                 }
               }}
-              className="text-sm underline text-red-600"
+              disabled={!canAdministerEngine}
+              title={adminOnlyTitle}
+              className="text-sm underline text-red-600 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Clear All
+              {`Clear All${adminOnlySuffix}`}
             </button>
           </div>
         </div>
