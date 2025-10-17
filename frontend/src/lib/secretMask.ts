@@ -33,9 +33,9 @@ export function flattenSecretValues(store?: SecretStore): string[] {
 
   Object.values(store ?? {}).forEach((services) => {
     Object.values(services ?? {}).forEach((entries) => {
-      Object.values(entries ?? {}).forEach((value) => {
-        if (typeof value !== 'string') return
-        const trimmed = value.trim()
+      Object.values(entries ?? {}).forEach((entry) => {
+        const storedValue = entry?.value ?? ''
+        const trimmed = storedValue.trim()
         if (!trimmed || seen.has(trimmed)) return
         seen.add(trimmed)
         values.push(trimmed)

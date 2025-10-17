@@ -40,9 +40,9 @@ export default function NodeSecretDropdown({
 
   const options = useMemo<SecretOption[]>(() => {
     const serviceEntries = secrets[group]?.[service] ?? {}
-    return Object.entries(serviceEntries).map(([name, storedValue]) => ({
+    return Object.entries(serviceEntries).map(([name, entry]) => ({
       name,
-      value: storedValue
+      value: entry?.value ?? ''
     }))
   }, [secrets, group, service])
 

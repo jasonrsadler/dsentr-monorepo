@@ -14,7 +14,8 @@ use crate::{
     state::AppState,
     utils::secrets::{
         collect_workflow_secrets, ensure_secret_exists, read_secret_store, remove_named_secret,
-        upsert_named_secret, write_secret_store, SecretUpsertOutcome, SecretValidationError,
+        to_response_store, upsert_named_secret, write_secret_store, SecretUpsertOutcome,
+        SecretValidationError,
     },
 };
 
@@ -50,7 +51,8 @@ pub async fn list_secrets(
     };
 
     let store = read_secret_store(&settings);
-    let secrets = serde_json::to_value(store).unwrap_or_else(|_| json!({}));
+    let secrets =
+        serde_json::to_value(to_response_store(&store, user_id)).unwrap_or_else(|_| json!({}));
 
     (
         StatusCode::OK,
@@ -105,7 +107,8 @@ pub async fn upsert_secret(
         return JsonResponse::server_error("Failed to save secret").into_response();
     }
 
-    let secrets = serde_json::to_value(store).unwrap_or_else(|_| json!({}));
+    let secrets =
+        serde_json::to_value(to_response_store(&store, user_id)).unwrap_or_else(|_| json!({}));
     (
         StatusCode::OK,
         Json(json!({
@@ -159,7 +162,8 @@ pub async fn delete_secret(
         return JsonResponse::server_error("Failed to delete secret").into_response();
     }
 
-    let secrets = serde_json::to_value(store).unwrap_or_else(|_| json!({}));
+    let secrets =
+        serde_json::to_value(to_response_store(&store, user_id)).unwrap_or_else(|_| json!({}));
     (
         StatusCode::OK,
         Json(json!({ "success": true, "secrets": secrets })),

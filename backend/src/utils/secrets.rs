@@ -1,8 +1,27 @@
 use std::collections::BTreeMap;
 
+use serde::Serialize;
 use serde_json::{Map, Value};
+use uuid::Uuid;
 
 pub type SecretStore = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
+
+pub type SecretResponseStore =
+    BTreeMap<String, BTreeMap<String, BTreeMap<String, SecretResponseEntry>>>;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SecretResponseEntry {
+    pub value: String,
+    #[serde(rename = "owner_id")]
+    pub owner_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SecretIdentifier {
+    pub group: String,
+    pub service: String,
+    pub name: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretValidationError {
@@ -44,6 +63,50 @@ pub fn read_secret_store(settings: &Value) -> SecretStore {
     }
 
     out
+}
+
+pub fn extend_response_store(
+    target: &mut SecretResponseStore,
+    store: &SecretStore,
+    owner_id: Uuid,
+) {
+    for (group, services) in store {
+        let group_map = target.entry(group.clone()).or_default();
+        for (service, entries) in services {
+            let service_map = group_map.entry(service.clone()).or_default();
+            for (name, value) in entries {
+                service_map.insert(
+                    name.clone(),
+                    SecretResponseEntry {
+                        value: value.clone(),
+                        owner_id,
+                    },
+                );
+            }
+        }
+    }
+}
+
+pub fn to_response_store(store: &SecretStore, owner_id: Uuid) -> SecretResponseStore {
+    let mut response = SecretResponseStore::new();
+    extend_response_store(&mut response, store, owner_id);
+    response
+}
+
+pub fn collect_secret_identifiers(store: &SecretStore) -> Vec<SecretIdentifier> {
+    let mut identifiers = Vec::new();
+    for (group, services) in store {
+        for (service, entries) in services {
+            for name in entries.keys() {
+                identifiers.push(SecretIdentifier {
+                    group: group.clone(),
+                    service: service.clone(),
+                    name: name.clone(),
+                });
+            }
+        }
+    }
+    identifiers
 }
 
 pub fn write_secret_store(settings: &mut Value, store: &SecretStore) {
@@ -384,6 +447,51 @@ mod tests {
             .get("primary")
             .unwrap();
         assert_eq!(value, "token2");
+    }
+
+    #[test]
+    fn to_response_store_preserves_values_and_owner() {
+        let mut store = SecretStore::new();
+        store
+            .entry("email".into())
+            .or_default()
+            .entry("smtp".into())
+            .or_default()
+            .insert("primary".into(), "secret".into());
+
+        let owner = Uuid::new_v4();
+        let response = to_response_store(&store, owner);
+
+        let entry = response
+            .get("email")
+            .and_then(|group| group.get("smtp"))
+            .and_then(|svc| svc.get("primary"))
+            .expect("entry exists");
+        assert_eq!(entry.value, "secret");
+        assert_eq!(entry.owner_id, owner);
+    }
+
+    #[test]
+    fn collect_secret_identifiers_returns_all_entries() {
+        let mut store = SecretStore::new();
+        let services = store.entry("email".into()).or_default();
+        services
+            .entry("smtp".into())
+            .or_default()
+            .extend([("primary".into(), "secret".into())]);
+        services
+            .entry("sendgrid".into())
+            .or_default()
+            .extend([("secondary".into(), "value".into())]);
+
+        let identifiers = collect_secret_identifiers(&store);
+        assert_eq!(identifiers.len(), 2);
+        assert!(identifiers
+            .iter()
+            .any(|id| { id.group == "email" && id.service == "smtp" && id.name == "primary" }));
+        assert!(identifiers.iter().any(|id| {
+            id.group == "email" && id.service == "sendgrid" && id.name == "secondary"
+        }));
     }
 
     #[test]

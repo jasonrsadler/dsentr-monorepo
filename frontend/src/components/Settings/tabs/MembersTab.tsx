@@ -14,6 +14,11 @@ import {
   type WorkspaceMembershipSummary
 } from '@/lib/orgWorkspaceApi'
 import { normalizePlanTier } from '@/lib/planTiers'
+import {
+  fetchWorkspaceSecretOwnership,
+  type WorkspaceSecretOwnershipEntry
+} from '@/lib/optionsApi'
+import { useSecrets } from '@/contexts/SecretsContext'
 
 const resolveMemberIdentity = (member: WorkspaceMember) => {
   const firstName = member.first_name?.trim() ?? ''
@@ -32,6 +37,7 @@ export default function MembersTab() {
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const refreshMemberships = useAuth((state) => state.refreshMemberships)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const { refresh: refreshSecrets } = useSecrets()
   const [members, setMembers] = useState<WorkspaceMember[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,6 +50,13 @@ export default function MembersTab() {
   const [pendingInvites, setPendingInvites] = useState<WorkspaceInvitation[]>(
     []
   )
+  const [checkingOwnershipFor, setCheckingOwnershipFor] = useState<
+    string | null
+  >(null)
+  const [pendingRemoval, setPendingRemoval] = useState<{
+    member: WorkspaceMember
+    secrets: WorkspaceSecretOwnershipEntry[]
+  } | null>(null)
 
   const planTier = useMemo(
     () =>
@@ -199,18 +212,62 @@ export default function MembersTab() {
     }
   }
 
-  const handleRemove = async (uid: string) => {
-    if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner) return
-    try {
-      setBusy(true)
-      await removeWorkspaceMember(resolvedWorkspaceId, uid)
-      setMembers((prev) => prev.filter((m) => m.user_id !== uid))
-    } catch (e: any) {
-      setError(e.message || 'Failed to remove member')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const performMemberRemoval = useCallback(
+    async (uid: string) => {
+      if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner) return false
+      try {
+        setBusy(true)
+        setError(null)
+        await removeWorkspaceMember(resolvedWorkspaceId, uid)
+        setMembers((prev) => prev.filter((m) => m.user_id !== uid))
+        try {
+          await refreshSecrets()
+        } catch (err) {
+          console.error('Failed to refresh secrets after member removal', err)
+        }
+        return true
+      } catch (e: any) {
+        setError(e?.message || 'Failed to remove member')
+        return false
+      } finally {
+        setBusy(false)
+      }
+    },
+    [
+      isWorkspaceAdminOrOwner,
+      refreshSecrets,
+      removeWorkspaceMember,
+      resolvedWorkspaceId
+    ]
+  )
+
+  const handleRemove = useCallback(
+    async (member: WorkspaceMember) => {
+      if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner) return
+      setError(null)
+      setNotice(null)
+      setCheckingOwnershipFor(member.user_id)
+      try {
+        const ownership =
+          await fetchWorkspaceSecretOwnership(resolvedWorkspaceId)
+        const secretsForMember = ownership?.[member.user_id] ?? []
+        if (secretsForMember.length > 0) {
+          setPendingRemoval({ member, secrets: secretsForMember })
+          return
+        }
+        await performMemberRemoval(member.user_id)
+      } catch (e: any) {
+        const message =
+          e instanceof Error
+            ? e.message
+            : 'Failed to check secret ownership for this member'
+        setError(message)
+      } finally {
+        setCheckingOwnershipFor(null)
+      }
+    },
+    [isWorkspaceAdminOrOwner, performMemberRemoval, resolvedWorkspaceId]
+  )
 
   const handleRole = async (uid: string, role: WorkspaceMember['role']) => {
     if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner) return
@@ -246,6 +303,18 @@ export default function MembersTab() {
       setBusy(false)
     }
   }
+
+  const confirmPendingRemoval = useCallback(async () => {
+    if (!pendingRemoval) return
+    const success = await performMemberRemoval(pendingRemoval.member.user_id)
+    if (success) {
+      setPendingRemoval(null)
+    }
+  }, [pendingRemoval, performMemberRemoval])
+
+  const cancelPendingRemoval = useCallback(() => {
+    setPendingRemoval(null)
+  }, [])
 
   const handleLeaveWorkspace = useCallback(async () => {
     if (!resolvedWorkspaceId || !canLeaveWorkspace) return
@@ -306,260 +375,326 @@ export default function MembersTab() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-zinc-600 dark:text-zinc-300">
-          Workspace:{' '}
-          <span className="font-medium text-zinc-900 dark:text-zinc-100">
-            {resolvedWorkspaceName || 'Unnamed workspace'}
-          </span>
-        </div>
-        <button
-          onClick={handleLeaveWorkspace}
-          disabled={!canLeaveWorkspace || busy}
-          className="px-3 py-1 text-xs font-medium rounded border border-red-400 text-red-600 disabled:opacity-50"
-        >
-          Leave workspace
-        </button>
-      </div>
-
-      {planTier === 'solo' ? (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
-          Upgrade to the workspace plan to invite additional members.
+    <div className="relative">
+      {pendingRemoval ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900">
+            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              Confirm member removal
+            </h3>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+              Removing {resolveMemberIdentity(pendingRemoval.member).primary}{' '}
+              will delete {pendingRemoval.secrets.length} secret
+              {pendingRemoval.secrets.length === 1 ? '' : 's'} they created for
+              this workspace. This action cannot be undone and workflows using
+              these secrets may fail.
+            </p>
+            <div className="mt-3 rounded border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+              <p className="font-medium text-zinc-700 dark:text-zinc-200">
+                Secrets owned by this member:
+              </p>
+              <ul className="mt-2 space-y-1">
+                {pendingRemoval.secrets.slice(0, 5).map((secret) => (
+                  <li key={`${secret.group}:${secret.service}:${secret.name}`}>
+                    <span className="font-medium">{secret.name}</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      {' '}
+                      ({secret.group} / {secret.service})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {pendingRemoval.secrets.length > 5 ? (
+                <p className="mt-2 text-zinc-500 dark:text-zinc-400">
+                  …and {pendingRemoval.secrets.length - 5} more entries.
+                </p>
+              ) : null}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={cancelPendingRemoval}
+                className="rounded border border-zinc-300 px-3 py-1 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmPendingRemoval}
+                disabled={busy}
+                className="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {busy ? 'Removing…' : 'Remove member'}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 
-      {notice ? (
-        <div className="rounded-md border border-blue-300 bg-blue-50 p-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
-          {notice}
-        </div>
-      ) : null}
-
-      {error ? (
-        <div className="rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="flex items-end gap-2">
-        <div className="flex-1">
-          <label className="block text-sm">Invite by Email</label>
-          <input
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-            placeholder="name@example.com"
-            disabled={!canManageMembers}
-            title={
-              !isWorkspaceAdminOrOwner
-                ? manageMembersPermissionMessage
-                : undefined
-            }
-            className="mt-1 w-full px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
-          />
-        </div>
-        <div>
-          <label className="block text-sm">Role</label>
-          <select
-            value={inviteRole}
-            onChange={(e) => setInviteRole(e.target.value as any)}
-            disabled={!canManageMembers}
-            title={
-              !isWorkspaceAdminOrOwner
-                ? manageMembersPermissionMessage
-                : undefined
-            }
-            className="mt-1 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-zinc-600 dark:text-zinc-300">
+            Workspace:{' '}
+            <span className="font-medium text-zinc-900 dark:text-zinc-100">
+              {resolvedWorkspaceName || 'Unnamed workspace'}
+            </span>
+          </div>
+          <button
+            onClick={handleLeaveWorkspace}
+            disabled={!canLeaveWorkspace || busy}
+            className="rounded border border-red-400 px-3 py-1 text-xs font-medium text-red-600 disabled:opacity-50"
           >
-            <option value="user">User</option>
-            <option value="viewer">Viewer</option>
-            <option value="admin">Admin</option>
-          </select>
+            Leave workspace
+          </button>
         </div>
-        <div>
-          <label className="block text-sm">Expires (days)</label>
-          <input
-            type="number"
-            min={1}
-            max={60}
-            value={inviteExpires}
-            onChange={(e) => setInviteExpires(Number(e.target.value))}
-            disabled={!canManageMembers}
+
+        {planTier === 'solo' ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+            Upgrade to the workspace plan to invite additional members.
+          </div>
+        ) : null}
+
+        {notice ? (
+          <div className="rounded-md border border-blue-300 bg-blue-50 p-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
+            {notice}
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <label className="block text-sm">Invite by Email</label>
+            <input
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="name@example.com"
+              disabled={!canManageMembers}
+              title={
+                !isWorkspaceAdminOrOwner
+                  ? manageMembersPermissionMessage
+                  : undefined
+              }
+              className="mt-1 w-full rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
+            />
+          </div>
+          <div>
+            <label className="block text-sm">Role</label>
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as any)}
+              disabled={!canManageMembers}
+              title={
+                !isWorkspaceAdminOrOwner
+                  ? manageMembersPermissionMessage
+                  : undefined
+              }
+              className="mt-1 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
+            >
+              <option value="user">User</option>
+              <option value="viewer">Viewer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm">Expires (days)</label>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={inviteExpires}
+              onChange={(e) => setInviteExpires(Number(e.target.value))}
+              disabled={!canManageMembers}
+              title={
+                !isWorkspaceAdminOrOwner
+                  ? manageMembersPermissionMessage
+                  : undefined
+              }
+              className="mt-1 w-24 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
+            />
+          </div>
+          <button
+            onClick={handleInvite}
+            disabled={!canManageMembers || busy}
             title={
               !isWorkspaceAdminOrOwner
                 ? manageMembersPermissionMessage
                 : undefined
             }
-            className="mt-1 w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
-          />
+            className="h-9 rounded bg-indigo-600 px-3 text-sm text-white disabled:opacity-50"
+          >
+            Invite
+          </button>
         </div>
-        <button
-          onClick={handleInvite}
-          disabled={!canManageMembers || busy}
-          title={
-            !isWorkspaceAdminOrOwner
-              ? manageMembersPermissionMessage
-              : undefined
-          }
-          className="h-9 px-3 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
-        >
-          Invite
-        </button>
-      </div>
 
-      {!isWorkspaceAdminOrOwner && planTier === 'workspace' ? (
-        <p className="text-xs text-zinc-500">
-          {manageMembersPermissionMessage}
-        </p>
-      ) : null}
+        {!isWorkspaceAdminOrOwner && planTier === 'workspace' ? (
+          <p className="text-xs text-zinc-500">
+            {manageMembersPermissionMessage}
+          </p>
+        ) : null}
 
-      {pendingInvites.length > 0 && (
+        {pendingInvites.length > 0 && (
+          <div className="border-t pt-3">
+            <h4 className="mb-2 font-semibold">Pending invitations</h4>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left">
+                  <th className="py-1">Email</th>
+                  <th className="py-1">Role</th>
+                  <th className="py-1">Expires</th>
+                  <th className="py-1 text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingInvites.map((inv) => (
+                  <tr
+                    key={inv.id}
+                    className="border-t border-zinc-200 dark:border-zinc-700"
+                  >
+                    <td className="py-2">{inv.email}</td>
+                    <td className="py-2 capitalize">{inv.role}</td>
+                    <td className="py-2 text-xs">
+                      {new Date(inv.expires_at).toLocaleString()}
+                    </td>
+                    <td className="py-2 text-right">
+                      <button
+                        onClick={async () => {
+                          if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner)
+                            return
+                          await revokeWorkspaceInvite(
+                            resolvedWorkspaceId,
+                            inv.id
+                          )
+                          setPendingInvites((prev) =>
+                            prev.filter((i) => i.id !== inv.id)
+                          )
+                        }}
+                        disabled={!canManageMembers}
+                        title={
+                          !isWorkspaceAdminOrOwner
+                            ? manageMembersPermissionMessage
+                            : undefined
+                        }
+                        className="rounded border px-2 py-1 text-xs disabled:opacity-60"
+                      >
+                        Revoke
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <div className="border-t pt-3">
-          <h4 className="font-semibold mb-2">Pending invitations</h4>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left">
-                <th className="py-1">Email</th>
-                <th className="py-1">Role</th>
-                <th className="py-1">Expires</th>
-                <th className="py-1 text-right"></th>
+                <th className="py-2">Member</th>
+                <th className="py-2">Role</th>
+                <th className="py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {pendingInvites.map((inv) => (
-                <tr
-                  key={inv.id}
-                  className="border-t border-zinc-200 dark:border-zinc-700"
-                >
-                  <td className="py-2">{inv.email}</td>
-                  <td className="py-2 capitalize">{inv.role}</td>
-                  <td className="py-2 text-xs">
-                    {new Date(inv.expires_at).toLocaleString()}
-                  </td>
-                  <td className="py-2 text-right">
-                    <button
-                      onClick={async () => {
-                        if (!resolvedWorkspaceId || !isWorkspaceAdminOrOwner)
-                          return
-                        await revokeWorkspaceInvite(resolvedWorkspaceId, inv.id)
-                        setPendingInvites((prev) =>
-                          prev.filter((i) => i.id !== inv.id)
-                        )
-                      }}
-                      disabled={!canManageMembers}
-                      title={
-                        !isWorkspaceAdminOrOwner
-                          ? manageMembersPermissionMessage
-                          : undefined
-                      }
-                      className="px-2 py-1 text-xs rounded border disabled:opacity-60"
-                    >
-                      Revoke
-                    </button>
+              {members.map((m) => {
+                const baseRoles: WorkspaceMember['role'][] = [
+                  'viewer',
+                  'user',
+                  'admin'
+                ]
+                const roleOptions =
+                  isWorkspaceOwner || m.role === 'owner'
+                    ? [...baseRoles, 'owner' as WorkspaceMember['role']]
+                    : baseRoles
+                const disableSelect =
+                  busy || !canManageMembers || m.role === 'owner'
+                const disableRemove =
+                  busy ||
+                  !canManageMembers ||
+                  m.role === 'owner' ||
+                  checkingOwnershipFor === m.user_id
+                const verifyingRemoval = checkingOwnershipFor === m.user_id
+                const identity = resolveMemberIdentity(m)
+                return (
+                  <tr
+                    key={m.user_id}
+                    className="border-t border-zinc-200 dark:border-zinc-700"
+                  >
+                    <td className="py-2">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {identity.primary}
+                        </span>
+                        {identity.secondary && (
+                          <span className="text-xs text-zinc-500">
+                            {identity.secondary}
+                          </span>
+                        )}
+                        {identity.identifier && (
+                          <span className="text-[11px] font-mono text-zinc-500 break-all">
+                            {identity.identifier}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2">
+                      <select
+                        value={m.role}
+                        onChange={(e) =>
+                          handleRole(
+                            m.user_id,
+                            e.target.value as WorkspaceMember['role']
+                          )
+                        }
+                        disabled={disableSelect}
+                        title={
+                          !isWorkspaceAdminOrOwner && m.role !== 'owner'
+                            ? manageMembersPermissionMessage
+                            : undefined
+                        }
+                        className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
+                      >
+                        {roleOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option.charAt(0).toUpperCase() + option.slice(1)}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-2 text-right">
+                      <button
+                        onClick={() => handleRemove(m)}
+                        disabled={disableRemove}
+                        title={
+                          !isWorkspaceAdminOrOwner && m.role !== 'owner'
+                            ? manageMembersPermissionMessage
+                            : undefined
+                        }
+                        className="px-2 py-1 text-xs rounded border text-red-600 disabled:opacity-50"
+                      >
+                        {verifyingRemoval
+                          ? 'Checking…'
+                          : busy && pendingRemoval?.member.user_id === m.user_id
+                            ? 'Removing…'
+                            : 'Remove'}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+              {members.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="py-4 text-center text-zinc-500">
+                    {busy ? 'Loading...' : 'No members yet.'}
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
-      )}
-
-      <div className="border-t pt-3">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left">
-              <th className="py-2">Member</th>
-              <th className="py-2">Role</th>
-              <th className="py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m) => {
-              const baseRoles: WorkspaceMember['role'][] = [
-                'viewer',
-                'user',
-                'admin'
-              ]
-              const roleOptions =
-                isWorkspaceOwner || m.role === 'owner'
-                  ? [...baseRoles, 'owner' as WorkspaceMember['role']]
-                  : baseRoles
-              const disableSelect =
-                busy || !canManageMembers || m.role === 'owner'
-              const disableRemove =
-                busy || !canManageMembers || m.role === 'owner'
-              const identity = resolveMemberIdentity(m)
-              return (
-                <tr
-                  key={m.user_id}
-                  className="border-t border-zinc-200 dark:border-zinc-700"
-                >
-                  <td className="py-2">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                        {identity.primary}
-                      </span>
-                      {identity.secondary && (
-                        <span className="text-xs text-zinc-500">
-                          {identity.secondary}
-                        </span>
-                      )}
-                      {identity.identifier && (
-                        <span className="text-[11px] font-mono text-zinc-500 break-all">
-                          {identity.identifier}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="py-2">
-                    <select
-                      value={m.role}
-                      onChange={(e) =>
-                        handleRole(
-                          m.user_id,
-                          e.target.value as WorkspaceMember['role']
-                        )
-                      }
-                      disabled={disableSelect}
-                      title={
-                        !isWorkspaceAdminOrOwner && m.role !== 'owner'
-                          ? manageMembersPermissionMessage
-                          : undefined
-                      }
-                      className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
-                    >
-                      {roleOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option.charAt(0).toUpperCase() + option.slice(1)}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="py-2 text-right">
-                    <button
-                      onClick={() => handleRemove(m.user_id)}
-                      disabled={disableRemove}
-                      title={
-                        !isWorkspaceAdminOrOwner && m.role !== 'owner'
-                          ? manageMembersPermissionMessage
-                          : undefined
-                      }
-                      className="px-2 py-1 text-xs rounded border text-red-600 disabled:opacity-50"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-            {members.length === 0 && (
-              <tr>
-                <td colSpan={3} className="py-4 text-center text-zinc-500">
-                  {busy ? 'Loading...' : 'No members yet.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
       </div>
     </div>
   )

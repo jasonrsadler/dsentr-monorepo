@@ -348,6 +348,10 @@ async fn main() {
                 .delete(routes::workspaces::remove_workspace_member),
         )
         .route(
+            "/{workspace_id}/secrets",
+            get(routes::workspaces::list_workspace_secret_ownership),
+        )
+        .route(
             "/{workspace_id}/leave",
             post(routes::workspaces::leave_workspace),
         )

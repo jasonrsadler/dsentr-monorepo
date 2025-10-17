@@ -1,13 +1,37 @@
 import { API_BASE_URL } from './config'
 import { getCsrfToken } from './csrfCache'
 
-export type SecretStore = Record<string, Record<string, Record<string, string>>>
+export interface SecretEntry {
+  value: string
+  ownerId: string
+}
+
+export type SecretStore = Record<
+  string,
+  Record<string, Record<string, SecretEntry>>
+>
 
 interface SecretsResponse {
   success: boolean
   secrets: SecretStore
   outcome?: 'created' | 'updated' | 'unchanged'
 }
+
+interface WorkspaceSecretsResponse {
+  success: boolean
+  ownership: WorkspaceSecretOwnership
+}
+
+export interface WorkspaceSecretOwnershipEntry {
+  group: string
+  service: string
+  name: string
+}
+
+export type WorkspaceSecretOwnership = Record<
+  string,
+  WorkspaceSecretOwnershipEntry[]
+>
 
 async function handleResponse(res: Response): Promise<SecretsResponse> {
   const data = await res
@@ -69,4 +93,27 @@ export async function deleteSecret(
   )
 
   return handleResponse(res)
+}
+
+export async function fetchWorkspaceSecretOwnership(
+  workspaceId: string
+): Promise<WorkspaceSecretOwnership> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/secrets`,
+    {
+      credentials: 'include'
+    }
+  )
+
+  const data = (await res
+    .json()
+    .catch(() => ({ success: false, message: 'Invalid response' }))) as
+    | WorkspaceSecretsResponse
+    | { success: false; message?: string }
+
+  if (!res.ok || !data.success) {
+    throw new Error(data?.message || 'Failed to load workspace secrets')
+  }
+
+  return data.ownership ?? {}
 }

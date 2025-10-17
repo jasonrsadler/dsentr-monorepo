@@ -1,5 +1,5 @@
 import { describe, beforeEach, afterEach, expect, it, vi } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import MembersTab from './MembersTab'
 import { useAuth } from '@/stores/auth'
@@ -7,8 +7,10 @@ import {
   HttpError,
   listWorkspaceInvites,
   listWorkspaceMembers,
-  leaveWorkspace
+  leaveWorkspace,
+  removeWorkspaceMember
 } from '@/lib/orgWorkspaceApi'
+import { fetchWorkspaceSecretOwnership } from '@/lib/optionsApi'
 import type { WorkspaceMembershipSummary } from '@/lib/orgWorkspaceApi'
 
 vi.mock('@/lib/orgWorkspaceApi', async () => {
@@ -19,9 +21,31 @@ vi.mock('@/lib/orgWorkspaceApi', async () => {
     ...actual,
     listWorkspaceMembers: vi.fn(),
     listWorkspaceInvites: vi.fn(),
-    leaveWorkspace: vi.fn()
+    leaveWorkspace: vi.fn(),
+    removeWorkspaceMember: vi.fn()
   }
 })
+
+vi.mock('@/lib/optionsApi', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/optionsApi')>('@/lib/optionsApi')
+  return {
+    ...actual,
+    fetchWorkspaceSecretOwnership: vi.fn()
+  }
+})
+
+const refreshSecretsMock = vi.fn()
+
+vi.mock('@/contexts/SecretsContext', () => ({
+  useSecrets: () => ({
+    secrets: {},
+    loading: false,
+    error: null,
+    refresh: refreshSecretsMock,
+    saveSecret: vi.fn()
+  })
+}))
 
 const initialStore = useAuth.getState()
 const { login, logout, checkAuth, setCurrentWorkspaceId, refreshMemberships } =
@@ -82,6 +106,8 @@ describe('MembersTab workspace actions', () => {
   const listMembersMock = vi.mocked(listWorkspaceMembers)
   const listInvitesMock = vi.mocked(listWorkspaceInvites)
   const leaveWorkspaceMock = vi.mocked(leaveWorkspace)
+  const removeMemberMock = vi.mocked(removeWorkspaceMember)
+  const fetchOwnershipMock = vi.mocked(fetchWorkspaceSecretOwnership)
 
   beforeEach(() => {
     window.localStorage.clear()
@@ -90,6 +116,10 @@ describe('MembersTab workspace actions', () => {
     listMembersMock.mockResolvedValue([])
     listInvitesMock.mockResolvedValue([])
     leaveWorkspaceMock.mockResolvedValue(undefined)
+    removeMemberMock.mockResolvedValue(undefined)
+    fetchOwnershipMock.mockResolvedValue({})
+    refreshSecretsMock.mockReset()
+    refreshSecretsMock.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -373,5 +403,90 @@ describe('MembersTab workspace actions', () => {
     expect(
       await screen.findByText(/redirected to your solo workspace/i)
     ).toBeInTheDocument()
+  })
+
+  it('requires confirmation before removing members with workspace secrets', async () => {
+    const members = [
+      {
+        workspace_id: workspaceMembership.workspace.id,
+        user_id: 'admin-user',
+        role: 'admin' as const,
+        joined_at: new Date().toISOString(),
+        email: 'admin@example.com',
+        first_name: 'Admin',
+        last_name: 'User'
+      },
+      {
+        workspace_id: workspaceMembership.workspace.id,
+        user_id: 'target-user',
+        role: 'user' as const,
+        joined_at: new Date().toISOString(),
+        email: 'target@example.com',
+        first_name: 'Target',
+        last_name: 'Member'
+      }
+    ]
+    listMembersMock.mockResolvedValue(members)
+
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'admin-user',
+          email: 'admin@example.com',
+          first_name: 'Admin',
+          last_name: 'User',
+          plan: 'workspace',
+          role: 'admin',
+          companyName: null
+        },
+        memberships: [workspaceMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id
+      }))
+    })
+
+    render(<MembersTab />)
+
+    const targetLabel = await screen.findByText('Target Member')
+    const targetRow = targetLabel.closest('tr')
+    expect(targetRow).not.toBeNull()
+    if (!targetRow) {
+      throw new Error('Target row not found')
+    }
+
+    const user = userEvent.setup()
+    fetchOwnershipMock.mockResolvedValueOnce({
+      'target-user': [{ group: 'email', service: 'smtp', name: 'primary-key' }]
+    })
+
+    const removeButton = within(targetRow).getByRole('button', {
+      name: /remove/i
+    })
+    await user.click(removeButton)
+
+    expect(fetchOwnershipMock).toHaveBeenCalledWith(
+      workspaceMembership.workspace.id
+    )
+    expect(removeMemberMock).not.toHaveBeenCalled()
+
+    const modalHeading = await screen.findByText(/confirm member removal/i)
+    expect(modalHeading).toBeInTheDocument()
+
+    const confirmButton = screen.getByRole('button', { name: /remove member/i })
+    await user.click(confirmButton)
+
+    await waitFor(() => {
+      expect(removeMemberMock).toHaveBeenCalledWith(
+        workspaceMembership.workspace.id,
+        'target-user'
+      )
+    })
+    expect(refreshSecretsMock).toHaveBeenCalled()
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/confirm member removal/i)
+      ).not.toBeInTheDocument()
+    })
   })
 })

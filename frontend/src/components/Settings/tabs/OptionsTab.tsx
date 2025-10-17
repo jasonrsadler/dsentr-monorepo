@@ -5,6 +5,7 @@ import {
   fetchSecrets,
   upsertSecret
 } from '@/lib/optionsApi'
+import { useAuth } from '@/stores/auth'
 
 interface ServiceDescriptor {
   key: string
@@ -166,6 +167,7 @@ export default function OptionsTab() {
   const [serviceErrors, setServiceErrors] = useState<ErrorMap>({})
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [deleteBusyKey, setDeleteBusyKey] = useState<string | null>(null)
+  const currentUserId = useAuth((state) => state.user?.id ?? null)
 
   useEffect(() => {
     let active = true
@@ -253,9 +255,13 @@ export default function OptionsTab() {
   }
 
   const renderService = (groupKey: string, descriptor: ServiceDescriptor) => {
-    const entries = Object.entries(
-      secrets[groupKey]?.[descriptor.key] ?? {}
-    ).sort((a, b) => a[0].localeCompare(b[0]))
+    const entries = Object.entries(secrets[groupKey]?.[descriptor.key] ?? {})
+      .map<[string, string, string | null]>(([name, entry]) => [
+        name,
+        entry?.value ?? '',
+        entry?.ownerId ?? null
+      ])
+      .sort((a, b) => a[0].localeCompare(b[0]))
     const draft = drafts[serviceKey(groupKey, descriptor.key)] ?? {
       name: '',
       value: ''
@@ -290,7 +296,7 @@ export default function OptionsTab() {
               No secrets saved yet.
             </p>
           )}
-          {entries.map(([name, value]) => {
+          {entries.map(([name, value, ownerId]) => {
             const masked = value
               ? '•'
                   .repeat(Math.min(value.length, 8))
@@ -309,6 +315,11 @@ export default function OptionsTab() {
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 tracking-widest">
                     {masked}
                   </p>
+                  {ownerId && ownerId !== currentUserId && (
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                      Created by another workspace member
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={() => handleDelete(groupKey, descriptor.key, name)}

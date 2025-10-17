@@ -1,4 +1,4 @@
-use std::env;
+use std::{collections::BTreeMap, env};
 
 use axum::{
     extract::State,
@@ -24,6 +24,7 @@ use crate::{
     responses::JsonResponse,
     routes::auth::session::AuthSession,
     state::AppState,
+    utils::secrets::{collect_secret_identifiers, read_secret_store, SecretIdentifier},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -592,6 +593,55 @@ pub async fn list_workspace_members(
         Ok(members) => Json(json!({"success": true, "members": members})).into_response(),
         Err(_) => JsonResponse::server_error("Failed to list members").into_response(),
     }
+}
+
+pub async fn list_workspace_secret_ownership(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    axum::extract::Path(workspace_id): axum::extract::Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    if let Err(resp) = ensure_workspace_admin(&app_state, user_id, workspace_id).await {
+        return resp;
+    }
+
+    let members = match app_state.workspace_repo.list_members(workspace_id).await {
+        Ok(members) => members,
+        Err(err) => {
+            error!(?err, %workspace_id, "failed to list workspace members for secret ownership");
+            return JsonResponse::server_error("Failed to load workspace secrets").into_response();
+        }
+    };
+
+    let mut ownership: BTreeMap<Uuid, Vec<SecretIdentifier>> = BTreeMap::new();
+
+    for member in members {
+        let settings = match app_state.db.get_user_settings(member.user_id).await {
+            Ok(settings) => settings,
+            Err(err) => {
+                error!(
+                    ?err,
+                    %workspace_id,
+                    member_id = %member.user_id,
+                    "failed to load user settings while collecting workspace secrets"
+                );
+                return JsonResponse::server_error("Failed to load workspace secrets")
+                    .into_response();
+            }
+        };
+
+        let store = read_secret_store(&settings);
+        let identifiers = collect_secret_identifiers(&store);
+        if !identifiers.is_empty() {
+            ownership.insert(member.user_id, identifiers);
+        }
+    }
+
+    Json(json!({ "success": true, "ownership": ownership })).into_response()
 }
 
 pub async fn add_workspace_member(
