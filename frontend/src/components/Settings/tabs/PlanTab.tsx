@@ -63,6 +63,7 @@ export default function PlanTab() {
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const workspaceEditedRef = useRef(false)
+  const isWorkspaceOwner = currentWorkspace?.role === 'owner'
 
   useEffect(() => {
     const fetchOptions = async () => {
@@ -184,6 +185,11 @@ export default function PlanTab() {
     setStatus(null)
     setError(null)
 
+    if (!isWorkspaceOwner) {
+      setError('Only workspace owners can modify billing settings.')
+      return
+    }
+
     if (canConfigureWorkspace && !workspaceName.trim()) {
       setError('Workspace name is required for this plan')
       return
@@ -258,6 +264,21 @@ export default function PlanTab() {
     setWorkspaceName(event.target.value)
   }
 
+  const activeWorkspaceName = useMemo(() => {
+    const candidate = currentWorkspace?.workspace?.name?.trim()
+    if (candidate) return candidate
+    if (workspaceName.trim()) return workspaceName.trim()
+    if (previousWorkspaceName.trim()) return previousWorkspaceName.trim()
+    return ''
+  }, [currentWorkspace?.workspace?.name, previousWorkspaceName, workspaceName])
+
+  const ownershipMessage = isWorkspaceOwner
+    ? null
+    : 'Only workspace owners can modify billing settings.'
+  const planName = currentPlanDetails?.name ?? 'current'
+  const workspaceLabel = activeWorkspaceName || 'This workspace'
+  const planSummaryMessage = `${workspaceLabel} is currently on the ${planName} plan.`
+
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
       <div>
@@ -267,6 +288,10 @@ export default function PlanTab() {
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Upgrade or downgrade your DSentr plan at any time. Changes take effect
           immediately.
+        </p>
+        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+          {planSummaryMessage}
+          {ownershipMessage ? ` ${ownershipMessage}` : ''}
         </p>
       </div>
 
@@ -289,11 +314,18 @@ export default function PlanTab() {
             <button
               key={option.tier}
               type="button"
-              onClick={() => setSelected(option.tier)}
+              onClick={
+                isWorkspaceOwner ? () => setSelected(option.tier) : undefined
+              }
+              disabled={!isWorkspaceOwner}
               className={`rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                 isSelected
                   ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400/70 dark:bg-indigo-500/10'
                   : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-300'
+              } ${
+                isWorkspaceOwner
+                  ? ''
+                  : 'cursor-not-allowed opacity-70 hover:border-zinc-200 dark:hover:border-zinc-800'
               }`}
             >
               <span className="block text-base font-semibold text-zinc-900 dark:text-zinc-100">
@@ -320,9 +352,22 @@ export default function PlanTab() {
               type="text"
               value={workspaceName}
               onChange={handleWorkspaceInputChange}
-              className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+              disabled={!isWorkspaceOwner}
+              className={[
+                'mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm',
+                'focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                'disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500',
+                'dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100',
+                'dark:disabled:bg-zinc-900/60 dark:disabled:text-zinc-500'
+              ].join(' ')}
               placeholder="Acme Workspace"
             />
+            {!isWorkspaceOwner ? (
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                Workspace owners can update the workspace name when changing
+                plans.
+              </p>
+            ) : null}
           </label>
         ) : (
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -334,8 +379,8 @@ export default function PlanTab() {
       <div className="flex justify-end">
         <button
           type="submit"
-          disabled={isSubmitting}
-          className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-70"
+          disabled={isSubmitting || !isWorkspaceOwner}
+          className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-400 disabled:opacity-80"
         >
           {isSubmitting ? 'Updating…' : 'Update plan'}
         </button>
