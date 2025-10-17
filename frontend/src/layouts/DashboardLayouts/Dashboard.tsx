@@ -7,7 +7,7 @@ import ActionIcon from '@/assets/svg-components/ActionIcon'
 import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
 import { useWorkflowLogs } from '@/stores/workflowLogs'
-import { useAuth } from '@/stores/auth'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import {
   listWorkflows,
   getWorkflow,
@@ -185,10 +185,14 @@ export default function Dashboard() {
   const [restrictionNotice, setRestrictionNotice] = useState<string | null>(
     null
   )
-  const { user } = useAuth()
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const userPlan = useAuth((state) => state.user?.plan ?? null)
   const planTier = useMemo<PlanTier>(
-    () => normalizePlanTier(user?.plan),
-    [user?.plan]
+    () =>
+      normalizePlanTier(
+        currentWorkspace?.workspace.plan ?? userPlan ?? undefined
+      ),
+    [currentWorkspace?.workspace.plan, userPlan]
   )
   const refreshPlanUsage = useCallback(async () => {
     try {
@@ -198,6 +202,8 @@ export default function Dashboard() {
       if (planTier === 'solo') {
         const hidden = usage.workflows.hidden ?? 0
         setHiddenWorkflowCount(hidden)
+      } else {
+        setHiddenWorkflowCount(0)
       }
     } catch (error) {
       console.error('Failed to load plan usage', error)

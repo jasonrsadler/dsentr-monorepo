@@ -12,7 +12,7 @@ import ActionNode from '@/components/Workflow/ActionNode'
 import NodeEdge from '@/components/Workflow/NodeEdge'
 import CustomControls from '@/components/UI/ReactFlow/CustomControl'
 import ConditionNode from '@/components/Workflow/ConditionNode'
-import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+import { normalizePlanTier } from '@/lib/planTiers'
 
 function normalizeNode(n: any) {
   return {
@@ -164,7 +164,7 @@ interface FlowCanvasProps {
   runningIds?: Set<string>
   succeededIds?: Set<string>
   failedIds?: Set<string>
-  planTier?: PlanTier
+  planTier?: string | null
   onRestrictionNotice?: (message: string) => void
 }
 

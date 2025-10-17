@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useAuth } from '@/stores/auth'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import {
   listWorkspaceMembers,
   removeWorkspaceMember,
@@ -33,6 +33,7 @@ export default function MembersTab() {
   const currentWorkspaceId = useAuth((state) => state.currentWorkspaceId)
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const refreshMemberships = useAuth((state) => state.refreshMemberships)
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
   const [members, setMembers] = useState<WorkspaceMember[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,25 +47,17 @@ export default function MembersTab() {
     []
   )
 
-  const planTier = useMemo(() => normalizePlanTier(user?.plan), [user?.plan])
+  const planTier = useMemo(
+    () =>
+      normalizePlanTier(
+        currentWorkspace?.workspace.plan ?? user?.plan ?? undefined
+      ),
+    [currentWorkspace?.workspace.plan, user?.plan]
+  )
   const availableWorkspaces = useMemo(
     () => (Array.isArray(memberships) ? memberships : []),
     [memberships]
   )
-  const currentWorkspace = useMemo(() => {
-    if (availableWorkspaces.length === 0) return null
-    if (!currentWorkspaceId) {
-      return availableWorkspaces[0] ?? null
-    }
-    return (
-      availableWorkspaces.find(
-        (membership) => membership.workspace.id === currentWorkspaceId
-      ) ??
-      availableWorkspaces[0] ??
-      null
-    )
-  }, [availableWorkspaces, currentWorkspaceId])
-
   const resolvedWorkspaceId = currentWorkspace?.workspace?.id ?? null
   const resolvedWorkspaceName = currentWorkspace?.workspace?.name ?? ''
   const isWorkspaceOwner = currentWorkspace?.role === 'owner'
@@ -106,7 +99,7 @@ export default function MembersTab() {
             'Access to this workspace was revoked. Redirected to your Solo workspace.'
           if (Array.isArray(membershipsList) && membershipsList.length > 0) {
             const soloWorkspace = membershipsList.find((membership) => {
-              return membership.workspace.plan === 'solo'
+              return normalizePlanTier(membership.workspace.plan) === 'solo'
             })
             if (soloWorkspace) {
               fallbackWorkspace = soloWorkspace
@@ -227,7 +220,7 @@ export default function MembersTab() {
       let message = 'You left the workspace.'
       if (Array.isArray(membershipsList) && membershipsList.length > 0) {
         const soloWorkspace = membershipsList.find((membership) => {
-          return membership.workspace.plan === 'solo'
+          return normalizePlanTier(membership.workspace.plan) === 'solo'
         })
         const nextWorkspace = soloWorkspace ?? membershipsList[0]
         if (nextWorkspace) {

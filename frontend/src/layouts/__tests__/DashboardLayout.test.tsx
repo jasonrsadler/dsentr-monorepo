@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { describe, beforeEach, expect, it, vi } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import DashboardLayout from '../DashboardLayout'
@@ -231,6 +231,53 @@ describe('DashboardLayout workspace switcher', () => {
     const calls = setCurrentWorkspaceIdSpy.mock.calls.flat()
     expect(calls).toContain('workspace-b')
     expect(calls).not.toContain('workspace-a')
+  })
+
+  it('updates the plan badge when switching active workspace', async () => {
+    const memberships = [
+      createMembership('workspace-a', 'Workspace A', 'solo', 'owner'),
+      createMembership('workspace-b', 'Workspace B', 'workspace', 'admin')
+    ]
+
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'user-plan',
+          email: 'plan@example.com',
+          first_name: 'Plan',
+          last_name: 'Tester',
+          plan: 'solo',
+          role: 'admin',
+          companyName: null
+        },
+        memberships,
+        currentWorkspaceId: 'workspace-a'
+      }))
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Routes>
+          <Route path="/dashboard" element={<DashboardLayout />}>
+            <Route index element={<div>Dashboard</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    )
+
+    const header = await screen.findByRole('banner')
+    expect(within(header).getByText(/^Solo$/)).toBeInTheDocument()
+
+    const switcher = await screen.findByLabelText(/workspace switcher/i)
+    const userEventInstance = userEvent.setup()
+    await userEventInstance.selectOptions(switcher, 'workspace-b')
+
+    await waitFor(() => {
+      expect(useAuth.getState().currentWorkspaceId).toBe('workspace-b')
+    })
+
+    expect(within(header).getByText(/^Workspace$/)).toBeInTheDocument()
   })
 
   it('prefers workspace specified in the query string when available', async () => {

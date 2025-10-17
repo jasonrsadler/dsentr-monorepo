@@ -24,7 +24,7 @@ import {
 import { ScheduleCalendar } from '../ui/schedule/ScheduleCalendar'
 import { ScheduleTimePicker } from '../ui/schedule/ScheduleTimePicker'
 import { ScheduleTimezonePicker } from '../ui/schedule/ScheduleTimezonePicker'
-import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+import { normalizePlanTier } from '@/lib/planTiers'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
   'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'

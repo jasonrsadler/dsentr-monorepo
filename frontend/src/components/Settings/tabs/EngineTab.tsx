@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useAuth } from '@/stores/auth'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import {
   listWorkflows,
   type WorkflowRecord,
@@ -32,9 +32,12 @@ const CONCURRENCY_RESTRICTION_MESSAGE =
   'Solo plan workflows run one job at a time. Upgrade in Settings → Plan to raise the concurrency limit.'
 
 export default function EngineTab() {
-  const { user } = useAuth()
+  const user = useAuth((state) => state.user)
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
   const isAdmin = (user?.role ?? '').toLowerCase() === 'admin'
-  const planTier = normalizePlanTier(user?.plan)
+  const planTier = normalizePlanTier(
+    currentWorkspace?.workspace.plan ?? user?.plan ?? undefined
+  )
   const isSoloPlan = planTier === 'solo'
   const openPlanSettings = useCallback(() => {
     try {

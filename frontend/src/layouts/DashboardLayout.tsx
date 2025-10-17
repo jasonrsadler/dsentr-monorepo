@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
-import { useAuth } from '@/stores/auth'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import SettingsButton from '@/components/Settings/SettingsButton'
 import SettingsModal from '@/components/Settings/SettingsModal'
 import WorkflowsTab from '@/components/Settings/tabs/WorkflowsTab'
@@ -24,6 +24,7 @@ export default function DashboardLayout() {
   const user = useAuth((state) => state.user)
   const memberships = useAuth((state) => state.memberships)
   const currentWorkspaceId = useAuth((state) => state.currentWorkspaceId)
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [initialSettingsTab, setInitialSettingsTab] = useState<
@@ -38,16 +39,6 @@ export default function DashboardLayout() {
   const hasWorkspaces = memberships.length > 0
   const hasMultipleWorkspaces = memberships.length > 1
   const previousSearchRef = useRef<string | null>(null)
-
-  const currentWorkspace = useMemo(() => {
-    if (!hasWorkspaces) return null
-    if (!currentWorkspaceId) return memberships[0]
-    return (
-      memberships.find((membership) => {
-        return membership.workspace.id === currentWorkspaceId
-      }) ?? memberships[0]
-    )
-  }, [currentWorkspaceId, hasWorkspaces, memberships])
 
   const currentWorkspaceName = useMemo(() => {
     if (!currentWorkspace) return ''
@@ -110,11 +101,12 @@ export default function DashboardLayout() {
   )
 
   const planLabel = useMemo(() => {
-    if (!user?.plan) return null
-    const normalized = user.plan.trim()
+    const planSource = currentWorkspace?.workspace.plan ?? user?.plan
+    if (!planSource) return null
+    const normalized = planSource.trim()
     if (!normalized) return null
     return normalized.charAt(0).toUpperCase() + normalized.slice(1)
-  }, [user?.plan])
+  }, [currentWorkspace?.workspace.plan, user?.plan])
 
   const settingsTabs = useMemo(
     () => [

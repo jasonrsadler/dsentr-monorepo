@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { API_BASE_URL } from '@/lib'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import { getCsrfToken } from '@/lib/csrfCache'
-import { useAuth } from '@/stores/auth'
+import type { WorkspaceMembershipSummary } from '@/lib/orgWorkspaceApi'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
 type PlanOption = {
   tier: PlanTier
@@ -27,40 +28,41 @@ const FALLBACK_PLAN_OPTIONS: PlanOption[] = [
 ]
 
 export default function PlanTab() {
-  const { user, checkAuth, memberships } = useAuth()
+  const user = useAuth((state) => state.user)
+  const checkAuth = useAuth((state) => state.checkAuth)
+  const memberships = useAuth((state) => state.memberships)
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const effectivePlan = useMemo<PlanTier>(
+    () =>
+      normalizePlanTier(
+        currentWorkspace?.workspace.plan ?? user?.plan ?? undefined
+      ),
+    [currentWorkspace?.workspace.plan, user?.plan]
+  )
+  const previousWorkspaceName = useMemo(() => {
+    const activeName = currentWorkspace?.workspace?.name
+    if (typeof activeName === 'string' && activeName.trim()) {
+      return activeName.trim()
+    }
+    if (!Array.isArray(memberships)) return ''
+    for (const membership of memberships) {
+      const candidate = membership?.workspace?.name
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim()
+      }
+    }
+    return ''
+  }, [currentWorkspace?.workspace?.name, memberships])
   const [planOptions, setPlanOptions] = useState<PlanOption[]>(
     FALLBACK_PLAN_OPTIONS
   )
-  const [selected, setSelected] = useState<PlanTier>(
-    normalizePlanTier(user?.plan)
-  )
-  const [currentPlan, setCurrentPlan] = useState<PlanTier>(
-    normalizePlanTier(user?.plan)
-  )
-  const [workspaceName, setWorkspaceName] = useState(() => {
-    if (!Array.isArray(memberships)) return ''
-    const membership = memberships[0]
-    const name = membership?.workspace?.name
-    return typeof name === 'string' ? name : ''
-  })
+  const [selected, setSelected] = useState<PlanTier>(effectivePlan)
+  const [currentPlan, setCurrentPlan] = useState<PlanTier>(effectivePlan)
+  const [workspaceName, setWorkspaceName] = useState(previousWorkspaceName)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const workspaceEditedRef = useRef(false)
-
-  const previousWorkspaceName = useMemo(() => {
-    if (!Array.isArray(memberships)) return ''
-    for (const membership of memberships) {
-      const name =
-        typeof membership?.workspace?.name === 'string'
-          ? membership.workspace.name.trim()
-          : ''
-      if (name) {
-        return name
-      }
-    }
-    return ''
-  }, [memberships])
 
   useEffect(() => {
     const fetchOptions = async () => {
@@ -101,22 +103,43 @@ export default function PlanTab() {
           : FALLBACK_PLAN_OPTIONS
 
         setPlanOptions(options.length > 0 ? options : FALLBACK_PLAN_OPTIONS)
-        if (data.user?.plan) {
-          const detectedPlan = normalizePlanTier(data.user.plan)
-          setSelected(detectedPlan)
-          setCurrentPlan(detectedPlan)
-        }
+
+        let detectedPlan: PlanTier | null = null
+
         if (Array.isArray(data.memberships)) {
-          const membershipName = data.memberships
-            .map((membership: any) => {
-              const candidate = membership?.workspace?.name
-              return typeof candidate === 'string' ? candidate.trim() : ''
-            })
-            .find((name: string) => Boolean(name))
+          const membershipList =
+            data.memberships as WorkspaceMembershipSummary[]
+          const activeMembership = selectCurrentWorkspace({
+            memberships: membershipList,
+            currentWorkspaceId: useAuth.getState().currentWorkspaceId
+          })
+
+          if (activeMembership?.workspace?.plan) {
+            detectedPlan = normalizePlanTier(activeMembership.workspace.plan)
+          }
+
+          const membershipName =
+            activeMembership?.workspace?.name?.trim() ||
+            membershipList
+              .map((membership) => {
+                const candidate = membership?.workspace?.name
+                return typeof candidate === 'string' ? candidate.trim() : ''
+              })
+              .find((name) => Boolean(name)) ||
+            ''
 
           if (membershipName && !workspaceEditedRef.current) {
             setWorkspaceName(membershipName)
           }
+        }
+
+        if (!detectedPlan && data.user?.plan) {
+          detectedPlan = normalizePlanTier(data.user.plan)
+        }
+
+        if (detectedPlan) {
+          setSelected(detectedPlan)
+          setCurrentPlan(detectedPlan)
         }
       } catch (err) {
         console.error(err)
@@ -127,10 +150,9 @@ export default function PlanTab() {
   }, [])
 
   useEffect(() => {
-    const normalizedPlan = normalizePlanTier(user?.plan)
-    setSelected(normalizedPlan)
-    setCurrentPlan(normalizedPlan)
-  }, [user?.plan])
+    setSelected((prev) => (prev === effectivePlan ? prev : effectivePlan))
+    setCurrentPlan((prev) => (prev === effectivePlan ? prev : effectivePlan))
+  }, [effectivePlan])
 
   useEffect(() => {
     if (selected !== 'workspace') return
@@ -138,6 +160,12 @@ export default function PlanTab() {
     if (!previousWorkspaceName) return
     setWorkspaceName(previousWorkspaceName)
   }, [selected, previousWorkspaceName])
+
+  useEffect(() => {
+    if (selected === 'workspace') return
+    if (workspaceEditedRef.current) return
+    setWorkspaceName('')
+  }, [selected])
 
   const canConfigureWorkspace = selected === 'workspace'
 

@@ -79,6 +79,30 @@ function resolveWorkspaceSelection(
   return memberships[0]?.workspace.id ?? null
 }
 
+export function selectCurrentWorkspace(state: {
+  memberships: WorkspaceSummary[]
+  currentWorkspaceId: string | null
+}): WorkspaceSummary | null {
+  if (!Array.isArray(state.memberships) || state.memberships.length === 0) {
+    return null
+  }
+
+  const resolvedId = resolveWorkspaceSelection(
+    state.memberships,
+    state.currentWorkspaceId
+  )
+
+  if (!resolvedId) return null
+
+  return (
+    state.memberships.find(
+      (membership) => membership.workspace.id === resolvedId
+    ) ??
+    state.memberships[0] ??
+    null
+  )
+}
+
 const initialWorkspaceId = readStoredWorkspaceId()
 
 export const useAuth = create<AuthState>((set, get) => ({

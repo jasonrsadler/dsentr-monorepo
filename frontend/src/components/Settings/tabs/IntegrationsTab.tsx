@@ -8,7 +8,7 @@ import {
   fetchConnections,
   refreshProvider
 } from '@/lib/oauthApi'
-import { useAuth } from '@/stores/auth'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 
 export type IntegrationNotice =
@@ -48,7 +48,8 @@ export default function IntegrationsTab({
   notice,
   onDismissNotice
 }: IntegrationsTabProps) {
-  const { user } = useAuth()
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const userPlan = useAuth((state) => state.user?.plan ?? null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<
@@ -60,8 +61,10 @@ export default function IntegrationsTab({
   const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
 
   const planTier = useMemo<PlanTier>((): PlanTier => {
-    return normalizePlanTier(user?.plan)
-  }, [user?.plan])
+    return normalizePlanTier(
+      currentWorkspace?.workspace.plan ?? userPlan ?? undefined
+    )
+  }, [currentWorkspace?.workspace.plan, userPlan])
   const isSoloPlan = planTier === 'solo'
 
   const openPlanSettings = useCallback(() => {

@@ -117,6 +117,41 @@ describe('MembersTab workspace actions', () => {
     expect(leaveButton).toBeDisabled()
   })
 
+  it('updates gating copy when switching from solo to workspace membership', async () => {
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'user-switch',
+          email: 'switch@example.com',
+          first_name: 'Switch',
+          last_name: 'Tester',
+          plan: 'solo',
+          role: 'admin',
+          companyName: null
+        },
+        memberships: [soloMembership, workspaceMembership],
+        currentWorkspaceId: soloMembership.workspace.id
+      }))
+    })
+
+    render(<MembersTab />)
+
+    expect(
+      await screen.findByText(/upgrade to the workspace plan/i)
+    ).toBeInTheDocument()
+
+    const select = await screen.findByRole('combobox')
+    const userEvents = userEvent.setup()
+    await userEvents.selectOptions(select, workspaceMembership.workspace.id)
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/upgrade to the workspace plan/i)
+      ).not.toBeInTheDocument()
+    })
+  })
+
   it('leaves a workspace and redirects to the solo workspace', async () => {
     const setCurrentWorkspaceIdMock = vi.fn()
     const checkAuthMock = vi.fn().mockResolvedValue(undefined)

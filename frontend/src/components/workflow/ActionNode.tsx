@@ -15,7 +15,7 @@ import MessagingAction from './Actions/Messaging/MessagingAction'
 import SheetsAction from './Actions/Google/SheetsAction'
 import HttpRequestAction from './Actions/HttpRequestAction'
 import RunCustomCodeAction from './Actions/RunCustomCodeAction'
-import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+import { normalizePlanTier } from '@/lib/planTiers'
 
 const PLAN_RESTRICTION_MESSAGES = {
   sheets:
@@ -56,7 +56,7 @@ interface ActionNodeProps {
   isRunning?: boolean
   isSucceeded?: boolean
   isFailed?: boolean
-  planTier?: PlanTier
+  planTier?: string | null
   onRestrictionNotice?: (message: string) => void
 }
 
