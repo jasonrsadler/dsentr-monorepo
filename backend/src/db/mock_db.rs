@@ -69,8 +69,16 @@ impl UserRepository for MockDb {
             None => Err(sqlx::Error::RowNotFound),
         }
     }
-    async fn find_user_id_by_email(&self, _: &str) -> Result<Option<UserId>, sqlx::Error> {
-        todo!()
+    async fn find_user_id_by_email(&self, email: &str) -> Result<Option<UserId>, sqlx::Error> {
+        if self.should_fail {
+            return Err(sqlx::Error::Protocol("Mock DB failure".into()));
+        }
+
+        Ok(self
+            .find_user_result
+            .as_ref()
+            .filter(|user| user.email.eq_ignore_ascii_case(email))
+            .map(|user| UserId { id: user.id }))
     }
     async fn insert_password_reset_token(
         &self,

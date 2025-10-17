@@ -957,8 +957,9 @@ fn random_token() -> String {
     Uuid::new_v4().to_string().replace('-', "")
 }
 
-fn build_invite_signup_url(frontend_origin: &str, token: &str) -> String {
-    format!("{}/signup?invite={}", frontend_origin, encode(token))
+fn build_invite_accept_url(frontend_origin: &str, token: &str, has_account: bool) -> String {
+    let path = if has_account { "login" } else { "signup" };
+    format!("{}/{}?invite={}", frontend_origin, path, encode(token))
 }
 
 pub async fn create_workspace_invitation(
@@ -997,6 +998,17 @@ pub async fn create_workspace_invitation(
     let expires_at = OffsetDateTime::now_utc() + time::Duration::days(expires_days.into());
 
     let token = random_token();
+    let invited_user_has_account = match app_state.db.find_user_id_by_email(email).await {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(err) => {
+            warn!(
+                ?err,
+                email, "failed to check if invited email already has an account"
+            );
+            false
+        }
+    };
     let invite = match app_state
         .workspace_repo
         .create_workspace_invitation(
@@ -1018,7 +1030,7 @@ pub async fn create_workspace_invitation(
 
     // Send email with invite link
     let frontend = &app_state.config.frontend_origin;
-    let accept_url = build_invite_signup_url(frontend, &invite.token);
+    let accept_url = build_invite_accept_url(frontend, &invite.token, invited_user_has_account);
     // Try to use the workspace name in the subject; fall back to UUID if unavailable
     let workspace_name = match app_state.workspace_repo.find_workspace(workspace_id).await {
         Ok(Some(ws)) => ws.name,
@@ -1302,7 +1314,7 @@ pub async fn workspace_to_solo_execute(
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_invitation, build_invite_signup_url, decline_invitation, leave_workspace,
+        accept_invitation, build_invite_accept_url, decline_invitation, leave_workspace,
         revoke_workspace_member, InvitationDecisionPayload, RevokeWorkspaceMemberPayload,
     };
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
@@ -1987,9 +1999,19 @@ mod tests {
     }
 
     #[test]
-    fn invite_urls_target_signup_with_encoded_token() {
-        let url = build_invite_signup_url("https://app.example.com", "abc+/=?");
-        assert_eq!(url, "https://app.example.com/signup?invite=abc%2B%2F%3D%3F");
+    fn invite_urls_target_correct_flow_with_encoded_token() {
+        let token = "abc+/=?";
+        let base = "https://app.example.com";
+        let login_url = build_invite_accept_url(base, token, true);
+        assert_eq!(
+            login_url,
+            "https://app.example.com/login?invite=abc%2B%2F%3D%3F"
+        );
+        let signup_url = build_invite_accept_url(base, token, false);
+        assert_eq!(
+            signup_url,
+            "https://app.example.com/signup?invite=abc%2B%2F%3D%3F"
+        );
     }
 
     #[tokio::test]
