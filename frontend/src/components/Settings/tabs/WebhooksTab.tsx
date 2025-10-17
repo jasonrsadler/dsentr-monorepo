@@ -8,6 +8,7 @@ import {
   setWebhookConfig
 } from '@/lib/workflowApi'
 import { API_BASE_URL } from '@/lib/config'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
 export default function WebhooksTab() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
@@ -20,6 +21,11 @@ export default function WebhooksTab() {
   const [requireHmac, setRequireHmac] = useState(false)
   const [replayWindow, setReplayWindow] = useState(300)
   const [signingKey, setSigningKey] = useState('')
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const canManageWebhooks =
+    currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'admin'
+  const manageWebhooksPermissionMessage =
+    'Only workspace admins or owners can manage webhook settings.'
 
   useEffect(() => {
     listWorkflows()
@@ -152,8 +158,9 @@ export default function WebhooksTab() {
         <div className="mt-3 flex items-center gap-2">
           <button
             className="text-xs px-2 py-1 rounded border whitespace-nowrap"
-            disabled={!workflowId || regenBusy}
+            disabled={!workflowId || regenBusy || !canManageWebhooks}
             onClick={() => {
+              if (!canManageWebhooks) return
               if (workflowId) setConfirming(true)
             }}
           >
@@ -164,6 +171,11 @@ export default function WebhooksTab() {
             rotation. Update any external integrations afterward.
           </span>
         </div>
+        {!canManageWebhooks && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+            You have read-only access. {manageWebhooksPermissionMessage}
+          </p>
+        )}
         <div className="mt-4 text-xs text-zinc-600 dark:text-zinc-300 space-y-2">
           <div>
             <span className="font-medium">Payload</span>: POST JSON
@@ -297,12 +309,18 @@ export default function WebhooksTab() {
 
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-3">
         <h3 className="font-semibold mb-2">HMAC Verification</h3>
+        {!canManageWebhooks && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+            You have read-only access. {manageWebhooksPermissionMessage}
+          </p>
+        )}
         <div className="flex items-center gap-3 mb-2">
           <label className="text-sm inline-flex items-center gap-2">
             <input
               type="checkbox"
               checked={requireHmac}
               onChange={(e) => setRequireHmac(e.target.checked)}
+              disabled={!canManageWebhooks}
             />
             Require HMAC signature
           </label>
@@ -317,11 +335,14 @@ export default function WebhooksTab() {
                 setReplayWindow(parseInt(e.target.value || '300', 10))
               }
               className="w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700"
+              disabled={!canManageWebhooks}
             />
           </label>
           <button
             className="text-xs px-2 py-1 rounded border"
+            disabled={!canManageWebhooks}
             onClick={async () => {
+              if (!canManageWebhooks) return
               try {
                 await setWebhookConfig(workflowId, {
                   require_hmac: requireHmac,
@@ -382,8 +403,9 @@ export default function WebhooksTab() {
               </button>
               <button
                 className="px-3 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-                disabled={regenBusy}
+                disabled={regenBusy || !canManageWebhooks}
                 onClick={async () => {
+                  if (!canManageWebhooks) return
                   if (!workflowId) return
                   try {
                     setRegenBusy(true)
