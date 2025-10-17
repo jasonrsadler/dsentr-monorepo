@@ -23,3 +23,6 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Invitation acceptance must always go through a confirmation modal with explicit Accept/Decline actions so users can opt out before hitting the API.
 - The dashboard header now includes a global workspace switcher. It must stay synchronized with `useAuth().currentWorkspaceId`, auto-select a sole workspace, and keep the router query string (`?workspace=`) up to date whenever the selection changes.
 - Leaving a workspace is initiated from the Members settings tab. The "Leave workspace" button must be disabled for owners, call the `leaveWorkspace` API when allowed, refresh cached memberships, and send users back to their Solo workspace (or next available one) when the server responds with `403`.
+
+## Change Reasons
+- Removed the Members tab workspace selector so the dashboard header switcher is the single mechanism for context changes.

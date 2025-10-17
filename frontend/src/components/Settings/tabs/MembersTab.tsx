@@ -27,10 +27,8 @@ const resolveMemberIdentity = (member: WorkspaceMember) => {
 }
 
 export default function MembersTab() {
-  const memberships = useAuth((state) => state.memberships)
   const user = useAuth((state) => state.user)
   const checkAuth = useAuth((state) => state.checkAuth)
-  const currentWorkspaceId = useAuth((state) => state.currentWorkspaceId)
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const refreshMemberships = useAuth((state) => state.refreshMemberships)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
@@ -54,22 +52,12 @@ export default function MembersTab() {
       ),
     [currentWorkspace?.workspace.plan, user?.plan]
   )
-  const availableWorkspaces = useMemo(
-    () => (Array.isArray(memberships) ? memberships : []),
-    [memberships]
-  )
   const resolvedWorkspaceId = currentWorkspace?.workspace?.id ?? null
   const resolvedWorkspaceName = currentWorkspace?.workspace?.name ?? ''
   const isWorkspaceOwner = currentWorkspace?.role === 'owner'
   const canManageMembers =
     planTier === 'workspace' && Boolean(resolvedWorkspaceId)
   const canLeaveWorkspace = Boolean(resolvedWorkspaceId) && !isWorkspaceOwner
-
-  useEffect(() => {
-    if (!currentWorkspaceId && availableWorkspaces[0]) {
-      setCurrentWorkspaceId(availableWorkspaces[0].workspace.id)
-    }
-  }, [availableWorkspaces, currentWorkspaceId, setCurrentWorkspaceId])
 
   useEffect(() => {
     if (!resolvedWorkspaceId) {
@@ -132,14 +120,6 @@ export default function MembersTab() {
     resolvedWorkspaceId,
     setCurrentWorkspaceId
   ])
-
-  const handleWorkspaceSelect = useCallback(
-    (workspaceId: string) => {
-      if (!workspaceId || workspaceId === resolvedWorkspaceId) return
-      setCurrentWorkspaceId(workspaceId)
-    },
-    [resolvedWorkspaceId, setCurrentWorkspaceId]
-  )
 
   const handleInvite = async () => {
     if (!resolvedWorkspaceId || !inviteEmail.trim() || !canManageMembers) return
@@ -276,31 +256,13 @@ export default function MembersTab() {
             {resolvedWorkspaceName || 'Unnamed workspace'}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          {availableWorkspaces.length > 1 ? (
-            <select
-              value={resolvedWorkspaceId}
-              onChange={(event) => handleWorkspaceSelect(event.target.value)}
-              className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 text-sm"
-            >
-              {availableWorkspaces.map((membership) => (
-                <option
-                  key={membership.workspace.id}
-                  value={membership.workspace.id}
-                >
-                  {membership.workspace.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          <button
-            onClick={handleLeaveWorkspace}
-            disabled={!canLeaveWorkspace || busy}
-            className="px-3 py-1 text-xs font-medium rounded border border-red-400 text-red-600 disabled:opacity-50"
-          >
-            Leave workspace
-          </button>
-        </div>
+        <button
+          onClick={handleLeaveWorkspace}
+          disabled={!canLeaveWorkspace || busy}
+          className="px-3 py-1 text-xs font-medium rounded border border-red-400 text-red-600 disabled:opacity-50"
+        >
+          Leave workspace
+        </button>
       </div>
 
       {planTier === 'solo' ? (
