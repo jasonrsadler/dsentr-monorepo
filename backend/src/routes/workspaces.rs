@@ -16,7 +16,9 @@ use crate::{
     models::{
         user::PublicUser,
         workflow::Workflow,
-        workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole},
+        workspace::{
+            Workspace, WorkspaceMembershipSummary, WorkspaceRole, INVITATION_STATUS_PENDING,
+        },
     },
     responses::JsonResponse,
     routes::auth::session::AuthSession,
@@ -141,13 +143,13 @@ async fn process_plan_change(
             let mut workspace = if let Some(membership) = existing_memberships
                 .iter()
                 .find(|membership| {
-                    membership.workspace.created_by == user_id
+                    membership.workspace.owner_id == user_id
                         && matches!(membership.role, WorkspaceRole::Owner | WorkspaceRole::Admin)
                 })
                 .or_else(|| {
                     existing_memberships
                         .iter()
-                        .find(|membership| membership.workspace.created_by == user_id)
+                        .find(|membership| membership.workspace.owner_id == user_id)
                 })
                 .or_else(|| {
                     existing_memberships
@@ -158,7 +160,7 @@ async fn process_plan_change(
             } else {
                 match app_state
                     .workspace_repo
-                    .create_workspace(workspace_name, user_id)
+                    .create_workspace(workspace_name, user_id, PlanTier::Workspace.as_str())
                     .await
                 {
                     Ok(record) => record,
@@ -523,7 +525,7 @@ async fn provision_solo_workspace(
     let name = solo_workspace_name(user);
     let workspace = app_state
         .workspace_repo
-        .create_workspace(&name, user.id)
+        .create_workspace(&name, user.id, PlanTier::Solo.as_str())
         .await?;
 
     app_state
@@ -1128,7 +1130,8 @@ async fn load_active_invitation(
     };
 
     let now = OffsetDateTime::now_utc();
-    if invite.revoked_at.is_some()
+    if invite.status != INVITATION_STATUS_PENDING
+        || invite.revoked_at.is_some()
         || invite.accepted_at.is_some()
         || invite.declined_at.is_some()
         || invite.expires_at <= now
@@ -1439,6 +1442,10 @@ mod tests {
                 self.declined.lock().unwrap().clone(),
             )
         }
+
+        fn current_invitation(&self) -> Option<WorkspaceInvitation> {
+            self.invitation.lock().unwrap().clone()
+        }
     }
 
     #[async_trait]
@@ -1447,6 +1454,7 @@ mod tests {
             &self,
             _: &str,
             _: Uuid,
+            _: &str,
         ) -> Result<crate::models::workspace::Workspace, sqlx::Error> {
             unimplemented!()
         }
@@ -1562,11 +1570,19 @@ mod tests {
 
         async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
             self.accepted.lock().unwrap().push(invite_id);
+            if let Some(invite) = self.invitation.lock().unwrap().as_mut() {
+                invite.status = crate::models::workspace::INVITATION_STATUS_ACCEPTED.to_string();
+                invite.accepted_at = Some(OffsetDateTime::now_utc());
+            }
             Ok(())
         }
 
         async fn mark_invitation_declined(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
             self.declined.lock().unwrap().push(invite_id);
+            if let Some(invite) = self.invitation.lock().unwrap().as_mut() {
+                invite.status = crate::models::workspace::INVITATION_STATUS_DECLINED.to_string();
+                invite.declined_at = Some(OffsetDateTime::now_utc());
+            }
             Ok(())
         }
 
@@ -1582,7 +1598,7 @@ mod tests {
     struct RecordingWorkspaceRepo {
         workspaces: Arc<Mutex<HashMap<Uuid, Workspace>>>,
         members: Arc<Mutex<HashMap<Uuid, Vec<WorkspaceMember>>>>,
-        audits: Arc<Mutex<Vec<(Uuid, Uuid, Uuid, Option<String>)>>>,
+        audits: Arc<Mutex<Vec<(Uuid, Uuid, String, Uuid, Option<String>)>>>,
     }
 
     impl RecordingWorkspaceRepo {
@@ -1605,7 +1621,7 @@ mod tests {
             }
         }
 
-        fn audit_records(&self) -> Vec<(Uuid, Uuid, Uuid, Option<String>)> {
+        fn audit_records(&self) -> Vec<(Uuid, Uuid, String, Uuid, Option<String>)> {
             self.audits.lock().unwrap().clone()
         }
 
@@ -1664,13 +1680,17 @@ mod tests {
             &self,
             name: &str,
             created_by: Uuid,
+            plan: &str,
         ) -> Result<Workspace, sqlx::Error> {
             let workspace = Workspace {
                 id: Uuid::new_v4(),
                 name: name.to_string(),
                 created_by,
+                owner_id: created_by,
+                plan: plan.to_string(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                deleted_at: None,
             };
             self.workspaces
                 .lock()
@@ -1732,6 +1752,14 @@ mod tests {
             if let Some(list) = members.get_mut(&workspace_id) {
                 if let Some(member) = list.iter_mut().find(|member| member.user_id == user_id) {
                     member.role = role;
+                    if role == WorkspaceRole::Owner {
+                        if let Some(workspace) =
+                            self.workspaces.lock().unwrap().get_mut(&workspace_id)
+                        {
+                            workspace.owner_id = user_id;
+                            workspace.updated_at = OffsetDateTime::now_utc();
+                        }
+                    }
                     return Ok(());
                 }
             }
@@ -1769,6 +1797,7 @@ mod tests {
                 self.audits.lock().unwrap().push((
                     workspace_id,
                     member_id,
+                    "revoked".to_string(),
                     revoked_by,
                     reason.map(|value| value.to_string()),
                 ));
@@ -1929,6 +1958,7 @@ mod tests {
             email: email.to_string(),
             role: WorkspaceRole::Admin,
             token: "inv-token".into(),
+            status: crate::models::workspace::INVITATION_STATUS_PENDING.to_string(),
             expires_at: OffsetDateTime::now_utc() + time::Duration::hours(1),
             created_by: Uuid::new_v4(),
             created_at: OffsetDateTime::now_utc(),
@@ -1991,6 +2021,12 @@ mod tests {
         assert_eq!(members[0].2, invite.role);
         assert_eq!(accepted, vec![invite.id]);
         assert!(declined.is_empty());
+
+        let updated = repo.current_invitation().expect("invite stored");
+        assert_eq!(
+            updated.status,
+            crate::models::workspace::INVITATION_STATUS_ACCEPTED
+        );
     }
 
     #[tokio::test]
@@ -2020,6 +2056,12 @@ mod tests {
         assert!(members.is_empty());
         assert!(accepted.is_empty());
         assert_eq!(declined, vec![invite.id]);
+
+        let updated = repo.current_invitation().expect("invite stored");
+        assert_eq!(
+            updated.status,
+            crate::models::workspace::INVITATION_STATUS_DECLINED
+        );
     }
 
     #[tokio::test]
@@ -2033,8 +2075,11 @@ mod tests {
             id: workspace_id,
             name: "Team Workspace".into(),
             created_by: owner_id,
+            owner_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
+            deleted_at: None,
         };
 
         let members = vec![
@@ -2103,8 +2148,11 @@ mod tests {
             id: workspace_id,
             name: "Shared Automation".into(),
             created_by: owner_id,
+            owner_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
+            deleted_at: None,
         };
 
         let members = vec![
@@ -2175,8 +2223,11 @@ mod tests {
             id: workspace_id,
             name: "Growth Team".into(),
             created_by: owner_id,
+            owner_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
+            deleted_at: None,
         };
 
         let members = vec![
@@ -2245,8 +2296,9 @@ mod tests {
         assert_eq!(audits.len(), 1);
         assert_eq!(audits[0].0, workspace_id);
         assert_eq!(audits[0].1, member_id);
-        assert_eq!(audits[0].2, owner_id);
-        assert_eq!(audits[0].3.as_deref(), Some("Compliance issue"));
+        assert_eq!(audits[0].2, "revoked");
+        assert_eq!(audits[0].3, owner_id);
+        assert_eq!(audits[0].4.as_deref(), Some("Compliance issue"));
 
         let sent = mailer.sent();
         assert_eq!(sent.len(), 1);

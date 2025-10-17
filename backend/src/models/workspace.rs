@@ -3,6 +3,14 @@ use sqlx::{FromRow, Type};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+pub const WORKSPACE_PLAN_SOLO: &str = "solo";
+pub const WORKSPACE_PLAN_TEAM: &str = "workspace";
+
+pub const INVITATION_STATUS_PENDING: &str = "pending";
+pub const INVITATION_STATUS_ACCEPTED: &str = "accepted";
+pub const INVITATION_STATUS_REVOKED: &str = "revoked";
+pub const INVITATION_STATUS_DECLINED: &str = "declined";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[sqlx(type_name = "workspace_role")]
 #[sqlx(rename_all = "lowercase")]
@@ -19,10 +27,14 @@ pub struct Workspace {
     pub id: Uuid,
     pub name: String,
     pub created_by: Uuid,
+    pub owner_id: Uuid,
+    pub plan: String,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub deleted_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -50,6 +62,7 @@ pub struct WorkspaceInvitation {
     pub email: String,
     pub role: WorkspaceRole,
     pub token: String,
+    pub status: String,
     #[serde(with = "time::serde::rfc3339")]
     pub expires_at: OffsetDateTime,
     pub created_by: Uuid,

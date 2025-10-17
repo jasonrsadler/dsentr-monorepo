@@ -13,7 +13,10 @@ use crate::models::workflow::Workflow;
 use crate::models::workflow_node_run::WorkflowNodeRun;
 use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_schedule::WorkflowSchedule;
-use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
+use crate::models::workspace::{
+    Workspace, WorkspaceMembershipSummary, WorkspaceRole, INVITATION_STATUS_PENDING,
+    WORKSPACE_PLAN_TEAM,
+};
 use serde_json::Value;
 
 #[allow(dead_code)]
@@ -603,13 +606,17 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         &self,
         name: &str,
         created_by: Uuid,
+        plan: &str,
     ) -> Result<Workspace, sqlx::Error> {
         Ok(Workspace {
             id: Uuid::new_v4(),
             name: name.to_string(),
             created_by,
+            owner_id: created_by,
+            plan: plan.to_string(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
+            deleted_at: None,
         })
     }
 
@@ -622,8 +629,11 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
             id: workspace_id,
             name: name.to_string(),
             created_by: Uuid::nil(),
+            owner_id: Uuid::nil(),
+            plan: WORKSPACE_PLAN_TEAM.to_string(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
+            deleted_at: None,
         })
     }
 
@@ -707,6 +717,7 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
             email: email.to_string(),
             role,
             token: token.to_string(),
+            status: INVITATION_STATUS_PENDING.to_string(),
             expires_at,
             created_by,
             created_at: OffsetDateTime::now_utc(),

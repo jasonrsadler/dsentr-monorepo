@@ -19,16 +19,25 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         &self,
         name: &str,
         created_by: Uuid,
+        plan: &str,
     ) -> Result<Workspace, sqlx::Error> {
         sqlx::query_as!(
             Workspace,
             r#"
-            INSERT INTO workspaces (name, created_by, created_at, updated_at)
-            VALUES ($1, $2, now(), now())
-            RETURNING id, name, created_by, created_at, updated_at
+            INSERT INTO workspaces (name, created_by, owner_id, plan, created_at, updated_at)
+            VALUES ($1, $2, $2, $3, now(), now())
+            RETURNING id,
+                      name,
+                      created_by,
+                      owner_id,
+                      plan,
+                      created_at,
+                      updated_at,
+                      deleted_at as "deleted_at?: OffsetDateTime"
             "#,
             name,
-            created_by
+            created_by,
+            plan
         )
         .fetch_one(&self.pool)
         .await
@@ -45,7 +54,14 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
             UPDATE workspaces
             SET name = $2, updated_at = now()
             WHERE id = $1
-            RETURNING id, name, created_by, created_at, updated_at
+            RETURNING id,
+                      name,
+                      created_by,
+                      owner_id,
+                      plan,
+                      created_at,
+                      updated_at,
+                      deleted_at as "deleted_at?: OffsetDateTime"
             "#,
             workspace_id,
             name
@@ -58,7 +74,14 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         sqlx::query_as!(
             Workspace,
             r#"
-            SELECT id, name, created_by, created_at, updated_at
+            SELECT id,
+                   name,
+                   created_by,
+                   owner_id,
+                   plan,
+                   created_at,
+                   updated_at,
+                   deleted_at as "deleted_at?: OffsetDateTime"
             FROM workspaces
             WHERE id = $1
             "#,
@@ -96,7 +119,9 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         user_id: Uuid,
         role: WorkspaceRole,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query!(
+        let mut tx = self.pool.begin().await?;
+
+        let result = sqlx::query!(
             r#"
             UPDATE workspace_members
             SET role = $3
@@ -106,8 +131,30 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
             user_id,
             role as WorkspaceRole
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        if result.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Err(sqlx::Error::RowNotFound);
+        }
+
+        if matches!(role, WorkspaceRole::Owner) {
+            sqlx::query!(
+                r#"
+                UPDATE workspaces
+                SET owner_id = $2, updated_at = now()
+                WHERE id = $1
+                "#,
+                workspace_id,
+                user_id
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
         Ok(())
     }
 
@@ -150,7 +197,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
 
         sqlx::query!(
             r#"
-            INSERT INTO workspace_member_audit (workspace_id, user_id, action, acted_by, reason)
+            INSERT INTO workspace_member_audit (workspace_id, member_id, action, actor_id, reason)
             VALUES ($1, $2, 'revoked', $3, $4)
             "#,
             workspace_id,
@@ -208,12 +255,16 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
             SELECT w.id,
                    w.name,
                    w.created_by,
+                   w.owner_id,
+                   w.plan,
                    w.created_at,
                    w.updated_at,
+                   w.deleted_at as "deleted_at?: OffsetDateTime",
                     m.role as "role: WorkspaceRole"
             FROM workspace_members m
             JOIN workspaces w ON w.id = m.workspace_id
             WHERE m.user_id = $1
+              AND w.deleted_at IS NULL
             ORDER BY w.created_at ASC
             "#,
             user_id
@@ -228,8 +279,11 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                     id: row.id,
                     name: row.name,
                     created_by: row.created_by,
+                    owner_id: row.owner_id,
+                    plan: row.plan,
                     created_at: row.created_at,
                     updated_at: row.updated_at,
+                    deleted_at: row.deleted_at,
                 },
                 role: row.role,
             })
@@ -248,14 +302,26 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         sqlx::query_as!(
             WorkspaceInvitation,
             r#"
-            INSERT INTO workspace_invitations (workspace_id, email, role, token, expires_at, created_by, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, now())
-            RETURNING id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at, ignored_at as "declined_at?: OffsetDateTime"
+            INSERT INTO workspace_invitations (workspace_id, email, role, token, status, expires_at, created_by, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+            RETURNING id,
+                      workspace_id,
+                      email,
+                      role as "role: WorkspaceRole",
+                      token,
+                      status,
+                      expires_at,
+                      created_by,
+                      created_at,
+                      accepted_at,
+                      revoked_at,
+                      ignored_at as "declined_at?: OffsetDateTime"
             "#,
             workspace_id,
             email,
             role as WorkspaceRole,
             token,
+            crate::models::workspace::INVITATION_STATUS_PENDING,
             expires_at,
             created_by
         )
@@ -270,7 +336,18 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         sqlx::query_as!(
             WorkspaceInvitation,
             r#"
-            SELECT id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at, ignored_at as "declined_at?: OffsetDateTime"
+            SELECT id,
+                   workspace_id,
+                   email,
+                   role as "role: WorkspaceRole",
+                   token,
+                   status,
+                   expires_at,
+                   created_by,
+                   created_at,
+                   accepted_at,
+                   revoked_at,
+                   ignored_at as "declined_at?: OffsetDateTime"
             FROM workspace_invitations
             WHERE workspace_id = $1
             ORDER BY created_at DESC
@@ -283,8 +360,17 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
 
     async fn revoke_workspace_invitation(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            r#"UPDATE workspace_invitations SET revoked_at = now() WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL"#,
-            invite_id
+            r#"
+            UPDATE workspace_invitations
+            SET revoked_at = now(), status = $2
+            WHERE id = $1
+              AND status = $3
+              AND accepted_at IS NULL
+              AND revoked_at IS NULL
+            "#,
+            invite_id,
+            crate::models::workspace::INVITATION_STATUS_REVOKED,
+            crate::models::workspace::INVITATION_STATUS_PENDING
         )
         .execute(&self.pool)
         .await?;
@@ -298,7 +384,18 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         sqlx::query_as!(
             WorkspaceInvitation,
             r#"
-            SELECT id, workspace_id, email, role as "role: WorkspaceRole", token, expires_at, created_by, created_at, accepted_at, revoked_at, ignored_at as "declined_at?: OffsetDateTime"
+            SELECT id,
+                   workspace_id,
+                   email,
+                   role as "role: WorkspaceRole",
+                   token,
+                   status,
+                   expires_at,
+                   created_by,
+                   created_at,
+                   accepted_at,
+                   revoked_at,
+                   ignored_at as "declined_at?: OffsetDateTime"
             FROM workspace_invitations
             WHERE token = $1
             "#,
@@ -310,8 +407,15 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
 
     async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            r#"UPDATE workspace_invitations SET accepted_at = now() WHERE id = $1"#,
-            invite_id
+            r#"
+            UPDATE workspace_invitations
+            SET accepted_at = now(), status = $2
+            WHERE id = $1
+              AND status = $3
+            "#,
+            invite_id,
+            crate::models::workspace::INVITATION_STATUS_ACCEPTED,
+            crate::models::workspace::INVITATION_STATUS_PENDING
         )
         .execute(&self.pool)
         .await?;
@@ -320,8 +424,15 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
 
     async fn mark_invitation_declined(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            r#"UPDATE workspace_invitations SET ignored_at = now() WHERE id = $1"#,
-            invite_id
+            r#"
+            UPDATE workspace_invitations
+            SET ignored_at = now(), status = $2
+            WHERE id = $1
+              AND status = $3
+            "#,
+            invite_id,
+            crate::models::workspace::INVITATION_STATUS_DECLINED,
+            crate::models::workspace::INVITATION_STATUS_PENDING
         )
         .execute(&self.pool)
         .await?;
@@ -340,21 +451,21 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                    email,
                    role as "role: WorkspaceRole",
                    token,
+                   status,
                    expires_at,
                    created_by,
                    created_at,
                    accepted_at,
-                   revoked_at,
-                   ignored_at as "declined_at?: OffsetDateTime"
+                    revoked_at,
+                    ignored_at as "declined_at?: OffsetDateTime"
             FROM workspace_invitations
             WHERE lower(email) = lower($1)
-              AND accepted_at IS NULL
-              AND revoked_at IS NULL
-              AND ignored_at IS NULL
+              AND status = $2
               AND expires_at > now()
             ORDER BY created_at DESC
             "#,
-            email
+            email,
+            crate::models::workspace::INVITATION_STATUS_PENDING
         )
         .fetch_all(&self.pool)
         .await

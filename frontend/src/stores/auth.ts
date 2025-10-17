@@ -18,8 +18,11 @@ type WorkspaceSummary = {
     id: string
     name: string
     created_by: string
+    owner_id: string
+    plan: string
     created_at: string
     updated_at: string
+    deleted_at?: string | null
   }
   role: 'owner' | 'admin' | 'user' | 'viewer'
 }

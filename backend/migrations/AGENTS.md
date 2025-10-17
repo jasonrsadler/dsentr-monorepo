@@ -16,3 +16,7 @@
 - Never edit an existing migration after it ships; create a new timestamped file instead.
 - For destructive changes, include companion rollback notes at the end of the file so emergency rollbacks are obvious.
 - When adding new SQL files, ensure they end with a newline and are idempotent where practical—tests rely on rerunning migrations against scratch databases.
+- Workspace lifecycle tables now expect:
+  - `workspaces.owner_id` to mirror the current owner (separate from the original `created_by` author), `plan` as the workspace plan slug (`solo`, `workspace`, etc.), and `deleted_at` soft-delete tracking.
+  - `workspace_invitations.status` constrained to `pending`, `accepted`, `revoked`, or `declined`, with `token` enforced as globally unique.
+  - `workspace_member_audit` rows capturing `workspace_id`, `member_id`, `actor_id`, normalized `action` text, optional `reason`, and an automatic `recorded_at` timestamp for membership changes.

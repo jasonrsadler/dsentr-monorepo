@@ -17,6 +17,7 @@ export type WorkspaceInvitation = {
   email: string
   role: 'owner' | 'admin' | 'user' | 'viewer'
   token: string
+  status: 'pending' | 'accepted' | 'revoked' | 'declined'
   expires_at: string
   created_by: string
   created_at: string
@@ -29,8 +30,11 @@ export type Workspace = {
   id: string
   name: string
   created_by: string
+  owner_id: string
+  plan: string
   created_at: string
   updated_at: string
+  deleted_at?: string | null
 }
 
 export type WorkspaceMembershipSummary = {

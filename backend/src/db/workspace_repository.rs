@@ -10,6 +10,7 @@ pub trait WorkspaceRepository: Send + Sync {
         &self,
         name: &str,
         created_by: Uuid,
+        plan: &str,
     ) -> Result<Workspace, sqlx::Error>;
 
     async fn update_workspace_name(

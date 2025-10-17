@@ -11,7 +11,7 @@ use crate::{
     models::{
         signup::{SignupInviteDecision, SignupPayload},
         user::OauthProvider,
-        workspace::WorkspaceRole,
+        workspace::{WorkspaceRole, INVITATION_STATUS_PENDING, WORKSPACE_PLAN_SOLO},
     },
     responses::JsonResponse,
     state,
@@ -67,7 +67,8 @@ pub async fn handle_signup(
             Ok(Some(invite)) => {
                 let now = OffsetDateTime::now_utc();
                 let email_mismatch = !invite.email.eq_ignore_ascii_case(&payload.email);
-                if invite.revoked_at.is_some()
+                if invite.status != INVITATION_STATUS_PENDING
+                    || invite.revoked_at.is_some()
                     || invite.accepted_at.is_some()
                     || invite.declined_at.is_some()
                     || invite.expires_at <= now
@@ -116,7 +117,7 @@ pub async fn handle_signup(
     if invite_record.is_none() || matches!(invite_decision, SignupInviteDecision::Decline) {
         let workspace_name = default_workspace_name(&payload);
         let workspace = match workspace_repo
-            .create_workspace(&workspace_name, user_id)
+            .create_workspace(&workspace_name, user_id, WORKSPACE_PLAN_SOLO)
             .await
         {
             Ok(workspace) => workspace,
@@ -210,6 +211,7 @@ mod tests {
             user::{OauthProvider, PublicUser, User, UserRole},
             workspace::{
                 Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole,
+                INVITATION_STATUS_PENDING, WORKSPACE_PLAN_SOLO,
             },
         },
         services::{
@@ -462,6 +464,7 @@ mod tests {
             &self,
             name: &str,
             created_by: Uuid,
+            plan: &str,
         ) -> Result<Workspace, sqlx::Error> {
             if self.fail_create_workspace {
                 return Err(sqlx::Error::Protocol("fail_create_workspace".into()));
@@ -470,8 +473,11 @@ mod tests {
                 id: Uuid::new_v4(),
                 name: name.to_string(),
                 created_by,
+                owner_id: created_by,
+                plan: plan.to_string(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                deleted_at: None,
             };
             self.created.lock().unwrap().push(workspace.clone());
             Ok(workspace)
@@ -486,8 +492,11 @@ mod tests {
                 id: workspace_id,
                 name: name.to_string(),
                 created_by: Uuid::nil(),
+                owner_id: Uuid::nil(),
+                plan: WORKSPACE_PLAN_SOLO.to_string(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                deleted_at: None,
             })
         }
 
@@ -648,6 +657,7 @@ mod tests {
             email: email.to_string(),
             role: WorkspaceRole::User,
             token: token.to_string(),
+            status: INVITATION_STATUS_PENDING.to_string(),
             expires_at,
             created_by: Uuid::new_v4(),
             created_at: OffsetDateTime::now_utc(),
