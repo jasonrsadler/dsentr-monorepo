@@ -36,7 +36,7 @@ export function parseInviteQuery(
     matchedKeys.push(key)
 
     const normalizedValues = rawValues
-      .map((value) => value?.trim())
+      .map((value) => sanitizeInviteValue(value))
       .filter((value): value is string => Boolean(value && value.length > 0))
 
     if (normalizedValues.length === 0) {
@@ -74,4 +74,38 @@ export function parseInviteQuery(
     canonicalSearch,
     matchedKeys
   }
+}
+
+// Some email clients or MTAs insert quoted-printable artifacts into URLs
+// when users click/copy them, e.g.:
+//   - Leading '3D' immediately after '?invite=' (encoding of '=')
+//   - Soft line breaks like '...66=\n b7419...'
+//   - Extraneous whitespace characters
+// This sanitizer attempts to reconstruct the original token safely.
+function sanitizeInviteValue(value: string | null): string | null {
+  if (!value) return null
+  let v = value.trim()
+
+  // Remove quoted-printable soft line breaks ("=\r?\n") and any interspersed whitespace
+  v = v.replace(/=\s*\r?\n/g, '')
+  // Remove all whitespace chars that may have been introduced
+  v = v.replace(/\s+/g, '')
+  // Remove zero-width spaces just in case
+  v = v.replace(/[\u200B\u200C\u200D]/g, '')
+
+  // If the value starts with an uppercase '3D' (QP for '='), and the remainder
+  // looks like a hex token, strip the '3D' prefix. Keep lower-case '3d' intact
+  // to avoid mangling legitimate hex tokens.
+  if (v.startsWith('3D')) {
+    const remainder = v.slice(2)
+    if (/^[0-9a-fA-F]{16,128}$/.test(remainder)) {
+      v = remainder
+    }
+  }
+
+  // Remove stray '=' characters that may have landed inside the token due to wrapping
+  // Tokens are hex strings without '='; safe to delete them.
+  v = v.replace(/=/g, '')
+
+  return v
 }

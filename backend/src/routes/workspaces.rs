@@ -1019,9 +1019,14 @@ pub async fn create_workspace_invitation(
     // Send email with invite link
     let frontend = &app_state.config.frontend_origin;
     let accept_url = build_invite_signup_url(frontend, &invite.token);
-    let subject = format!("You're invited to join {} on DSentr", workspace_id);
+    // Try to use the workspace name in the subject; fall back to UUID if unavailable
+    let workspace_name = match app_state.workspace_repo.find_workspace(workspace_id).await {
+        Ok(Some(ws)) => ws.name,
+        _ => workspace_id.to_string(),
+    };
+    let subject = format!("You're invited to join {} on DSentr", workspace_name);
     let body = format!(
-        "You've been invited to join a workspace on DSentr.\n\nOpen this link to accept: {}\n\nThis link expires in {} days.",
+        "You've been invited to join a workspace on DSentr.\n\nOpen this link to accept:\n<{}>\n\nThis link expires in {} days.",
         accept_url, expires_days
     );
     if let Err(err) = app_state

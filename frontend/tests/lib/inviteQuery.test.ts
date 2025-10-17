@@ -35,4 +35,13 @@ describe('parseInviteQuery', () => {
     expect(result.needsRedirect).toBe(true)
     expect(result.canonicalSearch).toBe('invite=xyz')
   })
+
+  it('sanitizes quoted-printable artifacts in invite value', () => {
+    const qp = '?invite=3D877ce21c66= b74193a449af7908ddbe0d'
+    const result = parseInviteQuery(qp)
+    expect(result.token).toBe('877ce21c66b74193a449af7908ddbe0d')
+    expect(result.conflict).toBe(false)
+    expect(result.needsRedirect).toBe(false)
+    expect(result.canonicalSearch).toBeNull()
+  })
 })
