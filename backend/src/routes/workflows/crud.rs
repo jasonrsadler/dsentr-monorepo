@@ -34,13 +34,6 @@ pub async fn create_workflow(
         .resolve_plan_tier(user_id, claims.plan.as_deref())
         .await;
 
-    if plan_tier.is_solo() {
-        let assessment = assess_workflow_for_plan(&data);
-        if !assessment.violations.is_empty() {
-            return plan_violation_response(assessment.violations);
-        }
-    }
-
     let memberships = match app_state
         .workspace_repo
         .list_memberships_for_user(user_id)
@@ -54,6 +47,13 @@ pub async fn create_workflow(
     };
     let roles_map = membership_roles_map(&memberships);
     let context = plan_context_for_user(claims.plan.as_deref(), &memberships, workspace_id);
+
+    if plan_tier.is_solo() && matches!(context, PlanContext::Solo) {
+        let assessment = assess_workflow_for_plan(&data);
+        if !assessment.violations.is_empty() {
+            return plan_violation_response(assessment.violations);
+        }
+    }
 
     if workspace_id.is_none() {
         workspace_id = match context {
@@ -368,13 +368,6 @@ pub async fn update_workflow(
         .resolve_plan_tier(user_id, claims.plan.as_deref())
         .await;
 
-    if plan_tier.is_solo() {
-        let assessment = assess_workflow_for_plan(&data);
-        if !assessment.violations.is_empty() {
-            return plan_violation_response(assessment.violations);
-        }
-    }
-
     let existing = match app_state
         .workflow_repo
         .find_workflow_for_member(user_id, workflow_id)
@@ -417,6 +410,13 @@ pub async fn update_workflow(
             "This workflow is not available in the current plan context.",
         )
         .into_response();
+    }
+
+    if plan_tier.is_solo() && matches!(context, PlanContext::Solo) {
+        let assessment = assess_workflow_for_plan(&data);
+        if !assessment.violations.is_empty() {
+            return plan_violation_response(assessment.violations);
+        }
     }
 
     let workspace_role = existing

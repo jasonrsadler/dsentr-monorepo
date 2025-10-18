@@ -62,11 +62,11 @@ pub async fn start_workflow_run(
                     return JsonResponse::server_error("Failed to start run").into_response();
                 }
             }
-        }
 
-        let assessment = assess_workflow_for_plan(&wf.data);
-        if !assessment.violations.is_empty() {
-            return plan_violation_response(assessment.violations);
+            let assessment = assess_workflow_for_plan(&wf.data);
+            if !assessment.violations.is_empty() {
+                return plan_violation_response(assessment.violations);
+            }
         }
 
         let now = OffsetDateTime::now_utc();
