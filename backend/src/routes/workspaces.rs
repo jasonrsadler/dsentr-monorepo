@@ -24,7 +24,10 @@ use crate::{
     responses::JsonResponse,
     routes::auth::session::AuthSession,
     state::AppState,
-    utils::secrets::{collect_secret_identifiers, read_secret_store, SecretIdentifier},
+    utils::{
+        plan_limits::NormalizedPlanTier,
+        secrets::{collect_secret_identifiers, read_secret_store, SecretIdentifier},
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -110,6 +113,45 @@ async fn process_plan_change(
                 )
                 .into_response());
             }
+
+            let existing_memberships = match app_state
+                .workspace_repo
+                .list_memberships_for_user(user_id)
+                .await
+            {
+                Ok(list) => list,
+                Err(err) => {
+                    tracing::error!(
+                        "failed to inspect workspace memberships during plan change: {:?}",
+                        err
+                    );
+                    return Err(
+                        JsonResponse::server_error("Failed to update workspace settings")
+                            .into_response(),
+                    );
+                }
+            };
+
+            for membership in existing_memberships
+                .iter()
+                .filter(|membership| membership.workspace.owner_id == user_id)
+            {
+                if !NormalizedPlanTier::from_str(Some(membership.workspace.plan.as_str())).is_solo()
+                {
+                    if let Err(err) = app_state
+                        .workspace_repo
+                        .update_workspace_plan(membership.workspace.id, PlanTier::Solo.as_str())
+                        .await
+                    {
+                        tracing::error!(
+                            "failed to downgrade workspace plan during plan change: {:?}",
+                            err
+                        );
+                        return Err(JsonResponse::server_error("Failed to update workspace")
+                            .into_response());
+                    }
+                }
+            }
         }
         PlanTier::Workspace => {
             let workspace_name = payload
@@ -183,6 +225,24 @@ async fn process_plan_change(
                     Ok(updated) => updated,
                     Err(err) => {
                         tracing::error!("failed to rename workspace during plan change: {:?}", err);
+                        return Err(JsonResponse::server_error("Failed to update workspace")
+                            .into_response());
+                    }
+                };
+            }
+
+            if NormalizedPlanTier::from_str(Some(workspace.plan.as_str())).is_solo() {
+                workspace = match app_state
+                    .workspace_repo
+                    .update_workspace_plan(workspace.id, PlanTier::Workspace.as_str())
+                    .await
+                {
+                    Ok(updated) => updated,
+                    Err(err) => {
+                        tracing::error!(
+                            "failed to update workspace plan during plan change: {:?}",
+                            err
+                        );
                         return Err(JsonResponse::server_error("Failed to update workspace")
                             .into_response());
                     }
@@ -1392,9 +1452,9 @@ pub async fn workspace_to_solo_execute(
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_invitation, build_invite_accept_url, decline_invitation, leave_workspace,
-        preview_invitation, revoke_workspace_member, InvitationDecisionPayload,
-        RevokeWorkspaceMemberPayload,
+        accept_invitation, build_invite_accept_url, change_plan, decline_invitation,
+        leave_workspace, preview_invitation, revoke_workspace_member, CompleteOnboardingPayload,
+        InvitationDecisionPayload, RevokeWorkspaceMemberPayload,
     };
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
     use crate::db::{
@@ -1573,6 +1633,22 @@ mod tests {
             _: &str,
         ) -> Result<crate::models::workspace::Workspace, sqlx::Error> {
             unimplemented!()
+        }
+
+        async fn update_workspace_plan(
+            &self,
+            workspace_id: Uuid,
+            plan: &str,
+        ) -> Result<crate::models::workspace::Workspace, sqlx::Error> {
+            let mut stored = self.workspace.lock().unwrap();
+            if let Some(ws) = stored.as_mut() {
+                if ws.id == workspace_id {
+                    ws.plan = plan.to_string();
+                    ws.updated_at = OffsetDateTime::now_utc();
+                    return Ok(ws.clone());
+                }
+            }
+            Err(sqlx::Error::RowNotFound)
         }
 
         async fn find_workspace(
@@ -1756,6 +1832,14 @@ mod tests {
             self.workspaces.lock().unwrap().len()
         }
 
+        fn workspace_plan(&self, workspace_id: Uuid) -> Option<String> {
+            self.workspaces
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .map(|workspace| workspace.plan.clone())
+        }
+
         fn copy_member_profile(&self, user_id: Uuid) -> (String, String, String) {
             let members = self.members.lock().unwrap();
             members
@@ -1816,6 +1900,20 @@ mod tests {
             let mut workspaces = self.workspaces.lock().unwrap();
             if let Some(ws) = workspaces.get_mut(&workspace_id) {
                 ws.name = name.to_string();
+                ws.updated_at = OffsetDateTime::now_utc();
+                return Ok(ws.clone());
+            }
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn update_workspace_plan(
+            &self,
+            workspace_id: Uuid,
+            plan: &str,
+        ) -> Result<Workspace, sqlx::Error> {
+            let mut workspaces = self.workspaces.lock().unwrap();
+            if let Some(ws) = workspaces.get_mut(&workspace_id) {
+                ws.plan = plan.to_string();
                 ws.updated_at = OffsetDateTime::now_utc();
                 return Ok(ws.clone());
             }
@@ -2188,6 +2286,130 @@ mod tests {
             updated.status,
             crate::models::workspace::INVITATION_STATUS_ACCEPTED
         );
+    }
+
+    #[tokio::test]
+    async fn change_plan_updates_workspace_plan_field() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Solo Space".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: super::PlanTier::Solo.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let member = WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::Owner,
+            joined_at: now,
+            email: "owner@example.com".into(),
+            first_name: "Owner".into(),
+            last_name: "User".into(),
+        };
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, vec![member]));
+        let mailer: Arc<dyn Mailer> = Arc::new(NoopMailer::default());
+        let db = Arc::new(MockDb::default());
+        let state = state_with_components(repo.clone(), mailer, db);
+
+        let claims = claims_fixture(user_id, "owner@example.com");
+        let payload = CompleteOnboardingPayload {
+            plan_tier: super::PlanTier::Workspace,
+            workspace_name: Some("Team Workspace".into()),
+            shared_workflow_ids: Vec::new(),
+        };
+
+        let response = change_plan(State(state), AuthSession(claims), Json(payload)).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 2048).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+
+        let returned_plan = json
+            .get("memberships")
+            .and_then(|value| value.as_array())
+            .and_then(|list| list.first())
+            .and_then(|membership| membership.get("workspace"))
+            .and_then(|workspace| workspace.get("plan"))
+            .and_then(|plan| plan.as_str())
+            .unwrap_or_default();
+
+        assert_eq!(returned_plan, super::PlanTier::Workspace.as_str());
+
+        let stored_plan = repo
+            .workspace_plan(workspace_id)
+            .expect("workspace plan should be recorded");
+        assert_eq!(stored_plan, super::PlanTier::Workspace.as_str());
+    }
+
+    #[tokio::test]
+    async fn change_plan_downgrades_workspace_plan_field() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team Space".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let member = WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::Owner,
+            joined_at: now,
+            email: "owner@example.com".into(),
+            first_name: "Owner".into(),
+            last_name: "User".into(),
+        };
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, vec![member]));
+        let mailer: Arc<dyn Mailer> = Arc::new(NoopMailer::default());
+        let db = Arc::new(MockDb::default());
+        let state = state_with_components(repo.clone(), mailer, db);
+
+        let claims = claims_fixture(user_id, "owner@example.com");
+        let payload = CompleteOnboardingPayload {
+            plan_tier: super::PlanTier::Solo,
+            workspace_name: None,
+            shared_workflow_ids: Vec::new(),
+        };
+
+        let response = change_plan(State(state), AuthSession(claims), Json(payload)).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 2048).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+
+        let returned_plan = json
+            .get("memberships")
+            .and_then(|value| value.as_array())
+            .and_then(|list| list.first())
+            .and_then(|membership| membership.get("workspace"))
+            .and_then(|workspace| workspace.get("plan"))
+            .and_then(|plan| plan.as_str())
+            .unwrap_or_default();
+
+        assert_eq!(returned_plan, super::PlanTier::Solo.as_str());
+
+        let stored_plan = repo
+            .workspace_plan(workspace_id)
+            .expect("workspace plan should be recorded");
+        assert_eq!(stored_plan, super::PlanTier::Solo.as_str());
     }
 
     #[tokio::test]

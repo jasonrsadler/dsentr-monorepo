@@ -20,3 +20,6 @@
 - When adding new route groups, update `main.rs` to mount them and consider rate-limit layer alignment (`auth_governor_conf` vs global).
 - Workspace invitation emails must link to `/signup?invite=…` and use URL-encoded tokens—update the dedicated test if this contract changes.
 - Workspace lifecycle flows now expose `GET /api/workspaces`, `GET /api/invites`, `POST /api/workspaces/:id/leave`, and `POST /api/workspaces/:id/revoke`. Use the shared Solo-provisioning helper so the last member receives an automatic personal workspace when they leave or are revoked.
+
+## Change Reasons
+- Solo plan downgrades now normalize owned workspaces back to the solo tier when processing plan changes.

@@ -668,6 +668,23 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         })
     }
 
+    async fn update_workspace_plan(
+        &self,
+        workspace_id: Uuid,
+        plan: &str,
+    ) -> Result<Workspace, sqlx::Error> {
+        Ok(Workspace {
+            id: workspace_id,
+            name: String::new(),
+            created_by: Uuid::nil(),
+            owner_id: Uuid::nil(),
+            plan: plan.to_string(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            deleted_at: None,
+        })
+    }
+
     async fn find_workspace(&self, _workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
         Ok(None)
     }

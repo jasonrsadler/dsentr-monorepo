@@ -70,6 +70,34 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .await
     }
 
+    async fn update_workspace_plan(
+        &self,
+        workspace_id: Uuid,
+        plan: &str,
+    ) -> Result<Workspace, sqlx::Error> {
+        sqlx::query_as!(
+            Workspace,
+            r#"
+            UPDATE workspaces
+            SET plan = $2,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING id,
+                      name,
+                      created_by,
+                      owner_id,
+                      plan,
+                      created_at,
+                      updated_at,
+                      deleted_at as "deleted_at?: OffsetDateTime"
+            "#,
+            workspace_id,
+            plan,
+        )
+        .fetch_one(&self.pool)
+        .await
+    }
+
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
         sqlx::query_as!(
             Workspace,
