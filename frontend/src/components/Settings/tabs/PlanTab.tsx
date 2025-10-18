@@ -190,6 +190,11 @@ export default function PlanTab() {
       return
     }
 
+    if (selected === currentPlan) {
+      setError('This plan is already active.')
+      return
+    }
+
     if (canConfigureWorkspace && !workspaceName.trim()) {
       setError('Workspace name is required for this plan')
       return
@@ -379,7 +384,9 @@ export default function PlanTab() {
       <div className="flex justify-end">
         <button
           type="submit"
-          disabled={isSubmitting || !isWorkspaceOwner}
+          disabled={
+            isSubmitting || !isWorkspaceOwner || selected === currentPlan
+          }
           className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-400 disabled:opacity-80"
         >
           {isSubmitting ? 'Updating…' : 'Update plan'}
