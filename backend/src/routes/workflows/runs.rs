@@ -3,6 +3,29 @@ use super::{
     prelude::*,
 };
 
+async fn fetch_workflow_for_member(
+    app_state: &AppState,
+    actor_id: Uuid,
+    workflow_id: Uuid,
+    server_error_message: &'static str,
+) -> Result<Workflow, Response> {
+    match app_state
+        .workflow_repo
+        .find_workflow_for_member(actor_id, workflow_id)
+        .await
+    {
+        Ok(Some(workflow)) => Ok(workflow),
+        Ok(None) => Err(JsonResponse::not_found("Workflow not found").into_response()),
+        Err(err) => {
+            eprintln!(
+                "DB error fetching workflow {workflow_id} for user {actor_id}: {:?}",
+                err
+            );
+            Err(JsonResponse::server_error(server_error_message).into_response())
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct StartWorkflowRunRequest {
     pub idempotency_key: Option<String>,
@@ -21,28 +44,27 @@ pub async fn start_workflow_run(
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
-    // Ensure workflow exists and belongs to user
-    let wf = match app_state
-        .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
-        .await
-    {
-        Ok(Some(w)) => w,
-        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
-        Err(e) => {
-            eprintln!("DB error fetching workflow before run: {:?}", e);
-            return JsonResponse::server_error("Failed to start run").into_response();
-        }
+    let wf =
+        match fetch_workflow_for_member(&app_state, user_id, workflow_id, "Failed to start run")
+            .await
+        {
+            Ok(workflow) => workflow,
+            Err(response) => return response,
+        };
+    let owner_id = wf.user_id;
+    let plan_tier = if wf.workspace_id.is_some() {
+        NormalizedPlanTier::Workspace
+    } else {
+        app_state
+            .resolve_plan_tier(user_id, claims.plan.as_deref())
+            .await
     };
-    let plan_tier = app_state
-        .resolve_plan_tier(user_id, claims.plan.as_deref())
-        .await;
 
     if plan_tier.is_solo() {
-        if wf.workspace_id.is_none() {
+        if wf.workspace_id.is_none() && wf.user_id == user_id {
             match app_state
                 .workflow_repo
-                .list_workflows_by_user(user_id)
+                .list_workflows_by_user(owner_id)
                 .await
             {
                 Ok(existing) => {
@@ -76,7 +98,7 @@ pub async fn start_workflow_run(
             .replace_time(Time::MIDNIGHT);
         match app_state
             .workflow_repo
-            .count_user_runs_since(user_id, start_of_month)
+            .count_user_runs_since(owner_id, start_of_month)
             .await
         {
             Ok(count) if count >= SOLO_MONTHLY_RUN_LIMIT => {
@@ -118,14 +140,14 @@ pub async fn start_workflow_run(
 
     match app_state
         .workflow_repo
-        .create_workflow_run(user_id, workflow_id, snapshot, idempotency_key)
+        .create_workflow_run(owner_id, workflow_id, snapshot, idempotency_key)
         .await
     {
         Ok(run) => {
             if let Some(p) = priority {
                 let _ = app_state
                     .workflow_repo
-                    .set_run_priority(user_id, workflow_id, run.id, p)
+                    .set_run_priority(owner_id, workflow_id, run.id, p)
                     .await;
             }
             (
@@ -154,15 +176,24 @@ pub async fn get_workflow_run_status(
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
+    let workflow =
+        match fetch_workflow_for_member(&app_state, user_id, workflow_id, "Failed to fetch run")
+            .await
+        {
+            Ok(workflow) => workflow,
+            Err(response) => return response,
+        };
+    let owner_id = workflow.user_id;
+
     match app_state
         .workflow_repo
-        .get_workflow_run(user_id, workflow_id, run_id)
+        .get_workflow_run(owner_id, workflow_id, run_id)
         .await
     {
         Ok(Some(run)) => {
             let nodes_res = app_state
                 .workflow_repo
-                .list_workflow_node_runs(user_id, workflow_id, run_id)
+                .list_workflow_node_runs(owner_id, workflow_id, run_id)
                 .await;
             match nodes_res {
                 Ok(node_runs) => (
@@ -197,9 +228,18 @@ pub async fn cancel_workflow_run(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    let workflow =
+        match fetch_workflow_for_member(&app_state, user_id, workflow_id, "Failed to cancel run")
+            .await
+        {
+            Ok(workflow) => workflow,
+            Err(response) => return response,
+        };
+    let owner_id = workflow.user_id;
+
     match app_state
         .workflow_repo
-        .cancel_workflow_run(user_id, workflow_id, run_id)
+        .cancel_workflow_run(owner_id, workflow_id, run_id)
         .await
     {
         Ok(true) => (
@@ -231,9 +271,20 @@ pub async fn list_active_runs(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    let (owner_id, workflow_scope) = if let Some(workflow_id) = params.workflow_id {
+        match fetch_workflow_for_member(&app_state, user_id, workflow_id, "Failed to list runs")
+            .await
+        {
+            Ok(workflow) => (workflow.user_id, Some(workflow_id)),
+            Err(response) => return response,
+        }
+    } else {
+        (user_id, None)
+    };
+
     match app_state
         .workflow_repo
-        .list_active_runs(user_id, params.workflow_id)
+        .list_active_runs(owner_id, workflow_scope)
         .await
     {
         Ok(runs) => (
@@ -270,10 +321,18 @@ pub async fn list_runs_for_workflow(
     let page = params.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
 
+    let workflow =
+        match fetch_workflow_for_member(&app_state, user_id, workflow_id, "Failed to list runs")
+            .await
+        {
+            Ok(workflow) => workflow,
+            Err(response) => return response,
+        };
+
     match app_state
         .workflow_repo
         .list_runs_paged(
-            user_id,
+            workflow.user_id,
             Some(workflow_id),
             params.status.as_deref(),
             per_page,
@@ -303,9 +362,17 @@ pub async fn cancel_all_runs_for_workflow(
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
+    let workflow =
+        match fetch_workflow_for_member(&app_state, user_id, workflow_id, "Failed to cancel runs")
+            .await
+        {
+            Ok(workflow) => workflow,
+            Err(response) => return response,
+        };
+
     match app_state
         .workflow_repo
-        .cancel_all_runs_for_workflow(user_id, workflow_id)
+        .cancel_all_runs_for_workflow(workflow.user_id, workflow_id)
         .await
     {
         Ok(affected) => (
@@ -339,9 +406,21 @@ pub async fn rerun_workflow_run(
     };
 
     // Fetch the original run to get snapshot
+    let workflow = match fetch_workflow_for_member(
+        &app_state,
+        user_id,
+        workflow_id,
+        "Failed to rerun",
+    )
+    .await
+    {
+        Ok(workflow) => workflow,
+        Err(response) => return response,
+    };
+
     let base_run = match app_state
         .workflow_repo
-        .get_workflow_run(user_id, workflow_id, run_id)
+        .get_workflow_run(workflow.user_id, workflow_id, run_id)
         .await
     {
         Ok(Some(r)) => r,
@@ -363,7 +442,7 @@ pub async fn rerun_workflow_run(
     match app_state
         .workflow_repo
         .create_workflow_run(
-            user_id,
+            workflow.user_id,
             workflow_id,
             snapshot,
             payload.idempotency_key.as_deref(),
@@ -392,9 +471,21 @@ pub async fn rerun_from_failed_node(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    let workflow = match fetch_workflow_for_member(
+        &app_state,
+        user_id,
+        workflow_id,
+        "Failed to rerun",
+    )
+    .await
+    {
+        Ok(workflow) => workflow,
+        Err(response) => return response,
+    };
+
     let nodes = match app_state
         .workflow_repo
-        .list_workflow_node_runs(user_id, workflow_id, run_id)
+        .list_workflow_node_runs(workflow.user_id, workflow_id, run_id)
         .await
     {
         Ok(v) => v,
@@ -433,16 +524,24 @@ pub async fn download_run_json(
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
+    let workflow =
+        match fetch_workflow_for_member(&app_state, user_id, workflow_id, "Failed to download run")
+            .await
+        {
+            Ok(workflow) => workflow,
+            Err(response) => return response,
+        };
+
     let run_opt = app_state
         .workflow_repo
-        .get_workflow_run(user_id, workflow_id, run_id)
+        .get_workflow_run(workflow.user_id, workflow_id, run_id)
         .await;
 
     match run_opt {
         Ok(Some(run)) => {
             let nodes_res = app_state
                 .workflow_repo
-                .list_workflow_node_runs(user_id, workflow_id, run_id)
+                .list_workflow_node_runs(workflow.user_id, workflow_id, run_id)
                 .await;
             match nodes_res {
                 Ok(node_runs) => {
