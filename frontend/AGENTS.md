@@ -31,3 +31,4 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Skipped invite fetching for non-admin workspace members so the Members tab avoids unnecessary API calls and 403 responses.
 - Secrets tab now scopes API requests by workspace so shared secrets remain visible across members while enforcing creator/admin deletion rules.
 - Secrets tab now opens a confirmation modal before deleting entries, warning that removal is irreversible and may impact dependent workflows.
+- Workspace selection now falls back to a user's owned workspace when their previously active workspace is unavailable so dashboard context stays consistent after membership changes.

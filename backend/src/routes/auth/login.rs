@@ -75,6 +75,23 @@ pub async fn handle_login(
             let requires_onboarding = user.onboarded_at.is_none()
                 || user.plan.as_ref().map(|p| p.is_empty()).unwrap_or(true);
 
+            let memberships = match app_state
+                .workspace_repo
+                .list_memberships_for_user(user.id)
+                .await
+            {
+                Ok(data) => data,
+                Err(err) => {
+                    tracing::error!(
+                        "failed to load workspace memberships for user {}: {:?}",
+                        user.id,
+                        err
+                    );
+                    return JsonResponse::server_error("Failed to load workspace context")
+                        .into_response();
+                }
+            };
+
             match create_jwt(&claims) {
                 Ok(token) => {
                     let cookie = Cookie::build(("auth_token", token))
@@ -91,12 +108,15 @@ pub async fn handle_login(
                         HeaderValue::from_str(&cookie.to_string()).unwrap(),
                     );
                     let user_json = to_value(&user).expect("User serialization failed");
+                    let memberships_json =
+                        to_value(&memberships).expect("Membership serialization failed");
                     (
                         StatusCode::OK,
                         headers,
                         Json(json!({
                             "success": true,
                             "user": user_json,
+                            "memberships": memberships_json,
                             "requires_onboarding": requires_onboarding
                         })),
                     )
@@ -301,6 +321,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["success"], true);
         assert_eq!(json["user"]["email"], user.email);
+        assert!(json["memberships"].is_array());
         assert_eq!(json["requires_onboarding"], true);
     }
 

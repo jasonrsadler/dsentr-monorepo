@@ -72,11 +72,29 @@ function resolveWorkspaceSelection(
   if (!Array.isArray(memberships) || memberships.length === 0) {
     return null
   }
+
+  const eligibleMemberships = memberships.filter(
+    (membership) => membership.workspace?.id
+  )
+  if (eligibleMemberships.length === 0) {
+    return null
+  }
+
   if (preferredId) {
-    const match = memberships.find((m) => m.workspace.id === preferredId)
+    const match = eligibleMemberships.find(
+      (membership) => membership.workspace.id === preferredId
+    )
     if (match) return match.workspace.id
   }
-  return memberships[0]?.workspace.id ?? null
+
+  const ownedWorkspace = eligibleMemberships.find(
+    (membership) => membership.role === 'owner'
+  )
+  if (ownedWorkspace) {
+    return ownedWorkspace.workspace.id
+  }
+
+  return eligibleMemberships[0]?.workspace.id ?? null
 }
 
 export function selectCurrentWorkspace(state: {

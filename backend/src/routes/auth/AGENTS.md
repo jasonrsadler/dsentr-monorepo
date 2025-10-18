@@ -20,3 +20,6 @@
 - Any new handler that needs authentication should accept `AuthSession` and derive the user ID via `claims.id`.
 - Password hashing/verification lives in `utils::password`; keep crypto concerns centralized there.
 - Signup handlers must honor workspace invitations: call `workspace_repo.find_invitation_by_token` to validate incoming tokens, attach members or mark invites declined accordingly, and provision a Solo workspace when no invite is accepted.
+
+## Change Reasons
+- Email/password login now returns the caller's workspace memberships so the frontend can hydrate the workspace switcher without requiring a hard refresh.
