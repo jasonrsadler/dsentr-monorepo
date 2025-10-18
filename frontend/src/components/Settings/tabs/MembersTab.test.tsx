@@ -324,7 +324,8 @@ describe('MembersTab workspace actions', () => {
       id: 'invite-1',
       email: 'pending@example.com',
       role: 'user',
-      expires_at: new Date().toISOString()
+      expires_at: new Date().toISOString(),
+      status: 'pending'
     }
 
     listMembersMock.mockResolvedValue([
@@ -363,6 +364,70 @@ describe('MembersTab workspace actions', () => {
     expect(listInvitesMock).toHaveBeenCalledWith(
       workspaceMembership.workspace.id
     )
+  })
+
+  it('omits non-pending invites from the pending list', async () => {
+    const now = new Date().toISOString()
+    listMembersMock.mockResolvedValue([
+      {
+        workspace_id: workspaceMembership.workspace.id,
+        user_id: 'member-admin',
+        role: 'admin',
+        joined_at: now,
+        email: 'member.admin@example.com',
+        first_name: 'Admin',
+        last_name: 'Member'
+      }
+    ])
+    listInvitesMock.mockResolvedValue([
+      {
+        id: 'invite-accepted',
+        email: 'accepted@example.com',
+        role: 'user',
+        expires_at: now,
+        status: 'accepted'
+      },
+      {
+        id: 'invite-declined',
+        email: 'declined@example.com',
+        role: 'user',
+        expires_at: now,
+        status: 'declined'
+      },
+      {
+        id: 'invite-revoked',
+        email: 'revoked@example.com',
+        role: 'user',
+        expires_at: now,
+        status: 'revoked'
+      }
+    ] as any)
+
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'user-admin',
+          email: 'admin@example.com',
+          first_name: 'Admin',
+          last_name: 'User',
+          plan: 'workspace',
+          role: 'admin',
+          companyName: null
+        },
+        memberships: [workspaceMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id
+      }))
+    })
+
+    render(<MembersTab />)
+
+    await waitFor(() => expect(listInvitesMock).toHaveBeenCalled())
+
+    expect(screen.queryByText('Pending invitations')).not.toBeInTheDocument()
+    expect(screen.queryByText('accepted@example.com')).not.toBeInTheDocument()
+    expect(screen.queryByText('declined@example.com')).not.toBeInTheDocument()
+    expect(screen.queryByText('revoked@example.com')).not.toBeInTheDocument()
   })
 
   it('redirects when workspace membership is no longer available (404)', async () => {

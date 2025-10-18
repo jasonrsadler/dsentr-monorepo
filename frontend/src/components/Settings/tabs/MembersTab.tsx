@@ -31,6 +31,11 @@ const resolveMemberIdentity = (member: WorkspaceMember) => {
   return { primary, secondary, identifier }
 }
 
+const filterPendingInvitations = (
+  invites: WorkspaceInvitation[]
+): WorkspaceInvitation[] =>
+  invites.filter((invite) => invite.status === 'pending')
+
 export default function MembersTab() {
   const user = useAuth((state) => state.user)
   const checkAuth = useAuth((state) => state.checkAuth)
@@ -108,7 +113,7 @@ export default function MembersTab() {
         try {
           const invites = await listWorkspaceInvites(resolvedWorkspaceId)
           if (active) {
-            setPendingInvites(invites)
+            setPendingInvites(filterPendingInvitations(invites))
           }
         } catch (error) {
           if (!active) {
@@ -202,7 +207,7 @@ export default function MembersTab() {
         role: inviteRole,
         expires_in_days: inviteExpires
       })
-      setPendingInvites((prev) => [inv, ...prev])
+      setPendingInvites((prev) => filterPendingInvitations([inv, ...prev]))
       setInviteEmail('')
       setInviteRole('user')
     } catch (e: any) {
