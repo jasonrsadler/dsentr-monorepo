@@ -30,8 +30,6 @@ pub async fn handle_login(
     State(app_state): State<AppState>,
     Json(payload): Json<LoginPayload>,
 ) -> Response {
-    eprintln!("Password provided: {}", payload.password);
-    eprintln!("User found: {:?}", payload.email);
     let user = app_state.db.find_user_by_email(&payload.email).await;
     let user = match user {
         Ok(Some(record)) => record,
