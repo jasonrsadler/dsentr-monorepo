@@ -6,26 +6,117 @@ use super::{
     },
     prelude::*,
 };
+use crate::models::workspace::WorkspaceRole;
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ConnectQuery {
+    #[serde(default)]
+    pub workspace: Option<Uuid>,
+}
+
+const OAUTH_VIEWER_RESTRICTION_MESSAGE: &str =
+    "Workspace viewers cannot connect OAuth accounts for this workspace.";
+const OAUTH_WORKSPACE_ACCESS_ERROR_MESSAGE: &str =
+    "We couldn't verify your access to this workspace. Please try again.";
+
+async fn ensure_oauth_permissions(
+    state: &AppState,
+    user_id: Uuid,
+    claims_plan: Option<&str>,
+    workspace: Option<Uuid>,
+    provider: ConnectedOAuthProvider,
+) -> Result<(), Response> {
+    if let Some(workspace_id) = workspace {
+        match state
+            .workspace_repo
+            .list_memberships_for_user(user_id)
+            .await
+        {
+            Ok(memberships) => {
+                if let Some(membership) = memberships
+                    .into_iter()
+                    .find(|m| m.workspace.id == workspace_id)
+                {
+                    if matches!(membership.role, WorkspaceRole::Viewer) {
+                        return Err(redirect_with_error(
+                            &state.config,
+                            provider,
+                            OAUTH_VIEWER_RESTRICTION_MESSAGE,
+                        ));
+                    }
+
+                    let plan_tier =
+                        NormalizedPlanTier::from_str(Some(membership.workspace.plan.as_str()));
+                    if plan_tier.is_solo() {
+                        return Err(redirect_with_error(
+                            &state.config,
+                            provider,
+                            OAUTH_PLAN_RESTRICTION_MESSAGE,
+                        ));
+                    }
+
+                    return Ok(());
+                }
+
+                return Err(redirect_with_error(
+                    &state.config,
+                    provider,
+                    "You do not have access to this workspace.",
+                ));
+            }
+            Err(err) => {
+                error!(%user_id, %workspace_id, ?err, "failed to load workspace memberships");
+                return Err(redirect_with_error(
+                    &state.config,
+                    provider,
+                    OAUTH_WORKSPACE_ACCESS_ERROR_MESSAGE,
+                ));
+            }
+        }
+    }
+
+    let plan_tier = state.resolve_plan_tier(user_id, claims_plan).await;
+    if plan_tier.is_solo() {
+        return Err(redirect_with_error(
+            &state.config,
+            provider,
+            OAUTH_PLAN_RESTRICTION_MESSAGE,
+        ));
+    }
+
+    Ok(())
+}
 
 pub async fn google_connect_start(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
+    Query(params): Query<ConnectQuery>,
     jar: CookieJar,
 ) -> Response {
-    let plan_tier = match Uuid::parse_str(&claims.id) {
+    match Uuid::parse_str(&claims.id) {
         Ok(user_id) => {
-            state
-                .resolve_plan_tier(user_id, claims.plan.as_deref())
-                .await
+            if let Err(response) = ensure_oauth_permissions(
+                &state,
+                user_id,
+                claims.plan.as_deref(),
+                params.workspace,
+                ConnectedOAuthProvider::Google,
+            )
+            .await
+            {
+                return response;
+            }
         }
-        Err(_) => NormalizedPlanTier::from_str(claims.plan.as_deref()),
-    };
-    if plan_tier.is_solo() {
-        return redirect_with_error(
-            &state.config,
-            ConnectedOAuthProvider::Google,
-            OAUTH_PLAN_RESTRICTION_MESSAGE,
-        );
+        Err(_) => {
+            let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+            if plan_tier.is_solo() {
+                return redirect_with_error(
+                    &state.config,
+                    ConnectedOAuthProvider::Google,
+                    OAUTH_PLAN_RESTRICTION_MESSAGE,
+                );
+            }
+        }
     }
 
     let state_token = generate_csrf_token();
@@ -65,22 +156,33 @@ pub async fn google_connect_callback(
 pub async fn microsoft_connect_start(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
+    Query(params): Query<ConnectQuery>,
     jar: CookieJar,
 ) -> Response {
-    let plan_tier = match Uuid::parse_str(&claims.id) {
+    match Uuid::parse_str(&claims.id) {
         Ok(user_id) => {
-            state
-                .resolve_plan_tier(user_id, claims.plan.as_deref())
-                .await
+            if let Err(response) = ensure_oauth_permissions(
+                &state,
+                user_id,
+                claims.plan.as_deref(),
+                params.workspace,
+                ConnectedOAuthProvider::Microsoft,
+            )
+            .await
+            {
+                return response;
+            }
         }
-        Err(_) => NormalizedPlanTier::from_str(claims.plan.as_deref()),
-    };
-    if plan_tier.is_solo() {
-        return redirect_with_error(
-            &state.config,
-            ConnectedOAuthProvider::Microsoft,
-            OAUTH_PLAN_RESTRICTION_MESSAGE,
-        );
+        Err(_) => {
+            let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+            if plan_tier.is_solo() {
+                return redirect_with_error(
+                    &state.config,
+                    ConnectedOAuthProvider::Microsoft,
+                    OAUTH_PLAN_RESTRICTION_MESSAGE,
+                );
+            }
+        }
     }
 
     let state_token = generate_csrf_token();

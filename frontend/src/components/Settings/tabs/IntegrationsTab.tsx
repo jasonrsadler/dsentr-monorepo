@@ -50,6 +50,8 @@ export default function IntegrationsTab({
 }: IntegrationsTabProps) {
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const userPlan = useAuth((state) => state.user?.plan ?? null)
+  const workspaceRole = currentWorkspace?.role ?? null
+  const workspaceId = currentWorkspace?.workspace.id ?? null
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<
@@ -66,6 +68,7 @@ export default function IntegrationsTab({
     )
   }, [currentWorkspace?.workspace.plan, userPlan])
   const isSoloPlan = planTier === 'solo'
+  const isViewer = workspaceRole === 'viewer'
 
   const openPlanSettings = useCallback(() => {
     try {
@@ -119,10 +122,14 @@ export default function IntegrationsTab({
   }, [notice])
 
   const handleConnect = (provider: OAuthProvider) => {
-    if (isSoloPlan) {
+    if (isSoloPlan || isViewer) {
       return
     }
-    window.location.href = `${API_BASE_URL}/api/oauth/${provider}/start`
+    const url = new URL(`${API_BASE_URL}/api/oauth/${provider}/start`)
+    if (workspaceId) {
+      url.searchParams.set('workspace', workspaceId)
+    }
+    window.location.href = url.toString()
   }
 
   const handleDisconnect = async (provider: OAuthProvider) => {
@@ -187,6 +194,13 @@ export default function IntegrationsTab({
               Upgrade
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {!isSoloPlan && isViewer ? (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 shadow-sm dark:border-blue-400/50 dark:bg-blue-500/10 dark:text-blue-100">
+          Workspace viewers cannot connect OAuth integrations. Ask a workspace
+          admin to share their credentials or upgrade your permissions.
         </div>
       ) : null}
 
@@ -260,7 +274,7 @@ export default function IntegrationsTab({
                     ) : (
                       <button
                         onClick={() => handleConnect(provider.key)}
-                        disabled={isSoloPlan}
+                        disabled={isSoloPlan || isViewer}
                         className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Connect
