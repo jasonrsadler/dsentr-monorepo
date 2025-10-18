@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import DashboardLayout from '../DashboardLayout'
 import { useAuth } from '@/stores/auth'
+import * as authApi from '@/lib/authApi'
 import type { WorkspaceMembershipSummary } from '@/lib/orgWorkspaceApi'
 
 type LocationLike = ReturnType<typeof useLocation>
@@ -318,5 +319,80 @@ describe('DashboardLayout workspace switcher', () => {
       expect(useAuth.getState().currentWorkspaceId).toBe('workspace-b')
     })
     expect(switcher).toHaveValue('workspace-b')
+  })
+})
+
+describe('DashboardLayout profile modal', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    resetAuthStore()
+  })
+
+  it('opens the profile modal and submits a password change', async () => {
+    const changePasswordSpy = vi
+      .spyOn(authApi, 'changeUserPassword')
+      .mockResolvedValue({ success: true, message: 'Password updated' })
+
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'user-profile',
+          email: 'profile@example.com',
+          first_name: 'Profile',
+          last_name: 'User',
+          plan: 'solo',
+          role: 'owner',
+          companyName: 'Dsentr'
+        },
+        memberships: [],
+        currentWorkspaceId: null
+      }))
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Routes>
+          <Route path="/dashboard" element={<DashboardLayout />}>
+            <Route index element={<div>Dashboard</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    )
+
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByLabelText(/open profile/i))
+
+    const dialog = await screen.findByRole('dialog', { name: /profile/i })
+    expect(dialog).toBeInTheDocument()
+
+    await user.type(
+      within(dialog).getByLabelText(/current password/i),
+      'old-password'
+    )
+    await user.type(
+      within(dialog).getByLabelText(/^new password$/i),
+      'new-password-123'
+    )
+    await user.type(
+      within(dialog).getByLabelText(/confirm new password/i),
+      'new-password-123'
+    )
+
+    await user.click(
+      within(dialog).getByRole('button', { name: /change password/i })
+    )
+
+    await waitFor(() => {
+      expect(changePasswordSpy).toHaveBeenCalledWith({
+        currentPassword: 'old-password',
+        newPassword: 'new-password-123'
+      })
+    })
+
+    expect(within(dialog).getByText(/password updated/i)).toBeInTheDocument()
+
+    changePasswordSpy.mockRestore()
   })
 })

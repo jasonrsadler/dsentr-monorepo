@@ -114,3 +114,46 @@ export function loginWithOAuth(provider: 'google' | 'github' | 'apple') {
 
   window.location.href = url
 }
+
+type ChangePasswordRequest = {
+  currentPassword: string
+  newPassword: string
+}
+
+type ChangePasswordResponse = {
+  success?: boolean
+  message?: string
+}
+
+export async function changeUserPassword({
+  currentPassword,
+  newPassword
+}: ChangePasswordRequest): Promise<ChangePasswordResponse> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-csrf-token': csrfToken
+    },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword
+    }),
+    credentials: 'include'
+  })
+
+  let data: ChangePasswordResponse | null = null
+  try {
+    data = (await res.json()) as ChangePasswordResponse
+  } catch {
+    data = null
+  }
+
+  if (!res.ok) {
+    const message = data?.message ?? 'Failed to change password.'
+    throw new Error(message)
+  }
+
+  return data ?? { success: true }
+}

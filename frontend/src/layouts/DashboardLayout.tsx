@@ -19,6 +19,8 @@ import MembersTab from '@/components/Settings/tabs/MembersTab'
 import { DsentrLogo } from '@/components/DsentrLogo'
 import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
+import ProfileButton from '@/components/Profile/ProfileButton'
+import ProfileModal from '@/components/Profile/ProfileModal'
 
 export default function DashboardLayout() {
   const user = useAuth((state) => state.user)
@@ -27,6 +29,7 @@ export default function DashboardLayout() {
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const [initialSettingsTab, setInitialSettingsTab] = useState<
     string | undefined
   >(undefined)
@@ -228,6 +231,7 @@ export default function DashboardLayout() {
                 Log out
               </NavigateButton>
               <ThemeToggle />
+              <ProfileButton onOpenProfile={() => setProfileOpen(true)} />
               <SettingsButton onOpenSettings={() => setSettingsOpen(true)} />
             </div>
           )}
@@ -237,6 +241,10 @@ export default function DashboardLayout() {
           <Outlet />
         </main>
 
+        <ProfileModal
+          open={profileOpen}
+          onClose={() => setProfileOpen(false)}
+        />
         <SettingsModal
           open={settingsOpen}
           onClose={() => {
