@@ -315,6 +315,7 @@ export default function PlanTab() {
       <div className="grid gap-3 md:grid-cols-2">
         {planOptions.map((option) => {
           const isSelected = option.tier === selected
+          const showCurrentBadge = option.tier === currentPlan && isSelected
           return (
             <button
               key={option.tier}
@@ -333,8 +334,13 @@ export default function PlanTab() {
                   : 'cursor-not-allowed opacity-70 hover:border-zinc-200 dark:hover:border-zinc-800'
               }`}
             >
-              <span className="block text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              <span className="flex items-center gap-2 text-base font-semibold text-zinc-900 dark:text-zinc-100">
                 {option.name}
+                {showCurrentBadge ? (
+                  <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200">
+                    Current plan
+                  </span>
+                ) : null}
               </span>
               <span className="mt-1 block text-sm font-medium text-indigo-600 dark:text-indigo-300">
                 {option.price}
