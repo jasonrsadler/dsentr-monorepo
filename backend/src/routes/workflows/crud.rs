@@ -39,26 +39,6 @@ pub async fn create_workflow(
         if !assessment.violations.is_empty() {
             return plan_violation_response(assessment.violations);
         }
-
-        match app_state
-            .workflow_repo
-            .list_workflows_by_user(user_id)
-            .await
-        {
-            Ok(existing) if existing.len() >= 3 => {
-                let violation = PlanViolation {
-                    code: "workflow-limit",
-                    message: "Solo accounts can save up to 3 workflows. Delete an existing workflow or upgrade in Settings → Plan.".to_string(),
-                    node_label: None,
-                };
-                return plan_violation_response(vec![violation]);
-            }
-            Ok(_) => {}
-            Err(err) => {
-                eprintln!("Failed to check workflow count: {:?}", err);
-                return JsonResponse::server_error("Failed to create workflow").into_response();
-            }
-        }
     }
 
     let memberships = match app_state
@@ -94,6 +74,33 @@ pub async fn create_workflow(
             None => {
                 return JsonResponse::forbidden("You do not have access to this workspace.")
                     .into_response();
+            }
+        }
+    }
+
+    if plan_tier.is_solo() && workspace_id.is_none() {
+        match app_state
+            .workflow_repo
+            .list_workflows_by_user(user_id)
+            .await
+        {
+            Ok(existing) => {
+                let personal_count = existing
+                    .iter()
+                    .filter(|wf| wf.workspace_id.is_none())
+                    .count();
+                if personal_count >= 3 {
+                    let violation = PlanViolation {
+                        code: "workflow-limit",
+                        message: "Solo accounts can save up to 3 workflows. Delete an existing workflow or upgrade in Settings → Plan.".to_string(),
+                        node_label: None,
+                    };
+                    return plan_violation_response(vec![violation]);
+                }
+            }
+            Err(err) => {
+                eprintln!("Failed to check workflow count: {:?}", err);
+                return JsonResponse::server_error("Failed to create workflow").into_response();
             }
         }
     }
@@ -224,7 +231,8 @@ pub async fn list_workflows(
             .collect();
         let allowed_owned = enforce_solo_workflow_limit(&owned);
         let allowed_ids: HashSet<_> = allowed_owned.iter().map(|wf| wf.id).collect();
-        hidden_count = owned.len().saturating_sub(allowed_owned.len());
+        let personal_total = owned.iter().filter(|wf| wf.workspace_id.is_none()).count();
+        hidden_count = personal_total.saturating_sub(allowed_owned.len());
         workflows
             .into_iter()
             .filter(|wf| wf.workspace_id.is_some() || allowed_ids.contains(&wf.id))
@@ -295,7 +303,8 @@ pub async fn get_workflow(
                 .into_response();
             }
 
-            if plan_tier.is_solo() && workflow.user_id == user_id {
+            if plan_tier.is_solo() && workflow.user_id == user_id && workflow.workspace_id.is_none()
+            {
                 match app_state
                     .workflow_repo
                     .list_workflows_by_user(user_id)
@@ -433,7 +442,8 @@ pub async fn update_workflow(
     }
 
     let is_creator = existing.user_id == user_id;
-    let allowed_ids = if plan_tier.is_solo() && is_creator {
+    let is_personal = existing.workspace_id.is_none();
+    let allowed_ids = if plan_tier.is_solo() && is_creator && is_personal {
         match app_state
             .workflow_repo
             .list_workflows_by_user(existing.user_id)

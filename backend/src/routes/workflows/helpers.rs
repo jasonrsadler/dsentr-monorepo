@@ -202,9 +202,13 @@ pub(crate) fn plan_violation_response(violations: Vec<PlanViolation>) -> Respons
 }
 
 pub(crate) fn enforce_solo_workflow_limit(workflows: &[Workflow]) -> Vec<Workflow> {
-    let mut sorted = workflows.to_vec();
-    sorted.sort_by_key(|wf| wf.created_at);
-    sorted.into_iter().take(3).collect()
+    let mut personal: Vec<_> = workflows
+        .iter()
+        .cloned()
+        .filter(|wf| wf.workspace_id.is_none())
+        .collect();
+    personal.sort_by_key(|wf| wf.created_at);
+    personal.into_iter().take(3).collect()
 }
 
 pub(crate) const SOLO_MONTHLY_RUN_LIMIT: i64 = 250;

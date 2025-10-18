@@ -39,26 +39,28 @@ pub async fn start_workflow_run(
         .await;
 
     if plan_tier.is_solo() {
-        match app_state
-            .workflow_repo
-            .list_workflows_by_user(user_id)
-            .await
-        {
-            Ok(existing) => {
-                let allowed = enforce_solo_workflow_limit(&existing);
-                let allowed_ids: HashSet<_> = allowed.into_iter().map(|wf| wf.id).collect();
-                if !allowed_ids.contains(&wf.id) {
-                    let violation = PlanViolation {
-                        code: "workflow-limit",
-                        message: "This workflow is locked on the solo plan. Upgrade in Settings → Plan to run it.".to_string(),
-                        node_label: None,
-                    };
-                    return plan_violation_response(vec![violation]);
+        if wf.workspace_id.is_none() {
+            match app_state
+                .workflow_repo
+                .list_workflows_by_user(user_id)
+                .await
+            {
+                Ok(existing) => {
+                    let allowed = enforce_solo_workflow_limit(&existing);
+                    let allowed_ids: HashSet<_> = allowed.into_iter().map(|wf| wf.id).collect();
+                    if !allowed_ids.contains(&wf.id) {
+                        let violation = PlanViolation {
+                            code: "workflow-limit",
+                            message: "This workflow is locked on the solo plan. Upgrade in Settings → Plan to run it.".to_string(),
+                            node_label: None,
+                        };
+                        return plan_violation_response(vec![violation]);
+                    }
                 }
-            }
-            Err(err) => {
-                eprintln!("Failed to enforce workflow limit before run: {:?}", err);
-                return JsonResponse::server_error("Failed to start run").into_response();
+                Err(err) => {
+                    eprintln!("Failed to enforce workflow limit before run: {:?}", err);
+                    return JsonResponse::server_error("Failed to start run").into_response();
+                }
             }
         }
 

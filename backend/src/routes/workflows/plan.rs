@@ -44,9 +44,13 @@ pub async fn get_plan_usage(
             return JsonResponse::server_error("Failed to load plan usage").into_response();
         }
     };
+    let personal_count = workflows
+        .iter()
+        .filter(|workflow| workflow.workspace_id.is_none())
+        .count();
     let hidden_count = if plan_tier.is_solo() {
         let allowed = enforce_solo_workflow_limit(&workflows);
-        workflows.len().saturating_sub(allowed.len())
+        personal_count.saturating_sub(allowed.len())
     } else {
         0
     };
