@@ -136,7 +136,8 @@ async fn process_plan_change(
                 .iter()
                 .filter(|membership| membership.workspace.owner_id == user_id)
             {
-                if !NormalizedPlanTier::from_str(Some(membership.workspace.plan.as_str())).is_solo()
+                if !NormalizedPlanTier::from_option(Some(membership.workspace.plan.as_str()))
+                    .is_solo()
                 {
                     if let Err(err) = app_state
                         .workspace_repo
@@ -231,7 +232,7 @@ async fn process_plan_change(
                 };
             }
 
-            if NormalizedPlanTier::from_str(Some(workspace.plan.as_str())).is_solo() {
+            if NormalizedPlanTier::from_option(Some(workspace.plan.as_str())).is_solo() {
                 workspace = match app_state
                     .workspace_repo
                     .update_workspace_plan(workspace.id, PlanTier::Workspace.as_str())
@@ -1112,7 +1113,7 @@ pub async fn create_workspace_invitation(
     if email.is_empty() {
         return JsonResponse::bad_request("Email is required").into_response();
     }
-    let expires_days = payload.expires_in_days.unwrap_or(14).max(1).min(60);
+    let expires_days = payload.expires_in_days.unwrap_or(14).clamp(1, 60);
     let expires_at = OffsetDateTime::now_utc() + time::Duration::days(expires_days.into());
 
     let token = random_token();
@@ -1488,6 +1489,10 @@ mod tests {
     use time::OffsetDateTime;
     use uuid::Uuid;
 
+    type MemberRecord = (Uuid, Uuid, WorkspaceRole);
+    type MembershipSnapshot = (Vec<MemberRecord>, Vec<Uuid>, Vec<Uuid>);
+    type AuditEntries = Vec<(Uuid, Uuid, String, Uuid, Option<String>)>;
+
     #[derive(Default)]
     struct NoopMailer;
 
@@ -1576,7 +1581,7 @@ mod tests {
     #[derive(Clone)]
     struct TestWorkspaceRepo {
         invitation: Arc<Mutex<Option<WorkspaceInvitation>>>,
-        members: Arc<Mutex<Vec<(Uuid, Uuid, WorkspaceRole)>>>,
+        members: Arc<Mutex<Vec<MemberRecord>>>,
         accepted: Arc<Mutex<Vec<Uuid>>>,
         declined: Arc<Mutex<Vec<Uuid>>>,
         workspace: Arc<Mutex<Option<Workspace>>>,
@@ -1599,7 +1604,7 @@ mod tests {
             repo
         }
 
-        fn records(&self) -> (Vec<(Uuid, Uuid, WorkspaceRole)>, Vec<Uuid>, Vec<Uuid>) {
+        fn records(&self) -> MembershipSnapshot {
             (
                 self.members.lock().unwrap().clone(),
                 self.accepted.lock().unwrap().clone(),
@@ -1783,7 +1788,7 @@ mod tests {
     struct RecordingWorkspaceRepo {
         workspaces: Arc<Mutex<HashMap<Uuid, Workspace>>>,
         members: Arc<Mutex<HashMap<Uuid, Vec<WorkspaceMember>>>>,
-        audits: Arc<Mutex<Vec<(Uuid, Uuid, String, Uuid, Option<String>)>>>,
+        audits: Arc<Mutex<AuditEntries>>,
     }
 
     impl RecordingWorkspaceRepo {
@@ -2125,9 +2130,9 @@ mod tests {
     fn test_state(repo: Arc<TestWorkspaceRepo>) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
-            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
-            mailer: Arc::new(NoopMailer::default()),
+            mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
@@ -2145,7 +2150,7 @@ mod tests {
     ) -> AppState {
         AppState {
             db: db.clone(),
-            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
@@ -2316,7 +2321,7 @@ mod tests {
         };
 
         let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, vec![member]));
-        let mailer: Arc<dyn Mailer> = Arc::new(NoopMailer::default());
+        let mailer: Arc<dyn Mailer> = Arc::new(NoopMailer);
         let db = Arc::new(MockDb::default());
         let state = state_with_components(repo.clone(), mailer, db);
 
@@ -2378,7 +2383,7 @@ mod tests {
         };
 
         let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, vec![member]));
-        let mailer: Arc<dyn Mailer> = Arc::new(NoopMailer::default());
+        let mailer: Arc<dyn Mailer> = Arc::new(NoopMailer);
         let db = Arc::new(MockDb::default());
         let state = state_with_components(repo.clone(), mailer, db);
 
@@ -2488,24 +2493,26 @@ mod tests {
 
         let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
 
-        let mut db = MockDb::default();
-        db.find_user_result = Some(User {
-            id: owner_id,
-            email: "owner@example.com".into(),
-            password_hash: String::new(),
-            first_name: "Owner".into(),
-            last_name: "User".into(),
-            role: Some(UserRole::User),
-            plan: None,
-            company_name: None,
-            oauth_provider: Some(OauthProvider::Email),
-            onboarded_at: Some(now),
-            created_at: now,
-        });
+        let db = MockDb {
+            find_user_result: Some(User {
+                id: owner_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: Some(now),
+                created_at: now,
+            }),
+            ..Default::default()
+        };
 
         let state = state_with_components(
             repo.clone() as Arc<dyn WorkspaceRepository>,
-            Arc::new(NoopMailer::default()) as Arc<dyn Mailer>,
+            Arc::new(NoopMailer) as Arc<dyn Mailer>,
             Arc::new(db),
         );
 
@@ -2561,24 +2568,26 @@ mod tests {
 
         let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
 
-        let mut db = MockDb::default();
-        db.find_user_result = Some(User {
-            id: member_id,
-            email: "member@example.com".into(),
-            password_hash: String::new(),
-            first_name: "Member".into(),
-            last_name: "User".into(),
-            role: Some(UserRole::User),
-            plan: None,
-            company_name: None,
-            oauth_provider: Some(OauthProvider::Email),
-            onboarded_at: Some(now),
-            created_at: now,
-        });
+        let db = MockDb {
+            find_user_result: Some(User {
+                id: member_id,
+                email: "member@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Member".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: Some(now),
+                created_at: now,
+            }),
+            ..Default::default()
+        };
 
         let state = state_with_components(
             repo.clone() as Arc<dyn WorkspaceRepository>,
-            Arc::new(NoopMailer::default()) as Arc<dyn Mailer>,
+            Arc::new(NoopMailer) as Arc<dyn Mailer>,
             Arc::new(db),
         );
 
@@ -2637,20 +2646,22 @@ mod tests {
         let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace.clone(), members));
         let mailer = Arc::new(RecordingMailer::new());
 
-        let mut db = MockDb::default();
-        db.find_user_result = Some(User {
-            id: member_id,
-            email: "member@example.com".into(),
-            password_hash: String::new(),
-            first_name: "Member".into(),
-            last_name: "User".into(),
-            role: Some(UserRole::User),
-            plan: None,
-            company_name: None,
-            oauth_provider: Some(OauthProvider::Email),
-            onboarded_at: Some(now),
-            created_at: now,
-        });
+        let db = MockDb {
+            find_user_result: Some(User {
+                id: member_id,
+                email: "member@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Member".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: Some(now),
+                created_at: now,
+            }),
+            ..Default::default()
+        };
 
         let state = state_with_components(
             repo.clone() as Arc<dyn WorkspaceRepository>,

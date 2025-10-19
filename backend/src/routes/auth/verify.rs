@@ -91,8 +91,8 @@ mod tests {
             .route("/", post(verify_email))
             .with_state(AppState {
                 db: Arc::new(db),
-                workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-                workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+                workflow_repo: Arc::new(NoopWorkflowRepository),
+                workspace_repo: Arc::new(NoopWorkspaceRepository),
                 mailer: Arc::new(MockMailer::default()),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),

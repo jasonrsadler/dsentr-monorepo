@@ -31,6 +31,7 @@ pub(crate) struct SecretsQuery {
     workspace: Option<Uuid>,
 }
 
+#[allow(clippy::result_large_err)]
 fn canonicalize_key(input: &str) -> Result<String, Response> {
     let key = input.trim().to_lowercase();
     if key.is_empty() {

@@ -192,12 +192,12 @@ mod tests {
         body::{to_bytes, Body},
         http::{Request, StatusCode},
     };
-    use std::{
-        sync::{Arc, Mutex},
-        usize,
-    };
+    use std::sync::{Arc, Mutex};
     use tower::ServiceExt;
     use uuid::Uuid;
+
+    type MembershipRecords = Vec<(Uuid, Uuid, WorkspaceRole)>;
+    type WorkspaceRecord = (Vec<Workspace>, MembershipRecords, Vec<Uuid>, Vec<Uuid>);
 
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
@@ -426,7 +426,7 @@ mod tests {
     struct RecordingWorkspaceRepo {
         invite: Mutex<Option<WorkspaceInvitation>>,
         created: Arc<Mutex<Vec<Workspace>>>,
-        add_calls: Arc<Mutex<Vec<(Uuid, Uuid, WorkspaceRole)>>>,
+        add_calls: Arc<Mutex<MembershipRecords>>,
         accepted: Arc<Mutex<Vec<Uuid>>>,
         declined: Arc<Mutex<Vec<Uuid>>>,
         fail_create_workspace: bool,
@@ -441,14 +441,7 @@ mod tests {
             }
         }
 
-        fn record(
-            &self,
-        ) -> (
-            Vec<Workspace>,
-            Vec<(Uuid, Uuid, WorkspaceRole)>,
-            Vec<Uuid>,
-            Vec<Uuid>,
-        ) {
+        fn record(&self) -> WorkspaceRecord {
             (
                 self.created.lock().unwrap().clone(),
                 self.add_calls.lock().unwrap().clone(),
@@ -694,7 +687,7 @@ mod tests {
             .route("/", axum::routing::post(handle_signup))
             .with_state(AppState {
                 db: Arc::new(repo),
-                workflow_repo: Arc::new(NoopWorkflowRepository::default()),
+                workflow_repo: Arc::new(NoopWorkflowRepository),
                 workspace_repo,
                 mailer: Arc::new(mailer),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -728,7 +721,7 @@ mod tests {
         let mailer = MockMailer::default();
         let res = run_signup(
             repo,
-            Arc::new(NoopWorkspaceRepository::default()),
+            Arc::new(NoopWorkspaceRepository),
             mailer,
             test_payload(),
         )
@@ -749,13 +742,7 @@ mod tests {
         };
 
         let mailer = MockMailer::default();
-        let res = run_signup(
-            repo,
-            Arc::new(NoopWorkspaceRepository::default()),
-            mailer,
-            payload,
-        )
-        .await;
+        let res = run_signup(repo, Arc::new(NoopWorkspaceRepository), mailer, payload).await;
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -771,7 +758,7 @@ mod tests {
         let mailer = MockMailer::default();
         let res = run_signup(
             repo,
-            Arc::new(NoopWorkspaceRepository::default()),
+            Arc::new(NoopWorkspaceRepository),
             mailer,
             test_payload(),
         )
@@ -791,7 +778,7 @@ mod tests {
         let mailer = MockMailer::default();
         let res = run_signup(
             repo,
-            Arc::new(NoopWorkspaceRepository::default()),
+            Arc::new(NoopWorkspaceRepository),
             mailer,
             test_payload(),
         )
@@ -810,12 +797,14 @@ mod tests {
             cleaned_up: Arc::clone(&cleaned_up),
         };
 
-        let mut mailer = MockMailer::default();
-        mailer.fail_send = true;
+        let mailer = MockMailer {
+            fail_send: true,
+            ..Default::default()
+        };
 
         let res = run_signup(
             repo,
-            Arc::new(NoopWorkspaceRepository::default()),
+            Arc::new(NoopWorkspaceRepository),
             mailer,
             test_payload(),
         )

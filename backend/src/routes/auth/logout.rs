@@ -33,7 +33,6 @@ mod tests {
         Router,
     };
     use serde_json::Value;
-    use std::usize;
     use tower::ServiceExt; // for `app.oneshot(...)`
 
     use crate::routes::auth::logout::handle_logout;

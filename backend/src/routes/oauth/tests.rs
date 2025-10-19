@@ -58,8 +58,8 @@ fn stub_config() -> Arc<Config> {
 fn stub_state(config: Arc<Config>) -> AppState {
     AppState {
         db: Arc::new(MockDb::default()),
-        workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-        workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+        workflow_repo: Arc::new(NoopWorkflowRepository),
+        workspace_repo: Arc::new(NoopWorkspaceRepository),
         mailer: Arc::new(MockMailer::default()),
         google_oauth: Arc::new(MockGoogleOAuth::default()),
         github_oauth: Arc::new(MockGitHubOAuth::default()),

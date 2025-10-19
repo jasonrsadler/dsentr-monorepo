@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::borrow::Cow;
+use std::{borrow::Cow, convert::Infallible, str::FromStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizedPlanTier {
@@ -8,7 +8,7 @@ pub enum NormalizedPlanTier {
 }
 
 impl NormalizedPlanTier {
-    pub fn from_str(raw: Option<&str>) -> Self {
+    pub fn from_option(raw: Option<&str>) -> Self {
         let normalized = raw.unwrap_or_default().trim().to_lowercase();
         if normalized.is_empty() {
             return Self::Solo;
@@ -41,6 +41,14 @@ impl NormalizedPlanTier {
 
     pub fn is_solo(self) -> bool {
         matches!(self, Self::Solo)
+    }
+}
+
+impl FromStr for NormalizedPlanTier {
+    type Err = Infallible;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_option(Some(raw)))
     }
 }
 
@@ -197,38 +205,38 @@ mod tests {
 
     #[test]
     fn normalizes_plan_values() {
-        assert!(NormalizedPlanTier::from_str(Some("Solo")).is_solo());
-        assert!(NormalizedPlanTier::from_str(Some("free")).is_solo());
+        assert!(NormalizedPlanTier::from_option(Some("Solo")).is_solo());
+        assert!(NormalizedPlanTier::from_option(Some("free")).is_solo());
         assert_eq!(
-            NormalizedPlanTier::from_str(Some("workspace")),
+            NormalizedPlanTier::from_option(Some("workspace")),
             NormalizedPlanTier::Workspace
         );
         assert_eq!(
-            NormalizedPlanTier::from_str(Some("workspace:trial")),
+            NormalizedPlanTier::from_option(Some("workspace:trial")),
             NormalizedPlanTier::Workspace
         );
         assert_eq!(
-            NormalizedPlanTier::from_str(Some("workspace_plus")),
+            NormalizedPlanTier::from_option(Some("workspace_plus")),
             NormalizedPlanTier::Workspace
         );
         assert_eq!(
-            NormalizedPlanTier::from_str(Some("team")),
+            NormalizedPlanTier::from_option(Some("team")),
             NormalizedPlanTier::Workspace
         );
         assert_eq!(
-            NormalizedPlanTier::from_str(Some("organization")),
+            NormalizedPlanTier::from_option(Some("organization")),
             NormalizedPlanTier::Workspace
         );
         assert_eq!(
-            NormalizedPlanTier::from_str(Some("organization-pro")),
+            NormalizedPlanTier::from_option(Some("organization-pro")),
             NormalizedPlanTier::Workspace
         );
         assert_eq!(
-            NormalizedPlanTier::from_str(Some("org_premium")),
+            NormalizedPlanTier::from_option(Some("org_premium")),
             NormalizedPlanTier::Workspace
         );
         assert_eq!(
-            NormalizedPlanTier::from_str(Some("enterprise")),
+            NormalizedPlanTier::from_option(Some("enterprise")),
             NormalizedPlanTier::Workspace
         );
     }

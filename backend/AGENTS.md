@@ -6,10 +6,11 @@
 itly coordinated.
 
 ## Required Practices
-- Run `cargo fmt` and `cargo clippy --all-targets --all-features` before committing backend changes.
-- Add or update integration/unit tests (`cargo test`) whenever modifying request handlers, data models, or migrations.
+- Run `cargo fmt` and `SQLX_OFFLINE=true cargo clippy --all-targets --all-features` before committing backend changes.
+- Add or update integration/unit tests (`SQLX_OFFLINE=true cargo test`) whenever modifying request handlers, data models, or migrations.
 - Prefer strongly typed structures and avoid `unwrap`/`expect` in production paths—propagate errors with `Result` and `thiserror
 `/`anyhow` patterns as appropriate.
+- App is run by using `cargo run --features tls` or just `cargo run` for non-ssl
 
 ## Change Reasons
 - Workspace membership listing now accepts viewer roles so the Members settings tab can display roster data without forcing a workspace switch.

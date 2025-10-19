@@ -90,6 +90,7 @@ fn derive_aws_signing_key(
     Ok(mac.finalize().into_bytes().to_vec())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sign_aws_request(
     access_key: &str,
     secret_key: &str,
@@ -1020,8 +1021,8 @@ mod tests {
     fn test_state_with_mailer(mailer: Arc<dyn Mailer>) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
-            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -1767,7 +1768,7 @@ mod tests {
             form.get("template").and_then(|v| v.first()),
             Some(&"welcome".to_string())
         );
-        assert!(form.get("subject").is_none());
+        assert!(!form.contains_key("subject"));
         let vars_json = form
             .get("h:X-Mailgun-Variables")
             .and_then(|v| v.first())

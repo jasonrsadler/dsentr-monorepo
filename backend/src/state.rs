@@ -35,13 +35,13 @@ impl AppState {
         user_id: Uuid,
         claims_plan: Option<&str>,
     ) -> NormalizedPlanTier {
-        let from_claims = NormalizedPlanTier::from_str(claims_plan);
+        let from_claims = NormalizedPlanTier::from_option(claims_plan);
         if !from_claims.is_solo() {
             return from_claims;
         }
 
         match self.db.find_public_user_by_id(user_id).await {
-            Ok(Some(user)) => NormalizedPlanTier::from_str(user.plan.as_deref()),
+            Ok(Some(user)) => NormalizedPlanTier::from_option(user.plan.as_deref()),
             Ok(None) => from_claims,
             Err(err) => {
                 error!(%user_id, ?err, "failed to refresh user plan tier from database");
@@ -102,20 +102,22 @@ mod tests {
 
     fn build_state_with_user(plan: Option<&str>) -> (AppState, Uuid) {
         let user_id = Uuid::new_v4();
-        let mut db = MockDb::default();
-        db.find_user_result = Some(User {
-            id: user_id,
-            email: "user@example.com".into(),
-            password_hash: String::new(),
-            first_name: "Plan".into(),
-            last_name: "Tester".into(),
-            role: Some(UserRole::User),
-            plan: plan.map(|p| p.to_string()),
-            company_name: None,
-            oauth_provider: Some(OauthProvider::Email),
-            onboarded_at: Some(OffsetDateTime::now_utc()),
-            created_at: OffsetDateTime::now_utc(),
-        });
+        let db = MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "user@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Plan".into(),
+                last_name: "Tester".into(),
+                role: Some(UserRole::User),
+                plan: plan.map(|p| p.to_string()),
+                company_name: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: Some(OffsetDateTime::now_utc()),
+                created_at: OffsetDateTime::now_utc(),
+            }),
+            ..Default::default()
+        };
 
         let config = Arc::new(Config {
             database_url: String::new(),
@@ -139,7 +141,7 @@ mod tests {
             db: Arc::new(db),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
-            mailer: Arc::new(NoopMailer::default()),
+            mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),

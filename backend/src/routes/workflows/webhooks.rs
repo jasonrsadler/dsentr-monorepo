@@ -88,8 +88,8 @@ pub async fn webhook_trigger(
         let (ts_str, sig_str) = {
             let ts = std::env::var("X_DSENTR_TS_OVERRIDE").ok();
             let sg = std::env::var("X_DSENTR_SIG_OVERRIDE").ok();
-            if ts.is_some() && sg.is_some() {
-                (ts.unwrap(), sg.unwrap())
+            if let (Some(ts), Some(sg)) = (ts, sg) {
+                (ts, sg)
             } else if let Some(Json(ref b)) = body {
                 let ts_v = b
                     .get("_dsentr_ts")

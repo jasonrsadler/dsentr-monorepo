@@ -277,6 +277,7 @@ fn value_as_string(value: &Value) -> Option<String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_action(
     node: &Node,
     context: &Value,

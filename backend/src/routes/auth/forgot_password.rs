@@ -243,8 +243,8 @@ mod tests {
         let github_oauth = Arc::new(MockGitHubOAuth::default());
         let state = AppState {
             db: repo,
-            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
             mailer,
             google_oauth,
             github_oauth,
@@ -357,8 +357,8 @@ mod tests {
         let github_oauth = Arc::new(MockGitHubOAuth::default());
         let state = AppState {
             db: repo,
-            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
             mailer,
             google_oauth,
             github_oauth,

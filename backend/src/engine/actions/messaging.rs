@@ -380,8 +380,7 @@ async fn send_teams_workflow_webhook(
     let mut headers = HeaderMap::new();
 
     if workflow_option_normalized.as_str() == "headersecretauth" {
-        let header_name_raw =
-            extract_required_str(params, "workflowHeaderName", "Header name")?;
+        let header_name_raw = extract_required_str(params, "workflowHeaderName", "Header name")?;
         let header_value_raw =
             extract_required_str(params, "workflowHeaderSecret", "Header secret")?;
 
@@ -1284,8 +1283,8 @@ mod tests {
     ) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
-            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -2177,10 +2176,10 @@ mod tests {
             .get("card")
             .and_then(|card| card.get("sections"))
             .and_then(|sections| sections.as_array())
-            .and_then(|sections| sections.get(0))
+            .and_then(|sections| sections.first())
             .and_then(|section| section.get("widgets"))
             .and_then(|widgets| widgets.as_array())
-            .and_then(|widgets| widgets.get(0))
+            .and_then(|widgets| widgets.first())
             .and_then(|widget| widget.get("textParagraph"))
             .and_then(|paragraph| paragraph.get("text"))
             .and_then(|text| text.as_str())

@@ -205,6 +205,7 @@ pub async fn list_channel_members(
     .into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_user_id(claims: &Claims) -> Result<Uuid, Response> {
     Uuid::parse_str(&claims.id)
         .map_err(|_| JsonResponse::unauthorized("Invalid user identifier").into_response())

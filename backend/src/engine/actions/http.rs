@@ -113,6 +113,7 @@ fn is_host_allowed(host: &str, patterns: &[String]) -> bool {
     false
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_http(
     node: &Node,
     context: &Value,
@@ -223,26 +224,25 @@ pub(crate) async fn execute_http(
                 json!({"error":"egress_blocked","host":host,"rule":"default_deny","message":msg});
             return Err(detail.to_string());
         }
-    } else if !allowed.is_empty()
-        && !is_host_allowed(&host, &allowed) {
-            let msg = format!("Outbound HTTP not allowed: {}", host);
-            let _ = state
-                .workflow_repo
-                .insert_egress_block_event(
-                    run.user_id,
-                    run.workflow_id,
-                    run.id,
-                    &node.id,
-                    &url,
-                    &host,
-                    "allowlist_miss",
-                    &msg,
-                )
-                .await;
-            let detail =
-                json!({"error":"egress_blocked","host":host,"rule":"allowlist_miss","message":msg});
-            return Err(detail.to_string());
-        }
+    } else if !allowed.is_empty() && !is_host_allowed(&host, &allowed) {
+        let msg = format!("Outbound HTTP not allowed: {}", host);
+        let _ = state
+            .workflow_repo
+            .insert_egress_block_event(
+                run.user_id,
+                run.workflow_id,
+                run.id,
+                &node.id,
+                &url,
+                &host,
+                "allowlist_miss",
+                &msg,
+            )
+            .await;
+        let detail =
+            json!({"error":"egress_blocked","host":host,"rule":"allowlist_miss","message":msg});
+        return Err(detail.to_string());
+    }
 
     let redirect_policy = if follow {
         let allowed_clone = allowed.clone();

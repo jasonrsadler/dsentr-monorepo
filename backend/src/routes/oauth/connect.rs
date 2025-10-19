@@ -46,7 +46,7 @@ async fn ensure_oauth_permissions(
                     }
 
                     let plan_tier =
-                        NormalizedPlanTier::from_str(Some(membership.workspace.plan.as_str()));
+                        NormalizedPlanTier::from_option(Some(membership.workspace.plan.as_str()));
                     if plan_tier.is_solo() {
                         return Err(redirect_with_error(
                             &state.config,
@@ -108,7 +108,7 @@ pub async fn google_connect_start(
             }
         }
         Err(_) => {
-            let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+            let plan_tier = NormalizedPlanTier::from_option(claims.plan.as_deref());
             if plan_tier.is_solo() {
                 return redirect_with_error(
                     &state.config,
@@ -174,7 +174,7 @@ pub async fn microsoft_connect_start(
             }
         }
         Err(_) => {
-            let plan_tier = NormalizedPlanTier::from_str(claims.plan.as_deref());
+            let plan_tier = NormalizedPlanTier::from_option(claims.plan.as_deref());
             if plan_tier.is_solo() {
                 return redirect_with_error(
                     &state.config,

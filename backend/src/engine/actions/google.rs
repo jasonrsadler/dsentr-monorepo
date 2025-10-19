@@ -426,8 +426,8 @@ mod tests {
     fn test_state(oauth_accounts: Arc<OAuthAccountService>, http_client: Arc<Client>) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
-            workflow_repo: Arc::new(NoopWorkflowRepository::default()),
-            workspace_repo: Arc::new(NoopWorkspaceRepository::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
             mailer: Arc::new(MockMailer::default()) as Arc<dyn Mailer>,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
