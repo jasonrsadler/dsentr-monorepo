@@ -6,6 +6,7 @@ use crate::models::workflow::Workflow;
 use crate::models::workflow_log::WorkflowLog;
 use crate::models::workflow_node_run::WorkflowNodeRun;
 use crate::models::workflow_run::WorkflowRun;
+use crate::models::workflow_run_event::{NewWorkflowRunEvent, WorkflowRunEvent};
 use crate::models::workflow_schedule::WorkflowSchedule;
 use time::OffsetDateTime;
 
@@ -127,6 +128,11 @@ pub trait WorkflowRepository: Send + Sync {
         workflow_id: Uuid,
         run_id: Uuid,
     ) -> Result<Vec<WorkflowNodeRun>, sqlx::Error>;
+
+    async fn record_run_event(
+        &self,
+        event: NewWorkflowRunEvent,
+    ) -> Result<WorkflowRunEvent, sqlx::Error>;
 
     // Worker helpers
     async fn claim_next_queued_run(&self) -> Result<Option<WorkflowRun>, sqlx::Error>;

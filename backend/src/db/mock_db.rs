@@ -12,6 +12,7 @@ use crate::models::signup::SignupPayload;
 use crate::models::workflow::Workflow;
 use crate::models::workflow_node_run::WorkflowNodeRun;
 use crate::models::workflow_run::WorkflowRun;
+use crate::models::workflow_run_event::{NewWorkflowRunEvent, WorkflowRunEvent};
 use crate::models::workflow_schedule::WorkflowSchedule;
 use crate::models::workspace::{
     Workspace, WorkspaceMembershipSummary, WorkspaceRole, INVITATION_STATUS_PENDING,
@@ -333,6 +334,22 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _run_id: Uuid,
     ) -> Result<Vec<WorkflowNodeRun>, sqlx::Error> {
         Ok(vec![])
+    }
+
+    async fn record_run_event(
+        &self,
+        event: NewWorkflowRunEvent,
+    ) -> Result<WorkflowRunEvent, sqlx::Error> {
+        Ok(WorkflowRunEvent {
+            id: Uuid::new_v4(),
+            workflow_run_id: event.workflow_run_id,
+            workflow_id: event.workflow_id,
+            workspace_id: event.workspace_id,
+            triggered_by: event.triggered_by,
+            connection_type: event.connection_type,
+            connection_id: event.connection_id,
+            recorded_at: event.recorded_at.unwrap_or_else(OffsetDateTime::now_utc),
+        })
     }
 
     async fn claim_next_queued_run(&self) -> Result<Option<WorkflowRun>, sqlx::Error> {

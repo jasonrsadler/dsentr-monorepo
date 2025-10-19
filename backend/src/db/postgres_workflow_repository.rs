@@ -1,7 +1,11 @@
 use crate::{
-    db::workflow_repository::WorkflowRepository, models::workflow::Workflow,
-    models::workflow_dead_letter::WorkflowDeadLetter, models::workflow_log::WorkflowLog,
-    models::workflow_node_run::WorkflowNodeRun, models::workflow_run::WorkflowRun,
+    db::workflow_repository::WorkflowRepository,
+    models::workflow::Workflow,
+    models::workflow_dead_letter::WorkflowDeadLetter,
+    models::workflow_log::WorkflowLog,
+    models::workflow_node_run::WorkflowNodeRun,
+    models::workflow_run::WorkflowRun,
+    models::workflow_run_event::{NewWorkflowRunEvent, WorkflowRunEvent},
     models::workflow_schedule::WorkflowSchedule,
 };
 use async_trait::async_trait;
@@ -524,6 +528,50 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)
+    }
+
+    async fn record_run_event(
+        &self,
+        event: NewWorkflowRunEvent,
+    ) -> Result<WorkflowRunEvent, sqlx::Error> {
+        let NewWorkflowRunEvent {
+            workflow_run_id,
+            workflow_id,
+            workspace_id,
+            triggered_by,
+            connection_type,
+            connection_id,
+            recorded_at,
+        } = event;
+
+        let recorded_at = recorded_at.unwrap_or_else(OffsetDateTime::now_utc);
+
+        let row = sqlx::query_as::<_, WorkflowRunEvent>(
+            r#"
+            INSERT INTO workflow_run_events (
+                workflow_run_id,
+                workflow_id,
+                workspace_id,
+                triggered_by,
+                connection_type,
+                connection_id,
+                recorded_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, workflow_run_id, workflow_id, workspace_id, triggered_by, connection_type, connection_id, recorded_at
+            "#,
+        )
+        .bind(workflow_run_id)
+        .bind(workflow_id)
+        .bind(workspace_id)
+        .bind(triggered_by)
+        .bind(connection_type)
+        .bind(connection_id)
+        .bind(recorded_at)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row)
     }
 
     async fn claim_next_queued_run(&self) -> Result<Option<WorkflowRun>, sqlx::Error> {
