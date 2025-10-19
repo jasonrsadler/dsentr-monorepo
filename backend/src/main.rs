@@ -23,6 +23,7 @@ use db::oauth_token_repository::UserOAuthTokenRepository;
 use db::postgres_oauth_token_repository::PostgresUserOAuthTokenRepository;
 use db::postgres_user_repository::PostgresUserRepository;
 use db::postgres_workflow_repository::PostgresWorkflowRepository;
+use db::postgres_workspace_connection_repository::PostgresWorkspaceConnectionRepository;
 use db::postgres_workspace_repository::PostgresWorkspaceRepository;
 use reqwest::Client;
 use responses::JsonResponse;
@@ -56,6 +57,7 @@ use routes::{
 use services::oauth::account_service::OAuthAccountService;
 use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
+use services::oauth::workspace_service::WorkspaceOAuthService;
 use sqlx::PgPool;
 use std::{net::SocketAddr, sync::Arc};
 #[cfg(not(feature = "tls"))]
@@ -69,6 +71,7 @@ use utils::csrf::{get_csrf_token, validate_csrf};
 
 use crate::db::{
     user_repository::UserRepository, workflow_repository::WorkflowRepository,
+    workspace_connection_repository::WorkspaceConnectionRepository,
     workspace_repository::WorkspaceRepository,
 };
 use crate::services::smtp_mailer::SmtpMailer;
@@ -184,21 +187,32 @@ async fn main() {
     let oauth_repo = Arc::new(PostgresUserOAuthTokenRepository {
         pool: pg_pool.clone(),
     }) as Arc<dyn UserOAuthTokenRepository>;
+    let workspace_connection_repo = Arc::new(PostgresWorkspaceConnectionRepository {
+        pool: pg_pool.clone(),
+    }) as Arc<dyn WorkspaceConnectionRepository>;
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_accounts = Arc::new(OAuthAccountService::new(
         oauth_repo.clone(),
-        Arc::new(config.oauth.token_encryption_key.clone()),
+        encryption_key.clone(),
         http_client_arc.clone(),
         &config.oauth,
+    ));
+    let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
+        oauth_repo.clone(),
+        workspace_connection_repo.clone(),
+        encryption_key.clone(),
     ));
 
     let state = AppState {
         db: user_repo,
         workflow_repo,
         workspace_repo,
+        workspace_connection_repo,
         mailer,
         google_oauth,
         github_oauth,
         oauth_accounts,
+        workspace_oauth,
         http_client: http_client_arc,
         config: config.clone(),
         worker_id: Arc::new(uuid::Uuid::new_v4().to_string()),
@@ -379,6 +393,10 @@ async fn main() {
         .route(
             "/{workspace_id}/invites/{invite_id}/revoke",
             post(routes::workspaces::revoke_workspace_invitation),
+        )
+        .route(
+            "/{workspace_id}/connections/promote",
+            post(routes::workspaces::promote_workspace_connection),
         )
         .layer(csrf_layer.clone());
 

@@ -12,3 +12,6 @@
 ## Usage Tips
 - Keep external HTTP calls in these modules; routes should only orchestrate and shape responses.
 - Provide mock implementations in each module so tests remain deterministic (see `MockMailer`, `mock_github_oauth`, `mock_google_oauth`).
+
+## Change Reasons
+- Introduced workspace OAuth service for cloning encrypted tokens into workspace-level connections and emitting audit events.

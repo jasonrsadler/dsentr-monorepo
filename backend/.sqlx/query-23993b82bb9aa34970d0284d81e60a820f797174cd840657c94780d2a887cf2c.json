@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                user_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at\n            FROM user_oauth_tokens\n            WHERE user_id = $1 AND provider = $2::oauth_connection_provider\n            ",
+  "query": "\n            SELECT\n                id,\n                workspace_id,\n                created_by,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at\n            FROM workspace_connections\n            WHERE workspace_id = $1 AND provider = $2::oauth_connection_provider\n            ",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,16 @@
       },
       {
         "ordinal": 1,
-        "name": "user_id",
+        "name": "workspace_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 2,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
         "name": "provider: _",
         "type_info": {
           "Custom": {
@@ -29,32 +34,32 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "access_token",
         "type_info": "Text"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "refresh_token",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "account_email",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -84,8 +89,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "205848491210b67af98a0557c3acf0792c92793283dedeb6dbba382aadd7914e"
+  "hash": "23993b82bb9aa34970d0284d81e60a820f797174cd840657c94780d2a887cf2c"
 }

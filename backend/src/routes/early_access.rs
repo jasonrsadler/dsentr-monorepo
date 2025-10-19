@@ -39,11 +39,15 @@ mod tests {
 
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
-        db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+        db::{
+            mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+            workspace_connection_repository::NoopWorkspaceConnectionRepository,
+        },
         services::{
             oauth::{
                 account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
                 google::mock_google_oauth::MockGoogleOAuth,
+                workspace_service::WorkspaceOAuthService,
             },
             smtp_mailer::MockMailer,
         },
@@ -80,10 +84,12 @@ mod tests {
                 db: Arc::new(db),
                 workflow_repo: Arc::new(NoopWorkflowRepository),
                 workspace_repo: Arc::new(NoopWorkspaceRepository),
+                workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
                 mailer: Arc::new(MockMailer::default()),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),
                 oauth_accounts: OAuthAccountService::test_stub(),
+                workspace_oauth: WorkspaceOAuthService::test_stub(),
                 http_client: Arc::new(Client::new()),
                 config: test_config(),
                 worker_id: Arc::new("test-worker".to_string()),

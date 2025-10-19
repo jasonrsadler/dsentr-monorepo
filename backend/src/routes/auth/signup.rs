@@ -204,6 +204,7 @@ mod tests {
         db::{
             mock_db::{NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::{UserId, UserRepository},
+            workspace_connection_repository::NoopWorkspaceConnectionRepository,
             workspace_repository::WorkspaceRepository,
         },
         models::{
@@ -218,6 +219,7 @@ mod tests {
             oauth::{
                 account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
                 google::mock_google_oauth::MockGoogleOAuth,
+                workspace_service::WorkspaceOAuthService,
             },
             smtp_mailer::{Mailer, MockMailer},
         },
@@ -690,10 +692,12 @@ mod tests {
                 db: Arc::new(repo),
                 workflow_repo: Arc::new(NoopWorkflowRepository),
                 workspace_repo,
+                workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
                 mailer: Arc::new(mailer),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),
                 oauth_accounts: OAuthAccountService::test_stub(),
+                workspace_oauth: WorkspaceOAuthService::test_stub(),
                 http_client: Arc::new(Client::new()),
                 config: test_config(),
                 worker_id: Arc::new("test-worker".to_string()),

@@ -35,4 +35,11 @@ pub trait UserOAuthTokenRepository: Send + Sync {
 
     async fn list_tokens_for_user(&self, user_id: Uuid)
         -> Result<Vec<UserOAuthToken>, sqlx::Error>;
+
+    async fn mark_shared(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        is_shared: bool,
+    ) -> Result<UserOAuthToken, sqlx::Error>;
 }

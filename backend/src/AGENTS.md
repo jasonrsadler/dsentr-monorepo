@@ -14,3 +14,6 @@
 - When adding new dependencies that need to be shared across handlers, extend `AppState` and initialize them in `main.rs`.
 - Keep the trait object cloning cheap; prefer `Arc<dyn Trait>` and guard stateful clients (HTTP, DB pools) behind `Arc`.
 - Follow existing rate-limiter patterns when wiring new route groups to avoid opening the API to abuse.
+
+## Change Reasons
+- AppState now wires workspace OAuth promotion repositories/services for shared connection APIs.

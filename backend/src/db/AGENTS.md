@@ -17,3 +17,6 @@
 - Keep trait signatures exhaustive; services depend on these abstractions rather than concrete Postgres types.
 - When adding new queries, use the SQLx macros so compile-time checking stays intact—remember to run `cargo sqlx prepare` if the project relies on it.
 - Extend `MockDb` and the `Noop*Repository` helpers when writing tests that need to assert persistence behavior without a database.
+
+## Change Reasons
+- Added workspace connection repositories and shared-token helpers for promoting OAuth credentials into workspaces.

@@ -11,6 +11,7 @@ itly coordinated.
 - Prefer strongly typed structures and avoid `unwrap`/`expect` in production paths—propagate errors with `Result` and `thiserror
 `/`anyhow` patterns as appropriate.
 - App is run by using `cargo run --features tls` or just `cargo run` for non-ssl
+- Updated offline database for tests with `cargo sqlx prepare -- --manifest-path ./Cargo.toml --all-targets`
 
 ## Change Reasons
 - Workspace membership listing now accepts viewer roles so the Members settings tab can display roster data without forcing a workspace switch.

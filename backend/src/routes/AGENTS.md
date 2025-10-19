@@ -23,3 +23,4 @@
 
 ## Change Reasons
 - Solo plan downgrades now normalize owned workspaces back to the solo tier when processing plan changes.
+- Added promotion endpoint tests to cover workspace-level OAuth sharing and authorization checks.

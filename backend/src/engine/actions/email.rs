@@ -938,10 +938,14 @@ pub(crate) async fn execute_email(
 mod tests {
     use super::*;
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
-    use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
+    use crate::db::{
+        mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+        workspace_connection_repository::NoopWorkspaceConnectionRepository,
+    };
     use crate::services::oauth::account_service::OAuthAccountService;
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
+    use crate::services::oauth::workspace_service::WorkspaceOAuthService;
     use crate::services::smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig, TlsMode};
     use crate::state::AppState;
     use async_trait::async_trait;
@@ -1023,10 +1027,12 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("worker".to_string()),

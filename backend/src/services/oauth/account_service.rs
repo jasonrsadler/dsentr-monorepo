@@ -26,6 +26,7 @@ pub struct StoredOAuthToken {
     pub refresh_token: String,
     pub expires_at: OffsetDateTime,
     pub account_email: String,
+    pub is_shared: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +113,7 @@ impl OAuthAccountService {
             refresh_token: tokens.refresh_token,
             expires_at: stored.expires_at,
             account_email: stored.account_email,
+            is_shared: stored.is_shared,
         })
     }
 
@@ -163,6 +165,7 @@ impl OAuthAccountService {
                 .await?;
             decrypted.expires_at = updated.expires_at;
             decrypted.account_email = updated.account_email;
+            decrypted.is_shared = updated.is_shared;
         }
 
         Ok(decrypted)
@@ -466,6 +469,7 @@ impl OAuthAccountService {
             refresh_token,
             expires_at: record.expires_at,
             account_email: record.account_email,
+            is_shared: record.is_shared,
         })
     }
 
@@ -505,6 +509,15 @@ impl OAuthAccountService {
                 _user_id: Uuid,
             ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
                 Ok(vec![])
+            }
+
+            async fn mark_shared(
+                &self,
+                _user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _is_shared: bool,
+            ) -> Result<UserOAuthToken, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
             }
         }
 
@@ -567,6 +580,15 @@ mod tests {
             _user_id: Uuid,
         ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
             Ok(vec![])
+        }
+
+        async fn mark_shared(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(Error::RowNotFound)
         }
     }
 

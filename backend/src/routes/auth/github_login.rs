@@ -197,7 +197,10 @@ mod tests {
 
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
-        db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+        db::{
+            mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+            workspace_connection_repository::NoopWorkspaceConnectionRepository,
+        },
         routes::auth::github_login::{github_callback, github_login},
         services::{
             oauth::{
@@ -209,6 +212,7 @@ mod tests {
                     service::{GitHubOAuthService, GitHubUserInfo},
                 },
                 google::mock_google_oauth::MockGoogleOAuth,
+                workspace_service::WorkspaceOAuthService,
             },
             smtp_mailer::MockMailer,
         },
@@ -270,10 +274,12 @@ mod tests {
             db: repo,
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer,
             google_oauth,
             github_oauth,
             oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("test-worker".to_string()),
@@ -345,10 +351,12 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(FailingGitHubOAuth),
             oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("test-worker".to_string()),

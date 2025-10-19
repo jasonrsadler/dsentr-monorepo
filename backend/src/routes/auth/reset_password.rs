@@ -92,6 +92,7 @@ mod tests {
         db::{
             mock_db::{NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::{UserId, UserRepository},
+            workspace_connection_repository::NoopWorkspaceConnectionRepository,
         },
         models::{
             signup::SignupPayload,
@@ -99,7 +100,7 @@ mod tests {
         },
         services::oauth::{
             account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
-            google::mock_google_oauth::MockGoogleOAuth,
+            google::mock_google_oauth::MockGoogleOAuth, workspace_service::WorkspaceOAuthService,
         },
         state::AppState,
     };
@@ -272,10 +273,12 @@ mod tests {
             db,
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer: Arc::new(crate::services::smtp_mailer::MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("test-worker".to_string()),

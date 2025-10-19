@@ -7,8 +7,11 @@ use axum_extra::extract::cookie::CookieJar;
 use std::sync::Arc;
 
 use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
-use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
-use crate::db::workspace_repository::WorkspaceRepository;
+use crate::db::{
+    mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+    workspace_connection_repository::NoopWorkspaceConnectionRepository,
+    workspace_repository::WorkspaceRepository,
+};
 use crate::models::user::UserRole;
 use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
 use crate::routes::auth::{claims::Claims, session::AuthSession};
@@ -17,6 +20,7 @@ use crate::services::{
         account_service::{OAuthAccountError, OAuthAccountService},
         github::mock_github_oauth::MockGitHubOAuth,
         google::mock_google_oauth::MockGoogleOAuth,
+        workspace_service::WorkspaceOAuthService,
     },
     smtp_mailer::MockMailer,
 };
@@ -60,10 +64,12 @@ fn stub_state(config: Arc<Config>) -> AppState {
         db: Arc::new(MockDb::default()),
         workflow_repo: Arc::new(NoopWorkflowRepository),
         workspace_repo: Arc::new(NoopWorkspaceRepository),
+        workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
         mailer: Arc::new(MockMailer::default()),
         google_oauth: Arc::new(MockGoogleOAuth::default()),
         github_oauth: Arc::new(MockGitHubOAuth::default()),
         oauth_accounts: OAuthAccountService::test_stub(),
+        workspace_oauth: WorkspaceOAuthService::test_stub(),
         http_client: Arc::new(reqwest::Client::new()),
         config,
         worker_id: Arc::new("test-worker".into()),

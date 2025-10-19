@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                user_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at\n            FROM user_oauth_tokens\n            WHERE user_id = $1\n            ORDER BY provider\n            ",
+  "query": "\n            UPDATE user_oauth_tokens\n            SET is_shared = $3, updated_at = now()\n            WHERE user_id = $1 AND provider = $2::oauth_connection_provider\n            RETURNING\n                id,\n                user_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                is_shared,\n                created_at,\n                updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -50,18 +50,35 @@
       },
       {
         "ordinal": 7,
+        "name": "is_shared",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        {
+          "Custom": {
+            "name": "oauth_connection_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "microsoft"
+              ]
+            }
+          }
+        },
+        "Bool"
       ]
     },
     "nullable": [
@@ -73,8 +90,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "6bf4839f1db63689e8f0c683bda3068f6d17a2ee5cf50faef39bc28ff0eb30ff"
+  "hash": "27d5e50a725541017db990f318f0b45cffeed8101f91d110ac28bf48ad971851"
 }

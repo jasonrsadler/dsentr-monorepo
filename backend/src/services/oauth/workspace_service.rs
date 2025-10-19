@@ -1,0 +1,467 @@
+use std::sync::Arc;
+
+use serde_json::json;
+use thiserror::Error;
+use time::OffsetDateTime;
+use uuid::Uuid;
+
+use crate::db::oauth_token_repository::UserOAuthTokenRepository;
+use crate::db::workspace_connection_repository::{
+    NewWorkspaceAuditEvent, NewWorkspaceConnection, WorkspaceConnectionRepository,
+};
+use crate::models::oauth_token::{
+    ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection,
+    WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED,
+};
+use crate::utils::encryption::{decrypt_secret, EncryptionError};
+
+#[derive(Debug, Clone)]
+pub struct DecryptedWorkspaceConnection {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub created_by: Uuid,
+    pub provider: ConnectedOAuthProvider,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: OffsetDateTime,
+    pub account_email: String,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Error, Debug)]
+pub enum WorkspaceOAuthError {
+    #[error("token not found")]
+    NotFound,
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("encryption error: {0}")]
+    Encryption(#[from] EncryptionError),
+}
+
+#[derive(Clone)]
+pub struct WorkspaceOAuthService {
+    user_tokens: Arc<dyn UserOAuthTokenRepository>,
+    workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
+    encryption_key: Arc<Vec<u8>>,
+}
+
+impl WorkspaceOAuthService {
+    pub fn new(
+        user_tokens: Arc<dyn UserOAuthTokenRepository>,
+        workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
+        encryption_key: Arc<Vec<u8>>,
+    ) -> Self {
+        Self {
+            user_tokens,
+            workspace_connections,
+            encryption_key,
+        }
+    }
+
+    pub async fn promote_connection(
+        &self,
+        workspace_id: Uuid,
+        actor_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<WorkspaceConnection, WorkspaceOAuthError> {
+        let token = self.load_token(actor_id, provider).await?;
+
+        let connection = self
+            .workspace_connections
+            .insert_connection(NewWorkspaceConnection {
+                workspace_id,
+                created_by: actor_id,
+                provider,
+                access_token: token.access_token.clone(),
+                refresh_token: token.refresh_token.clone(),
+                expires_at: token.expires_at,
+                account_email: token.account_email.clone(),
+            })
+            .await?;
+
+        let _ = self
+            .user_tokens
+            .mark_shared(actor_id, provider, true)
+            .await?;
+
+        let metadata = json!({
+            "provider": provider,
+            "account_email": token.account_email,
+        });
+
+        let _ = self
+            .workspace_connections
+            .record_audit_event(NewWorkspaceAuditEvent {
+                workspace_id,
+                actor_id,
+                event_type: WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED.to_string(),
+                metadata,
+            })
+            .await?;
+
+        Ok(connection)
+    }
+
+    pub async fn get_connection(
+        &self,
+        workspace_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<DecryptedWorkspaceConnection, WorkspaceOAuthError> {
+        let record = self
+            .workspace_connections
+            .find_by_workspace_and_provider(workspace_id, provider)
+            .await?
+            .ok_or(WorkspaceOAuthError::NotFound)?;
+        self.decrypt_connection(record)
+    }
+
+    fn decrypt_connection(
+        &self,
+        record: WorkspaceConnection,
+    ) -> Result<DecryptedWorkspaceConnection, WorkspaceOAuthError> {
+        Ok(DecryptedWorkspaceConnection {
+            id: record.id,
+            workspace_id: record.workspace_id,
+            created_by: record.created_by,
+            provider: record.provider,
+            access_token: decrypt_secret(&self.encryption_key, &record.access_token)?,
+            refresh_token: decrypt_secret(&self.encryption_key, &record.refresh_token)?,
+            expires_at: record.expires_at,
+            account_email: record.account_email,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+        })
+    }
+
+    async fn load_token(
+        &self,
+        actor_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<UserOAuthToken, WorkspaceOAuthError> {
+        let record = self
+            .user_tokens
+            .find_by_user_and_provider(actor_id, provider)
+            .await?
+            .ok_or(WorkspaceOAuthError::NotFound)?;
+
+        if record.user_id != actor_id {
+            return Err(WorkspaceOAuthError::NotFound);
+        }
+
+        Ok(record)
+    }
+
+    #[cfg(test)]
+    pub fn test_stub() -> Arc<Self> {
+        use async_trait::async_trait;
+
+        struct StubUserRepo;
+
+        #[async_trait]
+        impl UserOAuthTokenRepository for StubUserRepo {
+            async fn upsert_token(
+                &self,
+                _new_token: crate::db::oauth_token_repository::NewUserOAuthToken,
+            ) -> Result<UserOAuthToken, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
+            }
+
+            async fn find_by_user_and_provider(
+                &self,
+                _user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+                Ok(None)
+            }
+
+            async fn delete_token(
+                &self,
+                _user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
+            async fn list_tokens_for_user(
+                &self,
+                _user_id: Uuid,
+            ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+                Ok(vec![])
+            }
+
+            async fn mark_shared(
+                &self,
+                _user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _is_shared: bool,
+            ) -> Result<UserOAuthToken, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
+            }
+        }
+
+        struct StubWorkspaceRepo;
+
+        #[async_trait]
+        impl WorkspaceConnectionRepository for StubWorkspaceRepo {
+            async fn insert_connection(
+                &self,
+                _new_connection: NewWorkspaceConnection,
+            ) -> Result<WorkspaceConnection, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
+            }
+
+            async fn find_by_workspace_and_provider(
+                &self,
+                _workspace_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+                Ok(None)
+            }
+
+            async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
+            async fn record_audit_event(
+                &self,
+                _event: NewWorkspaceAuditEvent,
+            ) -> Result<crate::models::oauth_token::WorkspaceAuditEvent, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
+            }
+        }
+
+        Arc::new(Self {
+            user_tokens: Arc::new(StubUserRepo),
+            workspace_connections: Arc::new(StubWorkspaceRepo),
+            encryption_key: Arc::new(vec![0u8; 32]),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+    use time::Duration;
+
+    use crate::db::oauth_token_repository::NewUserOAuthToken;
+    use crate::utils::encryption::encrypt_secret;
+
+    struct InMemoryUserRepo {
+        token: Mutex<Option<UserOAuthToken>>,
+        shared_flag: Mutex<bool>,
+    }
+
+    #[async_trait]
+    impl UserOAuthTokenRepository for InMemoryUserRepo {
+        async fn upsert_token(
+            &self,
+            _new_token: NewUserOAuthToken,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn find_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            let token = self.token.lock().unwrap();
+            Ok(token
+                .clone()
+                .filter(|record| record.user_id == user_id && record.provider == provider))
+        }
+
+        async fn delete_token(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn mark_shared(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            let mut flag = self.shared_flag.lock().unwrap();
+            *flag = is_shared;
+            let token = self.token.lock().unwrap();
+            token.clone().ok_or(sqlx::Error::RowNotFound)
+        }
+    }
+
+    struct InMemoryWorkspaceRepo {
+        connection: Mutex<Option<WorkspaceConnection>>,
+        events: Mutex<Vec<crate::models::oauth_token::WorkspaceAuditEvent>>,
+    }
+
+    impl InMemoryWorkspaceRepo {
+        fn new() -> Self {
+            Self {
+                connection: Mutex::new(None),
+                events: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceConnectionRepository for InMemoryWorkspaceRepo {
+        async fn insert_connection(
+            &self,
+            new_connection: NewWorkspaceConnection,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            let record = WorkspaceConnection {
+                id: Uuid::new_v4(),
+                workspace_id: new_connection.workspace_id,
+                created_by: new_connection.created_by,
+                provider: new_connection.provider,
+                access_token: new_connection.access_token,
+                refresh_token: new_connection.refresh_token,
+                expires_at: new_connection.expires_at,
+                account_email: new_connection.account_email,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            };
+            let mut guard = self.connection.lock().unwrap();
+            *guard = Some(record.clone());
+            Ok(record)
+        }
+
+        async fn find_by_workspace_and_provider(
+            &self,
+            workspace_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            let guard = self.connection.lock().unwrap();
+            Ok(guard.clone().filter(|record| {
+                record.workspace_id == workspace_id && record.provider == provider
+            }))
+        }
+
+        async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn record_audit_event(
+            &self,
+            event: NewWorkspaceAuditEvent,
+        ) -> Result<crate::models::oauth_token::WorkspaceAuditEvent, sqlx::Error> {
+            let audit = crate::models::oauth_token::WorkspaceAuditEvent {
+                id: Uuid::new_v4(),
+                workspace_id: event.workspace_id,
+                actor_id: event.actor_id,
+                event_type: event.event_type,
+                metadata: event.metadata,
+                created_at: OffsetDateTime::now_utc(),
+            };
+            let mut guard = self.events.lock().unwrap();
+            guard.push(audit.clone());
+            Ok(audit)
+        }
+    }
+
+    #[tokio::test]
+    async fn promote_connection_copies_encrypted_tokens_and_marks_shared() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let key = Arc::new(vec![7u8; 32]);
+        let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+        let encrypted_access = encrypt_secret(&key, "access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "refresh").unwrap();
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(Some(UserOAuthToken {
+                id: Uuid::new_v4(),
+                user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "user@example.com".into(),
+                is_shared: false,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            })),
+            shared_flag: Mutex::new(false),
+        });
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+
+        let service = WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), key);
+
+        let result = service
+            .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Google)
+            .await
+            .expect("promotion succeeds");
+
+        assert_eq!(result.workspace_id, workspace_id);
+        assert_eq!(result.created_by, user_id);
+        assert_eq!(result.access_token, encrypted_access);
+        assert_eq!(result.refresh_token, encrypted_refresh);
+
+        let shared = *user_repo.shared_flag.lock().unwrap();
+        assert!(shared, "user token should be marked shared");
+
+        let events = workspace_repo.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_type,
+            WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED
+        );
+    }
+
+    #[tokio::test]
+    async fn get_connection_decrypts_tokens() {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![9u8; 32]);
+        let expires_at = OffsetDateTime::now_utc();
+        let encrypted_access = encrypt_secret(&key, "access-token").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "refresh-token").unwrap();
+
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: Uuid::new_v4(),
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Microsoft,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "user@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(None),
+            shared_flag: Mutex::new(false),
+        });
+
+        let service = WorkspaceOAuthService::new(user_repo, workspace_repo, key);
+
+        let connection = service
+            .get_connection(workspace_id, ConnectedOAuthProvider::Microsoft)
+            .await
+            .expect("connection exists");
+
+        assert_eq!(connection.workspace_id, workspace_id);
+        assert_eq!(connection.provider, ConnectedOAuthProvider::Microsoft);
+        assert_eq!(connection.access_token, "access-token");
+        assert_eq!(connection.refresh_token, "refresh-token");
+    }
+}

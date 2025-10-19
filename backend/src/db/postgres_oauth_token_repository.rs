@@ -43,6 +43,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 refresh_token,
                 expires_at,
                 account_email,
+                is_shared,
                 created_at,
                 updated_at
             "#,
@@ -73,6 +74,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 refresh_token,
                 expires_at,
                 account_email,
+                is_shared,
                 created_at,
                 updated_at
             FROM user_oauth_tokens
@@ -118,6 +120,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 refresh_token,
                 expires_at,
                 account_email,
+                is_shared,
                 created_at,
                 updated_at
             FROM user_oauth_tokens
@@ -127,6 +130,38 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
             user_id
         )
         .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn mark_shared(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        is_shared: bool,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        sqlx::query_as!(
+            UserOAuthToken,
+            r#"
+            UPDATE user_oauth_tokens
+            SET is_shared = $3, updated_at = now()
+            WHERE user_id = $1 AND provider = $2::oauth_connection_provider
+            RETURNING
+                id,
+                user_id,
+                provider as "provider: _",
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                is_shared,
+                created_at,
+                updated_at
+            "#,
+            user_id,
+            provider as ConnectedOAuthProvider,
+            is_shared,
+        )
+        .fetch_one(&self.pool)
         .await
     }
 }

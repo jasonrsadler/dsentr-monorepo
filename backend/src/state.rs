@@ -1,11 +1,12 @@
 use crate::config::Config;
 use crate::db::{
     user_repository::UserRepository, workflow_repository::WorkflowRepository,
+    workspace_connection_repository::WorkspaceConnectionRepository,
     workspace_repository::WorkspaceRepository,
 };
 use crate::services::oauth::{
     account_service::OAuthAccountService, github::service::GitHubOAuthService,
-    google::service::GoogleOAuthService,
+    google::service::GoogleOAuthService, workspace_service::WorkspaceOAuthService,
 };
 use crate::services::smtp_mailer::Mailer;
 use crate::utils::plan_limits::NormalizedPlanTier;
@@ -19,10 +20,12 @@ pub struct AppState {
     pub db: Arc<dyn UserRepository>,
     pub workflow_repo: Arc<dyn WorkflowRepository>,
     pub workspace_repo: Arc<dyn WorkspaceRepository>,
+    pub workspace_connection_repo: Arc<dyn WorkspaceConnectionRepository>,
     pub mailer: Arc<dyn Mailer>,
     pub google_oauth: Arc<dyn GoogleOAuthService>,
     pub github_oauth: Arc<dyn GitHubOAuthService + Send + Sync>,
     pub oauth_accounts: Arc<OAuthAccountService>,
+    pub workspace_oauth: Arc<WorkspaceOAuthService>,
     pub http_client: Arc<Client>,
     pub config: Arc<Config>,
     pub worker_id: Arc<String>,
@@ -55,6 +58,7 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
+    use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
     use crate::models::user::{OauthProvider, User, UserRole};
     use crate::services::{
         oauth::{
@@ -141,10 +145,12 @@ mod tests {
             db: Arc::new(db),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client: Arc::new(Client::new()),
             config,
             worker_id: Arc::new("test-worker".into()),

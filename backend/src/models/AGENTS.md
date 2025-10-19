@@ -22,3 +22,6 @@
 ## Usage Tips
 - These structs derive `sqlx::FromRow` where applicable, so SQLx queries can hydrate them directly.
 - When adding new columns in migrations, update the corresponding struct and ensure serde/time annotations stay in sync with API expectations.
+
+## Change Reasons
+- Documented workspace connection models and shared token flag for OAuth promotion flows.

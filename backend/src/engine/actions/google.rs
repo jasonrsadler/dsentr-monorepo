@@ -327,9 +327,13 @@ fn extract_error_message(body: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
-    use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
+    use crate::db::{
+        mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+        workspace_connection_repository::NoopWorkspaceConnectionRepository,
+    };
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
+    use crate::services::oauth::workspace_service::WorkspaceOAuthService;
     use crate::services::smtp_mailer::MockMailer;
     use once_cell::sync::Lazy;
     use reqwest::Client;
@@ -428,10 +432,12 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer: Arc::new(MockMailer::default()) as Arc<dyn Mailer>,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts,
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client,
             config: test_config(),
             worker_id: Arc::new("worker".to_string()),
@@ -484,6 +490,15 @@ mod tests {
                     Ok(vec![])
                 }
             }
+
+            async fn mark_shared(
+                &self,
+                _user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _is_shared: bool,
+            ) -> Result<UserOAuthToken, sqlx::Error> {
+                Ok(self.record.clone())
+            }
         }
 
         let key = Arc::new(vec![1u8; 32]);
@@ -501,6 +516,7 @@ mod tests {
             refresh_token: encrypted_refresh,
             expires_at: now + TimeDuration::hours(2),
             account_email: email.to_string(),
+            is_shared: false,
             created_at: now,
             updated_at: now,
         };

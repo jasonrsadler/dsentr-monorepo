@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, env};
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     response::{IntoResponse, Response},
     Json,
 };
@@ -13,6 +13,7 @@ use urlencoding::encode;
 use uuid::Uuid;
 
 use crate::{
+    models::oauth_token::ConnectedOAuthProvider,
     models::{
         user::PublicUser,
         workflow::Workflow,
@@ -23,6 +24,7 @@ use crate::{
     },
     responses::JsonResponse,
     routes::auth::session::AuthSession,
+    services::oauth::workspace_service::WorkspaceOAuthError,
     state::AppState,
     utils::{
         plan_limits::NormalizedPlanTier,
@@ -92,6 +94,11 @@ pub struct CompleteOnboardingPayload {
     pub workspace_name: Option<String>,
     #[serde(default)]
     pub shared_workflow_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PromoteWorkspaceConnectionPayload {
+    pub provider: ConnectedOAuthProvider,
 }
 
 async fn process_plan_change(
@@ -1450,19 +1457,70 @@ pub async fn workspace_to_solo_execute(
     Json(json!({"success": true})).into_response()
 }
 
+pub async fn promote_workspace_connection(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workspace_id): Path<Uuid>,
+    Json(payload): Json<PromoteWorkspaceConnectionPayload>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    if let Err(response) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return response;
+    }
+
+    match app_state
+        .workspace_oauth
+        .promote_connection(workspace_id, user_id, payload.provider)
+        .await
+    {
+        Ok(connection) => Json(json!({
+            "success": true,
+            "workspace_connection_id": connection.id,
+            "created_by": connection.created_by,
+        }))
+        .into_response(),
+        Err(WorkspaceOAuthError::NotFound) => {
+            JsonResponse::not_found("OAuth token not found for current user").into_response()
+        }
+        Err(err) => {
+            error!(
+                ?err,
+                %workspace_id,
+                %user_id,
+                "failed to promote workspace connection"
+            );
+            JsonResponse::server_error("Failed to promote workspace connection").into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         accept_invitation, build_invite_accept_url, change_plan, decline_invitation,
-        leave_workspace, preview_invitation, revoke_workspace_member, CompleteOnboardingPayload,
-        InvitationDecisionPayload, RevokeWorkspaceMemberPayload,
+        leave_workspace, preview_invitation, promote_workspace_connection, revoke_workspace_member,
+        CompleteOnboardingPayload, InvitationDecisionPayload, PromoteWorkspaceConnectionPayload,
+        RevokeWorkspaceMemberPayload,
     };
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
     use crate::db::{
         mock_db::{MockDb, NoopWorkflowRepository},
+        oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
+        workspace_connection_repository::{
+            NewWorkspaceAuditEvent, NewWorkspaceConnection, NoopWorkspaceConnectionRepository,
+            WorkspaceConnectionRepository,
+        },
         workspace_repository::WorkspaceRepository,
     };
     use crate::models::{
+        oauth_token::{
+            ConnectedOAuthProvider, UserOAuthToken, WorkspaceAuditEvent, WorkspaceConnection,
+            WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED,
+        },
         user::{OauthProvider, User, UserRole},
         workspace::{
             Workspace, WorkspaceInvitation, WorkspaceMember, WorkspaceMembershipSummary,
@@ -1473,13 +1531,19 @@ mod tests {
     use crate::services::{
         oauth::{
             account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
-            google::mock_google_oauth::MockGoogleOAuth,
+            google::mock_google_oauth::MockGoogleOAuth, workspace_service::WorkspaceOAuthService,
         },
-        smtp_mailer::{MailError, Mailer, SmtpConfig},
+        smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig},
     };
     use crate::state::AppState;
+    use crate::utils::encryption::encrypt_secret;
     use async_trait::async_trait;
-    use axum::{body::to_bytes, extract::State, http::StatusCode, Json};
+    use axum::{
+        body::to_bytes,
+        extract::{Path, State},
+        http::StatusCode,
+        Json,
+    };
     use reqwest::Client;
     use serde_json::Value;
     use std::{
@@ -1575,6 +1639,171 @@ mod tests {
 
         fn as_any(&self) -> &dyn std::any::Any {
             self
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct StubUserTokenRepo {
+        tokens: Arc<Mutex<HashMap<ConnectedOAuthProvider, UserOAuthToken>>>,
+        marks: Arc<Mutex<Vec<(Uuid, ConnectedOAuthProvider, bool)>>>,
+    }
+
+    impl StubUserTokenRepo {
+        fn with_token(token: UserOAuthToken) -> Self {
+            let mut map = HashMap::new();
+            map.insert(token.provider, token);
+            Self {
+                tokens: Arc::new(Mutex::new(map)),
+                marks: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn without_tokens() -> Self {
+            Self::default()
+        }
+
+        fn marks(&self) -> Vec<(Uuid, ConnectedOAuthProvider, bool)> {
+            self.marks.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl UserOAuthTokenRepository for StubUserTokenRepo {
+        async fn upsert_token(
+            &self,
+            _new_token: NewUserOAuthToken,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn find_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            let guard = self.tokens.lock().unwrap();
+            Ok(guard
+                .get(&provider)
+                .cloned()
+                .filter(|token| token.user_id == user_id))
+        }
+
+        async fn delete_token(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            user_id: Uuid,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            let guard = self.tokens.lock().unwrap();
+            Ok(guard
+                .values()
+                .filter(|token| token.user_id == user_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn mark_shared(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+            is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            self.marks
+                .lock()
+                .unwrap()
+                .push((user_id, provider, is_shared));
+
+            let mut guard = self.tokens.lock().unwrap();
+            if let Some(token) = guard.get_mut(&provider) {
+                if token.user_id == user_id {
+                    token.is_shared = is_shared;
+                    return Ok(token.clone());
+                }
+            }
+
+            Err(sqlx::Error::RowNotFound)
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct CapturingWorkspaceConnectionRepo {
+        connections: Arc<Mutex<Vec<WorkspaceConnection>>>,
+        audits: Arc<Mutex<Vec<WorkspaceAuditEvent>>>,
+    }
+
+    impl CapturingWorkspaceConnectionRepo {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn connections(&self) -> Vec<WorkspaceConnection> {
+            self.connections.lock().unwrap().clone()
+        }
+
+        fn audits(&self) -> Vec<WorkspaceAuditEvent> {
+            self.audits.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceConnectionRepository for CapturingWorkspaceConnectionRepo {
+        async fn insert_connection(
+            &self,
+            new_connection: NewWorkspaceConnection,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            let record = WorkspaceConnection {
+                id: Uuid::new_v4(),
+                workspace_id: new_connection.workspace_id,
+                created_by: new_connection.created_by,
+                provider: new_connection.provider,
+                access_token: new_connection.access_token,
+                refresh_token: new_connection.refresh_token,
+                expires_at: new_connection.expires_at,
+                account_email: new_connection.account_email,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            };
+
+            self.connections.lock().unwrap().push(record.clone());
+            Ok(record)
+        }
+
+        async fn find_by_workspace_and_provider(
+            &self,
+            workspace_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            let guard = self.connections.lock().unwrap();
+            Ok(guard
+                .iter()
+                .find(|record| record.workspace_id == workspace_id && record.provider == provider)
+                .cloned())
+        }
+
+        async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn record_audit_event(
+            &self,
+            event: NewWorkspaceAuditEvent,
+        ) -> Result<WorkspaceAuditEvent, sqlx::Error> {
+            let audit = WorkspaceAuditEvent {
+                id: Uuid::new_v4(),
+                workspace_id: event.workspace_id,
+                actor_id: event.actor_id,
+                event_type: event.event_type,
+                metadata: event.metadata,
+                created_at: OffsetDateTime::now_utc(),
+            };
+            self.audits.lock().unwrap().push(audit.clone());
+            Ok(audit)
         }
     }
 
@@ -2127,15 +2356,51 @@ mod tests {
         })
     }
 
+    fn promotion_state(
+        workspace_repo: Arc<dyn WorkspaceRepository>,
+        user_repo: Arc<StubUserTokenRepo>,
+        connection_repo: Arc<CapturingWorkspaceConnectionRepo>,
+        config: Arc<Config>,
+        encryption_key: Arc<Vec<u8>>,
+    ) -> AppState {
+        let workspace_connection_repo: Arc<dyn WorkspaceConnectionRepository> =
+            connection_repo.clone();
+        let user_token_repo: Arc<dyn UserOAuthTokenRepository> = user_repo.clone();
+
+        let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
+            user_token_repo.clone(),
+            workspace_connection_repo.clone(),
+            encryption_key,
+        ));
+
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo,
+            workspace_connection_repo,
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth,
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("worker-1".into()),
+            worker_lease_seconds: 30,
+        }
+    }
+
     fn test_state(repo: Arc<TestWorkspaceRepo>) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("worker-1".into()),
@@ -2152,10 +2417,12 @@ mod tests {
             db: db.clone(),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("worker-1".into()),
@@ -2191,6 +2458,228 @@ mod tests {
             plan: None,
             company_name: None,
         }
+    }
+
+    #[tokio::test]
+    async fn promote_workspace_connection_succeeds_for_admin() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let member = WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::Admin,
+            joined_at: now,
+            email: "owner@example.com".into(),
+            first_name: "Owner".into(),
+            last_name: "Admin".into(),
+        };
+        let workspace_repo: Arc<dyn WorkspaceRepository> = Arc::new(
+            RecordingWorkspaceRepo::seeded(workspace.clone(), vec![member.clone()]),
+        );
+
+        let encrypted_access = encrypt_secret(&encryption_key, "access-token").unwrap();
+        let encrypted_refresh = encrypt_secret(&encryption_key, "refresh-token").unwrap();
+
+        let user_token = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access.clone(),
+            refresh_token: encrypted_refresh.clone(),
+            expires_at: now + time::Duration::hours(1),
+            account_email: "owner@example.com".into(),
+            is_shared: false,
+            created_at: now,
+            updated_at: now,
+        };
+        let user_repo = Arc::new(StubUserTokenRepo::with_token(user_token));
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::new());
+
+        let state = promotion_state(
+            workspace_repo,
+            user_repo.clone(),
+            connection_repo.clone(),
+            Arc::clone(&config),
+            Arc::clone(&encryption_key),
+        );
+
+        let response = promote_workspace_connection(
+            State(state),
+            AuthSession(claims_fixture(user_id, "owner@example.com")),
+            Path(workspace_id),
+            Json(PromoteWorkspaceConnectionPayload {
+                provider: ConnectedOAuthProvider::Google,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["success"], Value::Bool(true));
+        assert_eq!(json["created_by"], Value::String(user_id.to_string()));
+
+        let inserted = connection_repo.connections();
+        assert_eq!(inserted.len(), 1);
+        assert_eq!(inserted[0].workspace_id, workspace_id);
+        assert_eq!(inserted[0].created_by, user_id);
+        assert_eq!(inserted[0].access_token, encrypted_access);
+        assert_eq!(inserted[0].refresh_token, encrypted_refresh);
+
+        let marks = user_repo.marks();
+        assert_eq!(marks, vec![(user_id, ConnectedOAuthProvider::Google, true)]);
+
+        let audits = connection_repo.audits();
+        assert_eq!(audits.len(), 1);
+        assert_eq!(
+            audits[0].event_type,
+            WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED
+        );
+        assert_eq!(audits[0].workspace_id, workspace_id);
+        assert_eq!(audits[0].actor_id, user_id);
+    }
+
+    #[tokio::test]
+    async fn promote_workspace_connection_rejects_member_role() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let member = WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::User,
+            joined_at: now,
+            email: "member@example.com".into(),
+            first_name: "Member".into(),
+            last_name: "User".into(),
+        };
+        let workspace_repo: Arc<dyn WorkspaceRepository> = Arc::new(
+            RecordingWorkspaceRepo::seeded(workspace.clone(), vec![member.clone()]),
+        );
+
+        let token = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&encryption_key, "access").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "refresh").unwrap(),
+            expires_at: now + time::Duration::hours(1),
+            account_email: "member@example.com".into(),
+            is_shared: false,
+            created_at: now,
+            updated_at: now,
+        };
+        let user_repo = Arc::new(StubUserTokenRepo::with_token(token));
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::new());
+
+        let state = promotion_state(
+            workspace_repo,
+            user_repo.clone(),
+            connection_repo.clone(),
+            Arc::clone(&config),
+            Arc::clone(&encryption_key),
+        );
+
+        let response = promote_workspace_connection(
+            State(state),
+            AuthSession(claims_fixture(user_id, "member@example.com")),
+            Path(workspace_id),
+            Json(PromoteWorkspaceConnectionPayload {
+                provider: ConnectedOAuthProvider::Google,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(user_repo.marks().is_empty());
+        assert!(connection_repo.connections().is_empty());
+    }
+
+    #[tokio::test]
+    async fn promote_workspace_connection_returns_not_found_without_token() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let member = WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::Admin,
+            joined_at: now,
+            email: "owner@example.com".into(),
+            first_name: "Owner".into(),
+            last_name: "User".into(),
+        };
+        let workspace_repo: Arc<dyn WorkspaceRepository> = Arc::new(
+            RecordingWorkspaceRepo::seeded(workspace.clone(), vec![member.clone()]),
+        );
+
+        let user_repo = Arc::new(StubUserTokenRepo::without_tokens());
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::new());
+
+        let state = promotion_state(
+            workspace_repo,
+            user_repo.clone(),
+            connection_repo.clone(),
+            Arc::clone(&config),
+            Arc::clone(&encryption_key),
+        );
+
+        let response = promote_workspace_connection(
+            State(state),
+            AuthSession(claims_fixture(user_id, "owner@example.com")),
+            Path(workspace_id),
+            Json(PromoteWorkspaceConnectionPayload {
+                provider: ConnectedOAuthProvider::Google,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(user_repo.marks().is_empty());
+        assert!(connection_repo.connections().is_empty());
     }
 
     #[test]

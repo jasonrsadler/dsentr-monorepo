@@ -20,3 +20,6 @@
   - `workspaces.owner_id` to mirror the current owner (separate from the original `created_by` author), `plan` as the workspace plan slug (`solo`, `workspace`, etc.), and `deleted_at` soft-delete tracking.
   - `workspace_invitations.status` constrained to `pending`, `accepted`, `revoked`, or `declined`, with `token` enforced as globally unique.
   - `workspace_member_audit` rows capturing `workspace_id`, `member_id`, `actor_id`, normalized `action` text, optional `reason`, and an automatic `recorded_at` timestamp for membership changes.
+
+## Change Reasons
+- Added workspace connection and audit event migration to back shared OAuth token promotion.

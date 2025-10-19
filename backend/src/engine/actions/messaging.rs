@@ -1125,14 +1125,18 @@ mod tests {
     use crate::engine::graph::Node;
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings},
-        db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
         db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
+        db::{
+            mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+            workspace_connection_repository::NoopWorkspaceConnectionRepository,
+        },
         models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken},
         models::workflow_run::WorkflowRun,
         services::{
             oauth::{
                 account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
                 google::mock_google_oauth::MockGoogleOAuth,
+                workspace_service::WorkspaceOAuthService,
             },
             smtp_mailer::MockMailer,
         },
@@ -1285,10 +1289,12 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts,
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
             http_client: Arc::new(Client::new()),
             config,
             worker_id: Arc::new("worker".to_string()),
@@ -1369,6 +1375,15 @@ mod tests {
             } else {
                 Ok(vec![])
             }
+        }
+
+        async fn mark_shared(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _is_shared: bool,
+        ) -> Result<UserOAuthToken, SqlxError> {
+            Ok(self.record.clone())
         }
     }
 
@@ -2028,6 +2043,7 @@ mod tests {
             refresh_token: encrypted_refresh,
             expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
             account_email: "alice@example.com".into(),
+            is_shared: false,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
         };
