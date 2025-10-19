@@ -3,6 +3,7 @@ use crate::engine::templating::templ_str;
 use crate::models::oauth_token::ConnectedOAuthProvider;
 use crate::models::workflow_run::WorkflowRun;
 use crate::services::oauth::account_service::{OAuthAccountError, StoredOAuthToken};
+use crate::services::oauth::workspace_service::WorkspaceOAuthError;
 use crate::state::AppState;
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
@@ -13,6 +14,8 @@ use std::collections::HashSet;
 use tracing::{info, warn};
 use urlencoding::encode;
 use uuid::Uuid;
+
+use super::{resolve_connection_usage, NodeConnectionUsage};
 
 const DEFAULT_MICROSOFT_GRAPH_BASE_URL: &str = "https://graph.microsoft.com/v1.0";
 
@@ -517,6 +520,37 @@ fn sanitize_teams_params(params: &Value) -> Value {
                 optional_string(params, "oauthProvider").unwrap_or_else(|| "microsoft".to_string());
             map.insert("oauthProvider".into(), Value::String(provider));
 
+            if let Some(connection_obj) = params.get("connection").and_then(|v| v.as_object()) {
+                let mut sanitized = Map::new();
+                if let Some(scope) = connection_obj
+                    .get("connectionScope")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
+                    sanitized.insert("connectionScope".into(), Value::String(scope.to_string()));
+                }
+                if let Some(id) = connection_obj
+                    .get("connectionId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
+                    sanitized.insert("connectionId".into(), Value::String(id.to_string()));
+                }
+                if let Some(email) = connection_obj
+                    .get("accountEmail")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
+                    sanitized.insert("accountEmail".into(), Value::String(email.to_string()));
+                }
+                if !sanitized.is_empty() {
+                    map.insert("connection".into(), Value::Object(sanitized));
+                }
+            }
+
             if let Some(connection) = optional_string(params, "oauthConnectionId") {
                 map.insert("oauthConnectionId".into(), Value::String(connection));
             }
@@ -753,6 +787,15 @@ async fn ensure_microsoft_access_token(
         })
 }
 
+fn map_workspace_microsoft_error(err: WorkspaceOAuthError) -> String {
+    match err {
+        WorkspaceOAuthError::NotFound => {
+            "Microsoft workspace connection not found or does not belong to this workspace. Promote the connection again from Settings → Integrations.".to_string()
+        }
+        other => format!("Failed to obtain Microsoft workspace connection: {other}"),
+    }
+}
+
 fn build_text_payload(message: &str, mentions: &[TeamsMentionEntry]) -> (Value, usize) {
     let mut content = text_to_html(message);
     let mut mention_entities = Vec::new();
@@ -884,19 +927,7 @@ async fn send_teams_delegated_oauth(
         );
     }
 
-    let connection = params
-        .get("oauthConnectionId")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            "Select a connected Microsoft account before using delegated Teams messaging"
-                .to_string()
-        })?;
-
-    if normalize_identifier(connection) != "microsoft" {
-        return Err("Unknown Microsoft OAuth connection selected".to_string());
-    }
+    let connection_usage = resolve_connection_usage(params)?;
 
     let team_id = params
         .get("teamId")
@@ -922,7 +953,58 @@ async fn send_teams_delegated_oauth(
         "Text"
     };
 
-    let token = ensure_microsoft_access_token(state, run.user_id).await?;
+    let (access_token, token_email) = match connection_usage {
+        NodeConnectionUsage::Workspace(info) => {
+            let workspace_id = run.workspace_id.ok_or_else(|| {
+                "This workflow run is not associated with a workspace. Promote the Microsoft connection to the workspace or switch the action back to a personal connection.".to_string()
+            })?;
+
+            let connection = state
+                .workspace_oauth
+                .ensure_valid_workspace_token(workspace_id, info.connection_id)
+                .await
+                .map_err(map_workspace_microsoft_error)?;
+
+            if connection.provider != ConnectedOAuthProvider::Microsoft {
+                return Err("Selected connection is not a Microsoft connection".to_string());
+            }
+
+            if let Some(expected) = info.account_email.as_ref() {
+                if !connection.account_email.eq_ignore_ascii_case(expected) {
+                    return Err(
+                        "Selected Microsoft connection does not match the expected account. Refresh your integration settings.".to_string(),
+                    );
+                }
+            }
+
+            (
+                connection.access_token.clone(),
+                connection.account_email.clone(),
+            )
+        }
+        NodeConnectionUsage::User(info) => {
+            let connection_hint = info.connection_id.clone().ok_or_else(|| {
+                "Select a connected Microsoft account before using delegated Teams messaging"
+                    .to_string()
+            })?;
+
+            if normalize_identifier(&connection_hint) != "microsoft" {
+                return Err("Unknown Microsoft OAuth connection selected".to_string());
+            }
+
+            let token = ensure_microsoft_access_token(state, run.user_id).await?;
+
+            if let Some(expected) = info.account_email.as_ref() {
+                if !token.account_email.eq_ignore_ascii_case(expected) {
+                    return Err(
+                        "Selected Microsoft account does not match the connected account. Refresh your integration settings.".to_string(),
+                    );
+                }
+            }
+
+            (token.access_token.clone(), token.account_email.clone())
+        }
+    };
 
     let base_url = microsoft_graph_base_url();
     let target = format!(
@@ -965,7 +1047,7 @@ async fn send_teams_delegated_oauth(
     let response = state
         .http_client
         .post(&target)
-        .bearer_auth(&token.access_token)
+        .bearer_auth(&access_token)
         .json(&payload)
         .send()
         .await
@@ -1020,15 +1102,8 @@ async fn send_teams_delegated_oauth(
         output["channelName"] = Value::String(channel_name.to_string());
     }
 
-    if let Some(email) = params
-        .get("oauthAccountEmail")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
-        output["oauthAccountEmail"] = Value::String(email.to_string());
-    } else if !token.account_email.trim().is_empty() {
-        output["oauthAccountEmail"] = Value::String(token.account_email.clone());
+    if !token_email.trim().is_empty() {
+        output["oauthAccountEmail"] = Value::String(token_email.clone());
     }
 
     if let Some(Value::Object(obj)) = parsed.as_ref() {
@@ -1312,6 +1387,7 @@ mod tests {
             id: Uuid::new_v4(),
             user_id: Uuid::new_v4(),
             workflow_id: Uuid::new_v4(),
+            workspace_id: None,
             snapshot: json!({}),
             status: "pending".into(),
             error: None,
@@ -1759,6 +1835,11 @@ mod tests {
             "oauthProvider": "microsoft",
             "oauthConnectionId": "microsoft",
             "oauthAccountEmail": "alice@example.com",
+            "connection": {
+                "connectionScope": "workspace",
+                "connectionId": "123",
+                "accountEmail": "alice@example.com"
+            },
             "teamId": "team-1",
             "teamName": "Team One",
             "channelId": "channel-7",
@@ -1793,6 +1874,31 @@ mod tests {
         );
         assert_eq!(
             map.get("oauthAccountEmail")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "alice@example.com"
+        );
+        let connection_obj = map
+            .get("connection")
+            .and_then(|v| v.as_object())
+            .expect("connection should be preserved");
+        assert_eq!(
+            connection_obj
+                .get("connectionScope")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "workspace"
+        );
+        assert_eq!(
+            connection_obj
+                .get("connectionId")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "123"
+        );
+        assert_eq!(
+            connection_obj
+                .get("accountEmail")
                 .and_then(|v| v.as_str())
                 .unwrap(),
             "alice@example.com"
@@ -2243,5 +2349,70 @@ mod tests {
             .expect_err("missing cards key should fail");
 
         assert_eq!(err, "Card JSON must include 'cards' or 'cardsV2'");
+    }
+
+    #[tokio::test]
+    async fn teams_workspace_connection_requires_workspace_context() {
+        let node = Node {
+            id: "teams-workspace".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Teams",
+                    "deliveryMethod": "Delegated OAuth (Post as user)",
+                    "oauthProvider": "microsoft",
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": Uuid::new_v4(),
+                    },
+                    "teamId": "team-1",
+                    "channelId": "channel-1",
+                    "messageType": "Text",
+                    "message": "Hello"
+                }
+            }),
+        };
+
+        let state = test_state();
+        let run = test_run();
+
+        let err = execute_messaging(&node, &Value::Null, &state, &run)
+            .await
+            .expect_err("workspace connections should require workspace context");
+
+        assert!(err.contains("not associated with a workspace"));
+    }
+
+    #[tokio::test]
+    async fn teams_workspace_connection_not_found_surfaces_message() {
+        let node = Node {
+            id: "teams-workspace-not-found".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Teams",
+                    "deliveryMethod": "Delegated OAuth (Post as user)",
+                    "oauthProvider": "microsoft",
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": Uuid::new_v4(),
+                    },
+                    "teamId": "team-1",
+                    "channelId": "channel-1",
+                    "messageType": "Text",
+                    "message": "Hello"
+                }
+            }),
+        };
+
+        let state = test_state();
+        let mut run = test_run();
+        run.workspace_id = Some(Uuid::new_v4());
+
+        let err = execute_messaging(&node, &Value::Null, &state, &run)
+            .await
+            .expect_err("missing workspace connection should bubble up error");
+
+        assert!(err.contains("workspace connection not found"));
     }
 }

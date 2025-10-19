@@ -430,7 +430,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             r#"
             INSERT INTO workflow_runs (user_id, workflow_id, snapshot, status, idempotency_key, started_at, created_at, updated_at)
             VALUES ($1, $2, $3, 'queued', $4, now(), now(), now())
-            RETURNING id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+            RETURNING id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                       started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
             "#,
             user_id,
@@ -452,7 +452,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                     let existing = sqlx::query_as!(
                         WorkflowRun,
                         r#"
-                        SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                        SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                                started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
                         FROM workflow_runs
                         WHERE user_id = $1 AND workflow_id = $2 AND idempotency_key = $3
@@ -482,7 +482,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         let row = sqlx::query_as!(
             WorkflowRun,
             r#"
-            SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+            SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                    started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
             FROM workflow_runs
             WHERE user_id = $1 AND workflow_id = $2 AND id = $3
@@ -538,7 +538,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             SET status = 'running', updated_at = now()
             FROM sel
             WHERE wr.id = sel.id
-            RETURNING wr.id, wr.user_id, wr.workflow_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,
+            RETURNING wr.id, wr.user_id, wr.workflow_id, wr.workspace_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,
                       wr.started_at, wr.finished_at, wr.created_at, wr.updated_at
             "#
         )
@@ -723,7 +723,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             let rows = sqlx::query_as!(
                 WorkflowRun,
                 r#"
-                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                        started_at as "started_at!", finished_at,
                        created_at as "created_at!", updated_at as "updated_at!"
                 FROM workflow_runs
@@ -742,7 +742,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             let rows = sqlx::query_as!(
                 WorkflowRun,
                 r#"
-                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                        started_at as "started_at!", finished_at,
                        created_at as "created_at!", updated_at as "updated_at!"
                 FROM workflow_runs
@@ -773,7 +773,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 let rows = sqlx::query_as!(
                     WorkflowRun,
                     r#"
-                    SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                    SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                            started_at as "started_at!", finished_at,
                            created_at as "created_at!", updated_at as "updated_at!"
                     FROM workflow_runs
@@ -795,7 +795,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 let rows = sqlx::query_as!(
                     WorkflowRun,
                     r#"
-                    SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                    SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                            started_at as "started_at!", finished_at,
                            created_at as "created_at!", updated_at as "updated_at!"
                     FROM workflow_runs
@@ -815,7 +815,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         } else if let Some(sts) = statuses {
             let rows = sqlx::query_as::<_, WorkflowRun>(
                 r#"
-                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                        started_at as "started_at!", finished_at,
                        created_at as "created_at!", updated_at as "updated_at!"
                 FROM workflow_runs
@@ -835,7 +835,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         } else {
             let rows = sqlx::query_as::<_, WorkflowRun>(
                 r#"
-                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                        started_at as "started_at!", finished_at,
                        created_at as "created_at!", updated_at as "updated_at!"
                 FROM workflow_runs
@@ -977,7 +977,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 updated_at = now()
             FROM sel
             WHERE wr.id = sel.id
-            RETURNING wr.id, wr.user_id, wr.workflow_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,
+            RETURNING wr.id, wr.user_id, wr.workflow_id, wr.workspace_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,
                       wr.started_at, wr.finished_at, wr.created_at, wr.updated_at
             "#
         )
@@ -989,6 +989,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             id: r.get("id"),
             user_id: r.get("user_id"),
             workflow_id: r.get("workflow_id"),
+            workspace_id: r.get("workspace_id"),
             snapshot: r.get("snapshot"),
             status: r.get("status"),
             error: r.get("error"),
@@ -1129,7 +1130,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 r#"
                 INSERT INTO workflow_runs (user_id, workflow_id, snapshot, status, started_at, created_at, updated_at)
                 VALUES ($1, $2, $3, 'queued', now(), now(), now())
-                RETURNING id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                RETURNING id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                           started_at, finished_at, created_at, updated_at
                 "#
             )
@@ -1142,6 +1143,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 id: new_run_row.get("id"),
                 user_id: new_run_row.get("user_id"),
                 workflow_id: new_run_row.get("workflow_id"),
+                workspace_id: new_run_row.get("workspace_id"),
                 snapshot: new_run_row.get("snapshot"),
                 status: new_run_row.get("status"),
                 error: new_run_row.get("error"),

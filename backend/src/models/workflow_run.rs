@@ -8,6 +8,7 @@ pub struct WorkflowRun {
     pub id: Uuid,
     pub user_id: Uuid,
     pub workflow_id: Uuid,
+    pub workspace_id: Option<Uuid>,
     pub snapshot: serde_json::Value,
     pub status: String,
     pub error: Option<String>,

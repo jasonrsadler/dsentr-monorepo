@@ -6,6 +6,7 @@ use crate::engine::templating::templ_str;
 use crate::models::oauth_token::ConnectedOAuthProvider;
 use crate::models::workflow_run::WorkflowRun;
 use crate::services::oauth::account_service::OAuthAccountError;
+use crate::services::oauth::workspace_service::WorkspaceOAuthError;
 use crate::state::AppState;
 use serde_json::{json, Map, Value};
 
@@ -21,7 +22,7 @@ pub(crate) async fn execute_sheets(
 
     let spreadsheet_id_raw = extract_required_str(&params, "spreadsheetId", "Spreadsheet ID")?;
     let worksheet_raw = extract_required_str(&params, "worksheet", "Worksheet name")?;
-    let account_email = extract_required_str(&params, "accountEmail", "Google account")?;
+    let connection_usage = super::resolve_connection_usage(&params)?;
 
     let spreadsheet_id = templ_str(spreadsheet_id_raw, context).trim().to_string();
     if spreadsheet_id.is_empty() {
@@ -103,20 +104,55 @@ pub(crate) async fn execute_sheets(
         row_values[offset] = entry.value.clone();
     }
 
-    let token = state
-        .oauth_accounts
-        .ensure_valid_access_token(run.user_id, ConnectedOAuthProvider::Google)
-        .await
-        .map_err(map_oauth_error)?;
+    let (access_token, resolved_email) = match connection_usage {
+        super::NodeConnectionUsage::Workspace(info) => {
+            let workspace_id = run.workspace_id.ok_or_else(|| {
+                "This workflow run is not associated with a workspace. Promote the Google connection to the workspace or switch the action back to a personal connection.".to_string()
+            })?;
 
-    if !token
-        .account_email
-        .eq_ignore_ascii_case(account_email.trim())
-    {
-        return Err(
-            "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
-        );
-    }
+            let connection = state
+                .workspace_oauth
+                .ensure_valid_workspace_token(workspace_id, info.connection_id)
+                .await
+                .map_err(map_workspace_oauth_error)?;
+
+            if connection.provider != ConnectedOAuthProvider::Google {
+                return Err("Selected connection is not a Google connection".to_string());
+            }
+
+            if let Some(expected) = info.account_email.as_ref() {
+                if !connection.account_email.eq_ignore_ascii_case(expected) {
+                    return Err(
+                        "Selected Google connection does not match the expected account. Refresh your integration settings.".to_string(),
+                    );
+                }
+            }
+
+            (
+                connection.access_token.clone(),
+                connection.account_email.clone(),
+            )
+        }
+        super::NodeConnectionUsage::User(info) => {
+            let expected = info.account_email.clone().ok_or_else(|| {
+                "Select a connected Google account before using this action".to_string()
+            })?;
+
+            let token = state
+                .oauth_accounts
+                .ensure_valid_access_token(run.user_id, ConnectedOAuthProvider::Google)
+                .await
+                .map_err(map_oauth_error)?;
+
+            if !token.account_email.eq_ignore_ascii_case(&expected) {
+                return Err(
+                    "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
+                );
+            }
+
+            (token.access_token.clone(), token.account_email.clone())
+        }
+    };
 
     let base_url = sheets_api_base();
     let spreadsheet_component = encode_path_component(&spreadsheet_id);
@@ -150,7 +186,7 @@ pub(crate) async fn execute_sheets(
     let response = state
         .http_client
         .post(url)
-        .bearer_auth(&token.access_token)
+        .bearer_auth(&access_token)
         .query(&[
             ("valueInputOption", "USER_ENTERED"),
             ("insertDataOption", "INSERT_ROWS"),
@@ -193,7 +229,7 @@ pub(crate) async fn execute_sheets(
     output.insert("worksheet".to_string(), Value::String(worksheet.clone()));
     output.insert(
         "accountEmail".to_string(),
-        Value::String(token.account_email.clone()),
+        Value::String(resolved_email.clone()),
     );
     output.insert("columns".to_string(), Value::Object(column_map));
     output.insert("values".to_string(), Value::Array(row_values_json));
@@ -293,6 +329,15 @@ fn map_oauth_error(err: OAuthAccountError) -> String {
                 .to_string()
         }
         other => format!("Failed to obtain Google access token: {other}"),
+    }
+}
+
+fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> String {
+    match err {
+        WorkspaceOAuthError::NotFound => {
+            "Google workspace connection not found or does not belong to this workspace. Promote the connection again from Settings → Integrations.".to_string()
+        }
+        other => format!("Failed to obtain Google workspace connection: {other}"),
     }
 }
 
@@ -416,6 +461,7 @@ mod tests {
             id: Uuid::new_v4(),
             user_id,
             workflow_id: Uuid::new_v4(),
+            workspace_id: None,
             snapshot: json!({}),
             status: "pending".to_string(),
             error: None,
@@ -612,6 +658,69 @@ mod tests {
             .expect_err("mismatched email should error");
 
         assert!(err.contains("does not match the connected account"));
+    }
+
+    #[tokio::test]
+    async fn workspace_connection_requires_workspace_context() {
+        let workspace_connection_id = Uuid::new_v4();
+        let node = Node {
+            id: "node-1".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "spreadsheetId": "abc123",
+                    "worksheet": "Sheet1",
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": workspace_connection_id,
+                    },
+                    "columns": [
+                        {"key": "A", "value": "1"}
+                    ]
+                }
+            }),
+        };
+
+        let state = test_state(OAuthAccountService::test_stub(), Arc::new(Client::new()));
+        let run = sample_run(Uuid::new_v4());
+
+        let err = execute_sheets(&node, &Value::Null, &state, &run)
+            .await
+            .expect_err("workspace connections should require workspace context");
+
+        assert!(err.contains("not associated with a workspace"));
+    }
+
+    #[tokio::test]
+    async fn workspace_connection_not_found_surfaces_message() {
+        let workspace_connection_id = Uuid::new_v4();
+        let node = Node {
+            id: "node-1".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "spreadsheetId": "abc123",
+                    "worksheet": "Sheet1",
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": workspace_connection_id,
+                    },
+                    "columns": [
+                        {"key": "A", "value": "1"}
+                    ]
+                }
+            }),
+        };
+
+        let state = test_state(OAuthAccountService::test_stub(), Arc::new(Client::new()));
+        let mut run = sample_run(Uuid::new_v4());
+        run.workspace_id = Some(Uuid::new_v4());
+
+        let err = execute_sheets(&node, &Value::Null, &state, &run)
+            .await
+            .expect_err("missing workspace connection should bubble up error");
+
+        assert!(err.contains("workspace connection not found"));
     }
 
     #[derive(Debug)]

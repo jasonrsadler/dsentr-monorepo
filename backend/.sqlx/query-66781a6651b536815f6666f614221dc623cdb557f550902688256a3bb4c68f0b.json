@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,\n                       started_at as \"started_at!\", finished_at,\n                       created_at as \"created_at!\", updated_at as \"updated_at!\"\n                FROM workflow_runs\n                WHERE user_id = $1\n                  AND workflow_id = $2\n                  AND status IN ('queued','running')\n                ORDER BY started_at ASC\n                ",
+  "query": "\n                    SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                           started_at as \"started_at!\", finished_at,\n                           created_at as \"created_at!\", updated_at as \"updated_at!\"\n                    FROM workflow_runs\n                    WHERE user_id = $1 AND workflow_id = $2\n                      AND ($3::text[] IS NULL OR status = ANY($3))\n                    ORDER BY created_at DESC\n                    LIMIT $4 OFFSET $5\n                    ",
   "describe": {
     "columns": [
       {
@@ -20,41 +20,46 @@
       },
       {
         "ordinal": 3,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
         "name": "snapshot",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "status",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "error",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "idempotency_key",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "started_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "finished_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "created_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
@@ -62,13 +67,17 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "Uuid",
+        "TextArray",
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      true,
       false,
       false,
       true,
@@ -79,5 +88,5 @@
       false
     ]
   },
-  "hash": "7e2690c9029457cd3e7f661ef7f4cd4a2052efdc6b671405dcb2ce5b64136f1d"
+  "hash": "66781a6651b536815f6666f614221dc623cdb557f550902688256a3bb4c68f0b"
 }

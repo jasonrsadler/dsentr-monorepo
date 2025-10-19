@@ -5,12 +5,100 @@ mod http;
 mod messaging;
 
 use serde_json::{json, Value};
+use uuid::Uuid;
 
 use crate::engine::templating::templ_str;
 use crate::models::workflow_run::WorkflowRun;
 use crate::state::AppState;
 
 use super::graph::Node;
+
+#[derive(Debug, Clone)]
+pub(crate) enum NodeConnectionUsage {
+    User(UserConnectionUsage),
+    Workspace(WorkspaceConnectionUsage),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UserConnectionUsage {
+    pub connection_id: Option<String>,
+    pub account_email: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WorkspaceConnectionUsage {
+    pub connection_id: Uuid,
+    pub account_email: Option<String>,
+}
+
+pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionUsage, String> {
+    let read_str = |value: Option<&Value>| -> Option<String> {
+        value
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    };
+
+    let connection_obj = params.get("connection").and_then(|value| value.as_object());
+
+    let scope = connection_obj
+        .and_then(|obj| read_str(obj.get("connectionScope")))
+        .or_else(|| read_str(params.get("connectionScope")));
+
+    let connection_id = connection_obj
+        .and_then(|obj| read_str(obj.get("connectionId")))
+        .or_else(|| read_str(params.get("connectionId")));
+
+    let account_email_connection = connection_obj.and_then(|obj| read_str(obj.get("accountEmail")));
+    let account_email_primary = read_str(params.get("accountEmail"));
+    let account_email_oauth = read_str(params.get("oauthAccountEmail"));
+
+    let account_email = || {
+        account_email_connection
+            .clone()
+            .or_else(|| account_email_primary.clone())
+            .or_else(|| account_email_oauth.clone())
+    };
+
+    if connection_obj.is_some() || scope.is_some() || connection_id.is_some() {
+        let scope_value = scope.clone().ok_or_else(|| {
+            "Connection scope is required when specifying a connection".to_string()
+        })?;
+
+        match scope_value.to_ascii_lowercase().as_str() {
+            "workspace" => {
+                let id_str = connection_id
+                    .clone()
+                    .ok_or_else(|| "Workspace connections require a connectionId".to_string())?;
+
+                let parsed_id = Uuid::parse_str(&id_str)
+                    .map_err(|_| "Workspace connectionId must be a valid UUID".to_string())?;
+
+                return Ok(NodeConnectionUsage::Workspace(WorkspaceConnectionUsage {
+                    connection_id: parsed_id,
+                    account_email: account_email(),
+                }));
+            }
+            "user" => {
+                return Ok(NodeConnectionUsage::User(UserConnectionUsage {
+                    connection_id,
+                    account_email: account_email(),
+                }));
+            }
+            other => {
+                return Err(format!("Unsupported connection scope `{}`", other));
+            }
+        }
+    }
+
+    let legacy_connection_id = read_str(params.get("oauthConnectionId"));
+
+    Ok(NodeConnectionUsage::User(UserConnectionUsage {
+        connection_id: legacy_connection_id,
+        account_email: account_email(),
+    }))
+}
 
 pub(crate) async fn execute_trigger(
     node: &Node,
