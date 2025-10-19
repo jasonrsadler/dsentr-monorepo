@@ -109,6 +109,7 @@ pub trait WorkflowRepository: Send + Sync {
         &self,
         user_id: Uuid,
         workflow_id: Uuid,
+        workspace_id: Option<Uuid>,
         snapshot: Value,
         idempotency_key: Option<&str>,
     ) -> Result<WorkflowRun, sqlx::Error>;

@@ -170,7 +170,13 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
 
     state
         .workflow_repo
-        .create_workflow_run(schedule.user_id, schedule.workflow_id, snapshot, None)
+        .create_workflow_run(
+            schedule.user_id,
+            schedule.workflow_id,
+            workflow.workspace_id,
+            snapshot,
+            None,
+        )
         .await?;
 
     let now = Utc::now();

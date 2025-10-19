@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                        SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                               started_at as \"started_at!\", finished_at, created_at as \"created_at!\", updated_at as \"updated_at!\"\n                        FROM workflow_runs\n                        WHERE user_id = $1 AND workflow_id = $2 AND idempotency_key = $3\n                        ORDER BY created_at DESC\n                        LIMIT 1\n                        ",
+  "query": "\n            INSERT INTO workflow_runs (user_id, workflow_id, workspace_id, snapshot, status, idempotency_key, started_at, created_at, updated_at)\n            VALUES ($1, $2, $3, $4, 'queued', $5, now(), now(), now())\n            RETURNING id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                      started_at as \"started_at!\", finished_at, created_at as \"created_at!\", updated_at as \"updated_at!\"\n            ",
   "describe": {
     "columns": [
       {
@@ -68,6 +68,8 @@
       "Left": [
         "Uuid",
         "Uuid",
+        "Uuid",
+        "Jsonb",
         "Text"
       ]
     },
@@ -86,5 +88,5 @@
       false
     ]
   },
-  "hash": "37755e1e169d45b2badcc9eeabc6d2ae1007d9e02d729542bd275375abce3fcb"
+  "hash": "2f7150d115bd76b14460af8f9fb0334a6177f609e91a7adcfe14fb00a079f663"
 }

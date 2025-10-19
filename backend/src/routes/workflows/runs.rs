@@ -140,7 +140,13 @@ pub async fn start_workflow_run(
 
     match app_state
         .workflow_repo
-        .create_workflow_run(owner_id, workflow_id, snapshot, idempotency_key)
+        .create_workflow_run(
+            owner_id,
+            workflow_id,
+            wf.workspace_id,
+            snapshot,
+            idempotency_key,
+        )
         .await
     {
         Ok(run) => {
@@ -444,6 +450,7 @@ pub async fn rerun_workflow_run(
         .create_workflow_run(
             workflow.user_id,
             workflow_id,
+            workflow.workspace_id,
             snapshot,
             payload.idempotency_key.as_deref(),
         )

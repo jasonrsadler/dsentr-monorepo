@@ -155,7 +155,7 @@ pub async fn webhook_trigger(
 
     match app_state
         .workflow_repo
-        .create_workflow_run(wf.user_id, wf.id, snapshot, None)
+        .create_workflow_run(wf.user_id, wf.id, wf.workspace_id, snapshot, None)
         .await
     {
         Ok(run) => (

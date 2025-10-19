@@ -308,6 +308,7 @@ impl WorkflowRepository for NoopWorkflowRepository {
         &self,
         _user_id: Uuid,
         _workflow_id: Uuid,
+        _workspace_id: Option<Uuid>,
         _snapshot: Value,
         _idempotency_key: Option<&str>,
     ) -> Result<WorkflowRun, sqlx::Error> {

@@ -421,6 +421,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         &self,
         user_id: Uuid,
         workflow_id: Uuid,
+        workspace_id: Option<Uuid>,
         snapshot: Value,
         idempotency_key: Option<&str>,
     ) -> Result<WorkflowRun, sqlx::Error> {
@@ -428,13 +429,14 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         let insert_res = sqlx::query_as!(
             WorkflowRun,
             r#"
-            INSERT INTO workflow_runs (user_id, workflow_id, snapshot, status, idempotency_key, started_at, created_at, updated_at)
-            VALUES ($1, $2, $3, 'queued', $4, now(), now(), now())
+            INSERT INTO workflow_runs (user_id, workflow_id, workspace_id, snapshot, status, idempotency_key, started_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, 'queued', $5, now(), now(), now())
             RETURNING id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                       started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
             "#,
             user_id,
             workflow_id,
+            workspace_id,
             snapshot,
             idempotency_key
         )
@@ -455,12 +457,15 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                         SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                                started_at as "started_at!", finished_at, created_at as "created_at!", updated_at as "updated_at!"
                         FROM workflow_runs
-                        WHERE user_id = $1 AND workflow_id = $2 AND idempotency_key = $3
+                        WHERE workflow_id = $1
+                          AND COALESCE(workspace_id, user_id) = COALESCE($3::uuid, $2)
+                          AND idempotency_key = $4
                         ORDER BY created_at DESC
                         LIMIT 1
                         "#,
-                        user_id,
                         workflow_id,
+                        user_id,
+                        workspace_id,
                         idempotency_key
                     )
                     .fetch_one(&self.pool)
@@ -1110,7 +1115,11 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         if let Some(dl) = maybe {
             // Refresh allowlist in snapshot before requeue
             let wf_row = sqlx::query!(
-                r#"SELECT egress_allowlist FROM workflows WHERE id = $1"#,
+                r#"
+                SELECT workspace_id, egress_allowlist
+                FROM workflows
+                WHERE id = $1
+                "#,
                 workflow_id
             )
             .fetch_one(&self.pool)
@@ -1128,14 +1137,15 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             }
             let new_run_row = sqlx::query(
                 r#"
-                INSERT INTO workflow_runs (user_id, workflow_id, snapshot, status, started_at, created_at, updated_at)
-                VALUES ($1, $2, $3, 'queued', now(), now(), now())
+                INSERT INTO workflow_runs (user_id, workflow_id, workspace_id, snapshot, status, started_at, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, 'queued', now(), now(), now())
                 RETURNING id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,
                           started_at, finished_at, created_at, updated_at
                 "#
             )
             .bind(user_id)
             .bind(workflow_id)
+            .bind(wf_row.workspace_id)
             .bind(new_snapshot)
             .fetch_one(&self.pool)
             .await?;
