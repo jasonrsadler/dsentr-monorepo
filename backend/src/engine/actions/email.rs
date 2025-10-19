@@ -1288,7 +1288,6 @@ mod tests {
 
     #[derive(Debug)]
     struct RecordedRequest {
-        method: Method,
         uri: Uri,
         headers: HeaderMap,
         body: Vec<u8>,
@@ -1316,7 +1315,7 @@ mod tests {
 
     async fn stub_handler<F>(
         State(state): State<StubState<F>>,
-        method: Method,
+        _method: Method,
         uri: Uri,
         headers: HeaderMap,
         body: Bytes,
@@ -1325,7 +1324,6 @@ mod tests {
         F: Fn() -> Response<Body> + Send + Sync + 'static,
     {
         let record = RecordedRequest {
-            method,
             uri,
             headers,
             body: body.to_vec(),
@@ -1384,7 +1382,7 @@ mod tests {
         };
 
         let app = Router::new()
-            .route("/v3/:domain/messages", post(stub_handler::<F>))
+            .route("/v3/{domain}/messages", post(stub_handler::<F>))
             .with_state(state);
 
         let server = axum::serve(listener, app.into_make_service());
@@ -1488,7 +1486,7 @@ mod tests {
             .await
             .expect("sendgrid email should succeed");
 
-        assert_eq!(next, None);
+        assert_eq!(next, Some("abc123".to_string()));
         assert_eq!(output["sent"], true);
         assert_eq!(output["service"], "SendGrid");
         assert_eq!(output["status"], 202);

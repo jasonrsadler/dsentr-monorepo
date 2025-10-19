@@ -1231,7 +1231,7 @@ mod tests {
         };
 
         let app = Router::new()
-            .route("/*path", post(stub_handler::<F>))
+            .route("/{*path}", post(stub_handler::<F>))
             .with_state(state);
 
         let server = axum::serve(listener, app.into_make_service());

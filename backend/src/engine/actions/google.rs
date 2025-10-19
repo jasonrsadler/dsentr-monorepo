@@ -634,7 +634,7 @@ mod tests {
         };
 
         let app = Router::new()
-            .route("/v4/spreadsheets/*rest", post(stub_handler::<F>))
+            .route("/v4/spreadsheets/{*rest}", post(stub_handler::<F>))
             .with_state(state);
 
         let server = axum::serve(listener, app.into_make_service());
@@ -668,7 +668,10 @@ mod tests {
         })
         .await;
 
-        let _guard = EnvGuard::set("GOOGLE_SHEETS_API_BASE", format!("http://{}", addr));
+        let _guard = EnvGuard::set(
+            "GOOGLE_SHEETS_API_BASE",
+            format!("http://{}/v4/spreadsheets", addr),
+        );
 
         let http_client = Arc::new(
             Client::builder()
@@ -752,7 +755,10 @@ mod tests {
         })
         .await;
 
-        let _guard = EnvGuard::set("GOOGLE_SHEETS_API_BASE", format!("http://{}", addr));
+        let _guard = EnvGuard::set(
+            "GOOGLE_SHEETS_API_BASE",
+            format!("http://{}/v4/spreadsheets", addr),
+        );
 
         let http_client = Arc::new(
             Client::builder()
