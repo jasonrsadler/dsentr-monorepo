@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workspace_invitations\n            SET revoked_at = now(), status = $2\n            WHERE id = $1\n              AND status = $3\n              AND accepted_at IS NULL\n              AND revoked_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6c04554994d35ca826ec1711cc070909a036c281f3c54ce0bd091896609cc650"
+}

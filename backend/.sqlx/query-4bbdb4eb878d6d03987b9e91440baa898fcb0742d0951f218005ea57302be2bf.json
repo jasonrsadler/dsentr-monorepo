@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO users (\n                email, password_hash, first_name, last_name, company_name, country, tax_id,\n                is_verified, is_subscribed, settings, created_at, updated_at, oauth_provider\n            )\n            VALUES (\n                $1, $2, $3, $4, $5, $6, $7,\n                false, false, '{}', now(), now(), $8::oauth_provider\n            )\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "oauth_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "github",
+                "apple",
+                "email"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4bbdb4eb878d6d03987b9e91440baa898fcb0742d0951f218005ea57302be2bf"
+}

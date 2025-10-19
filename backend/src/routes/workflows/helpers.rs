@@ -315,22 +315,6 @@ pub(crate) fn can_access_workflow_in_context(
     }
 }
 
-pub(crate) async fn membership_role_for(
-    state: &AppState,
-    user_id: Uuid,
-    workspace_id: Uuid,
-) -> Result<Option<WorkspaceRole>, sqlx::Error> {
-    let memberships = state
-        .workspace_repo
-        .list_memberships_for_user(user_id)
-        .await?;
-
-    Ok(memberships
-        .into_iter()
-        .find(|membership| membership.workspace.id == workspace_id)
-        .map(|membership| membership.role))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

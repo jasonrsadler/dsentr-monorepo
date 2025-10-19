@@ -1,0 +1,96 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT nr.id, nr.run_id, nr.node_id, nr.name, nr.node_type, nr.inputs, nr.outputs, nr.status, nr.error,\n                   nr.started_at as \"started_at!\", nr.finished_at, nr.created_at as \"created_at!\", nr.updated_at as \"updated_at!\"\n            FROM workflow_node_runs nr\n            JOIN workflow_runs r ON r.id = nr.run_id\n            WHERE r.user_id = $1 AND r.workflow_id = $2 AND r.id = $3\n            ORDER BY nr.started_at ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "node_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "node_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "inputs",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "outputs",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "started_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "ca20996672e7a2d750b4f5ae0ae811321aaee27ab2a70c5af4c377dbf7fb74b5"
+}

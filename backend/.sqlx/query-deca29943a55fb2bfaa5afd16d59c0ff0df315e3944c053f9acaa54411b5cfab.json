@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO workspace_member_audit (workspace_id, member_id, action, actor_id, reason)\n            VALUES ($1, $2, 'revoked', $3, $4)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "deca29943a55fb2bfaa5afd16d59c0ff0df315e3944c053f9acaa54411b5cfab"
+}

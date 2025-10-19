@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO workspace_invitations (workspace_id, email, role, token, status, expires_at, created_by, created_at)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, now())\n            RETURNING id,\n                      workspace_id,\n                      email,\n                      role as \"role: WorkspaceRole\",\n                      token,\n                      status,\n                      expires_at,\n                      created_by,\n                      created_at,\n                      accepted_at,\n                      revoked_at,\n                      ignored_at as \"declined_at?: OffsetDateTime\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "role: WorkspaceRole",
+        "type_info": {
+          "Custom": {
+            "name": "workspace_role",
+            "kind": {
+              "Enum": [
+                "admin",
+                "user",
+                "viewer",
+                "owner"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "accepted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "declined_at?: OffsetDateTime",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        {
+          "Custom": {
+            "name": "workspace_role",
+            "kind": {
+              "Enum": [
+                "admin",
+                "user",
+                "viewer",
+                "owner"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "236ee135d5d8ef318d7dad671898da31d6c40cb4cd0afb06c87a2c3b9ded5f24"
+}

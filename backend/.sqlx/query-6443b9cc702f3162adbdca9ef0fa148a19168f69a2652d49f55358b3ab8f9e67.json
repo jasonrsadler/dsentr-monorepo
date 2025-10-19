@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id,\n                   email,\n                   role as \"role: _\",\n                   password_hash,\n                   first_name,\n                   last_name,\n                   plan,\n                   company_name,\n                   oauth_provider as \"oauth_provider: OauthProvider\",\n                   onboarded_at,\n                   created_at\n            FROM users\n            WHERE email = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "role: _",
+        "type_info": {
+          "Custom": {
+            "name": "user_role",
+            "kind": {
+              "Enum": [
+                "user",
+                "admin"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "password_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "first_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "plan",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "company_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "oauth_provider: OauthProvider",
+        "type_info": {
+          "Custom": {
+            "name": "oauth_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "github",
+                "apple",
+                "email"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "onboarded_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "6443b9cc702f3162adbdca9ef0fa148a19168f69a2652d49f55358b3ab8f9e67"
+}

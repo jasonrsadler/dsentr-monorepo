@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workflow_runs\n            SET status = 'canceled', finished_at = now(), updated_at = now()\n            WHERE user_id = $1 AND workflow_id = $2 AND status IN ('queued','running')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d2d514fa04045337647d829d920c10690debe628f99abd8283ba7f50d0d132b7"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workflow_runs\n            SET status = $2,\n                error = $3,\n                finished_at = COALESCE(finished_at, now()),\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "13707c5ce5ff06e71c91b894734f507284aa12bfd1d3bb2ea83419c38f69769b"
+}

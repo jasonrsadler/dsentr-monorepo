@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workspace_members\n            SET role = $3\n            WHERE workspace_id = $1 AND user_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        {
+          "Custom": {
+            "name": "workspace_role",
+            "kind": {
+              "Enum": [
+                "admin",
+                "user",
+                "viewer",
+                "owner"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d6c26e3f33790bd0692bf065bd26babfc4bd2ac94923884a171d37a730002ba8"
+}

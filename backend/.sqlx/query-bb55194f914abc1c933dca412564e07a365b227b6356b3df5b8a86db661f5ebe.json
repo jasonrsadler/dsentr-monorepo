@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO user_oauth_tokens (\n                user_id,\n                provider,\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                updated_at\n            )\n            VALUES ($1, $2::oauth_connection_provider, $3, $4, $5, $6, now())\n            ON CONFLICT (user_id, provider)\n            DO UPDATE SET\n                access_token = EXCLUDED.access_token,\n                refresh_token = EXCLUDED.refresh_token,\n                expires_at = EXCLUDED.expires_at,\n                account_email = EXCLUDED.account_email,\n                updated_at = now()\n            RETURNING\n                id,\n                user_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: _",
+        "type_info": {
+          "Custom": {
+            "name": "oauth_connection_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "microsoft"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "access_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "refresh_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "account_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "oauth_connection_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "microsoft"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bb55194f914abc1c933dca412564e07a365b227b6356b3df5b8a86db661f5ebe"
+}

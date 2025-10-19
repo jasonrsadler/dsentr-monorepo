@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workflow_schedules\n            SET last_run_at = $2,\n                next_run_at = $3,\n                enabled = $4,\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "73a3bc2cfb19c11324c276985bd3ee92e5732f8c5a620d635c4db7dd6b5e5e46"
+}

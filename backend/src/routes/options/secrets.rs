@@ -291,7 +291,7 @@ pub async fn delete_secret(
         let mut owner_store = None;
 
         for member in members {
-            let mut settings = match app_state.db.get_user_settings(member.user_id).await {
+            let settings = match app_state.db.get_user_settings(member.user_id).await {
                 Ok(settings) => settings,
                 Err(err) => {
                     eprintln!(

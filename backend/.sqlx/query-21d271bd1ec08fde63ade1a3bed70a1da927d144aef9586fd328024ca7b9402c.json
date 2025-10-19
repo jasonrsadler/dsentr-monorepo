@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM workflow_logs\n            WHERE user_id = $1 AND workflow_id = $2 AND id = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "21d271bd1ec08fde63ade1a3bed70a1da927d144aef9586fd328024ca7b9402c"
+}

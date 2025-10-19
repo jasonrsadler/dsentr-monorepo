@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workflow_node_runs\n            SET status = $2,\n                outputs = $3,\n                error = $4,\n                finished_at = COALESCE(finished_at, now()),\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "808abe4d949ccd5731160e56850ef330f6f6afc39aa17eab11c75c577c8df74d"
+}

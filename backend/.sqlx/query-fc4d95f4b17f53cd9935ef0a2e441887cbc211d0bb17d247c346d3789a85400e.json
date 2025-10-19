@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workflow_schedules\n            SET enabled = false,\n                next_run_at = NULL,\n                updated_at = now()\n            WHERE workflow_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fc4d95f4b17f53cd9935ef0a2e441887cbc211d0bb17d247c346d3789a85400e"
+}

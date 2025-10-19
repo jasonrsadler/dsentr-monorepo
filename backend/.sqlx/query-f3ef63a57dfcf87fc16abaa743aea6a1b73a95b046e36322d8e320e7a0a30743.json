@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workspace_invitations\n            SET ignored_at = now(), status = $2\n            WHERE id = $1\n              AND status = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f3ef63a57dfcf87fc16abaa743aea6a1b73a95b046e36322d8e320e7a0a30743"
+}

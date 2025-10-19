@@ -1,0 +1,26 @@
+2025-10-18 14:32:17.926 EDT [49488] LOG:  starting PostgreSQL 17.6 on x86_64-windows, compiled by msvc-19.44.35213, 64-bit
+2025-10-18 14:32:17.928 EDT [49488] LOG:  listening on IPv4 address "127.0.0.1", port 6543
+2025-10-18 14:32:18.008 EDT [40176] LOG:  database system was shut down at 2025-10-18 14:31:39 EDT
+2025-10-18 14:32:18.049 EDT [49488] LOG:  database system is ready to accept connections
+2025-10-18 14:37:17.995 EDT [38832] LOG:  checkpoint starting: time
+2025-10-18 14:37:27.201 EDT [38832] LOG:  checkpoint complete: wrote 37 buffers (0.2%); 0 WAL file(s) added, 0 removed, 0 recycled; write=3.635 s, sync=0.023 s, total=9.207 s; sync files=10, longest=0.010 s, average=0.003 s; distance=189 kB, estimate=189 kB; lsn=0/15A25B8, redo lsn=0/15A2528
+2025-10-18 17:11:00.626 EDT [51984] ERROR:  duplicate key value violates unique constraint "_sqlx_migrations_pkey"
+2025-10-18 17:11:00.626 EDT [51984] DETAIL:  Key (version)=(2025) already exists.
+2025-10-18 17:11:00.626 EDT [51984] STATEMENT:  
+	    INSERT INTO _sqlx_migrations ( version, description, success, checksum, execution_time )
+	    VALUES ( $1, $2, TRUE, $3, -1 )
+	                
+2025-10-18 17:11:00.637 EDT [51984] LOG:  could not receive data from client: An established connection was aborted by the software in your host machine.
+	
+2025-10-18 17:12:17.659 EDT [38832] LOG:  checkpoint starting: time
+2025-10-18 17:12:27.008 EDT [38832] LOG:  checkpoint complete: wrote 91 buffers (0.6%); 0 WAL file(s) added, 0 removed, 0 recycled; write=9.288 s, sync=0.005 s, total=9.349 s; sync files=4, longest=0.003 s, average=0.002 s; distance=4655 kB, estimate=4655 kB; lsn=0/1A2E5C8, redo lsn=0/1A2E148
+2025-10-18 17:12:27.040 EDT [38832] LOG:  checkpoint starting: immediate force wait
+2025-10-18 17:12:27.058 EDT [38832] LOG:  checkpoint complete: wrote 1 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.002 s, sync=0.002 s, total=0.018 s; sync files=1, longest=0.002 s, average=0.002 s; distance=1 kB, estimate=4189 kB; lsn=0/1A2E698, redo lsn=0/1A2E640
+2025-10-18 21:14:39.543 GMT [41120] FATAL:  "F:/work/unified/backend/pgdata" is not a valid data directory
+2025-10-18 21:14:39.543 GMT [41120] DETAIL:  File "F:/work/unified/backend/pgdata/PG_VERSION" is missing.
+2025-10-18 17:15:39.537 EDT [49620] WARNING:  autovacuum worker took too long to start; canceled
+2025-10-18 17:15:39.544 EDT [49488] LOG:  could not open file "postmaster.pid": No such file or directory
+2025-10-18 17:15:39.544 EDT [49488] LOG:  performing immediate shutdown because data directory lock file is invalid
+2025-10-18 17:15:39.544 EDT [49488] LOG:  received immediate shutdown request
+2025-10-18 17:15:39.545 EDT [49488] LOG:  could not open file "postmaster.pid": No such file or directory
+2025-10-18 17:15:39.616 EDT [49488] LOG:  database system is shut down
