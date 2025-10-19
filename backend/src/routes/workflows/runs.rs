@@ -2,6 +2,7 @@ use super::{
     helpers::{enforce_solo_workflow_limit, plan_violation_response, SOLO_MONTHLY_RUN_LIMIT},
     prelude::*,
 };
+use crate::utils::workflow_connection_metadata;
 
 async fn fetch_workflow_for_member(
     app_state: &AppState,
@@ -43,6 +44,7 @@ pub async fn start_workflow_run(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    let triggered_by = claims.id.clone();
 
     let wf =
         match fetch_workflow_for_member(&app_state, user_id, workflow_id, "Failed to start run")
@@ -138,6 +140,12 @@ pub async fn start_workflow_run(
             .collect(),
     );
 
+    if let Some(obj) = snapshot.as_object_mut() {
+        obj.remove("_connection_metadata");
+    }
+    let connection_metadata = workflow_connection_metadata::collect(&snapshot);
+    workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
+
     match app_state
         .workflow_repo
         .create_workflow_run(
@@ -155,6 +163,17 @@ pub async fn start_workflow_run(
                     .workflow_repo
                     .set_run_priority(owner_id, workflow_id, run.id, p)
                     .await;
+            }
+
+            let events = workflow_connection_metadata::build_run_events(
+                &run,
+                &triggered_by,
+                &connection_metadata,
+            );
+            for event in events {
+                if let Err(err) = app_state.workflow_repo.record_run_event(event).await {
+                    eprintln!("Failed to record workflow run event {}: {:?}", run.id, err);
+                }
             }
             (
                 StatusCode::ACCEPTED,
@@ -410,6 +429,7 @@ pub async fn rerun_workflow_run(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
+    let triggered_by = claims.id.clone();
 
     // Fetch the original run to get snapshot
     let workflow = match fetch_workflow_for_member(
@@ -445,6 +465,12 @@ pub async fn rerun_workflow_run(
         snapshot["_start_from_node"] = serde_json::Value::String(start_id);
     }
 
+    if let Some(obj) = snapshot.as_object_mut() {
+        obj.remove("_connection_metadata");
+    }
+    let connection_metadata = workflow_connection_metadata::collect(&snapshot);
+    workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
+
     match app_state
         .workflow_repo
         .create_workflow_run(
@@ -456,11 +482,27 @@ pub async fn rerun_workflow_run(
         )
         .await
     {
-        Ok(run) => (
-            StatusCode::ACCEPTED,
-            Json(json!({"success": true, "run": run})),
-        )
-            .into_response(),
+        Ok(run) => {
+            let events = workflow_connection_metadata::build_run_events(
+                &run,
+                &triggered_by,
+                &connection_metadata,
+            );
+            for event in events {
+                if let Err(err) = app_state.workflow_repo.record_run_event(event).await {
+                    eprintln!(
+                        "Failed to record workflow rerun event {}: {:?}",
+                        run.id, err
+                    );
+                }
+            }
+
+            (
+                StatusCode::ACCEPTED,
+                Json(json!({"success": true, "run": run})),
+            )
+                .into_response()
+        }
         Err(e) => {
             eprintln!("DB error creating rerun: {:?}", e);
             JsonResponse::server_error("Failed to enqueue rerun").into_response()

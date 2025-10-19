@@ -17,3 +17,4 @@
 
 ## Change Reasons
 - AppState now wires workspace OAuth promotion repositories/services for shared connection APIs.
+- Workflow run execution now records connection metadata and emits run events from routes, workers, and the engine.

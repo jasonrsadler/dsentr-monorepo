@@ -6,6 +6,7 @@ use crate::state::AppState;
 use crate::utils::schedule::{
     compute_next_run, offset_to_utc, parse_schedule_config, utc_to_offset,
 };
+use crate::utils::workflow_connection_metadata;
 use chrono::Utc;
 use serde_json::{json, Value};
 use tokio::time::sleep;
@@ -168,7 +169,13 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     }
     snapshot["_trigger_context"] = context;
 
-    state
+    if let Some(obj) = snapshot.as_object_mut() {
+        obj.remove("_connection_metadata");
+    }
+    let connection_metadata = workflow_connection_metadata::collect(&snapshot);
+    workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
+
+    let run = state
         .workflow_repo
         .create_workflow_run(
             schedule.user_id,
@@ -178,6 +185,18 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
             None,
         )
         .await?;
+
+    let triggered_by = format!("schedule:{}", schedule.id);
+    let events =
+        workflow_connection_metadata::build_run_events(&run, &triggered_by, &connection_metadata);
+    for event in events {
+        if let Err(err) = state.workflow_repo.record_run_event(event).await {
+            eprintln!(
+                "worker: failed to record schedule run event {}: {:?}",
+                run.id, err
+            );
+        }
+    }
 
     let now = Utc::now();
     let next_dt = compute_next_run(&config, Some(last_run_utc), now);

@@ -5,3 +5,4 @@ pub mod password;
 pub mod plan_limits;
 pub mod schedule;
 pub mod secrets;
+pub mod workflow_connection_metadata;

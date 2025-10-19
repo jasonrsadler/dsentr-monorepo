@@ -5,11 +5,24 @@ use tracing::debug;
 
 use crate::models::workflow_run::WorkflowRun;
 use crate::state::AppState;
+use crate::utils::workflow_connection_metadata;
 
 use super::actions::{execute_action, execute_condition, execute_trigger};
 use super::graph::Graph;
 
 pub async fn execute_run(state: AppState, run: WorkflowRun) {
+    let triggered_by = format!("worker:{}", state.worker_id.as_ref());
+    let metadata = workflow_connection_metadata::collect(&run.snapshot);
+    let events = workflow_connection_metadata::build_run_events(&run, &triggered_by, &metadata);
+    for event in events {
+        if let Err(err) = state.workflow_repo.record_run_event(event).await {
+            eprintln!(
+                "worker: failed to record execution run event {}: {:?}",
+                run.id, err
+            );
+        }
+    }
+
     let Some(graph) = Graph::from_snapshot(&run.snapshot) else {
         let _ = state
             .workflow_repo
