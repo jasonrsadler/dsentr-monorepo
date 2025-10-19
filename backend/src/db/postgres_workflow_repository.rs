@@ -812,48 +812,46 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                 .await?;
                 Ok(rows)
             }
+        } else if let Some(sts) = statuses {
+            let rows = sqlx::query_as!(
+                WorkflowRun,
+                r#"
+                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                       started_at as "started_at!", finished_at,
+                       created_at as "created_at!", updated_at as "updated_at!"
+                FROM workflow_runs
+                WHERE user_id = $1
+                  AND ($2::text[] IS NULL OR status = ANY($2))
+                ORDER BY created_at DESC
+                LIMIT $3 OFFSET $4
+                "#,
+                user_id,
+                sts,
+                limit,
+                offset
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            Ok(rows)
         } else {
-            if let Some(sts) = statuses {
-                let rows = sqlx::query_as!(
-                    WorkflowRun,
-                    r#"
-                    SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
-                           started_at as "started_at!", finished_at,
-                           created_at as "created_at!", updated_at as "updated_at!"
-                    FROM workflow_runs
-                    WHERE user_id = $1
-                      AND ($2::text[] IS NULL OR status = ANY($2))
-                    ORDER BY created_at DESC
-                    LIMIT $3 OFFSET $4
-                    "#,
-                    user_id,
-                    sts,
-                    limit,
-                    offset
-                )
-                .fetch_all(&self.pool)
-                .await?;
-                Ok(rows)
-            } else {
-                let rows = sqlx::query_as!(
-                    WorkflowRun,
-                    r#"
-                    SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
-                           started_at as "started_at!", finished_at,
-                           created_at as "created_at!", updated_at as "updated_at!"
-                    FROM workflow_runs
-                    WHERE user_id = $1
-                    ORDER BY created_at DESC
-                    LIMIT $2 OFFSET $3
-                    "#,
-                    user_id,
-                    limit,
-                    offset
-                )
-                .fetch_all(&self.pool)
-                .await?;
-                Ok(rows)
-            }
+            let rows = sqlx::query_as!(
+                WorkflowRun,
+                r#"
+                SELECT id, user_id, workflow_id, snapshot, status, error, idempotency_key,
+                       started_at as "started_at!", finished_at,
+                       created_at as "created_at!", updated_at as "updated_at!"
+                FROM workflow_runs
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+                "#,
+                user_id,
+                limit,
+                offset
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            Ok(rows)
         }
     }
 

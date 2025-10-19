@@ -119,18 +119,16 @@ pub fn compute_next_run(
         } else {
             None
         }
-    } else {
-        if start >= now {
-            Some(start)
-        } else if let Some((every, unit)) = normalize_repeat(config) {
-            let mut candidate = start;
-            while candidate < now {
-                candidate = add_interval(candidate, every, unit)?;
-            }
-            Some(candidate)
-        } else {
-            Some(start)
+    } else if start >= now {
+        Some(start)
+    } else if let Some((every, unit)) = normalize_repeat(config) {
+        let mut candidate = start;
+        while candidate < now {
+            candidate = add_interval(candidate, every, unit)?;
         }
+        Some(candidate)
+    } else {
+        Some(start)
     }
 }
 

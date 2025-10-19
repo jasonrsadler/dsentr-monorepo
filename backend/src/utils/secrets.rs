@@ -217,8 +217,8 @@ pub fn ensure_secret_exists(
     let mut counter = 1usize;
     loop {
         let candidate = format!("{}-{}", base, counter);
-        if !entries.contains_key(&candidate) {
-            entries.insert(candidate, trimmed_value.to_string());
+        if let std::collections::btree_map::Entry::Vacant(e) = entries.entry(candidate) {
+            e.insert(trimmed_value.to_string());
             return true;
         }
         counter += 1;

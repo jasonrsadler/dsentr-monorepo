@@ -223,8 +223,8 @@ pub(crate) async fn execute_http(
                 json!({"error":"egress_blocked","host":host,"rule":"default_deny","message":msg});
             return Err(detail.to_string());
         }
-    } else if !allowed.is_empty() {
-        if !is_host_allowed(&host, &allowed) {
+    } else if !allowed.is_empty()
+        && !is_host_allowed(&host, &allowed) {
             let msg = format!("Outbound HTTP not allowed: {}", host);
             let _ = state
                 .workflow_repo
@@ -243,7 +243,6 @@ pub(crate) async fn execute_http(
                 json!({"error":"egress_blocked","host":host,"rule":"allowlist_miss","message":msg});
             return Err(detail.to_string());
         }
-    }
 
     let redirect_policy = if follow {
         let allowed_clone = allowed.clone();
@@ -270,12 +269,10 @@ pub(crate) async fn execute_http(
                 } else {
                     attempt.stop()
                 }
+            } else if allowed_clone.is_empty() || is_host_allowed(&host, &allowed_clone) {
+                attempt.follow()
             } else {
-                if allowed_clone.is_empty() || is_host_allowed(&host, &allowed_clone) {
-                    attempt.follow()
-                } else {
-                    attempt.stop()
-                }
+                attempt.stop()
             }
         })
     } else {

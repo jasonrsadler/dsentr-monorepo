@@ -203,9 +203,7 @@ pub(crate) fn plan_violation_response(violations: Vec<PlanViolation>) -> Respons
 
 pub(crate) fn enforce_solo_workflow_limit(workflows: &[Workflow]) -> Vec<Workflow> {
     let mut personal: Vec<_> = workflows
-        .iter()
-        .cloned()
-        .filter(|wf| wf.workspace_id.is_none())
+        .iter().filter(|&wf| wf.workspace_id.is_none()).cloned()
         .collect();
     personal.sort_by_key(|wf| wf.created_at);
     personal.into_iter().take(3).collect()
@@ -235,7 +233,7 @@ fn extract_workspace_id_from_plan(plan: Option<&str>) -> Option<Uuid> {
     }
 
     let segments =
-        raw.split(|c: char| matches!(c, ':' | '/' | '|' | ',' | ';' | '\n' | '\r' | '\t' | ' '));
+        raw.split([':', '/', '|', ',', ';', '\n', '\r', '\t', ' ']);
     for segment in segments {
         let candidate = segment
             .trim_matches(|c: char| matches!(c, '[' | ']' | '{' | '}' | '(' | ')' | '"' | '\''));

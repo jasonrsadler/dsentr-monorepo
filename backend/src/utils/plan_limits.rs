@@ -15,9 +15,9 @@ impl NormalizedPlanTier {
         }
 
         let key = normalized
-            .split(|c: char| matches!(c, ':' | '-' | '_' | ' ' | '/' | '.'))
+            .split([':', '-', '_', ' ', '/', '.'])
             .next()
-            .unwrap_or_else(|| normalized.as_str());
+            .unwrap_or(normalized.as_str());
 
         match key {
             "workspace" | "team" | "organization" | "organisation" | "org" | "enterprise" => {

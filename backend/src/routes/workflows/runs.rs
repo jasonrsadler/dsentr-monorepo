@@ -497,8 +497,7 @@ pub async fn rerun_from_failed_node(
     let failed = nodes
         .iter()
         .rev()
-        .find(|n| n.status == "failed")
-        .and_then(|n| Some(n.node_id.clone()));
+        .find(|n| n.status == "failed").map(|n| n.node_id.clone());
     if let Some(node_id) = failed {
         payload.start_from_node_id = Some(node_id);
         rerun_workflow_run(

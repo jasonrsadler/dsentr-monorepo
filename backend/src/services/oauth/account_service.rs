@@ -235,7 +235,7 @@ impl OAuthAccountService {
             .refresh_token
             .ok_or(OAuthAccountError::MissingRefreshToken)?;
         let expires_in = response.expires_in.unwrap_or(3600);
-        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in.into());
+        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
 
         let user_info: UserInfoResponse = self
             .client
@@ -299,7 +299,7 @@ impl OAuthAccountService {
             .refresh_token
             .ok_or(OAuthAccountError::MissingRefreshToken)?;
         let expires_in = response.expires_in.unwrap_or(3600);
-        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in.into());
+        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
 
         let user_info: UserInfoResponse = self
             .client
@@ -366,7 +366,7 @@ impl OAuthAccountService {
             .refresh_token
             .unwrap_or_else(|| refresh_token.to_string());
         let expires_in = response.expires_in.unwrap_or(3600);
-        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in.into());
+        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
 
         Ok(AuthorizationTokens {
             access_token: response.access_token,
@@ -408,7 +408,7 @@ impl OAuthAccountService {
             .refresh_token
             .unwrap_or_else(|| refresh_token.to_string());
         let expires_in = response.expires_in.unwrap_or(3600);
-        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in.into());
+        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
 
         Ok(AuthorizationTokens {
             access_token: response.access_token,

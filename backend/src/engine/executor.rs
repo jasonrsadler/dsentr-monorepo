@@ -24,7 +24,7 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
             .nodes
             .values()
             .find(|n| n.kind == "trigger")
-            .map(|node| context_key(node));
+            .map(context_key);
         let key = trigger_key.unwrap_or_else(|| "trigger".to_string());
         context.insert(key, initial.clone());
     }
@@ -131,7 +131,7 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                 node.data
                     .get("label")
                     .and_then(|v| v.as_str())
-                    .or_else(|| Some(kind))
+                    .or(Some(kind))
                     .map(|s| s as &str),
                 Some(kind),
                 Some(node.data.clone()),

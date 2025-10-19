@@ -379,33 +379,30 @@ async fn send_teams_workflow_webhook(
 
     let mut headers = HeaderMap::new();
 
-    match workflow_option_normalized.as_str() {
-        "headersecretauth" => {
-            let header_name_raw =
-                extract_required_str(params, "workflowHeaderName", "Header name")?;
-            let header_value_raw =
-                extract_required_str(params, "workflowHeaderSecret", "Header secret")?;
+    if workflow_option_normalized.as_str() == "headersecretauth" {
+        let header_name_raw =
+            extract_required_str(params, "workflowHeaderName", "Header name")?;
+        let header_value_raw =
+            extract_required_str(params, "workflowHeaderSecret", "Header secret")?;
 
-            let header_name = templ_str(header_name_raw, context);
-            let trimmed_name = header_name.trim();
-            if trimmed_name.is_empty() {
-                return Err("Header name is required".to_string());
-            }
-
-            let header_name = HeaderName::from_bytes(trimmed_name.as_bytes())
-                .map_err(|_| "Header name is invalid".to_string())?;
-
-            let header_value = templ_str(header_value_raw, context);
-            if header_value.trim().is_empty() {
-                return Err("Header secret is required".to_string());
-            }
-
-            let header_value = HeaderValue::from_str(header_value.as_str())
-                .map_err(|_| "Header secret contains invalid characters".to_string())?;
-
-            headers.insert(header_name, header_value);
+        let header_name = templ_str(header_name_raw, context);
+        let trimmed_name = header_name.trim();
+        if trimmed_name.is_empty() {
+            return Err("Header name is required".to_string());
         }
-        _ => {}
+
+        let header_name = HeaderName::from_bytes(trimmed_name.as_bytes())
+            .map_err(|_| "Header name is invalid".to_string())?;
+
+        let header_value = templ_str(header_value_raw, context);
+        if header_value.trim().is_empty() {
+            return Err("Header secret is required".to_string());
+        }
+
+        let header_value = HeaderValue::from_str(header_value.as_str())
+            .map_err(|_| "Header secret contains invalid characters".to_string())?;
+
+        headers.insert(header_name, header_value);
     }
 
     let headers = if headers.is_empty() {
