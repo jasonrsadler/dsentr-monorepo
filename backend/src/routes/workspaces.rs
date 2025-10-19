@@ -1774,6 +1774,17 @@ mod tests {
             Ok(record)
         }
 
+        async fn find_by_id(
+            &self,
+            connection_id: Uuid,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            let guard = self.connections.lock().unwrap();
+            Ok(guard
+                .iter()
+                .find(|record| record.id == connection_id)
+                .cloned())
+        }
+
         async fn find_by_workspace_and_provider(
             &self,
             workspace_id: Uuid,
@@ -1784,6 +1795,25 @@ mod tests {
                 .iter()
                 .find(|record| record.workspace_id == workspace_id && record.provider == provider)
                 .cloned())
+        }
+
+        async fn update_tokens(
+            &self,
+            connection_id: Uuid,
+            access_token: String,
+            refresh_token: String,
+            expires_at: OffsetDateTime,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            let mut guard = self.connections.lock().unwrap();
+            if let Some(existing) = guard.iter_mut().find(|record| record.id == connection_id) {
+                existing.access_token = access_token;
+                existing.refresh_token = refresh_token;
+                existing.expires_at = expires_at;
+                existing.updated_at = OffsetDateTime::now_utc();
+                return Ok(existing.clone());
+            }
+
+            Err(sqlx::Error::RowNotFound)
         }
 
         async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
@@ -2366,10 +2396,12 @@ mod tests {
         let workspace_connection_repo: Arc<dyn WorkspaceConnectionRepository> =
             connection_repo.clone();
         let user_token_repo: Arc<dyn UserOAuthTokenRepository> = user_repo.clone();
+        let oauth_accounts = OAuthAccountService::test_stub();
 
         let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
             user_token_repo.clone(),
             workspace_connection_repo.clone(),
+            oauth_accounts.clone(),
             encryption_key,
         ));
 
@@ -2381,7 +2413,7 @@ mod tests {
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
-            oauth_accounts: OAuthAccountService::test_stub(),
+            oauth_accounts,
             workspace_oauth,
             http_client: Arc::new(Client::new()),
             config,

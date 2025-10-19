@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::PgPool;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::db::workspace_connection_repository::{
@@ -66,6 +67,33 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         .await
     }
 
+    async fn find_by_id(
+        &self,
+        connection_id: Uuid,
+    ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+        sqlx::query_as!(
+            WorkspaceConnection,
+            r#"
+            SELECT
+                id,
+                workspace_id,
+                created_by,
+                provider as "provider: _",
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                created_at,
+                updated_at
+            FROM workspace_connections
+            WHERE id = $1
+            "#,
+            connection_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     async fn find_by_workspace_and_provider(
         &self,
         workspace_id: Uuid,
@@ -92,6 +120,44 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             provider as ConnectedOAuthProvider,
         )
         .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn update_tokens(
+        &self,
+        connection_id: Uuid,
+        access_token: String,
+        refresh_token: String,
+        expires_at: OffsetDateTime,
+    ) -> Result<WorkspaceConnection, sqlx::Error> {
+        sqlx::query_as!(
+            WorkspaceConnection,
+            r#"
+            UPDATE workspace_connections
+            SET
+                access_token = $2,
+                refresh_token = $3,
+                expires_at = $4,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id,
+                workspace_id,
+                created_by,
+                provider as "provider: _",
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                created_at,
+                updated_at
+            "#,
+            connection_id,
+            access_token,
+            refresh_token,
+            expires_at,
+        )
+        .fetch_one(&self.pool)
         .await
     }
 

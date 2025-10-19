@@ -32,11 +32,24 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         new_connection: NewWorkspaceConnection,
     ) -> Result<WorkspaceConnection, sqlx::Error>;
 
+    async fn find_by_id(
+        &self,
+        connection_id: Uuid,
+    ) -> Result<Option<WorkspaceConnection>, sqlx::Error>;
+
     async fn find_by_workspace_and_provider(
         &self,
         workspace_id: Uuid,
         provider: ConnectedOAuthProvider,
     ) -> Result<Option<WorkspaceConnection>, sqlx::Error>;
+
+    async fn update_tokens(
+        &self,
+        connection_id: Uuid,
+        access_token: String,
+        refresh_token: String,
+        expires_at: time::OffsetDateTime,
+    ) -> Result<WorkspaceConnection, sqlx::Error>;
 
     async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
 
@@ -58,12 +71,29 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Err(sqlx::Error::RowNotFound)
     }
 
+    async fn find_by_id(
+        &self,
+        _connection_id: Uuid,
+    ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+        Ok(None)
+    }
+
     async fn find_by_workspace_and_provider(
         &self,
         _workspace_id: Uuid,
         _provider: ConnectedOAuthProvider,
     ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
         Ok(None)
+    }
+
+    async fn update_tokens(
+        &self,
+        _connection_id: Uuid,
+        _access_token: String,
+        _refresh_token: String,
+        _expires_at: time::OffsetDateTime,
+    ) -> Result<WorkspaceConnection, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
     }
 
     async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {

@@ -1113,6 +1113,7 @@ dependencies = [
  "boa_engine",
  "chrono",
  "chrono-tz",
+ "dashmap 5.5.3",
  "dotenv",
  "hex",
  "hmac",

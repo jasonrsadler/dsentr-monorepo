@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use dashmap::DashMap;
 use serde_json::json;
 use thiserror::Error;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::db::oauth_token_repository::UserOAuthTokenRepository;
@@ -13,7 +15,8 @@ use crate::models::oauth_token::{
     ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection,
     WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED,
 };
-use crate::utils::encryption::{decrypt_secret, EncryptionError};
+use crate::services::oauth::account_service::{OAuthAccountError, OAuthAccountService};
+use crate::utils::encryption::{decrypt_secret, encrypt_secret, EncryptionError};
 
 #[derive(Debug, Clone)]
 pub struct DecryptedWorkspaceConnection {
@@ -37,25 +40,32 @@ pub enum WorkspaceOAuthError {
     Database(#[from] sqlx::Error),
     #[error("encryption error: {0}")]
     Encryption(#[from] EncryptionError),
+    #[error("oauth error: {0}")]
+    OAuth(#[from] OAuthAccountError),
 }
 
 #[derive(Clone)]
 pub struct WorkspaceOAuthService {
     user_tokens: Arc<dyn UserOAuthTokenRepository>,
     workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
+    oauth_accounts: Arc<OAuthAccountService>,
     encryption_key: Arc<Vec<u8>>,
+    connection_locks: Arc<DashMap<Uuid, Arc<Mutex<()>>>>,
 }
 
 impl WorkspaceOAuthService {
     pub fn new(
         user_tokens: Arc<dyn UserOAuthTokenRepository>,
         workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
+        oauth_accounts: Arc<OAuthAccountService>,
         encryption_key: Arc<Vec<u8>>,
     ) -> Self {
         Self {
             user_tokens,
             workspace_connections,
+            oauth_accounts,
             encryption_key,
+            connection_locks: Arc::new(DashMap::new()),
         }
     }
 
@@ -114,6 +124,54 @@ impl WorkspaceOAuthService {
             .await?
             .ok_or(WorkspaceOAuthError::NotFound)?;
         self.decrypt_connection(record)
+    }
+
+    pub async fn ensure_valid_workspace_token(
+        &self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+    ) -> Result<DecryptedWorkspaceConnection, WorkspaceOAuthError> {
+        let lock = self
+            .connection_locks
+            .entry(connection_id)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+
+        let _guard = lock.lock().await;
+
+        let record = self
+            .workspace_connections
+            .find_by_id(connection_id)
+            .await?
+            .filter(|conn| conn.workspace_id == workspace_id)
+            .ok_or(WorkspaceOAuthError::NotFound)?;
+
+        let mut decrypted = self.decrypt_connection(record.clone())?;
+        let refresh_deadline = OffsetDateTime::now_utc() + Duration::seconds(60);
+
+        if decrypted.expires_at <= refresh_deadline {
+            let refreshed = self
+                .oauth_accounts
+                .refresh_access_token(decrypted.provider, &decrypted.refresh_token)
+                .await?;
+
+            let encrypted_access = encrypt_secret(&self.encryption_key, &refreshed.access_token)?;
+            let encrypted_refresh = encrypt_secret(&self.encryption_key, &refreshed.refresh_token)?;
+
+            let updated = self
+                .workspace_connections
+                .update_tokens(
+                    connection_id,
+                    encrypted_access,
+                    encrypted_refresh,
+                    refreshed.expires_at,
+                )
+                .await?;
+
+            decrypted = self.decrypt_connection(updated)?;
+        }
+
+        Ok(decrypted)
     }
 
     fn decrypt_connection(
@@ -211,12 +269,29 @@ impl WorkspaceOAuthService {
                 Err(sqlx::Error::RowNotFound)
             }
 
+            async fn find_by_id(
+                &self,
+                _connection_id: Uuid,
+            ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+                Ok(None)
+            }
+
             async fn find_by_workspace_and_provider(
                 &self,
                 _workspace_id: Uuid,
                 _provider: ConnectedOAuthProvider,
             ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
                 Ok(None)
+            }
+
+            async fn update_tokens(
+                &self,
+                _connection_id: Uuid,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+            ) -> Result<WorkspaceConnection, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
             }
 
             async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
@@ -234,7 +309,9 @@ impl WorkspaceOAuthService {
         Arc::new(Self {
             user_tokens: Arc::new(StubUserRepo),
             workspace_connections: Arc::new(StubWorkspaceRepo),
+            oauth_accounts: OAuthAccountService::test_stub(),
             encryption_key: Arc::new(vec![0u8; 32]),
+            connection_locks: Arc::new(DashMap::new()),
         })
     }
 }
@@ -339,6 +416,14 @@ mod tests {
             Ok(record)
         }
 
+        async fn find_by_id(
+            &self,
+            connection_id: Uuid,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            let guard = self.connection.lock().unwrap();
+            Ok(guard.clone().filter(|record| record.id == connection_id))
+        }
+
         async fn find_by_workspace_and_provider(
             &self,
             workspace_id: Uuid,
@@ -348,6 +433,26 @@ mod tests {
             Ok(guard.clone().filter(|record| {
                 record.workspace_id == workspace_id && record.provider == provider
             }))
+        }
+
+        async fn update_tokens(
+            &self,
+            connection_id: Uuid,
+            access_token: String,
+            refresh_token: String,
+            expires_at: OffsetDateTime,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            let mut guard = self.connection.lock().unwrap();
+            if let Some(conn) = guard.as_mut() {
+                if conn.id == connection_id {
+                    conn.access_token = access_token;
+                    conn.refresh_token = refresh_token;
+                    conn.expires_at = expires_at;
+                    conn.updated_at = OffsetDateTime::now_utc();
+                    return Ok(conn.clone());
+                }
+            }
+            Err(sqlx::Error::RowNotFound)
         }
 
         async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
@@ -398,7 +503,13 @@ mod tests {
         });
         let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
 
-        let service = WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), key);
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            workspace_repo.clone(),
+            oauth_accounts,
+            key,
+        );
 
         let result = service
             .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Google)
@@ -452,7 +563,8 @@ mod tests {
             shared_flag: Mutex::new(false),
         });
 
-        let service = WorkspaceOAuthService::new(user_repo, workspace_repo, key);
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let service = WorkspaceOAuthService::new(user_repo, workspace_repo, oauth_accounts, key);
 
         let connection = service
             .get_connection(workspace_id, ConnectedOAuthProvider::Microsoft)
@@ -463,5 +575,52 @@ mod tests {
         assert_eq!(connection.provider, ConnectedOAuthProvider::Microsoft);
         assert_eq!(connection.access_token, "access-token");
         assert_eq!(connection.refresh_token, "refresh-token");
+    }
+
+    #[tokio::test]
+    async fn ensure_valid_workspace_token_returns_connection_without_refresh() {
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![11u8; 32]);
+        let expires_at = OffsetDateTime::now_utc() + Duration::minutes(5);
+        let encrypted_access = encrypt_secret(&key, "existing-access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "existing-refresh").unwrap();
+
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access,
+                refresh_token: encrypted_refresh,
+                expires_at,
+                account_email: "user@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(None),
+            shared_flag: Mutex::new(false),
+        });
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let service = WorkspaceOAuthService::new(user_repo, workspace_repo, oauth_accounts, key);
+
+        let connection = service
+            .ensure_valid_workspace_token(workspace_id, connection_id)
+            .await
+            .expect("connection exists");
+
+        assert_eq!(connection.id, connection_id);
+        assert_eq!(connection.workspace_id, workspace_id);
+        assert_eq!(connection.provider, ConnectedOAuthProvider::Google);
+        assert_eq!(connection.access_token, "existing-access");
+        assert_eq!(connection.refresh_token, "existing-refresh");
     }
 }

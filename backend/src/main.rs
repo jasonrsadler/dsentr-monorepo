@@ -200,6 +200,7 @@ async fn main() {
     let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
         oauth_repo.clone(),
         workspace_connection_repo.clone(),
+        oauth_accounts.clone(),
         encryption_key.clone(),
     ));
 
