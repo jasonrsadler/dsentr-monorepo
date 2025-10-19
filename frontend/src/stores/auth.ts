@@ -14,6 +14,7 @@ type User = {
   role: string
   plan: string | null
   companyName: string | null
+  oauthProvider: 'google' | 'github' | 'apple' | 'email' | null
   onboarded_at?: string | null
 }
 
@@ -178,7 +179,8 @@ export const useAuth = create<AuthState>((set, get) => ({
         ? {
             ...data.user,
             plan: data.user.plan ?? null,
-            companyName: data.user.company_name ?? null
+            companyName: data.user.company_name ?? null,
+            oauthProvider: data.user.oauth_provider ?? null
           }
         : null
       const memberships = (data?.memberships ?? []) as WorkspaceSummary[]

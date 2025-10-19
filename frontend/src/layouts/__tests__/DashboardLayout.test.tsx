@@ -88,7 +88,8 @@ describe('DashboardLayout workspace switcher', () => {
           last_name: 'User',
           plan: 'solo',
           role: 'owner',
-          companyName: null
+          companyName: null,
+          oauthProvider: null
         },
         memberships: [membership],
         currentWorkspaceId: null
@@ -132,7 +133,8 @@ describe('DashboardLayout workspace switcher', () => {
           last_name: 'Member',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: null
         },
         memberships,
         currentWorkspaceId: 'workspace-a'
@@ -195,7 +197,8 @@ describe('DashboardLayout workspace switcher', () => {
           last_name: 'Member',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: null
         },
         memberships,
         currentWorkspaceId: 'workspace-a',
@@ -250,7 +253,8 @@ describe('DashboardLayout workspace switcher', () => {
           last_name: 'Tester',
           plan: 'solo',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: null
         },
         memberships,
         currentWorkspaceId: 'workspace-a'
@@ -297,7 +301,8 @@ describe('DashboardLayout workspace switcher', () => {
           last_name: 'Member',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: null
         },
         memberships,
         currentWorkspaceId: 'workspace-a'
@@ -343,7 +348,8 @@ describe('DashboardLayout profile modal', () => {
           last_name: 'User',
           plan: 'solo',
           role: 'owner',
-          companyName: 'Dsentr'
+          companyName: 'Dsentr',
+          oauthProvider: null
         },
         memberships: [],
         currentWorkspaceId: null
@@ -394,5 +400,53 @@ describe('DashboardLayout profile modal', () => {
     expect(within(dialog).getByText(/password updated/i)).toBeInTheDocument()
 
     changePasswordSpy.mockRestore()
+  })
+
+  it('disables password changes for Google or GitHub accounts', async () => {
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'oauth-user',
+          email: 'oauth@example.com',
+          first_name: 'OAuth',
+          last_name: 'User',
+          plan: 'solo',
+          role: 'owner',
+          companyName: null,
+          oauthProvider: 'google'
+        },
+        memberships: [],
+        currentWorkspaceId: null
+      }))
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Routes>
+          <Route path="/dashboard" element={<DashboardLayout />}>
+            <Route index element={<div>Dashboard</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    )
+
+    const user = userEvent.setup()
+    await user.click(await screen.findByLabelText(/open profile/i))
+
+    const dialog = await screen.findByRole('dialog', { name: /profile/i })
+    expect(
+      within(dialog).getByText(/password changes are managed/i)
+    ).toBeInTheDocument()
+
+    const submitButton = within(dialog).getByRole('button', {
+      name: /change password/i
+    })
+    expect(submitButton).toBeDisabled()
+    expect(within(dialog).getByLabelText(/current password/i)).toBeDisabled()
+    expect(within(dialog).getByLabelText(/^new password$/i)).toBeDisabled()
+    expect(
+      within(dialog).getByLabelText(/confirm new password/i)
+    ).toBeDisabled()
   })
 })

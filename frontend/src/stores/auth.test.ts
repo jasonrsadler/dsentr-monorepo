@@ -70,7 +70,8 @@ describe('useAuth workspace selection', () => {
         last_name: 'User',
         plan: 'solo',
         role: 'owner',
-        companyName: null
+        companyName: null,
+        oauthProvider: null
       },
       [collaboratorMembership, ownedMembership]
     )

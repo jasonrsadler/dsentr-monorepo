@@ -102,6 +102,7 @@ impl UserRepository for MockDb {
                     role: user.role,
                     plan: user.plan.clone(),
                     company_name: user.company_name.clone(),
+                    oauth_provider: user.oauth_provider,
                     onboarded_at: user.onboarded_at,
                 }));
             }

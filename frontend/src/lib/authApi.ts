@@ -87,7 +87,8 @@ export async function loginWithEmail({
       const normalizedUser = {
         ...data.user,
         plan: data.user.plan ?? null,
-        companyName: data.user.company_name ?? null
+        companyName: data.user.company_name ?? null,
+        oauthProvider: data.user.oauth_provider ?? null
       }
       login(
         normalizedUser,

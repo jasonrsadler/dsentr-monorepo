@@ -358,6 +358,7 @@ mod tests {
                 plan: None,
                 company_name: None,
                 role: Some(UserRole::User),
+                oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: None,
             }))
         }

@@ -33,6 +33,9 @@ export default function ProfileModal({ open, onClose }: Props) {
   if (!open || !user) return null
 
   const fullName = `${user.first_name} ${user.last_name}`.trim()
+  const isPasswordChangeDisabled =
+    user.oauthProvider === 'google' || user.oauthProvider === 'github'
+  const passwordInputsDisabled = isPasswordChangeDisabled || isSubmitting
   const toastVariantClass =
     toast?.type === 'error'
       ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-200'
@@ -44,6 +47,9 @@ export default function ProfileModal({ open, onClose }: Props) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (isPasswordChangeDisabled) {
+      return
+    }
     if (!newPassword || !confirmPassword) {
       setToast({
         type: 'error',
@@ -148,6 +154,12 @@ export default function ProfileModal({ open, onClose }: Props) {
         </section>
 
         <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
+          {isPasswordChangeDisabled ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+              Password changes are managed through your Google or GitHub
+              account.
+            </p>
+          ) : null}
           <div>
             <label
               htmlFor="current-password"
@@ -163,6 +175,7 @@ export default function ProfileModal({ open, onClose }: Props) {
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
               required
+              disabled={passwordInputsDisabled}
             />
           </div>
 
@@ -181,6 +194,7 @@ export default function ProfileModal({ open, onClose }: Props) {
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
               required
+              disabled={passwordInputsDisabled}
             />
           </div>
 
@@ -199,6 +213,7 @@ export default function ProfileModal({ open, onClose }: Props) {
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               required
+              disabled={passwordInputsDisabled}
             />
           </div>
 
@@ -212,7 +227,7 @@ export default function ProfileModal({ open, onClose }: Props) {
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={passwordInputsDisabled}
               className="px-4 py-2 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isSubmitting ? 'Saving…' : 'Change password'}

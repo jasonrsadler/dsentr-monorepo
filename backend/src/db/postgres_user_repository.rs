@@ -130,6 +130,7 @@ impl UserRepository for PostgresUserRepository {
                    role,
                    plan,
                    company_name,
+                   oauth_provider,
                    onboarded_at
             FROM users
             WHERE id = $1
