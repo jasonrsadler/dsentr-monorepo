@@ -952,11 +952,12 @@ mod tests {
     use axum::Router;
     use base64::engine::general_purpose::STANDARD as BASE64;
     use base64::Engine;
+    use once_cell::sync::Lazy;
     use reqwest::Client;
     use serde_json::{json, Value};
     use std::collections::HashMap;
     use std::net::SocketAddr;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, MutexGuard};
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -965,18 +966,34 @@ mod tests {
 
     use crate::engine::graph::Node;
 
-    struct EnvGuard(&'static str);
+    static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+        _lock: MutexGuard<'static, ()>,
+    }
 
     impl EnvGuard {
         fn set(key: &'static str, value: String) -> Self {
+            let lock = ENV_LOCK.lock().expect("env mutex poisoned");
+            let previous = std::env::var(key).ok();
             std::env::set_var(key, value);
-            Self(key)
+            Self {
+                key,
+                previous,
+                _lock: lock,
+            }
         }
     }
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            std::env::remove_var(self.0);
+            if let Some(previous) = self.previous.take() {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
         }
     }
 

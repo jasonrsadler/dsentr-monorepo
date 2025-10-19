@@ -331,10 +331,11 @@ mod tests {
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
     use crate::services::smtp_mailer::MockMailer;
+    use once_cell::sync::Lazy;
     use reqwest::Client;
     use serde_json::json;
     use std::net::SocketAddr;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, MutexGuard};
     use std::time::Duration;
     use time::{Duration as TimeDuration, OffsetDateTime};
     use tokio::net::TcpListener;
@@ -354,18 +355,34 @@ mod tests {
     use axum::routing::post;
     use axum::Router;
 
-    struct EnvGuard(&'static str);
+    static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+        _lock: MutexGuard<'static, ()>,
+    }
 
     impl EnvGuard {
         fn set(key: &'static str, value: String) -> Self {
+            let lock = ENV_LOCK.lock().expect("env mutex poisoned");
+            let previous = env::var(key).ok();
             env::set_var(key, value);
-            Self(key)
+            Self {
+                key,
+                previous,
+                _lock: lock,
+            }
         }
     }
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            env::remove_var(self.0);
+            if let Some(previous) = self.previous.take() {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
         }
     }
 
