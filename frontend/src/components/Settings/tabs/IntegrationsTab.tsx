@@ -92,6 +92,10 @@ export default function IntegrationsTab({
   const [removeDialog, setRemoveDialog] =
     useState<WorkspaceConnectionInfo | null>(null)
   const [removeBusyId, setRemoveBusyId] = useState<string | null>(null)
+  const [disconnectDialog, setDisconnectDialog] = useState<{
+    provider: OAuthProvider
+    sharedConnections: WorkspaceConnectionInfo[]
+  } | null>(null)
 
   const planTier = useMemo<PlanTier>((): PlanTier => {
     return normalizePlanTier(
@@ -101,6 +105,52 @@ export default function IntegrationsTab({
   const isSoloPlan = planTier === 'solo'
   const isViewer = workspaceRole === 'viewer'
   const canPromote = workspaceRole === 'owner' || workspaceRole === 'admin'
+
+  const currentUserEmail = useMemo(() => {
+    const email = currentUser?.email
+    if (typeof email !== 'string') {
+      return null
+    }
+    const trimmed = email.trim()
+    return trimmed.length > 0 ? trimmed.toLowerCase() : null
+  }, [currentUser?.email])
+
+  const currentUserDisplayName = useMemo(() => {
+    const first =
+      typeof currentUser?.first_name === 'string'
+        ? currentUser.first_name.trim()
+        : ''
+    const last =
+      typeof currentUser?.last_name === 'string'
+        ? currentUser.last_name.trim()
+        : ''
+    const fullName = [first, last].filter((part) => part.length > 0).join(' ')
+    if (fullName.length > 0) {
+      return fullName.toLowerCase()
+    }
+    return null
+  }, [currentUser?.first_name, currentUser?.last_name])
+
+  const matchesCurrentUser = useCallback(
+    (entry: WorkspaceConnectionInfo) => {
+      const sharedEmail =
+        typeof entry.sharedByEmail === 'string'
+          ? entry.sharedByEmail.trim().toLowerCase()
+          : null
+      if (sharedEmail && currentUserEmail) {
+        return sharedEmail === currentUserEmail
+      }
+      const sharedName =
+        typeof entry.sharedByName === 'string'
+          ? entry.sharedByName.trim().toLowerCase()
+          : null
+      if (sharedName && currentUserDisplayName) {
+        return sharedName === currentUserDisplayName
+      }
+      return false
+    },
+    [currentUserDisplayName, currentUserEmail]
+  )
 
   const openPlanSettings = useCallback(() => {
     try {
@@ -180,20 +230,24 @@ export default function IntegrationsTab({
     window.location.href = url.toString()
   }
 
-  const handleDisconnect = async (provider: OAuthProvider) => {
-    setBusyProvider(provider)
-    try {
-      await disconnectProvider(provider)
-      setStatuses((prev) => {
-        const workspaceConnections = prev[provider]?.workspace ?? []
-        const nextWorkspace = workspaceConnections.map((entry) => ({
-          ...entry
-        }))
-        const nextState = {
-          ...prev,
-          [provider]: {
+  const performDisconnect = useCallback(
+    async (
+      provider: OAuthProvider,
+      sharedConnections: WorkspaceConnectionInfo[]
+    ): Promise<boolean> => {
+      setBusyProvider(provider)
+      try {
+        for (const entry of sharedConnections) {
+          if (removeBusyId === entry.id) {
+            continue
+          }
+          await unshareWorkspaceConnection(entry.workspaceId, entry.id)
+        }
+        await disconnectProvider(provider)
+        setStatuses((prev) => {
+          const existing = prev[provider] ?? {
             personal: {
-              scope: 'personal',
+              scope: 'personal' as const,
               id: null,
               connected: false,
               accountEmail: undefined,
@@ -201,20 +255,64 @@ export default function IntegrationsTab({
               lastRefreshedAt: undefined,
               isShared: false
             },
-            workspace: nextWorkspace
+            workspace: [] as WorkspaceConnectionInfo[]
           }
-        }
-        setCachedConnections(nextState)
-        return nextState
-      })
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to disconnect provider'
-      setError(message)
-    } finally {
-      setBusyProvider(null)
-    }
-  }
+          const filteredWorkspace = existing.workspace
+            .filter(
+              (entry) =>
+                !sharedConnections.some((shared) => shared.id === entry.id)
+            )
+            .map((entry) => ({ ...entry }))
+          const nextState = {
+            ...prev,
+            [provider]: {
+              personal: {
+                scope: 'personal' as const,
+                id: null,
+                connected: false,
+                accountEmail: undefined,
+                expiresAt: undefined,
+                lastRefreshedAt: undefined,
+                isShared: false
+              },
+              workspace: filteredWorkspace
+            }
+          }
+          setCachedConnections(nextState)
+          return nextState
+        })
+        setError(null)
+        return true
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Failed to disconnect provider'
+        setError(message)
+        return false
+      } finally {
+        setBusyProvider(null)
+      }
+    },
+    [removeBusyId]
+  )
+
+  const handleDisconnect = useCallback(
+    (provider: OAuthProvider) => {
+      const status = statuses[provider]
+      const personal = status?.personal
+      const workspaceConnections = status?.workspace ?? []
+      const sharedConnections = workspaceConnections.filter((entry) =>
+        matchesCurrentUser(entry)
+      )
+
+      if (sharedConnections.length > 0) {
+        setDisconnectDialog({ provider, sharedConnections })
+        return
+      }
+
+      void performDisconnect(provider, [])
+    },
+    [matchesCurrentUser, performDisconnect, statuses]
+  )
 
   const handleRefresh = async (provider: OAuthProvider) => {
     setBusyProvider(provider)
@@ -601,7 +699,7 @@ export default function IntegrationsTab({
           const workspaceName = removeDialog.workspaceName?.trim().length
             ? removeDialog.workspaceName
             : 'this workspace'
-          return `Stop sharing the ${providerName} connection with ${workspaceName}?`
+          return `Stop sharing the ${providerName} connection with ${workspaceName}? Workflows that rely on this connection may stop working.`
         })()}
         confirmText="Remove"
         onCancel={() => {
@@ -639,8 +737,10 @@ export default function IntegrationsTab({
                 .filter((workspaceEntry) => workspaceEntry.id !== entry.id)
                 .map((workspaceEntry) => ({ ...workspaceEntry }))
               const shouldClearSharedFlag =
-                existing.personal.id !== null &&
-                existing.personal.id === entry.id
+                matchesCurrentUser(entry) &&
+                !nextWorkspace.some((workspaceEntry) =>
+                  matchesCurrentUser(workspaceEntry)
+                )
               const nextPersonal = shouldClearSharedFlag
                 ? { ...existing.personal, isShared: false }
                 : { ...existing.personal }
@@ -665,6 +765,53 @@ export default function IntegrationsTab({
           } finally {
             setRemoveBusyId(null)
             setRemoveDialog(null)
+          }
+        }}
+      />
+      <ConfirmDialog
+        isOpen={disconnectDialog !== null}
+        title="Remove Shared Credential"
+        message={(() => {
+          if (!disconnectDialog) {
+            return 'Disconnect this OAuth credential?'
+          }
+          const providerName =
+            PROVIDERS.find((p) => p.key === disconnectDialog.provider)?.name ??
+            'this provider'
+          const workspaces = disconnectDialog.sharedConnections
+            .map((entry) =>
+              entry.workspaceName?.trim().length
+                ? entry.workspaceName
+                : 'this workspace'
+            )
+            .filter((name, index, arr) => arr.indexOf(name) === index)
+          const workspaceText =
+            workspaces.length === 0
+              ? 'your workspace'
+              : workspaces.length === 1
+                ? workspaces[0]
+                : `${workspaces.slice(0, -1).join(', ')} and ${
+                    workspaces[workspaces.length - 1]
+                  }`
+          return `Disconnecting this ${providerName} credential will also remove the shared connection from ${workspaceText}. Existing workflows may stop working if they rely on it. Do you want to continue?`
+        })()}
+        confirmText="Remove credential"
+        onCancel={() => {
+          setDisconnectDialog(null)
+        }}
+        onConfirm={async () => {
+          if (!disconnectDialog) {
+            return
+          }
+          if (busyProvider === disconnectDialog.provider) {
+            return
+          }
+          const ok = await performDisconnect(
+            disconnectDialog.provider,
+            disconnectDialog.sharedConnections
+          )
+          if (ok) {
+            setDisconnectDialog(null)
           }
         }}
       />

@@ -37,3 +37,4 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Integrations tab now lets admins revoke shared OAuth connections without deleting the owner's personal credential.
 - Workflow nodes clear shared workspace credential selections when the shared connection is removed so users must choose an available credential explicitly.
 - OAuth connection selectors update in real time when workspace credentials are promoted or removed, so open workflows reflect changes without refreshing.
+- Shared credential removal flows now warn about potential workflow failures and ensure personal disconnects also revoke shared workspace connections.
