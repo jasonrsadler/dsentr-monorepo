@@ -5,7 +5,8 @@ import {
   MiniMap,
   addEdge,
   useEdgesState,
-  useNodesState
+  useNodesState,
+  useReactFlow
 } from '@xyflow/react'
 import TriggerNode from '@/components/Workflow/TriggerNode'
 import ActionNode from '@/components/Workflow/ActionNode'
@@ -186,6 +187,7 @@ export default function FlowCanvas({
 }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
   const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
+  const reactFlow = useReactFlow()
   const normalizedPlanTier = useMemo(
     () => normalizePlanTier(planTier),
     [planTier]
@@ -462,11 +464,10 @@ export default function FlowCanvas({
       if (!canEditRef.current) return
       const type = event.dataTransfer.getData('application/reactflow')
       if (!type) return
-      const bounds = event.currentTarget.getBoundingClientRect()
-      const position = {
-        x: event.clientX - bounds.left,
-        y: event.clientY - bounds.top
-      }
+      const position = reactFlow.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY
+      })
       setNodes((nds) => {
         if (isSoloPlan && nds.length >= 10) {
           onRestrictionNotice?.(
@@ -495,7 +496,7 @@ export default function FlowCanvas({
       })
       markWorkflowDirtyRef.current()
     },
-    [setNodes, isSoloPlan, onRestrictionNotice]
+    [setNodes, isSoloPlan, onRestrictionNotice, reactFlow]
   )
 
   const onDragOver = useCallback((event) => {
