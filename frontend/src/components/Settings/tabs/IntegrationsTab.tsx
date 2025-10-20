@@ -328,16 +328,24 @@ export default function IntegrationsTab({
           lastRefreshedAt: undefined,
           isShared: false
         }
+        const nextPersonal = {
+          ...previousPersonal,
+          connected: true
+        }
+
+        if (typeof updated.accountEmail !== 'undefined') {
+          nextPersonal.accountEmail = updated.accountEmail
+        }
+        if (typeof updated.expiresAt !== 'undefined') {
+          nextPersonal.expiresAt = updated.expiresAt
+        }
+        if (typeof updated.lastRefreshedAt !== 'undefined') {
+          nextPersonal.lastRefreshedAt = updated.lastRefreshedAt
+        }
         const nextState = {
           ...prev,
           [provider]: {
-            personal: {
-              ...previousPersonal,
-              connected: true,
-              accountEmail: updated.accountEmail,
-              expiresAt: updated.expiresAt,
-              lastRefreshedAt: updated.lastRefreshedAt
-            },
+            personal: nextPersonal,
             workspace: (prev[provider]?.workspace ?? []).map((entry) => ({
               ...entry
             }))

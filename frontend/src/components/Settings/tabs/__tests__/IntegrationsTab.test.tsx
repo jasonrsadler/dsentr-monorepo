@@ -163,6 +163,69 @@ describe('IntegrationsTab', () => {
     })
   })
 
+  it('preserves existing token metadata when refresh response omits fields', async () => {
+    fetchConnections.mockResolvedValueOnce({
+      google: {
+        personal: {
+          scope: 'personal',
+          id: 'google-personal',
+          connected: true,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+          isShared: false
+        },
+        workspace: []
+      },
+      microsoft: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          isShared: false
+        },
+        workspace: []
+      }
+    })
+    refreshProvider.mockResolvedValueOnce({
+      connected: true,
+      accountEmail: 'owner@example.com',
+      expiresAt: undefined,
+      lastRefreshedAt: undefined
+    })
+
+    const user = userEvent.setup()
+    render(<IntegrationsTab />)
+
+    await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+
+    const refreshButton = await screen.findByRole('button', {
+      name: /Refresh token/i
+    })
+    await user.click(refreshButton)
+
+    await waitFor(() => expect(refreshProvider).toHaveBeenCalledWith('google'))
+    await waitFor(() => expect(setCachedConnections).toHaveBeenCalled())
+
+    const lastCall =
+      setCachedConnections.mock.calls[
+        setCachedConnections.mock.calls.length - 1
+      ]
+    expect(lastCall).toBeDefined()
+    const snapshot = lastCall?.[0] as any
+
+    expect(snapshot.google.personal.expiresAt).toBe('2025-01-01T00:00:00.000Z')
+    expect(snapshot.google.personal.lastRefreshedAt).toBe(
+      '2024-12-31T15:30:00.000Z'
+    )
+
+    expect(screen.getByText(/Token expires:/i)).toBeInTheDocument()
+    expect(screen.getByText(/Last refreshed:/i)).toBeInTheDocument()
+  })
+
   it('warns about breaking workflows when removing a workspace connection', async () => {
     fetchConnections.mockResolvedValueOnce({
       google: {
