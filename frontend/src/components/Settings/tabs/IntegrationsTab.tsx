@@ -64,6 +64,7 @@ export default function IntegrationsTab({
         scope: 'personal',
         id: null,
         connected: false,
+        lastRefreshedAt: undefined,
         isShared: false
       },
       workspace: []
@@ -73,6 +74,7 @@ export default function IntegrationsTab({
         scope: 'personal',
         id: null,
         connected: false,
+        lastRefreshedAt: undefined,
         isShared: false
       },
       workspace: []
@@ -184,6 +186,7 @@ export default function IntegrationsTab({
             connected: false,
             accountEmail: undefined,
             expiresAt: undefined,
+            lastRefreshedAt: undefined,
             isShared: false
           },
           workspace: prev[provider]?.workspace ?? []
@@ -212,11 +215,13 @@ export default function IntegrationsTab({
               connected: false,
               accountEmail: undefined,
               expiresAt: undefined,
+              lastRefreshedAt: undefined,
               isShared: false
             }),
             connected: true,
             accountEmail: updated.accountEmail,
-            expiresAt: updated.expiresAt
+            expiresAt: updated.expiresAt,
+            lastRefreshedAt: updated.lastRefreshedAt
           },
           workspace: prev[provider]?.workspace ?? []
         }
@@ -302,6 +307,7 @@ export default function IntegrationsTab({
             const connected = personal?.connected ?? false
             const accountEmail = personal?.accountEmail
             const expiresAt = personal?.expiresAt
+            const lastRefreshedAt = personal?.lastRefreshedAt
             const busy = busyProvider === provider.key
             const promoting = promoteBusyProvider === provider.key
             const workspaceConnections = status?.workspace ?? []
@@ -398,6 +404,14 @@ export default function IntegrationsTab({
                       <dd>{new Date(expiresAt).toLocaleString()}</dd>
                     </div>
                   )}
+                  {lastRefreshedAt && (
+                    <div className="flex items-center gap-2">
+                      <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                        Last refreshed:
+                      </dt>
+                      <dd>{new Date(lastRefreshedAt).toLocaleString()}</dd>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
                       Scopes:
@@ -434,6 +448,12 @@ export default function IntegrationsTab({
                               ? ` (${entry.sharedByEmail})`
                               : ''}
                           </div>
+                          {entry.lastRefreshedAt ? (
+                            <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                              Last refreshed{' '}
+                              {new Date(entry.lastRefreshedAt).toLocaleString()}
+                            </div>
+                          ) : null}
                         </li>
                       ))}
                     </ul>

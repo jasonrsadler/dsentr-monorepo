@@ -51,6 +51,7 @@ describe('IntegrationsTab', () => {
             connected: true,
             accountEmail: 'owner@example.com',
             expiresAt: '2025-01-01T00:00:00.000Z',
+            lastRefreshedAt: '2024-12-31T15:30:00.000Z',
             isShared: false
           },
           workspace: []
@@ -62,6 +63,7 @@ describe('IntegrationsTab', () => {
             connected: false,
             accountEmail: undefined,
             expiresAt: undefined,
+            lastRefreshedAt: undefined,
             isShared: false
           },
           workspace: []
@@ -75,6 +77,7 @@ describe('IntegrationsTab', () => {
             connected: true,
             accountEmail: 'owner@example.com',
             expiresAt: '2025-01-01T00:00:00.000Z',
+            lastRefreshedAt: '2025-01-03T11:00:00.000Z',
             isShared: true
           },
           workspace: [
@@ -84,6 +87,7 @@ describe('IntegrationsTab', () => {
               connected: true,
               accountEmail: 'owner@example.com',
               expiresAt: '2025-01-01T00:00:00.000Z',
+              lastRefreshedAt: '2025-01-02T08:15:00.000Z',
               workspaceId: 'ws-1',
               workspaceName: 'Acme Workspace',
               sharedByName: 'Owner Example',
@@ -98,6 +102,7 @@ describe('IntegrationsTab', () => {
             connected: false,
             accountEmail: undefined,
             expiresAt: undefined,
+            lastRefreshedAt: undefined,
             isShared: false
           },
           workspace: []
@@ -108,6 +113,14 @@ describe('IntegrationsTab', () => {
     render(<IntegrationsTab />)
 
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+
+    expect(
+      await screen.findByText(
+        `Last refreshed ${new Date(
+          '2024-12-31T15:30:00.000Z'
+        ).toLocaleString()}`
+      )
+    ).toBeInTheDocument()
 
     const promoteButton = await screen.findByRole('button', {
       name: /Promote to Workspace/i
@@ -133,5 +146,12 @@ describe('IntegrationsTab', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Workspace connections')).toBeInTheDocument()
     expect(screen.getByText('Acme Workspace')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        `Last refreshed ${new Date(
+          '2025-01-02T08:15:00.000Z'
+        ).toLocaleString()}`
+      )
+    ).toBeInTheDocument()
   })
 })

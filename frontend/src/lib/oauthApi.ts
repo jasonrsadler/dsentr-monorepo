@@ -40,7 +40,7 @@ interface PersonalConnectionPayload {
   accountEmail: string
   expiresAt: string
   isShared: boolean
-  lastRefreshedAt: string
+  lastRefreshedAt?: string | null
 }
 
 interface WorkspaceConnectionPayload {
@@ -52,7 +52,7 @@ interface WorkspaceConnectionPayload {
   workspaceName: string
   sharedByName?: string | null
   sharedByEmail?: string | null
-  lastRefreshedAt: string
+  lastRefreshedAt?: string | null
 }
 
 interface ConnectionsApiResponse {
@@ -63,9 +63,9 @@ interface ConnectionsApiResponse {
 
 interface RefreshApiResponse {
   success: boolean
-  account_email: string
-  expires_at: string
-  last_refreshed_at: string
+  accountEmail?: string | null
+  expiresAt?: string | null
+  lastRefreshedAt?: string | null
 }
 
 const defaultPersonalConnection = (): PersonalConnectionInfo => ({
@@ -74,8 +74,8 @@ const defaultPersonalConnection = (): PersonalConnectionInfo => ({
   connected: false,
   accountEmail: undefined,
   expiresAt: undefined,
-  isShared: false,
-  lastRefreshedAt: undefined
+  lastRefreshedAt: undefined,
+  isShared: false
 })
 
 const defaultProviderConnections = (): ProviderConnectionSet => ({
@@ -123,8 +123,8 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
         connected: true,
         accountEmail: normalize(entry.accountEmail),
         expiresAt: entry.expiresAt ?? undefined,
-        isShared: Boolean(entry.isShared),
-        lastRefreshedAt: entry.lastRefreshedAt ?? undefined
+        lastRefreshedAt: normalize(entry.lastRefreshedAt),
+        isShared: Boolean(entry.isShared)
       }
     }
   })
@@ -150,11 +150,11 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
       connected: true,
       accountEmail: normalize(entry.accountEmail),
       expiresAt: entry.expiresAt ?? undefined,
+      lastRefreshedAt: normalize(entry.lastRefreshedAt),
       workspaceId,
       workspaceName: normalize(entry.workspaceName) ?? 'Workspace connection',
       sharedByName: normalize(entry.sharedByName),
-      sharedByEmail: normalize(entry.sharedByEmail),
-      lastRefreshedAt: entry.lastRefreshedAt ?? undefined
+      sharedByEmail: normalize(entry.sharedByEmail)
     }
 
     map[entry.provider] = {
@@ -213,11 +213,18 @@ export async function refreshProvider(
   }
 
   const data = (await res.json()) as RefreshApiResponse
+  const normalize = (value?: string | null): string | undefined => {
+    if (typeof value !== 'string') {
+      return undefined
+    }
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
   return {
     connected: true,
-    accountEmail: data.account_email,
-    expiresAt: data.expires_at,
-    lastRefreshedAt: data.last_refreshed_at
+    accountEmail: normalize(data.accountEmail),
+    expiresAt: normalize(data.expiresAt),
+    lastRefreshedAt: normalize(data.lastRefreshedAt)
   }
 }
 
