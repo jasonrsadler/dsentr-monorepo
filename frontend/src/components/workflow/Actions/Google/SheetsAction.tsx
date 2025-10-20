@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
   fetchConnections,
+  getCachedConnections,
+  subscribeToConnectionUpdates,
   type ConnectionScope,
   type ProviderConnectionSet
 } from '@/lib/oauthApi'
@@ -156,30 +158,49 @@ export default function SheetsAction({
 
   useEffect(() => {
     let active = true
-    setConnectionsLoading(true)
-    setConnectionsError(null)
-    fetchConnections()
-      .then((connections) => {
-        if (!active) return
-        setConnectionState(connections.google ?? null)
-        setConnectionsError(null)
-      })
-      .catch((error) => {
-        if (!active) return
-        const message =
-          error instanceof Error
-            ? error.message
-            : 'Failed to load Google connections'
-        setConnectionsError(message)
-        setConnectionState(null)
-      })
-      .finally(() => {
-        if (!active) return
-        setConnectionsLoading(false)
-      })
+
+    const cached = getCachedConnections()
+    if (cached?.google) {
+      setConnectionState(cached.google)
+      setConnectionsError(null)
+      setConnectionsLoading(false)
+    }
+
+    const unsubscribe = subscribeToConnectionUpdates((snapshot) => {
+      if (!active) return
+      const googleConnections = snapshot?.google ?? null
+      setConnectionState(googleConnections)
+      setConnectionsError(null)
+      setConnectionsLoading(false)
+    })
+
+    if (!cached) {
+      setConnectionsLoading(true)
+      setConnectionsError(null)
+      fetchConnections()
+        .then((connections) => {
+          if (!active) return
+          setConnectionState(connections.google ?? null)
+          setConnectionsError(null)
+        })
+        .catch((error) => {
+          if (!active) return
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Failed to load Google connections'
+          setConnectionsError(message)
+          setConnectionState(null)
+        })
+        .finally(() => {
+          if (!active) return
+          setConnectionsLoading(false)
+        })
+    }
 
     return () => {
       active = false
+      unsubscribe()
     }
   }, [])
 
@@ -200,13 +221,29 @@ export default function SheetsAction({
       if (!selected && email) {
         selected = findConnectionByEmail(email)
       }
+      const wasWorkspaceSelection = scope === 'workspace'
+      if (!selected && wasWorkspaceSelection) {
+        if (
+          prev.oauthConnectionScope ||
+          prev.oauthConnectionId ||
+          prev.accountEmail
+        ) {
+          return {
+            ...prev,
+            oauthConnectionScope: '',
+            oauthConnectionId: '',
+            accountEmail: ''
+          }
+        }
+        return prev
+      }
       if (!selected) {
         const personal = connectionState.personal
         if (personal.connected && personal.id) {
           selected = personal
         }
       }
-      if (!selected) {
+      if (!selected && !wasWorkspaceSelection) {
         if (connectionState.workspace.length === 1) {
           selected = connectionState.workspace[0]
         }

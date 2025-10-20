@@ -15,3 +15,4 @@ itly coordinated.
 
 ## Change Reasons
 - Workspace membership listing now accepts viewer roles so the Members settings tab can display roster data without forcing a workspace switch.
+- Added workspace OAuth connection removal flow so admins can revoke shared credentials without deleting personal tokens.

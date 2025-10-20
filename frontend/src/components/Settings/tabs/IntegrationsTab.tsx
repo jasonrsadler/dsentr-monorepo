@@ -4,10 +4,13 @@ import { API_BASE_URL } from '@/lib/config'
 import {
   OAuthProvider,
   ProviderConnectionSet,
+  WorkspaceConnectionInfo,
   disconnectProvider,
   fetchConnections,
   refreshProvider,
-  promoteConnection
+  promoteConnection,
+  unshareWorkspaceConnection,
+  setCachedConnections
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
@@ -52,6 +55,7 @@ export default function IntegrationsTab({
 }: IntegrationsTabProps) {
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const userPlan = useAuth((state) => state.user?.plan ?? null)
+  const currentUser = useAuth((state) => state.user ?? null)
   const workspaceRole = currentWorkspace?.role ?? null
   const workspaceId = currentWorkspace?.workspace.id ?? null
   const [loading, setLoading] = useState(true)
@@ -85,6 +89,9 @@ export default function IntegrationsTab({
     useState<OAuthProvider | null>(null)
   const [promoteBusyProvider, setPromoteBusyProvider] =
     useState<OAuthProvider | null>(null)
+  const [removeDialog, setRemoveDialog] =
+    useState<WorkspaceConnectionInfo | null>(null)
+  const [removeBusyId, setRemoveBusyId] = useState<string | null>(null)
 
   const planTier = useMemo<PlanTier>((): PlanTier => {
     return normalizePlanTier(
@@ -177,21 +184,29 @@ export default function IntegrationsTab({
     setBusyProvider(provider)
     try {
       await disconnectProvider(provider)
-      setStatuses((prev) => ({
-        ...prev,
-        [provider]: {
-          personal: {
-            scope: 'personal',
-            id: null,
-            connected: false,
-            accountEmail: undefined,
-            expiresAt: undefined,
-            lastRefreshedAt: undefined,
-            isShared: false
-          },
-          workspace: prev[provider]?.workspace ?? []
+      setStatuses((prev) => {
+        const workspaceConnections = prev[provider]?.workspace ?? []
+        const nextWorkspace = workspaceConnections.map((entry) => ({
+          ...entry
+        }))
+        const nextState = {
+          ...prev,
+          [provider]: {
+            personal: {
+              scope: 'personal',
+              id: null,
+              connected: false,
+              accountEmail: undefined,
+              expiresAt: undefined,
+              lastRefreshedAt: undefined,
+              isShared: false
+            },
+            workspace: nextWorkspace
+          }
         }
-      }))
+        setCachedConnections(nextState)
+        return nextState
+      })
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to disconnect provider'
@@ -205,27 +220,34 @@ export default function IntegrationsTab({
     setBusyProvider(provider)
     try {
       const updated = await refreshProvider(provider)
-      setStatuses((prev) => ({
-        ...prev,
-        [provider]: {
-          personal: {
-            ...(prev[provider]?.personal ?? {
-              scope: 'personal',
-              id: null,
-              connected: false,
-              accountEmail: undefined,
-              expiresAt: undefined,
-              lastRefreshedAt: undefined,
-              isShared: false
-            }),
-            connected: true,
-            accountEmail: updated.accountEmail,
-            expiresAt: updated.expiresAt,
-            lastRefreshedAt: updated.lastRefreshedAt
-          },
-          workspace: prev[provider]?.workspace ?? []
+      setStatuses((prev) => {
+        const previousPersonal = prev[provider]?.personal ?? {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          isShared: false
         }
-      }))
+        const nextState = {
+          ...prev,
+          [provider]: {
+            personal: {
+              ...previousPersonal,
+              connected: true,
+              accountEmail: updated.accountEmail,
+              expiresAt: updated.expiresAt,
+              lastRefreshedAt: updated.lastRefreshedAt
+            },
+            workspace: (prev[provider]?.workspace ?? []).map((entry) => ({
+              ...entry
+            }))
+          }
+        }
+        setCachedConnections(nextState)
+        return nextState
+      })
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to refresh tokens'
@@ -454,6 +476,19 @@ export default function IntegrationsTab({
                               {new Date(entry.lastRefreshedAt).toLocaleString()}
                             </div>
                           ) : null}
+                          {canPromote ? (
+                            <div className="mt-2 flex justify-end">
+                              <button
+                                onClick={() => setRemoveDialog(entry)}
+                                disabled={
+                                  removeBusyId === entry.id || busy || promoting
+                                }
+                                className="rounded-md bg-red-500 px-2 py-1 text-xs font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
+                              >
+                                Remove from workspace
+                              </button>
+                            </div>
+                          ) : null}
                         </li>
                       ))}
                     </ul>
@@ -491,7 +526,55 @@ export default function IntegrationsTab({
               provider,
               connectionId: personal.id
             })
-            await loadConnections()
+            const workspaceName =
+              currentWorkspace?.workspace.name?.trim() ?? 'Workspace connection'
+            const sharedByName =
+              currentUser?.first_name || currentUser?.last_name
+                ? [currentUser?.first_name, currentUser?.last_name]
+                    .filter((part) => part && part.trim().length > 0)
+                    .join(' ')
+                : undefined
+            const sharedByEmail = currentUser?.email?.trim() || undefined
+
+            setStatuses((prev) => {
+              const existing = prev[provider] ?? {
+                personal: personal,
+                workspace: []
+              }
+
+              const nextPersonal = {
+                ...existing.personal,
+                isShared: true
+              }
+
+              const filteredWorkspace = (existing.workspace ?? []).filter(
+                (entry) => entry.id !== personal.id
+              )
+
+              const workspaceEntry: WorkspaceConnectionInfo = {
+                scope: 'workspace',
+                id: personal.id,
+                connected: true,
+                provider,
+                accountEmail: personal.accountEmail,
+                expiresAt: personal.expiresAt,
+                lastRefreshedAt: personal.lastRefreshedAt,
+                workspaceId,
+                workspaceName,
+                sharedByName,
+                sharedByEmail
+              }
+
+              const nextState = {
+                ...prev,
+                [provider]: {
+                  personal: nextPersonal,
+                  workspace: [...filteredWorkspace, workspaceEntry]
+                }
+              }
+              setCachedConnections(nextState)
+              return nextState
+            })
             setError(null)
           } catch (err) {
             setError(
@@ -502,6 +585,86 @@ export default function IntegrationsTab({
           } finally {
             setPromoteBusyProvider(null)
             setPromoteDialogProvider(null)
+          }
+        }}
+      />
+      <ConfirmDialog
+        isOpen={removeDialog !== null}
+        title="Remove Workspace Connection"
+        message={(() => {
+          if (!removeDialog) {
+            return 'Stop sharing this connection with the workspace?'
+          }
+          const providerName =
+            PROVIDERS.find((p) => p.key === removeDialog.provider)?.name ??
+            'Integration'
+          const workspaceName = removeDialog.workspaceName?.trim().length
+            ? removeDialog.workspaceName
+            : 'this workspace'
+          return `Stop sharing the ${providerName} connection with ${workspaceName}?`
+        })()}
+        confirmText="Remove"
+        onCancel={() => {
+          setRemoveDialog(null)
+          setRemoveBusyId(null)
+        }}
+        onConfirm={async () => {
+          const entry = removeDialog
+          if (!entry) return
+          if (!entry.id) {
+            setError(
+              'Missing workspace connection identifier. Refresh and try again.'
+            )
+            setRemoveDialog(null)
+            return
+          }
+          try {
+            setRemoveBusyId(entry.id)
+            await unshareWorkspaceConnection(entry.workspaceId, entry.id)
+            setStatuses((prev) => {
+              const providerKey = entry.provider
+              const existing = prev[providerKey] ?? {
+                personal: {
+                  scope: 'personal',
+                  id: null,
+                  connected: false,
+                  accountEmail: undefined,
+                  expiresAt: undefined,
+                  lastRefreshedAt: undefined,
+                  isShared: false
+                },
+                workspace: []
+              }
+              const nextWorkspace = existing.workspace
+                .filter((workspaceEntry) => workspaceEntry.id !== entry.id)
+                .map((workspaceEntry) => ({ ...workspaceEntry }))
+              const shouldClearSharedFlag =
+                existing.personal.id !== null &&
+                existing.personal.id === entry.id
+              const nextPersonal = shouldClearSharedFlag
+                ? { ...existing.personal, isShared: false }
+                : { ...existing.personal }
+
+              const nextState = {
+                ...prev,
+                [providerKey]: {
+                  personal: nextPersonal,
+                  workspace: nextWorkspace
+                }
+              }
+              setCachedConnections(nextState)
+              return nextState
+            })
+            setError(null)
+          } catch (err) {
+            setError(
+              err instanceof Error
+                ? err.message
+                : 'Failed to remove workspace connection'
+            )
+          } finally {
+            setRemoveBusyId(null)
+            setRemoveDialog(null)
           }
         }}
       />

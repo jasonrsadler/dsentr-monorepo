@@ -402,6 +402,10 @@ async fn main() {
             "/{workspace_id}/connections/promote",
             post(routes::workspaces::promote_workspace_connection),
         )
+        .route(
+            "/{workspace_id}/connections/{connection_id}",
+            delete(routes::workspaces::remove_workspace_connection),
+        )
         .layer(csrf_layer.clone());
 
     let options_routes = Router::new()

@@ -34,3 +34,6 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Workspace selection now falls back to a user's owned workspace when their previously active workspace is unavailable so dashboard context stays consistent after membership changes.
 - Logs tab now summarizes executed workflow runs with a human-readable timeline while keeping a copy-to-clipboard option for the raw JSON payload.
 - Logs tab now enriches workflow run summaries with trigger origin, credential usage, and node subtype context derived from execution snapshots.
+- Integrations tab now lets admins revoke shared OAuth connections without deleting the owner's personal credential.
+- Workflow nodes clear shared workspace credential selections when the shared connection is removed so users must choose an available credential explicitly.
+- OAuth connection selectors update in real time when workspace credentials are promoted or removed, so open workflows reflect changes without refreshing.

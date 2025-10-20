@@ -12,6 +12,8 @@ pub enum ConnectedOAuthProvider {
 
 #[allow(dead_code)]
 pub const WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED: &str = "connection_promoted";
+#[allow(dead_code)]
+pub const WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED: &str = "connection_unshared";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserOAuthToken {

@@ -1,7 +1,8 @@
-import { screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { vi } from 'vitest'
 import TeamsAction from './TeamsAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+import { updateCachedConnections } from '@/lib/oauthApi'
 
 const secrets = {
   messaging: {
@@ -25,12 +26,14 @@ describe('TeamsAction', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    updateCachedConnections(() => null)
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
+    updateCachedConnections(() => null)
   })
 
   it('emits changes without validation errors', async () => {
@@ -469,6 +472,113 @@ describe('TeamsAction', () => {
         { userId: 'user-1', displayName: 'Jane Doe' }
       ])
       expect(lastCall?.[1]).toBe(false)
+    })
+  })
+
+  it('clears delegated workspace selections when a shared credential is removed while editing', async () => {
+    const fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : 'url' in input
+                ? input.url
+                : input.toString()
+
+        if (url.includes('/api/oauth/connections')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              personal: [
+                {
+                  id: 'microsoft-personal',
+                  provider: 'microsoft',
+                  accountEmail: 'owner@example.com',
+                  expiresAt: '2025-01-01T00:00:00.000Z',
+                  isShared: true
+                }
+              ],
+              workspace: [
+                {
+                  id: 'workspace-shared',
+                  provider: 'microsoft',
+                  accountEmail: 'ops@example.com',
+                  expiresAt: '2025-01-01T00:00:00.000Z',
+                  workspaceId: 'ws-1',
+                  workspaceName: 'Operations',
+                  sharedByName: 'Owner User',
+                  sharedByEmail: 'owner@example.com'
+                }
+              ]
+            })
+          )
+        }
+
+        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+      })
+
+    const onChange = vi.fn()
+    renderWithSecrets(
+      <TeamsAction
+        args={{
+          ...baseArgs,
+          deliveryMethod: 'Delegated OAuth (Post as user)',
+          oauthProvider: 'microsoft',
+          oauthConnectionScope: 'workspace',
+          oauthConnectionId: 'workspace-shared',
+          oauthAccountEmail: 'ops@example.com'
+        }}
+        onChange={onChange}
+      />,
+      { secrets }
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/oauth/connections'),
+        expect.anything()
+      )
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', {
+          name: /workspace credential/i
+        })
+      ).toBeInTheDocument()
+    })
+
+    await act(async () => {
+      updateCachedConnections((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          microsoft: {
+            personal: {
+              ...prev.microsoft.personal,
+              isShared: false
+            },
+            workspace: []
+          }
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Select Microsoft connection' })
+      ).toBeInTheDocument()
+    })
+
+    const lastCall = onChange.mock.calls.at(-1)
+    expect(lastCall?.[0]).toMatchObject({
+      oauthProvider: 'microsoft',
+      oauthConnectionScope: '',
+      oauthConnectionId: '',
+      oauthAccountEmail: ''
     })
   })
 

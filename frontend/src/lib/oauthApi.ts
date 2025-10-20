@@ -21,6 +21,7 @@ export interface PersonalConnectionInfo extends BaseConnectionInfo {
 
 export interface WorkspaceConnectionInfo extends BaseConnectionInfo {
   scope: 'workspace'
+  provider: OAuthProvider
   workspaceId: string
   workspaceName: string
   sharedByName?: string
@@ -33,6 +34,68 @@ export interface ProviderConnectionSet {
 }
 
 type ProviderConnectionMap = Record<OAuthProvider, ProviderConnectionSet>
+
+type ConnectionListener = (snapshot: ProviderConnectionMap | null) => void
+
+let cachedConnections: ProviderConnectionMap | null = null
+const connectionListeners = new Set<ConnectionListener>()
+
+const cloneConnectionSet = (
+  set: ProviderConnectionSet
+): ProviderConnectionSet => ({
+  personal: { ...set.personal },
+  workspace: set.workspace.map((entry) => ({ ...entry }))
+})
+
+const cloneConnectionMap = (
+  map: ProviderConnectionMap
+): ProviderConnectionMap => ({
+  google: cloneConnectionSet(map.google),
+  microsoft: cloneConnectionSet(map.microsoft)
+})
+
+const emitCachedConnections = (snapshot: ProviderConnectionMap | null) => {
+  cachedConnections = snapshot ? cloneConnectionMap(snapshot) : null
+  const payload = cachedConnections
+    ? cloneConnectionMap(cachedConnections)
+    : null
+  connectionListeners.forEach((listener) => {
+    listener(payload)
+  })
+}
+
+export const getCachedConnections = (): ProviderConnectionMap | null => {
+  return cachedConnections ? cloneConnectionMap(cachedConnections) : null
+}
+
+export const subscribeToConnectionUpdates = (
+  listener: ConnectionListener
+): (() => void) => {
+  connectionListeners.add(listener)
+  if (cachedConnections) {
+    listener(cloneConnectionMap(cachedConnections))
+  }
+  return () => {
+    connectionListeners.delete(listener)
+  }
+}
+
+export const setCachedConnections = (snapshot: ProviderConnectionMap) => {
+  emitCachedConnections(snapshot)
+}
+
+export const updateCachedConnections = (
+  updater: (
+    current: ProviderConnectionMap | null
+  ) => ProviderConnectionMap | null
+): ProviderConnectionMap | null => {
+  const current = cachedConnections
+    ? cloneConnectionMap(cachedConnections)
+    : null
+  const next = updater(current)
+  emitCachedConnections(next)
+  return next
+}
 
 interface PersonalConnectionPayload {
   id: string
@@ -148,6 +211,7 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
       scope: 'workspace',
       id: connectionId,
       connected: true,
+      provider: entry.provider,
       accountEmail: normalize(entry.accountEmail),
       expiresAt: entry.expiresAt ?? undefined,
       lastRefreshedAt: normalize(entry.lastRefreshedAt),
@@ -163,6 +227,7 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
     }
   })
 
+  setCachedConnections(map)
   return map
 }
 
@@ -184,6 +249,31 @@ export async function disconnectProvider(
       .then((body) => body?.message)
       .catch(() => null)
     throw new Error(message || 'Failed to disconnect provider')
+  }
+}
+
+export async function unshareWorkspaceConnection(
+  workspaceId: string,
+  connectionId: string
+): Promise<void> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/connections/${connectionId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: {
+        'x-csrf-token': csrfToken
+      }
+    }
+  )
+
+  if (!res.ok) {
+    const message = await res
+      .json()
+      .then((body) => body?.message)
+      .catch(() => null)
+    throw new Error(message || 'Failed to remove workspace connection')
   }
 }
 

@@ -1,17 +1,93 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 
 import SheetsAction from '../SheetsAction'
+import { updateCachedConnections } from '@/lib/oauthApi'
 
-const fetchConnections = vi.fn()
+const createJsonResponse = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  })
 
-vi.mock('@/lib/oauthApi', () => ({
-  fetchConnections,
-  refreshProvider: vi.fn(),
-  disconnectProvider: vi.fn(),
-  promoteConnection: vi.fn()
-}))
+const googlePersonalPayload = {
+  id: 'google-personal',
+  provider: 'google' as const,
+  accountEmail: 'owner@example.com',
+  expiresAt: '2025-01-01T00:00:00.000Z',
+  isShared: false,
+  lastRefreshedAt: null
+}
+
+const googleWorkspacePayload = {
+  id: 'google-workspace',
+  provider: 'google' as const,
+  accountEmail: 'ops@example.com',
+  expiresAt: '2025-01-01T00:00:00.000Z',
+  workspaceId: 'ws-1',
+  workspaceName: 'Operations',
+  sharedByName: 'Team Admin',
+  sharedByEmail: 'admin@example.com',
+  lastRefreshedAt: null
+}
+
+const buildGoogleConnections = (includeWorkspace: boolean) => ({
+  personal: {
+    scope: 'personal' as const,
+    id: 'google-personal',
+    connected: true,
+    accountEmail: 'owner@example.com',
+    expiresAt: '2025-01-01T00:00:00.000Z',
+    lastRefreshedAt: undefined,
+    isShared: includeWorkspace
+  },
+  workspace: includeWorkspace
+    ? [
+        {
+          scope: 'workspace' as const,
+          id: 'google-workspace',
+          connected: true,
+          accountEmail: 'ops@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          workspaceId: 'ws-1',
+          workspaceName: 'Operations',
+          sharedByName: 'Team Admin',
+          sharedByEmail: 'admin@example.com'
+        }
+      ]
+    : []
+})
+
+const buildEmptyConnections = () => ({
+  personal: {
+    scope: 'personal' as const,
+    id: null,
+    connected: false,
+    accountEmail: undefined,
+    expiresAt: undefined,
+    lastRefreshedAt: undefined,
+    isShared: false
+  },
+  workspace: [] as never[]
+})
+
+const buildConnectionMap = (includeWorkspace: boolean) => ({
+  google: (() => {
+    const google = buildGoogleConnections(includeWorkspace)
+    return {
+      personal: { ...google.personal },
+      workspace: google.workspace.map((entry) => ({ ...entry }))
+    }
+  })(),
+  microsoft: (() => {
+    const microsoft = buildEmptyConnections()
+    return {
+      personal: { ...microsoft.personal },
+      workspace: microsoft.workspace.map((entry) => ({ ...entry }))
+    }
+  })()
+})
 
 describe('SheetsAction', () => {
   const baseArgs = {
@@ -26,56 +102,28 @@ describe('SheetsAction', () => {
     setDirty: vi.fn()
   }
 
-  const googleConnections = {
-    personal: {
-      scope: 'personal',
-      id: 'google-personal',
-      connected: true,
-      accountEmail: 'owner@example.com',
-      expiresAt: '2025-01-01T00:00:00.000Z',
-      isShared: false
-    },
-    workspace: [
-      {
-        scope: 'workspace',
-        id: 'google-workspace',
-        connected: true,
-        accountEmail: 'ops@example.com',
-        expiresAt: '2025-01-01T00:00:00.000Z',
-        workspaceId: 'ws-1',
-        workspaceName: 'Operations',
-        sharedByName: 'Team Admin',
-        sharedByEmail: 'admin@example.com'
-      }
-    ]
-  }
-
-  const emptyConnections = {
-    personal: {
-      scope: 'personal',
-      id: null,
-      connected: false,
-      accountEmail: undefined,
-      expiresAt: undefined,
-      isShared: false
-    },
-    workspace: []
-  }
-
   beforeEach(() => {
-    vi.clearAllMocks()
+    updateCachedConnections(() => null)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    updateCachedConnections(() => null)
   })
 
   it('renders grouped connection options', async () => {
-    fetchConnections.mockResolvedValueOnce({
-      google: googleConnections,
-      microsoft: emptyConnections
-    })
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      createJsonResponse({
+        success: true,
+        personal: [googlePersonalPayload],
+        workspace: [googleWorkspacePayload]
+      })
+    )
 
     const user = userEvent.setup()
     render(<SheetsAction args={{ ...baseArgs }} />)
 
-    await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
 
     const dropdownButton = await screen.findByRole('button', {
       name: /owner@example.com/i
@@ -87,10 +135,13 @@ describe('SheetsAction', () => {
   })
 
   it('shows workspace credential notice when selected', async () => {
-    fetchConnections.mockResolvedValueOnce({
-      google: googleConnections,
-      microsoft: emptyConnections
-    })
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      createJsonResponse({
+        success: true,
+        personal: [googlePersonalPayload],
+        workspace: [googleWorkspacePayload]
+      })
+    )
 
     render(
       <SheetsAction
@@ -104,5 +155,74 @@ describe('SheetsAction', () => {
     )
 
     expect(await screen.findByText(/workspace credential/i)).toBeInTheDocument()
+  })
+
+  it('clears workspace selections when the shared credential is removed while open', async () => {
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      createJsonResponse({
+        success: true,
+        personal: [googlePersonalPayload],
+        workspace: [googleWorkspacePayload]
+      })
+    )
+
+    render(
+      <SheetsAction
+        args={{
+          ...baseArgs,
+          accountEmail: 'ops@example.com',
+          oauthConnectionScope: 'workspace',
+          oauthConnectionId: 'google-workspace'
+        }}
+      />
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /workspace credential/i })
+      ).toBeInTheDocument()
+    )
+
+    await act(async () => {
+      updateCachedConnections(() => buildConnectionMap(false))
+    })
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Select Google connection' })
+      ).toBeInTheDocument()
+    )
+  })
+
+  it('adds workspace connections without refetching when promoted elsewhere', async () => {
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      createJsonResponse({
+        success: true,
+        personal: [googlePersonalPayload],
+        workspace: []
+      })
+    )
+
+    const user = userEvent.setup()
+    render(<SheetsAction args={{ ...baseArgs }} />)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    const dropdownButton = await screen.findByRole('button', {
+      name: /owner@example.com/i
+    })
+    await user.click(dropdownButton)
+
+    expect(screen.queryByText('Workspace connections')).not.toBeInTheDocument()
+
+    await act(async () => {
+      updateCachedConnections(() => buildConnectionMap(true))
+    })
+
+    await user.click(dropdownButton)
+    expect(await screen.findByText('Workspace connections')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

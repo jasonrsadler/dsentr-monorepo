@@ -7,6 +7,8 @@ import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import {
   fetchConnections,
+  getCachedConnections,
+  subscribeToConnectionUpdates,
   type ConnectionScope,
   type ProviderConnectionSet
 } from '@/lib/oauthApi'
@@ -959,35 +961,55 @@ export default function TeamsAction({
     : delegatedCardModes[0]
 
   useEffect(() => {
-    if (!isDelegated || connectionsFetched) return
+    if (!isDelegated) return
 
     let active = true
-    setConnectionsLoading(true)
-    setConnectionsError(null)
 
-    fetchConnections()
-      .then((data) => {
-        if (!active) return
-        setMicrosoftConnections(data.microsoft ?? null)
-        setConnectionsError(null)
-      })
-      .catch((error) => {
-        if (!active) return
-        const message =
-          error instanceof Error
-            ? error.message
-            : 'Failed to load Microsoft integrations'
-        setConnectionsError(message)
-        setMicrosoftConnections(null)
-      })
-      .finally(() => {
-        if (!active) return
-        setConnectionsLoading(false)
-        setConnectionsFetched(true)
-      })
+    const cached = getCachedConnections()
+    if (cached?.microsoft) {
+      setMicrosoftConnections(cached.microsoft)
+      setConnectionsError(null)
+      setConnectionsLoading(false)
+      setConnectionsFetched(true)
+    }
+
+    const unsubscribe = subscribeToConnectionUpdates((snapshot) => {
+      if (!active) return
+      const microsoft = snapshot?.microsoft ?? null
+      setMicrosoftConnections(microsoft)
+      setConnectionsError(null)
+      setConnectionsLoading(false)
+      setConnectionsFetched(true)
+    })
+
+    if (!cached && !connectionsFetched) {
+      setConnectionsLoading(true)
+      setConnectionsError(null)
+      fetchConnections()
+        .then((data) => {
+          if (!active) return
+          setMicrosoftConnections(data.microsoft ?? null)
+          setConnectionsError(null)
+        })
+        .catch((error) => {
+          if (!active) return
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Failed to load Microsoft integrations'
+          setConnectionsError(message)
+          setMicrosoftConnections(null)
+        })
+        .finally(() => {
+          if (!active) return
+          setConnectionsLoading(false)
+          setConnectionsFetched(true)
+        })
+    }
 
     return () => {
       active = false
+      unsubscribe()
     }
   }, [isDelegated, connectionsFetched])
 
@@ -1018,13 +1040,26 @@ export default function TeamsAction({
       if (!selected && email) {
         selected = findConnectionByEmail(email)
       }
+      const wasWorkspaceSelection = scope === 'workspace'
+      if (!selected && wasWorkspaceSelection) {
+        const cleared = applyConnectionSelection(prev, null)
+        cleared.oauthProvider = 'microsoft'
+        if (connectionStateEqual(prev, cleared)) {
+          return prev
+        }
+        return cleared
+      }
       if (!selected) {
         const personal = microsoftConnections.personal
         if (personal.connected && personal.id) {
           selected = personal
         }
       }
-      if (!selected && microsoftConnections.workspace.length === 1) {
+      if (
+        !selected &&
+        !wasWorkspaceSelection &&
+        microsoftConnections.workspace.length === 1
+      ) {
         selected = microsoftConnections.workspace[0]
       }
 

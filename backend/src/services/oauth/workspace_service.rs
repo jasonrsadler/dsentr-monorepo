@@ -5,6 +5,7 @@ use serde_json::json;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
 use tokio::sync::Mutex;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::db::oauth_token_repository::UserOAuthTokenRepository;
@@ -15,7 +16,7 @@ use crate::db::workspace_connection_repository::{
 };
 use crate::models::oauth_token::{
     ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection,
-    WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED,
+    WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED, WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED,
 };
 use crate::services::oauth::account_service::{
     AuthorizationTokens, OAuthAccountError, OAuthAccountService,
@@ -136,6 +137,59 @@ impl WorkspaceOAuthService {
             .await?;
 
         Ok(connection)
+    }
+
+    pub async fn remove_connection(
+        &self,
+        workspace_id: Uuid,
+        actor_id: Uuid,
+        connection_id: Uuid,
+    ) -> Result<(), WorkspaceOAuthError> {
+        let connection = self
+            .workspace_connections
+            .find_by_id(connection_id)
+            .await?
+            .filter(|conn| conn.workspace_id == workspace_id)
+            .ok_or(WorkspaceOAuthError::NotFound)?;
+
+        match self
+            .user_tokens
+            .mark_shared(connection.created_by, connection.provider, false)
+            .await
+        {
+            Ok(_) => {}
+            Err(sqlx::Error::RowNotFound) => {
+                warn!(
+                    %connection_id,
+                    %workspace_id,
+                    user_id = %connection.created_by,
+                    provider = ?connection.provider,
+                    "personal oauth token missing while unsharing workspace connection"
+                );
+            }
+            Err(err) => return Err(WorkspaceOAuthError::Database(err)),
+        }
+
+        self.workspace_connections
+            .delete_connection(connection_id)
+            .await?;
+
+        let metadata = json!({
+            "provider": connection.provider,
+            "account_email": connection.account_email,
+            "connection_id": connection.id,
+        });
+
+        self.workspace_connections
+            .record_audit_event(NewWorkspaceAuditEvent {
+                workspace_id,
+                actor_id,
+                event_type: WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED.to_string(),
+                metadata,
+            })
+            .await?;
+
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -587,7 +641,11 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
-        async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+        async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error> {
+            let mut guard = self.connection.lock().unwrap();
+            if guard.as_ref().map(|record| record.id) == Some(connection_id) {
+                *guard = None;
+            }
             Ok(())
         }
 
@@ -707,6 +765,130 @@ mod tests {
         assert_eq!(
             events[0].event_type,
             WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_connection_deletes_workspace_entry_and_marks_unshared() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let key = Arc::new(vec![11u8; 32]);
+        let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+        let encrypted_access = encrypt_secret(&key, "access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "refresh").unwrap();
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(Some(UserOAuthToken {
+                id: Uuid::new_v4(),
+                user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "user@example.com".into(),
+                is_shared: true,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            })),
+            shared_flag: Mutex::new(true),
+        });
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "user@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
+        let service =
+            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+
+        service
+            .remove_connection(workspace_id, user_id, connection_id)
+            .await
+            .expect("removal succeeds");
+
+        assert!(workspace_repo.connection.lock().unwrap().is_none());
+        let shared = *user_repo.shared_flag.lock().unwrap();
+        assert!(!shared, "user token should be marked unshared");
+
+        let events = workspace_repo.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_type,
+            WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED
+        );
+        assert_eq!(events[0].workspace_id, workspace_id);
+        assert_eq!(events[0].actor_id, user_id);
+    }
+
+    #[tokio::test]
+    async fn remove_connection_succeeds_when_personal_token_missing() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let key = Arc::new(vec![13u8; 32]);
+        let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+        let encrypted_access = encrypt_secret(&key, "access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "refresh").unwrap();
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(None),
+            shared_flag: Mutex::new(true),
+        });
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "user@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
+        let service =
+            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+
+        service
+            .remove_connection(workspace_id, user_id, connection_id)
+            .await
+            .expect("removal succeeds even without personal token");
+
+        assert!(workspace_repo.connection.lock().unwrap().is_none());
+        let shared = *user_repo.shared_flag.lock().unwrap();
+        assert!(
+            !shared,
+            "shared flag should be cleared when removal succeeds"
+        );
+
+        let events = workspace_repo.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_type,
+            WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED
         );
     }
 

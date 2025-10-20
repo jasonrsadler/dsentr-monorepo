@@ -1498,11 +1498,48 @@ pub async fn promote_workspace_connection(
     }
 }
 
+pub async fn remove_workspace_connection(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path((workspace_id, connection_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    if let Err(response) = require_workspace_admin(&app_state, user_id, workspace_id).await {
+        return response;
+    }
+
+    match app_state
+        .workspace_oauth
+        .remove_connection(workspace_id, user_id, connection_id)
+        .await
+    {
+        Ok(()) => JsonResponse::success("Workspace connection removed").into_response(),
+        Err(WorkspaceOAuthError::NotFound) => {
+            JsonResponse::not_found("Workspace connection not found").into_response()
+        }
+        Err(err) => {
+            error!(
+                ?err,
+                %workspace_id,
+                %connection_id,
+                %user_id,
+                "failed to remove workspace connection"
+            );
+            JsonResponse::server_error("Failed to remove workspace connection").into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         accept_invitation, build_invite_accept_url, change_plan, decline_invitation,
-        leave_workspace, preview_invitation, promote_workspace_connection, revoke_workspace_member,
+        leave_workspace, preview_invitation, promote_workspace_connection, remove_workspace_connection,
+        revoke_workspace_member,
         CompleteOnboardingPayload, InvitationDecisionPayload, PromoteWorkspaceConnectionPayload,
         RevokeWorkspaceMemberPayload,
     };
@@ -1519,7 +1556,7 @@ mod tests {
     use crate::models::{
         oauth_token::{
             ConnectedOAuthProvider, UserOAuthToken, WorkspaceAuditEvent, WorkspaceConnection,
-            WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED,
+            WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED, WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED,
         },
         user::{OauthProvider, User, UserRole},
         workspace::{
@@ -1737,6 +1774,7 @@ mod tests {
     struct CapturingWorkspaceConnectionRepo {
         connections: Arc<Mutex<Vec<WorkspaceConnection>>>,
         audits: Arc<Mutex<Vec<WorkspaceAuditEvent>>>,
+        deleted: Arc<Mutex<Vec<Uuid>>>,
     }
 
     impl CapturingWorkspaceConnectionRepo {
@@ -1750,6 +1788,10 @@ mod tests {
 
         fn audits(&self) -> Vec<WorkspaceAuditEvent> {
             self.audits.lock().unwrap().clone()
+        }
+
+        fn deleted(&self) -> Vec<Uuid> {
+            self.deleted.lock().unwrap().clone()
         }
     }
 
@@ -1887,7 +1929,12 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
-        async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+        async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error> {
+            {
+                let mut guard = self.connections.lock().unwrap();
+                guard.retain(|record| record.id != connection_id);
+            }
+            self.deleted.lock().unwrap().push(connection_id);
             Ok(())
         }
 
@@ -2785,6 +2832,174 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert!(user_repo.marks().is_empty());
         assert!(connection_repo.connections().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_workspace_connection_deletes_connection_for_admin() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let member = WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::Admin,
+            joined_at: now,
+            email: "owner@example.com".into(),
+            first_name: "Owner".into(),
+            last_name: "Admin".into(),
+        };
+        let workspace_repo: Arc<dyn WorkspaceRepository> = Arc::new(
+            RecordingWorkspaceRepo::seeded(workspace.clone(), vec![member.clone()]),
+        );
+
+        let encrypted_access = encrypt_secret(&encryption_key, "access-token").unwrap();
+        let encrypted_refresh = encrypt_secret(&encryption_key, "refresh-token").unwrap();
+
+        let user_token = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access.clone(),
+            refresh_token: encrypted_refresh.clone(),
+            expires_at: now + time::Duration::hours(1),
+            account_email: "owner@example.com".into(),
+            is_shared: true,
+            created_at: now,
+            updated_at: now,
+        };
+        let user_repo = Arc::new(StubUserTokenRepo::with_token(user_token));
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::new());
+
+        let state = promotion_state(
+            workspace_repo,
+            user_repo.clone(),
+            connection_repo.clone(),
+            Arc::clone(&config),
+            Arc::clone(&encryption_key),
+        );
+
+        let inserted = connection_repo
+            .insert_connection(NewWorkspaceConnection {
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at: now + time::Duration::hours(1),
+                account_email: "owner@example.com".into(),
+            })
+            .await
+            .expect("insert connection");
+
+        let response = remove_workspace_connection(
+            State(state),
+            AuthSession(claims_fixture(user_id, "owner@example.com")),
+            Path((workspace_id, inserted.id)),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let marks = user_repo.marks();
+        assert!(marks.contains(&(user_id, ConnectedOAuthProvider::Google, false)));
+
+        assert!(connection_repo
+            .connections()
+            .iter()
+            .all(|connection| connection.id != inserted.id));
+        assert_eq!(connection_repo.deleted(), vec![inserted.id]);
+
+        let audits = connection_repo.audits();
+        assert_eq!(audits.len(), 1);
+        assert_eq!(
+            audits[0].event_type,
+            WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED
+        );
+        assert_eq!(audits[0].workspace_id, workspace_id);
+        assert_eq!(audits[0].actor_id, user_id);
+    }
+
+    #[tokio::test]
+    async fn remove_workspace_connection_returns_not_found_when_missing() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let member = WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::Admin,
+            joined_at: now,
+            email: "owner@example.com".into(),
+            first_name: "Owner".into(),
+            last_name: "Admin".into(),
+        };
+        let workspace_repo: Arc<dyn WorkspaceRepository> = Arc::new(
+            RecordingWorkspaceRepo::seeded(workspace.clone(), vec![member.clone()]),
+        );
+
+        let token = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&encryption_key, "access").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "refresh").unwrap(),
+            expires_at: now + time::Duration::hours(1),
+            account_email: "owner@example.com".into(),
+            is_shared: true,
+            created_at: now,
+            updated_at: now,
+        };
+        let user_repo = Arc::new(StubUserTokenRepo::with_token(token));
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::new());
+
+        let state = promotion_state(
+            workspace_repo,
+            user_repo.clone(),
+            connection_repo.clone(),
+            Arc::clone(&config),
+            Arc::clone(&encryption_key),
+        );
+
+        let missing_connection_id = Uuid::new_v4();
+
+        let response = remove_workspace_connection(
+            State(state),
+            AuthSession(claims_fixture(user_id, "owner@example.com")),
+            Path((workspace_id, missing_connection_id)),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(user_repo.marks().is_empty());
+        assert!(connection_repo.deleted().is_empty());
     }
 
     #[test]
