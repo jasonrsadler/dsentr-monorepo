@@ -29,6 +29,7 @@ const allowedKeys: Record<MessagingPlatform, string[]> = {
     'workflowHeaderName',
     'workflowHeaderSecret',
     'oauthProvider',
+    'oauthConnectionScope',
     'oauthConnectionId',
     'oauthAccountEmail',
     'teamId',
@@ -36,7 +37,8 @@ const allowedKeys: Record<MessagingPlatform, string[]> = {
     'channelId',
     'channelName',
     'messageType',
-    'mentions'
+    'mentions',
+    'connection'
   ],
   'Google Chat': ['webhookUrl', 'message', 'cardJson']
 }

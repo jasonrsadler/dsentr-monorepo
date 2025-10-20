@@ -92,7 +92,33 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
         }
     }
 
+    let legacy_scope = read_str(params.get("oauthConnectionScope"));
     let legacy_connection_id = read_str(params.get("oauthConnectionId"));
+
+    if let Some(scope_value) = legacy_scope.clone() {
+        match scope_value.to_ascii_lowercase().as_str() {
+            "workspace" => {
+                let id_str = legacy_connection_id.clone().ok_or_else(|| {
+                    "Workspace connections require a connectionId".to_string()
+                })?;
+
+                let parsed_id = Uuid::parse_str(&id_str)
+                    .map_err(|_| "Workspace connectionId must be a valid UUID".to_string())?;
+
+                return Ok(NodeConnectionUsage::Workspace(WorkspaceConnectionUsage {
+                    connection_id: parsed_id,
+                    account_email: account_email(),
+                }));
+            }
+            "personal" | "user" => {
+                return Ok(NodeConnectionUsage::User(UserConnectionUsage {
+                    connection_id: legacy_connection_id.clone(),
+                    account_email: account_email(),
+                }));
+            }
+            _ => {}
+        }
+    }
 
     Ok(NodeConnectionUsage::User(UserConnectionUsage {
         connection_id: legacy_connection_id,
@@ -404,5 +430,60 @@ pub(crate) async fn execute_action(
             json!({"skipped": true, "reason": "unsupported actionType"}),
             None,
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use serde_json::json;
+
+    #[test]
+    fn resolve_connection_usage_honors_legacy_workspace_scope() {
+        let connection_id = Uuid::new_v4();
+        let params = json!({
+            "oauthConnectionScope": "workspace",
+            "oauthConnectionId": connection_id.to_string(),
+            "oauthAccountEmail": "workspace@example.com"
+        });
+
+        let usage = resolve_connection_usage(&params).expect("workspace scope should parse");
+
+        match usage {
+            NodeConnectionUsage::Workspace(info) => {
+                assert_eq!(info.connection_id, connection_id);
+                assert_eq!(
+                    info.account_email.as_deref(),
+                    Some("workspace@example.com")
+                );
+            }
+            other => panic!("expected workspace usage, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolve_connection_usage_honors_legacy_personal_scope() {
+        let params = json!({
+            "oauthConnectionScope": "personal",
+            "oauthConnectionId": "microsoft-personal",
+            "oauthAccountEmail": "alice@example.com"
+        });
+
+        let usage = resolve_connection_usage(&params).expect("personal scope should parse");
+
+        match usage {
+            NodeConnectionUsage::User(info) => {
+                assert_eq!(
+                    info.connection_id.as_deref(),
+                    Some("microsoft-personal")
+                );
+                assert_eq!(
+                    info.account_email.as_deref(),
+                    Some("alice@example.com")
+                );
+            }
+            other => panic!("expected personal usage, got {:?}", other),
+        }
     }
 }

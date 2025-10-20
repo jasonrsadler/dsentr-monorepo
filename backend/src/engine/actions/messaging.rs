@@ -988,8 +988,11 @@ async fn send_teams_delegated_oauth(
                     .to_string()
             })?;
 
-            if normalize_identifier(&connection_hint) != "microsoft" {
-                return Err("Unknown Microsoft OAuth connection selected".to_string());
+            if connection_hint.trim().is_empty() {
+                return Err(
+                    "Select a connected Microsoft account before using delegated Teams messaging"
+                        .to_string(),
+                );
             }
 
             let token = ensure_microsoft_access_token(state, run.user_id).await?;
@@ -2398,6 +2401,113 @@ mod tests {
         assert_eq!(mentions.len(), 2);
         assert_eq!(mentions[0]["mentionText"], "@Jane");
         assert_eq!(mentions[0]["mentioned"]["user"]["id"], "user-1");
+    }
+
+    #[tokio::test]
+    async fn teams_delegated_personal_accepts_explicit_connection_id() {
+        let (addr, mut rx, handle) = spawn_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::CREATED)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "id": "message-actual-id",
+                        "webUrl": "https://teams.microsoft.com/l/message/actual"
+                    })
+                    .to_string(),
+                ))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set("MICROSOFT_GRAPH_BASE_URL", format!("http://{}", addr));
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let user_id = Uuid::new_v4();
+
+        let access_token = "personal-access-token";
+        let refresh_token = "personal-refresh-token";
+        let encrypted_access = encrypt_secret(&encryption_key, access_token).unwrap();
+        let encrypted_refresh = encrypt_secret(&encryption_key, refresh_token).unwrap();
+
+        let record = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Microsoft,
+            access_token: encrypted_access,
+            refresh_token: encrypted_refresh,
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "alice@example.com".into(),
+            is_shared: false,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let repo = Arc::new(StaticTokenRepo { record }) as Arc<dyn UserOAuthTokenRepository>;
+        let oauth_accounts = Arc::new(OAuthAccountService::new(
+            repo,
+            Arc::clone(&encryption_key),
+            Arc::new(Client::new()),
+            &config.oauth,
+        ));
+
+        let state = build_state_with_oauth(
+            oauth_accounts,
+            WorkspaceOAuthService::test_stub(),
+            Arc::clone(&config),
+        );
+        let mut run = test_run();
+        run.user_id = user_id;
+
+        let node = Node {
+            id: "delegated-text-connection".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Teams",
+                    "deliveryMethod": "Delegated OAuth (Post as user)",
+                    "oauthProvider": "microsoft",
+                    "oauthConnectionScope": "personal",
+                    "oauthConnectionId": "personal-connection-id",
+                    "oauthAccountEmail": "alice@example.com",
+                    "connection": {
+                        "connectionScope": "user",
+                        "connectionId": "personal-connection-id",
+                        "accountEmail": "alice@example.com"
+                    },
+                    "teamId": "team-1",
+                    "teamName": "Team One",
+                    "channelId": "channel-1",
+                    "channelName": "General",
+                    "messageType": "Text",
+                    "message": "Hello team"
+                }
+            }),
+        };
+
+        let (output, _) = execute_messaging(&node, &Value::Null, &state, &run)
+            .await
+            .expect("delegated message should succeed with explicit id");
+
+        assert_eq!(output["status"], 201);
+        assert_eq!(output["service"], "Teams");
+        assert_eq!(output["messageId"], "message-actual-id");
+        assert_eq!(output["oauthAccountEmail"], "alice@example.com");
+
+        let req = rx
+            .recv()
+            .await
+            .expect("graph request should be captured for explicit id");
+        handle.abort();
+
+        let auth_header = req
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+            .map(|(_, value)| value.clone())
+            .unwrap_or_default();
+        assert!(auth_header.contains("Bearer personal-access-token"));
     }
 
     #[tokio::test]

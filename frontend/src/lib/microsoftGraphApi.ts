@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './config'
+import type { ConnectionScope } from './oauthApi'
 
 type GraphApiResponse = {
   success: boolean
@@ -45,6 +46,32 @@ export interface MicrosoftChannelMember {
   email?: string
 }
 
+export interface MicrosoftConnectionOptions {
+  scope?: ConnectionScope
+  connectionId?: string | null
+}
+
+function appendConnectionQuery(
+  path: string,
+  options?: MicrosoftConnectionOptions
+): string {
+  if (!options) return path
+
+  const params = new URLSearchParams()
+
+  if (options.scope) {
+    params.set('scope', options.scope)
+  }
+
+  const trimmedId = options.connectionId?.trim()
+  if (trimmedId) {
+    params.set('connection_id', trimmedId)
+  }
+
+  const query = params.toString()
+  return query ? `${path}?${query}` : path
+}
+
 async function requestJson<T extends GraphApiResponse>(
   path: string,
   errorLabel: string
@@ -70,9 +97,11 @@ async function requestJson<T extends GraphApiResponse>(
   return payload ?? ({ success: true } as T)
 }
 
-export async function fetchMicrosoftTeams(): Promise<MicrosoftTeam[]> {
+export async function fetchMicrosoftTeams(
+  options?: MicrosoftConnectionOptions
+): Promise<MicrosoftTeam[]> {
   const data = await requestJson<TeamsApiResponse>(
-    '/api/microsoft/teams',
+    appendConnectionQuery('/api/microsoft/teams', options),
     'Microsoft Teams'
   )
 
@@ -90,11 +119,15 @@ export async function fetchMicrosoftTeams(): Promise<MicrosoftTeam[]> {
 }
 
 export async function fetchMicrosoftTeamChannels(
-  teamId: string
+  teamId: string,
+  options?: MicrosoftConnectionOptions
 ): Promise<MicrosoftChannel[]> {
   const encodedTeam = encodeURIComponent(teamId)
   const data = await requestJson<ChannelsApiResponse>(
-    `/api/microsoft/teams/${encodedTeam}/channels`,
+    appendConnectionQuery(
+      `/api/microsoft/teams/${encodedTeam}/channels`,
+      options
+    ),
     'Microsoft Teams channels'
   )
 
@@ -113,12 +146,16 @@ export async function fetchMicrosoftTeamChannels(
 
 export async function fetchMicrosoftChannelMembers(
   teamId: string,
-  channelId: string
+  channelId: string,
+  options?: MicrosoftConnectionOptions
 ): Promise<MicrosoftChannelMember[]> {
   const encodedTeam = encodeURIComponent(teamId)
   const encodedChannel = encodeURIComponent(channelId)
   const data = await requestJson<MembersApiResponse>(
-    `/api/microsoft/teams/${encodedTeam}/channels/${encodedChannel}/members`,
+    appendConnectionQuery(
+      `/api/microsoft/teams/${encodedTeam}/channels/${encodedChannel}/members`,
+      options
+    ),
     'Microsoft channel members'
   )
 
