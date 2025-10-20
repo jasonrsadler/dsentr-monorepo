@@ -983,12 +983,20 @@ async fn send_teams_delegated_oauth(
             )
         }
         NodeConnectionUsage::User(info) => {
-            let connection_hint = info.connection_id.clone().ok_or_else(|| {
-                "Select a connected Microsoft account before using delegated Teams messaging"
-                    .to_string()
-            })?;
+            let connection_hint = info
+                .connection_id
+                .as_deref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .and_then(|value| Uuid::parse_str(value).ok());
+            let expected_email = info
+                .account_email
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string());
 
-            if connection_hint.trim().is_empty() {
+            if connection_hint.is_none() && expected_email.is_none() {
                 return Err(
                     "Select a connected Microsoft account before using delegated Teams messaging"
                         .to_string(),
@@ -997,15 +1005,29 @@ async fn send_teams_delegated_oauth(
 
             let token = ensure_microsoft_access_token(state, run.user_id).await?;
 
-            if let Some(expected) = info.account_email.as_ref() {
-                if !token.account_email.eq_ignore_ascii_case(expected) {
+            if let Some(expected_id) = connection_hint {
+                if expected_id != token.id {
                     return Err(
                         "Selected Microsoft account does not match the connected account. Refresh your integration settings.".to_string(),
                     );
                 }
-            }
+                (token.access_token.clone(), token.account_email.clone())
+            } else {
+                let Some(expected) = expected_email else {
+                    return Err(
+                        "Select a connected Microsoft account before using delegated Teams messaging"
+                            .to_string(),
+                    );
+                };
 
-            (token.access_token.clone(), token.account_email.clone())
+                if !token.account_email.eq_ignore_ascii_case(&expected) {
+                    return Err(
+                        "Selected Microsoft account does not match the connected account. Refresh your integration settings.".to_string(),
+                    );
+                }
+
+                (token.access_token.clone(), token.account_email.clone())
+            }
         }
     };
 
@@ -1369,6 +1391,18 @@ mod tests {
             SqlxError,
         > {
             Ok(Vec::new())
+        }
+
+        async fn update_tokens_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+            _account_email: String,
+        ) -> Result<(), SqlxError> {
+            Ok(())
         }
 
         async fn update_tokens(
@@ -2314,8 +2348,9 @@ mod tests {
         let encrypted_access = encrypt_secret(&encryption_key, access_token).unwrap();
         let encrypted_refresh = encrypt_secret(&encryption_key, refresh_token).unwrap();
 
+        let token_id = Uuid::new_v4();
         let record = UserOAuthToken {
-            id: Uuid::new_v4(),
+            id: token_id,
             user_id,
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypted_access,
@@ -2328,18 +2363,22 @@ mod tests {
         };
 
         let repo = Arc::new(StaticTokenRepo { record }) as Arc<dyn UserOAuthTokenRepository>;
+        let workspace_repo = Arc::new(RecordingWorkspaceConnections::default())
+            as Arc<dyn WorkspaceConnectionRepository>;
         let oauth_accounts = Arc::new(OAuthAccountService::new(
             repo,
+            workspace_repo.clone(),
             Arc::clone(&encryption_key),
             Arc::new(Client::new()),
             &config.oauth,
         ));
 
-        let state = build_state_with_oauth(
+        let mut state = build_state_with_oauth(
             oauth_accounts,
             WorkspaceOAuthService::test_stub(),
             Arc::clone(&config),
         );
+        state.workspace_connection_repo = workspace_repo;
         let mut run = test_run();
         run.user_id = user_id;
 
@@ -2351,7 +2390,14 @@ mod tests {
                     "platform": "Teams",
                     "deliveryMethod": "Delegated OAuth (Post as user)",
                     "oauthProvider": "microsoft",
-                    "oauthConnectionId": "microsoft",
+                    "oauthConnectionScope": "personal",
+                    "oauthConnectionId": token_id.to_string(),
+                    "oauthAccountEmail": "alice@example.com",
+                    "connection": {
+                        "connectionScope": "user",
+                        "connectionId": token_id.to_string(),
+                        "accountEmail": "alice@example.com"
+                    },
                     "teamId": "team-1",
                     "teamName": "Team One",
                     "channelId": "channel-1",
@@ -2431,8 +2477,9 @@ mod tests {
         let encrypted_access = encrypt_secret(&encryption_key, access_token).unwrap();
         let encrypted_refresh = encrypt_secret(&encryption_key, refresh_token).unwrap();
 
+        let token_id = Uuid::new_v4();
         let record = UserOAuthToken {
-            id: Uuid::new_v4(),
+            id: token_id,
             user_id,
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypted_access,
@@ -2445,18 +2492,22 @@ mod tests {
         };
 
         let repo = Arc::new(StaticTokenRepo { record }) as Arc<dyn UserOAuthTokenRepository>;
+        let workspace_repo = Arc::new(RecordingWorkspaceConnections::default())
+            as Arc<dyn WorkspaceConnectionRepository>;
         let oauth_accounts = Arc::new(OAuthAccountService::new(
             repo,
+            workspace_repo.clone(),
             Arc::clone(&encryption_key),
             Arc::new(Client::new()),
             &config.oauth,
         ));
 
-        let state = build_state_with_oauth(
+        let mut state = build_state_with_oauth(
             oauth_accounts,
             WorkspaceOAuthService::test_stub(),
             Arc::clone(&config),
         );
+        state.workspace_connection_repo = workspace_repo;
         let mut run = test_run();
         run.user_id = user_id;
 
@@ -2469,11 +2520,11 @@ mod tests {
                     "deliveryMethod": "Delegated OAuth (Post as user)",
                     "oauthProvider": "microsoft",
                     "oauthConnectionScope": "personal",
-                    "oauthConnectionId": "personal-connection-id",
+                    "oauthConnectionId": token_id.to_string(),
                     "oauthAccountEmail": "alice@example.com",
                     "connection": {
                         "connectionScope": "user",
-                        "connectionId": "personal-connection-id",
+                        "connectionId": token_id.to_string(),
                         "accountEmail": "alice@example.com"
                     },
                     "teamId": "team-1",

@@ -324,6 +324,18 @@ impl WorkspaceOAuthService {
                 Ok(Vec::new())
             }
 
+            async fn update_tokens_for_creator(
+                &self,
+                _creator_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+                _account_email: String,
+            ) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
             async fn update_tokens(
                 &self,
                 _connection_id: Uuid,
@@ -528,6 +540,29 @@ mod tests {
                     updated_at: record.updated_at,
                 })
                 .collect())
+        }
+
+        async fn update_tokens_for_creator(
+            &self,
+            creator_id: Uuid,
+            provider: ConnectedOAuthProvider,
+            access_token: String,
+            refresh_token: String,
+            expires_at: OffsetDateTime,
+            account_email: String,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.connection.lock().unwrap();
+            if let Some(conn) = guard.as_mut() {
+                if conn.created_by == creator_id && conn.provider == provider {
+                    conn.access_token = access_token;
+                    conn.refresh_token = refresh_token;
+                    conn.expires_at = expires_at;
+                    conn.account_email = account_email;
+                    conn.updated_at = OffsetDateTime::now_utc();
+                }
+            }
+
+            Ok(())
         }
 
         async fn update_tokens(

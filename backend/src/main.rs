@@ -193,6 +193,7 @@ async fn main() {
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_accounts = Arc::new(OAuthAccountService::new(
         oauth_repo.clone(),
+        workspace_connection_repo.clone(),
         encryption_key.clone(),
         http_client_arc.clone(),
         &config.oauth,

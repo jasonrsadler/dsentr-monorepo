@@ -521,6 +521,18 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn update_tokens_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+            _account_email: String,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
         async fn update_tokens(
             &self,
             _connection_id: Uuid,
@@ -605,8 +617,10 @@ mod tests {
             updated_at: now,
         })));
 
+        let workspace_repo = Arc::new(WorkspaceRepoStub::new(None, None, None));
         let oauth_accounts = Arc::new(OAuthAccountService::new(
             personal_repo,
+            workspace_repo.clone(),
             Arc::clone(&encryption_key),
             Arc::new(Client::new()),
             &config.oauth,
@@ -614,6 +628,7 @@ mod tests {
 
         let mut state = base_state(config);
         state.oauth_accounts = oauth_accounts;
+        state.workspace_connection_repo = workspace_repo;
 
         let token = ensure_microsoft_token(&state, user_id, &ConnectionQuery::default())
             .await

@@ -184,6 +184,40 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         .await
     }
 
+    async fn update_tokens_for_creator(
+        &self,
+        creator_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        access_token: String,
+        refresh_token: String,
+        expires_at: OffsetDateTime,
+        account_email: String,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE workspace_connections
+            SET
+                access_token = $3,
+                refresh_token = $4,
+                expires_at = $5,
+                account_email = $6,
+                updated_at = now()
+            WHERE created_by = $1
+              AND provider = $2
+            "#,
+        )
+        .bind(creator_id)
+        .bind(provider)
+        .bind(access_token)
+        .bind(refresh_token)
+        .bind(expires_at)
+        .bind(account_email)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     async fn update_tokens(
         &self,
         connection_id: Uuid,

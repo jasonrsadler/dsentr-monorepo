@@ -68,6 +68,16 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         user_id: Uuid,
     ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error>;
 
+    async fn update_tokens_for_creator(
+        &self,
+        creator_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        access_token: String,
+        refresh_token: String,
+        expires_at: time::OffsetDateTime,
+        account_email: String,
+    ) -> Result<(), sqlx::Error>;
+
     async fn update_tokens(
         &self,
         connection_id: Uuid,
@@ -124,6 +134,18 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         _user_id: Uuid,
     ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
         Ok(Vec::new())
+    }
+
+    async fn update_tokens_for_creator(
+        &self,
+        _creator_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+        _access_token: String,
+        _refresh_token: String,
+        _expires_at: time::OffsetDateTime,
+        _account_email: String,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
     }
 
     async fn update_tokens(

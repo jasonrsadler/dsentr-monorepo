@@ -240,6 +240,18 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
             .collect())
     }
 
+    async fn update_tokens_for_creator(
+        &self,
+        _creator_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+        _access_token: String,
+        _refresh_token: String,
+        _expires_at: OffsetDateTime,
+        _account_email: String,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
     async fn update_tokens(
         &self,
         _connection_id: Uuid,
@@ -289,18 +301,6 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         updated_at: personal_updated_at,
     };
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![personal_token],
-    });
-    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
-    let oauth_client = Arc::new(reqwest::Client::new());
-    let oauth_service = Arc::new(OAuthAccountService::new(
-        token_repo,
-        encryption_key,
-        oauth_client,
-        &config.oauth,
-    ));
-
     let workspace_connection_id = Uuid::new_v4();
     let workspace_id = Uuid::new_v4();
     let workspace_expires_at = personal_expires_at + Duration::hours(4);
@@ -320,6 +320,19 @@ async fn list_connections_returns_personal_and_workspace_entries() {
 
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(vec![(user_id, listing)]));
+
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
+        tokens: vec![personal_token],
+    });
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+    let oauth_client = Arc::new(reqwest::Client::new());
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        workspace_repo.clone(),
+        encryption_key,
+        oauth_client,
+        &config.oauth,
+    ));
 
     let mut state = stub_state(config.clone());
     state.oauth_accounts = oauth_service;
@@ -442,10 +455,14 @@ async fn refresh_connection_returns_last_refreshed_timestamp() {
         }],
     });
 
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
+
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_client = Arc::new(reqwest::Client::new());
     let oauth_service = Arc::new(OAuthAccountService::new(
         token_repo,
+        workspace_repo.clone(),
         encryption_key,
         oauth_client,
         &config.oauth,
@@ -453,6 +470,7 @@ async fn refresh_connection_returns_last_refreshed_timestamp() {
 
     let mut state = stub_state(config.clone());
     state.oauth_accounts = oauth_service;
+    state.workspace_connection_repo = workspace_repo;
 
     let claims = Claims {
         id: user_id.to_string(),

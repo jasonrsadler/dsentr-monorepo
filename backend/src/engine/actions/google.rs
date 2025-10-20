@@ -9,6 +9,7 @@ use crate::services::oauth::account_service::OAuthAccountError;
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
 use crate::state::AppState;
 use serde_json::{json, Map, Value};
+use uuid::Uuid;
 
 const DEFAULT_SHEETS_BASE: &str = "https://sheets.googleapis.com/v4/spreadsheets";
 
@@ -134,9 +135,24 @@ pub(crate) async fn execute_sheets(
             )
         }
         super::NodeConnectionUsage::User(info) => {
-            let expected = info.account_email.clone().ok_or_else(|| {
-                "Select a connected Google account before using this action".to_string()
-            })?;
+            let connection_hint = info
+                .connection_id
+                .as_deref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .and_then(|value| Uuid::parse_str(value).ok());
+            let expected_email = info
+                .account_email
+                .as_deref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string());
+
+            if connection_hint.is_none() && expected_email.is_none() {
+                return Err(
+                    "Select a connected Google account before using this action".to_string()
+                );
+            }
 
             let token = state
                 .oauth_accounts
@@ -144,13 +160,28 @@ pub(crate) async fn execute_sheets(
                 .await
                 .map_err(map_oauth_error)?;
 
-            if !token.account_email.eq_ignore_ascii_case(&expected) {
-                return Err(
-                    "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
-                );
-            }
+            if let Some(expected_id) = connection_hint {
+                if expected_id != token.id {
+                    return Err(
+                        "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
+                    );
+                }
+                (token.access_token.clone(), token.account_email.clone())
+            } else {
+                let Some(expected) = expected_email else {
+                    return Err(
+                        "Select a connected Google account before using this action".to_string()
+                    );
+                };
 
-            (token.access_token.clone(), token.account_email.clone())
+                if !token.account_email.eq_ignore_ascii_case(&expected) {
+                    return Err(
+                        "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
+                    );
+                }
+
+                (token.access_token.clone(), token.account_email.clone())
+            }
         }
     };
 
@@ -554,6 +585,18 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn update_tokens_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+            _account_email: String,
+        ) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
         async fn update_tokens(
             &self,
             connection_id: Uuid,
@@ -659,7 +702,7 @@ mod tests {
         }
     }
 
-    fn oauth_service_with_token(user_id: Uuid, email: &str) -> Arc<OAuthAccountService> {
+    fn oauth_service_with_token(user_id: Uuid, email: &str) -> (Arc<OAuthAccountService>, Uuid) {
         #[derive(Clone)]
         struct StaticRepo {
             record: UserOAuthToken,
@@ -722,8 +765,9 @@ mod tests {
             crate::utils::encryption::encrypt_secret(&key, "refresh-token").unwrap();
         let now = OffsetDateTime::now_utc();
 
+        let record_id = Uuid::new_v4();
         let record = UserOAuthToken {
-            id: Uuid::new_v4(),
+            id: record_id,
             user_id,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypted_access,
@@ -736,6 +780,8 @@ mod tests {
         };
 
         let repo = Arc::new(StaticRepo { record });
+        let workspace_repo = Arc::new(RecordingWorkspaceConnections::default())
+            as Arc<dyn WorkspaceConnectionRepository>;
         let client = Arc::new(Client::new());
         let settings = OAuthSettings {
             google: OAuthProviderConfig {
@@ -751,7 +797,16 @@ mod tests {
             token_encryption_key: (*key).clone(),
         };
 
-        Arc::new(OAuthAccountService::new(repo, key, client, &settings))
+        (
+            Arc::new(OAuthAccountService::new(
+                repo,
+                workspace_repo,
+                key,
+                client,
+                &settings,
+            )),
+            record_id,
+        )
     }
 
     #[tokio::test]
@@ -802,7 +857,7 @@ mod tests {
     #[tokio::test]
     async fn account_email_mismatch_rejected() {
         let user_id = Uuid::new_v4();
-        let oauth_accounts = oauth_service_with_token(user_id, "different@example.com");
+        let (oauth_accounts, _) = oauth_service_with_token(user_id, "different@example.com");
         let state = test_state(oauth_accounts, Arc::new(Client::new()));
         let run = sample_run(user_id);
 
@@ -826,6 +881,70 @@ mod tests {
             .expect_err("mismatched email should error");
 
         assert!(err.contains("does not match the connected account"));
+    }
+
+    #[tokio::test]
+    async fn connection_id_allows_updated_account_email() {
+        let response_body = json!({
+            "updates": {
+                "updatedRange": "Sheet1!A1:A1",
+                "updatedRows": 1,
+                "updatedColumns": 1
+            }
+        });
+
+        let (addr, mut rx, handle) = spawn_sheets_stub_server(move || {
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::from(response_body.to_string()))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set(
+            "GOOGLE_SHEETS_API_BASE",
+            format!("http://{}/v4/spreadsheets", addr),
+        );
+
+        let user_id = Uuid::new_v4();
+        let (oauth_accounts, token_id) = oauth_service_with_token(user_id, "updated@example.com");
+        let state = test_state(oauth_accounts, Arc::new(Client::new()));
+        let run = sample_run(user_id);
+
+        let node = Node {
+            id: "node-connection".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "spreadsheetId": "abc123",
+                    "worksheet": "Sheet1",
+                    "accountEmail": "user@example.com",
+                    "connection": {
+                        "connectionScope": "user",
+                        "connectionId": token_id.to_string(),
+                        "accountEmail": "user@example.com"
+                    },
+                    "columns": [
+                        {"key": "A", "value": "{{foo}}"}
+                    ]
+                }
+            }),
+        };
+
+        let (output, _) = execute_sheets(&node, &json!({"foo": "value"}), &state, &run)
+            .await
+            .expect("connection id should allow updated email");
+
+        assert_eq!(output["accountEmail"], "updated@example.com");
+
+        let recorded = rx
+            .recv()
+            .await
+            .expect("request should be recorded for connection id test");
+        let path = recorded.uri.path();
+        assert!(path.contains("/v4/spreadsheets/abc123/values/Sheet1!A1:append"));
+
+        handle.abort();
     }
 
     #[tokio::test]
@@ -1129,7 +1248,7 @@ mod tests {
     #[tokio::test]
     async fn successful_append_posts_row() {
         let user_id = Uuid::new_v4();
-        let oauth_accounts = oauth_service_with_token(user_id, "user@example.com");
+        let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
 
         let response_body = json!({
             "updates": {
@@ -1216,7 +1335,7 @@ mod tests {
     #[tokio::test]
     async fn non_contiguous_columns_include_blank_cells() {
         let user_id = Uuid::new_v4();
-        let oauth_accounts = oauth_service_with_token(user_id, "user@example.com");
+        let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
 
         let response_body = json!({
             "updates": {
@@ -1294,7 +1413,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_column_name_rejected() {
         let user_id = Uuid::new_v4();
-        let oauth_accounts = oauth_service_with_token(user_id, "user@example.com");
+        let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
         let state = test_state(oauth_accounts, Arc::new(Client::new()));
         let run = sample_run(user_id);
 
@@ -1323,7 +1442,7 @@ mod tests {
     #[tokio::test]
     async fn duplicate_columns_rejected() {
         let user_id = Uuid::new_v4();
-        let oauth_accounts = oauth_service_with_token(user_id, "user@example.com");
+        let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
         let state = test_state(oauth_accounts, Arc::new(Client::new()));
         let run = sample_run(user_id);
 
@@ -1355,7 +1474,7 @@ mod tests {
     #[tokio::test]
     async fn templated_column_rejected() {
         let user_id = Uuid::new_v4();
-        let oauth_accounts = oauth_service_with_token(user_id, "user@example.com");
+        let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
         let state = test_state(oauth_accounts, Arc::new(Client::new()));
         let run = sample_run(user_id);
 

@@ -8,7 +8,10 @@ use uuid::Uuid;
 
 use crate::config::{OAuthProviderConfig, OAuthSettings};
 use crate::db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository};
+use crate::db::workspace_connection_repository::WorkspaceConnectionRepository;
 use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
+#[cfg(test)]
+use crate::models::oauth_token::{WorkspaceAuditEvent, WorkspaceConnection};
 use crate::utils::encryption::{decrypt_secret, encrypt_secret, EncryptionError};
 
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -58,6 +61,7 @@ pub enum OAuthAccountError {
 #[derive(Clone)]
 pub struct OAuthAccountService {
     repo: Arc<dyn UserOAuthTokenRepository>,
+    workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
     encryption_key: Arc<Vec<u8>>,
     client: Arc<Client>,
     google: OAuthProviderConfig,
@@ -67,12 +71,14 @@ pub struct OAuthAccountService {
 impl OAuthAccountService {
     pub fn new(
         repo: Arc<dyn UserOAuthTokenRepository>,
+        workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
         encryption_key: Arc<Vec<u8>>,
         client: Arc<Client>,
         settings: &OAuthSettings,
     ) -> Self {
         Self {
             repo,
+            workspace_connections,
             encryption_key,
             client,
             google: settings.google.clone(),
@@ -161,17 +167,31 @@ impl OAuthAccountService {
                 .upsert_token(NewUserOAuthToken {
                     user_id,
                     provider,
-                    access_token: encrypted_access,
-                    refresh_token: encrypted_refresh,
+                    access_token: encrypted_access.clone(),
+                    refresh_token: encrypted_refresh.clone(),
                     expires_at: refreshed.expires_at,
                     account_email: record.account_email,
                 })
                 .await?;
             decrypted.id = updated.id;
             decrypted.expires_at = updated.expires_at;
-            decrypted.account_email = updated.account_email;
+            let account_email = updated.account_email.clone();
+            decrypted.account_email = account_email.clone();
             decrypted.is_shared = updated.is_shared;
             decrypted.updated_at = updated.updated_at;
+
+            if updated.is_shared {
+                self.workspace_connections
+                    .update_tokens_for_creator(
+                        user_id,
+                        provider,
+                        encrypted_access,
+                        encrypted_refresh,
+                        refreshed.expires_at,
+                        account_email,
+                    )
+                    .await?;
+            }
         }
 
         Ok(decrypted)
@@ -529,7 +549,89 @@ impl OAuthAccountService {
             }
         }
 
+        struct StubWorkspaceRepo;
+
+        #[async_trait]
+        impl WorkspaceConnectionRepository for StubWorkspaceRepo {
+            async fn insert_connection(
+                &self,
+                _new_connection: crate::db::workspace_connection_repository::NewWorkspaceConnection,
+            ) -> Result<WorkspaceConnection, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
+            }
+
+            async fn find_by_id(
+                &self,
+                _connection_id: Uuid,
+            ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+                Ok(None)
+            }
+
+            async fn find_by_workspace_and_provider(
+                &self,
+                _workspace_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+                Ok(None)
+            }
+
+            async fn list_for_workspace(
+                &self,
+                _workspace_id: Uuid,
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+                sqlx::Error,
+            > {
+                Ok(Vec::new())
+            }
+
+            async fn list_for_user_memberships(
+                &self,
+                _user_id: Uuid,
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+                sqlx::Error,
+            > {
+                Ok(Vec::new())
+            }
+
+            async fn update_tokens_for_creator(
+                &self,
+                _creator_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+                _account_email: String,
+            ) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
+            async fn update_tokens(
+                &self,
+                _connection_id: Uuid,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+            ) -> Result<WorkspaceConnection, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
+            }
+
+            async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
+            async fn record_audit_event(
+                &self,
+                _event: crate::db::workspace_connection_repository::NewWorkspaceAuditEvent,
+            ) -> Result<WorkspaceAuditEvent, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
+            }
+        }
+
         let repo = Arc::new(StubRepo) as Arc<dyn UserOAuthTokenRepository>;
+        let workspace_connections =
+            Arc::new(StubWorkspaceRepo) as Arc<dyn WorkspaceConnectionRepository>;
         let key = Arc::new(vec![0u8; 32]);
         let client = Arc::new(Client::new());
         let settings = OAuthSettings {
@@ -545,7 +647,13 @@ impl OAuthAccountService {
             },
             token_encryption_key: vec![0u8; 32],
         };
-        Arc::new(Self::new(repo, key, client, &settings))
+        Arc::new(Self::new(
+            repo,
+            workspace_connections,
+            key,
+            client,
+            &settings,
+        ))
     }
 }
 
@@ -553,6 +661,7 @@ impl OAuthAccountService {
 mod tests {
     use super::*;
     use crate::db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository};
+    use crate::db::workspace_connection_repository::WorkspaceConnectionRepository;
     use async_trait::async_trait;
     use sqlx::Error;
 
@@ -600,10 +709,91 @@ mod tests {
         }
     }
 
+    struct NoopWorkspaceRepo;
+
+    #[async_trait]
+    impl WorkspaceConnectionRepository for NoopWorkspaceRepo {
+        async fn insert_connection(
+            &self,
+            _new_connection: crate::db::workspace_connection_repository::NewWorkspaceConnection,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+
+        async fn find_by_id(
+            &self,
+            _connection_id: Uuid,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn find_by_workspace_and_provider(
+            &self,
+            _workspace_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn list_for_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<
+            Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+            sqlx::Error,
+        > {
+            Ok(Vec::new())
+        }
+
+        async fn list_for_user_memberships(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<
+            Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+            sqlx::Error,
+        > {
+            Ok(Vec::new())
+        }
+
+        async fn update_tokens_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+            _account_email: String,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn update_tokens(
+            &self,
+            _connection_id: Uuid,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+
+        async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn record_audit_event(
+            &self,
+            _event: crate::db::workspace_connection_repository::NewWorkspaceAuditEvent,
+        ) -> Result<WorkspaceAuditEvent, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+    }
+
     #[tokio::test]
     async fn scopes_are_exposed() {
         let client = Arc::new(Client::new());
         let repo = Arc::new(InMemoryRepo);
+        let workspace_repo = Arc::new(NoopWorkspaceRepo);
         let key = Arc::new(vec![0u8; 32]);
         let settings = OAuthSettings {
             google: OAuthProviderConfig {
@@ -618,7 +808,7 @@ mod tests {
             },
             token_encryption_key: vec![0u8; 32],
         };
-        let service = OAuthAccountService::new(repo, key, client, &settings);
+        let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
         let scopes = service.google_scopes();
         assert!(scopes.contains("email"));
         assert!(scopes.contains("https://www.googleapis.com/auth/spreadsheets"));

@@ -1845,6 +1845,29 @@ mod tests {
                 .collect())
         }
 
+        async fn update_tokens_for_creator(
+            &self,
+            creator_id: Uuid,
+            provider: ConnectedOAuthProvider,
+            access_token: String,
+            refresh_token: String,
+            expires_at: OffsetDateTime,
+            account_email: String,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.connections.lock().unwrap();
+            for record in guard.iter_mut() {
+                if record.created_by == creator_id && record.provider == provider {
+                    record.access_token = access_token.clone();
+                    record.refresh_token = refresh_token.clone();
+                    record.expires_at = expires_at;
+                    record.account_email = account_email.clone();
+                    record.updated_at = OffsetDateTime::now_utc();
+                }
+            }
+
+            Ok(())
+        }
+
         async fn update_tokens(
             &self,
             connection_id: Uuid,

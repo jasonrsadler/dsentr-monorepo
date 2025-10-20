@@ -98,9 +98,9 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
     if let Some(scope_value) = legacy_scope.clone() {
         match scope_value.to_ascii_lowercase().as_str() {
             "workspace" => {
-                let id_str = legacy_connection_id.clone().ok_or_else(|| {
-                    "Workspace connections require a connectionId".to_string()
-                })?;
+                let id_str = legacy_connection_id
+                    .clone()
+                    .ok_or_else(|| "Workspace connections require a connectionId".to_string())?;
 
                 let parsed_id = Uuid::parse_str(&id_str)
                     .map_err(|_| "Workspace connectionId must be a valid UUID".to_string())?;
@@ -453,10 +453,7 @@ mod tests {
         match usage {
             NodeConnectionUsage::Workspace(info) => {
                 assert_eq!(info.connection_id, connection_id);
-                assert_eq!(
-                    info.account_email.as_deref(),
-                    Some("workspace@example.com")
-                );
+                assert_eq!(info.account_email.as_deref(), Some("workspace@example.com"));
             }
             other => panic!("expected workspace usage, got {:?}", other),
         }
@@ -474,14 +471,8 @@ mod tests {
 
         match usage {
             NodeConnectionUsage::User(info) => {
-                assert_eq!(
-                    info.connection_id.as_deref(),
-                    Some("microsoft-personal")
-                );
-                assert_eq!(
-                    info.account_email.as_deref(),
-                    Some("alice@example.com")
-                );
+                assert_eq!(info.connection_id.as_deref(), Some("microsoft-personal"));
+                assert_eq!(info.account_email.as_deref(), Some("alice@example.com"));
             }
             other => panic!("expected personal usage, got {:?}", other),
         }
