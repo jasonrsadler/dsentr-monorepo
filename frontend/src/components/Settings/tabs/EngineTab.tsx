@@ -31,6 +31,59 @@ import { normalizePlanTier } from '@/lib/planTiers'
 const CONCURRENCY_RESTRICTION_MESSAGE =
   'Solo plan workflows run one job at a time. Upgrade in Settings → Plan to raise the concurrency limit.'
 
+const describeActorMetadata = (meta: any): string | null => {
+  if (!meta) return null
+  if (typeof meta === 'string') return meta
+  if (typeof meta !== 'object') return null
+  if (typeof meta.label === 'string' && meta.label.trim()) {
+    return meta.label.trim()
+  }
+  const parts: string[] = []
+  if (typeof meta.name === 'string' && meta.name.trim()) {
+    parts.push(meta.name.trim())
+  }
+  if (typeof meta.email === 'string' && meta.email.trim()) {
+    parts.push(meta.email.trim())
+  }
+  if (typeof meta.type === 'string' && meta.type.trim()) {
+    const formatted = meta.type
+      .trim()
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char: string) => char.toUpperCase())
+    if (!parts.includes(formatted)) parts.push(formatted)
+  }
+  return parts.length ? parts.join(' · ') : null
+}
+
+const describeCredentialMetadata = (meta: any): string | null => {
+  if (!meta) return null
+  if (typeof meta === 'string') return meta
+  if (typeof meta !== 'object') return null
+  if (typeof meta.label === 'string' && meta.label.trim()) {
+    return meta.label.trim()
+  }
+  const provider =
+    typeof meta.provider === 'string' && meta.provider.trim()
+      ? meta.provider.trim()
+      : ''
+  const scope =
+    typeof meta.scope === 'string' && meta.scope.trim()
+      ? meta.scope.trim().replace(/_/g, ' ')
+      : ''
+  const header = [provider, scope].filter(Boolean).join(' · ')
+  const account =
+    typeof meta.account_email === 'string' && meta.account_email.trim()
+      ? meta.account_email.trim()
+      : ''
+  const workspace =
+    typeof meta.workspace_name === 'string' && meta.workspace_name.trim()
+      ? meta.workspace_name.trim()
+      : ''
+  const details = [account, workspace].filter(Boolean).join(' · ')
+  const parts = [header, details].filter(Boolean)
+  return parts.length ? parts.join(' — ') : null
+}
+
 export default function EngineTab() {
   const user = useAuth((state) => state.user)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
@@ -517,6 +570,10 @@ export default function EngineTab() {
                           (finished.getTime() - started.getTime()) / 1000
                         )
                       : null
+                  const triggeredBy = describeActorMetadata(r.triggered_by)
+                  const executedWith = describeCredentialMetadata(
+                    r.executed_with
+                  )
                   return (
                     <div
                       key={r.id}
@@ -567,6 +624,26 @@ export default function EngineTab() {
                           </button>
                         </div>
                       </div>
+                      {(triggeredBy || executedWith) && (
+                        <div className="mt-1 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                          {triggeredBy && (
+                            <div>
+                              <span className="font-semibold">
+                                Triggered by:
+                              </span>{' '}
+                              {triggeredBy}
+                            </div>
+                          )}
+                          {executedWith && (
+                            <div>
+                              <span className="font-semibold">
+                                Executed with:
+                              </span>{' '}
+                              {executedWith}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )
                 })}

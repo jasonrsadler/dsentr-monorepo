@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 
-type DropdownOption =
+export type NodeDropdownOption =
   | string
   | {
       label: string
@@ -8,8 +8,27 @@ type DropdownOption =
       disabled?: boolean
     }
 
+export interface NodeDropdownOptionGroup {
+  label: string
+  options: NodeDropdownOption[]
+}
+
+type DropdownEntry = NodeDropdownOption | NodeDropdownOptionGroup
+
+type NormalizedItem =
+  | {
+      type: 'group'
+      label: string
+    }
+  | {
+      type: 'option'
+      label: string
+      value: string
+      disabled: boolean
+    }
+
 interface NodeDropdownFieldProps {
-  options: DropdownOption[]
+  options: DropdownEntry[]
   value?: string
   onChange: (value: string) => void
   placeholder?: string
@@ -31,22 +50,52 @@ export default function NodeDropdownField({
 }: NodeDropdownFieldProps) {
   const [open, setOpen] = useState(false)
 
-  const normalizedOptions = useMemo(
+  const normalizedItems = useMemo<NormalizedItem[]>(() => {
+    const items: NormalizedItem[] = []
+
+    const normalizeOption = (option: NodeDropdownOption) => {
+      if (typeof option === 'string') {
+        items.push({
+          type: 'option',
+          label: option,
+          value: option,
+          disabled: false
+        })
+        return
+      }
+
+      items.push({
+        type: 'option',
+        label: option.label,
+        value: option.value,
+        disabled: option.disabled ?? false
+      })
+    }
+
+    options.forEach((entry) => {
+      if (typeof entry === 'object' && entry !== null && 'options' in entry) {
+        items.push({ type: 'group', label: entry.label })
+        entry.options.forEach((option) => normalizeOption(option))
+      } else {
+        normalizeOption(entry as NodeDropdownOption)
+      }
+    })
+
+    return items
+  }, [options])
+
+  const selectableOptions = useMemo(
     () =>
-      options.map((option) =>
-        typeof option === 'string'
-          ? { label: option, value: option, disabled: false }
-          : {
-              label: option.label,
-              value: option.value,
-              disabled: option.disabled ?? false
-            }
+      normalizedItems.filter(
+        (item): item is Extract<NormalizedItem, { type: 'option' }> =>
+          item.type === 'option'
       ),
-    [options]
+    [normalizedItems]
   )
+
   const selected = useMemo(
-    () => normalizedOptions.find((option) => option.value === value),
-    [normalizedOptions, value]
+    () => selectableOptions.find((option) => option.value === value),
+    [selectableOptions, value]
   )
   const buttonLabel = loading
     ? 'Loading…'
@@ -60,6 +109,8 @@ export default function NodeDropdownField({
     onChange(nextValue)
     setOpen(false)
   }
+
+  const hasOptions = selectableOptions.length > 0
 
   return (
     <div className="relative inline-block w-full text-xs">
@@ -97,32 +148,45 @@ export default function NodeDropdownField({
             <li className="px-2 py-2 text-zinc-500 dark:text-zinc-400">
               Loading…
             </li>
-          ) : normalizedOptions.length === 0 ? (
+          ) : !hasOptions ? (
             <li className="px-2 py-2 text-zinc-500 dark:text-zinc-400">
               {emptyMessage}
             </li>
           ) : (
-            normalizedOptions.map((option) => (
-              <li
-                role="option"
-                key={option.value}
-                aria-selected={option.value === value}
-                onClick={() => {
-                  if (option.disabled) {
-                    onOptionBlocked?.(option.value)
-                    return
-                  }
-                  handleSelect(option.value)
-                }}
-                className={`px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 ${
-                  option.disabled
-                    ? 'cursor-not-allowed opacity-50 hover:bg-transparent'
-                    : ''
-                }`}
-              >
-                {option.label}
-              </li>
-            ))
+            normalizedItems.map((item, index) => {
+              if (item.type === 'group') {
+                return (
+                  <li
+                    key={`group-${index}-${item.label}`}
+                    className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400"
+                  >
+                    {item.label}
+                  </li>
+                )
+              }
+
+              return (
+                <li
+                  role="option"
+                  key={item.value}
+                  aria-selected={item.value === value}
+                  onClick={() => {
+                    if (item.disabled) {
+                      onOptionBlocked?.(item.value)
+                      return
+                    }
+                    handleSelect(item.value)
+                  }}
+                  className={`px-2 py-1 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 ${
+                    item.disabled
+                      ? 'cursor-not-allowed opacity-50 hover:bg-transparent'
+                      : ''
+                  }`}
+                >
+                  {item.label}
+                </li>
+              )
+            })
           )}
         </ul>
       )}

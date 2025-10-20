@@ -1,9 +1,15 @@
-import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
+import NodeDropdownField, {
+  type NodeDropdownOptionGroup
+} from '@/components/UI/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { fetchConnections } from '@/lib/oauthApi'
+import {
+  fetchConnections,
+  type ConnectionScope,
+  type ProviderConnectionSet
+} from '@/lib/oauthApi'
 
 const MAX_SHEETS_COLUMNS = 18278
 const COLUMN_KEY_REGEX = /^[A-Za-z]+$/
@@ -45,11 +51,31 @@ const validateColumnMappings = (
   return undefined
 }
 
+const connectionValueKey = (scope: ConnectionScope, id: string) =>
+  `${scope}:${id}`
+
+const parseConnectionValue = (
+  raw: string
+): { scope: ConnectionScope; id: string } | null => {
+  if (!raw) return null
+  const [scopePart, ...rest] = raw.split(':')
+  const idPart = rest.join(':')
+  if (
+    (scopePart === 'personal' || scopePart === 'workspace') &&
+    idPart.trim()
+  ) {
+    return { scope: scopePart, id: idPart.trim() }
+  }
+  return null
+}
+
 interface SheetsActionProps {
   spreadsheetId: string
   worksheet: string
   columns: { key: string; value: string }[]
   accountEmail?: string
+  oauthConnectionScope?: ConnectionScope
+  oauthConnectionId?: string
   dirty: boolean
   setParams: (params: Partial<SheetsActionProps>) => void
   setDirty: (dirty: boolean) => void
@@ -79,39 +105,64 @@ export default function SheetsAction({
     spreadsheetId: args.spreadsheetId || '',
     worksheet: args.worksheet || '',
     columns: args.columns || [],
-    accountEmail: args.accountEmail || ''
+    accountEmail: args.accountEmail || '',
+    oauthConnectionScope: args.oauthConnectionScope || '',
+    oauthConnectionId: args.oauthConnectionId || ''
   })
-  const [accountOptions, setAccountOptions] = useState<string[]>([])
-  const [accountsLoading, setAccountsLoading] = useState(true)
-  const [accountsError, setAccountsError] = useState<string | null>(null)
+  const [connectionState, setConnectionState] =
+    useState<ProviderConnectionSet | null>(null)
+  const [connectionsLoading, setConnectionsLoading] = useState(true)
+  const [connectionsError, setConnectionsError] = useState<string | null>(null)
+
+  const findConnectionById = useCallback(
+    (scope?: ConnectionScope | null, id?: string | null) => {
+      if (!connectionState || !scope || !id) return null
+      if (scope === 'personal') {
+        const personal = connectionState.personal
+        if (!personal.connected || !personal.id) return null
+        return personal.id === id ? personal : null
+      }
+
+      return connectionState.workspace.find((entry) => entry.id === id) ?? null
+    },
+    [connectionState]
+  )
+
+  const findConnectionByEmail = useCallback(
+    (email?: string | null) => {
+      if (!connectionState) return null
+      const normalized = email?.trim().toLowerCase()
+      if (!normalized) return null
+
+      const personal = connectionState.personal
+      if (
+        personal.connected &&
+        personal.accountEmail &&
+        personal.accountEmail.trim().toLowerCase() === normalized
+      ) {
+        return personal
+      }
+
+      return (
+        connectionState.workspace.find(
+          (entry) =>
+            entry.accountEmail &&
+            entry.accountEmail.trim().toLowerCase() === normalized
+        ) ?? null
+      )
+    },
+    [connectionState]
+  )
 
   useEffect(() => {
     let active = true
-    setAccountsLoading(true)
+    setConnectionsLoading(true)
+    setConnectionsError(null)
     fetchConnections()
       .then((connections) => {
         if (!active) return
-        const google = connections.google
-        const available =
-          google?.connected && google.accountEmail?.trim()
-            ? [google.accountEmail.trim()]
-            : []
-        setAccountOptions(available)
-        setParams((prev) => {
-          if (!prev) return prev
-          const current = prev.accountEmail?.trim()
-          if (!current) return prev
-          if (
-            available.length === 0 ||
-            !available.some(
-              (option) => option.toLowerCase() === current.toLowerCase()
-            )
-          ) {
-            return { ...prev, accountEmail: '' }
-          }
-          return prev
-        })
-        setAccountsError(null)
+        setConnectionState(connections.google ?? null)
+        setConnectionsError(null)
       })
       .catch((error) => {
         if (!active) return
@@ -119,17 +170,107 @@ export default function SheetsAction({
           error instanceof Error
             ? error.message
             : 'Failed to load Google connections'
-        setAccountsError(message)
+        setConnectionsError(message)
+        setConnectionState(null)
       })
       .finally(() => {
         if (!active) return
-        setAccountsLoading(false)
+        setConnectionsLoading(false)
       })
 
     return () => {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!connectionState) return
+    setParams((prev) => {
+      if (!prev) return prev
+
+      const rawScope = prev.oauthConnectionScope
+      const scope =
+        rawScope === 'personal' || rawScope === 'workspace'
+          ? (rawScope as ConnectionScope)
+          : undefined
+      const id = prev.oauthConnectionId?.trim() || undefined
+      const email = prev.accountEmail?.trim() || undefined
+
+      let selected = findConnectionById(scope, id)
+      if (!selected && email) {
+        selected = findConnectionByEmail(email)
+      }
+      if (!selected) {
+        const personal = connectionState.personal
+        if (personal.connected && personal.id) {
+          selected = personal
+        }
+      }
+      if (!selected) {
+        if (connectionState.workspace.length === 1) {
+          selected = connectionState.workspace[0]
+        }
+      }
+
+      if (!selected) {
+        if (
+          prev.oauthConnectionScope ||
+          prev.oauthConnectionId ||
+          prev.accountEmail
+        ) {
+          return {
+            ...prev,
+            oauthConnectionScope: '',
+            oauthConnectionId: '',
+            accountEmail: ''
+          }
+        }
+        return prev
+      }
+
+      const nextScope = selected.scope
+      const nextId = selected.id ?? ''
+      const nextEmail = selected.accountEmail ?? ''
+
+      if (
+        prev.oauthConnectionScope === nextScope &&
+        prev.oauthConnectionId === nextId &&
+        (prev.accountEmail ?? '') === nextEmail
+      ) {
+        return prev
+      }
+
+      return {
+        ...prev,
+        oauthConnectionScope: nextScope,
+        oauthConnectionId: nextId,
+        accountEmail: nextEmail
+      }
+    })
+  }, [connectionState, findConnectionByEmail, findConnectionById, setParams])
+
+  const connectionChoices = useMemo(() => {
+    if (!connectionState)
+      return [] as (
+        | ProviderConnectionSet['personal']
+        | ProviderConnectionSet['workspace'][number]
+      )[]
+
+    const entries: (
+      | ProviderConnectionSet['personal']
+      | ProviderConnectionSet['workspace'][number]
+    )[] = []
+    const personal = connectionState.personal
+    if (personal.connected && personal.id) {
+      entries.push(personal)
+    }
+    for (const entry of connectionState.workspace) {
+      if (entry.id) {
+        entries.push(entry)
+      }
+    }
+    return entries
+  }, [connectionState])
 
   const hasErrors = (updatedParams: Partial<SheetsActionProps>) => {
     const errors: Partial<SheetsActionErrorProps> = {}
@@ -143,19 +284,36 @@ export default function SheetsAction({
       const columnError = validateColumnMappings(updatedParams.columns)
       if (columnError) errors.columnsError = columnError
     }
-    const accountSelected = updatedParams.accountEmail?.trim()
-    if (!accountSelected) {
-      errors.accountEmailError = accountOptions.length
-        ? 'Select a connected Google account'
-        : 'Connect a Google account in Settings → Integrations'
-    } else if (
-      accountOptions.length > 0 &&
-      !accountOptions.some(
-        (option) => option.toLowerCase() === accountSelected.toLowerCase()
-      )
-    ) {
-      errors.accountEmailError =
-        'Selected Google account is no longer connected. Refresh your integrations.'
+    const selectedScope =
+      updatedParams.oauthConnectionScope ?? params.oauthConnectionScope ?? ''
+    const selectedId =
+      updatedParams.oauthConnectionId ?? params.oauthConnectionId ?? ''
+
+    if (connectionsError) {
+      errors.accountEmailError = connectionsError
+    } else if (!connectionsLoading) {
+      if (connectionChoices.length === 0) {
+        errors.accountEmailError =
+          'Connect a Google account in Settings → Integrations'
+      } else {
+        const normalizedScope =
+          selectedScope === 'personal' || selectedScope === 'workspace'
+            ? selectedScope
+            : null
+        const normalizedId = (selectedId ?? '').toString().trim()
+
+        if (!normalizedScope || !normalizedId) {
+          errors.accountEmailError = 'Select a connected Google account'
+        } else if (
+          !connectionChoices.some(
+            (choice) =>
+              choice.scope === normalizedScope && choice.id === normalizedId
+          )
+        ) {
+          errors.accountEmailError =
+            'Selected Google connection is no longer available. Refresh your integrations.'
+        }
+      }
     }
     return errors
   }
@@ -163,7 +321,7 @@ export default function SheetsAction({
   const validationErrors = useMemo(
     () => hasErrors(params),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [params, accountOptions]
+    [params, connectionChoices, connectionsError, connectionsLoading]
   )
 
   useEffect(() => {
@@ -178,25 +336,130 @@ export default function SheetsAction({
 
   const errorClass = 'text-xs text-red-500'
 
+  const connectionOptionGroups = useMemo<NodeDropdownOptionGroup[]>(() => {
+    if (!connectionState) return []
+    const groups: NodeDropdownOptionGroup[] = []
+    const personal = connectionState.personal
+    if (personal.connected && personal.id) {
+      groups.push({
+        label: 'Your connections',
+        options: [
+          {
+            value: connectionValueKey('personal', personal.id),
+            label: personal.accountEmail?.trim() || 'Personal Google account'
+          }
+        ]
+      })
+    }
+
+    const workspaceOptions = connectionState.workspace
+      .filter((entry) => typeof entry.id === 'string' && entry.id)
+      .map((entry) => {
+        const id = entry.id as string
+        const workspaceName = entry.workspaceName?.trim()
+        const accountEmail = entry.accountEmail?.trim()
+        const label = workspaceName
+          ? accountEmail
+            ? `${workspaceName} · ${accountEmail}`
+            : `${workspaceName} credential`
+          : accountEmail || 'Workspace credential'
+        return {
+          value: connectionValueKey('workspace', id),
+          label
+        }
+      })
+
+    if (workspaceOptions.length > 0) {
+      groups.push({
+        label: 'Workspace connections',
+        options: workspaceOptions
+      })
+    }
+
+    return groups
+  }, [connectionState])
+
+  const selectedConnectionValue = useMemo(() => {
+    const scope = params.oauthConnectionScope
+    const id = params.oauthConnectionId
+    if (scope !== 'personal' && scope !== 'workspace') return ''
+    if (!id) return ''
+    return connectionValueKey(scope, id)
+  }, [params.oauthConnectionScope, params.oauthConnectionId])
+
+  const selectedConnection = useMemo(() => {
+    const scope =
+      params.oauthConnectionScope === 'personal' ||
+      params.oauthConnectionScope === 'workspace'
+        ? (params.oauthConnectionScope as ConnectionScope)
+        : undefined
+    const id = params.oauthConnectionId?.trim() || undefined
+    return findConnectionById(scope, id)
+  }, [
+    findConnectionById,
+    params.oauthConnectionId,
+    params.oauthConnectionScope
+  ])
+
+  const handleConnectionChange = useCallback(
+    (value: string) => {
+      setDirty(true)
+      const parsed = parseConnectionValue(value)
+      if (!parsed) {
+        setParams((prev) => ({
+          ...prev,
+          oauthConnectionScope: '',
+          oauthConnectionId: '',
+          accountEmail: ''
+        }))
+        return
+      }
+      const match = findConnectionById(parsed.scope, parsed.id)
+      setParams((prev) => ({
+        ...prev,
+        oauthConnectionScope: parsed.scope,
+        oauthConnectionId: parsed.id,
+        accountEmail: match?.accountEmail ?? ''
+      }))
+    },
+    [findConnectionById, setParams]
+  )
+
+  const usingWorkspaceCredential = selectedConnection?.scope === 'workspace'
+
   return (
     <div className="flex flex-col gap-2">
       <NodeDropdownField
-        options={accountOptions}
-        value={params.accountEmail || ''}
-        onChange={(val) => updateField('accountEmail', val)}
+        options={connectionOptionGroups}
+        value={selectedConnectionValue}
+        onChange={handleConnectionChange}
         placeholder={
-          accountsLoading
-            ? 'Loading Google accounts…'
-            : accountOptions.length > 0
-              ? 'Select Google account'
-              : 'No connected Google accounts'
+          connectionsLoading
+            ? 'Loading Google connections…'
+            : connectionOptionGroups.length > 0
+              ? 'Select Google connection'
+              : 'No Google connections available'
         }
-        disabled={accountsLoading || accountOptions.length === 0}
+        disabled={connectionsLoading || connectionOptionGroups.length === 0}
+        loading={connectionsLoading}
+        emptyMessage={connectionsError || 'No Google connections available'}
       />
-      {accountsError && <p className="text-xs text-red-500">{accountsError}</p>}
-      {validationErrors.accountEmailError && (
+      {connectionsError && (
+        <p className="text-xs text-red-500">{connectionsError}</p>
+      )}
+      {!connectionsError && validationErrors.accountEmailError && (
         <p className={errorClass}>{validationErrors.accountEmailError}</p>
       )}
+      {usingWorkspaceCredential &&
+        selectedConnection?.scope === 'workspace' && (
+          <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-700 shadow-sm dark:border-blue-400/60 dark:bg-blue-500/10 dark:text-blue-200">
+            This action will run using the workspace credential
+            {selectedConnection.workspaceName
+              ? ` "${selectedConnection.workspaceName}"`
+              : ''}
+            . Workspace admins manage refresh tokens in Settings → Integrations.
+          </p>
+        )}
 
       <NodeInputField
         placeholder="Spreadsheet ID"

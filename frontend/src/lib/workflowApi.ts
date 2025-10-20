@@ -344,6 +344,23 @@ export async function cancelRun(
 }
 
 // Runs API
+export interface RunActorMetadata {
+  type?: string
+  id?: string
+  name?: string
+  email?: string
+  label?: string
+}
+
+export interface RunCredentialMetadata {
+  provider?: string
+  scope?: string
+  connection_id?: string
+  account_email?: string
+  workspace_name?: string
+  label?: string
+}
+
 export interface WorkflowRunRecord {
   id: string
   user_id: string
@@ -356,6 +373,8 @@ export interface WorkflowRunRecord {
   finished_at?: string | null
   created_at: string
   updated_at: string
+  triggered_by?: RunActorMetadata | string | null
+  executed_with?: RunCredentialMetadata | string | null
 }
 
 export interface WorkflowNodeRunRecord {

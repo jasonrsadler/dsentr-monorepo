@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
+import NodeDropdownField, {
+  type NodeDropdownOptionGroup
+} from '@/components/UI/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
-import { fetchConnections, type ProviderConnection } from '@/lib/oauthApi'
+import {
+  fetchConnections,
+  type ConnectionScope,
+  type ProviderConnectionSet
+} from '@/lib/oauthApi'
 import {
   fetchMicrosoftTeams,
   fetchMicrosoftTeamChannels,
@@ -36,6 +42,7 @@ export interface TeamsActionValues {
   workflowHeaderSecret?: string
   oauthProvider?: string
   oauthConnectionId?: string
+  oauthConnectionScope?: ConnectionScope
   oauthAccountEmail?: string
   teamId?: string
   teamName?: string
@@ -128,6 +135,7 @@ const STRING_KEYS: (keyof TeamsActionValues)[] = [
   'workflowHeaderSecret',
   'oauthProvider',
   'oauthConnectionId',
+  'oauthConnectionScope',
   'oauthAccountEmail',
   'teamId',
   'teamName',
@@ -184,6 +192,7 @@ const normalizeParams = (incoming?: TeamsActionValues): TeamsActionValues => {
     workflowHeaderSecret: '',
     oauthProvider: '',
     oauthConnectionId: '',
+    oauthConnectionScope: '',
     oauthAccountEmail: '',
     teamId: '',
     teamName: '',
@@ -238,6 +247,7 @@ const sanitizeForSelection = (
   if (isIncomingWebhook) {
     sanitized.oauthProvider = ''
     sanitized.oauthConnectionId = ''
+    sanitized.oauthConnectionScope = ''
     sanitized.oauthAccountEmail = ''
     sanitized.teamId = ''
     sanitized.teamName = ''
@@ -310,6 +320,11 @@ const sanitizeForSelection = (
     sanitized.oauthProvider = sanitized.oauthProvider?.trim() || 'microsoft'
     sanitized.oauthConnectionId =
       sanitized.oauthConnectionId?.trim() || 'microsoft'
+    sanitized.oauthConnectionScope =
+      sanitized.oauthConnectionScope === 'workspace' ||
+      sanitized.oauthConnectionScope === 'personal'
+        ? sanitized.oauthConnectionScope
+        : ''
     sanitized.oauthAccountEmail = sanitized.oauthAccountEmail?.trim() || ''
     sanitized.teamId = sanitized.teamId?.trim() || ''
     sanitized.teamName = sanitized.teamName?.trim() || ''
@@ -361,6 +376,7 @@ const sanitizeForSelection = (
   sanitized.workflowHeaderSecret = ''
   sanitized.oauthProvider = ''
   sanitized.oauthConnectionId = ''
+  sanitized.oauthConnectionScope = ''
   sanitized.oauthAccountEmail = ''
   sanitized.teamId = ''
   sanitized.teamName = ''
@@ -373,6 +389,24 @@ const sanitizeForSelection = (
   sanitized.cardBody = ''
 
   return sanitized
+}
+
+const buildConnectionValue = (scope: ConnectionScope, id: string) =>
+  `${scope}:${id}`
+
+const parseConnectionValue = (
+  raw: string
+): { scope: ConnectionScope; id: string } | null => {
+  if (!raw) return null
+  const [scopePart, ...rest] = raw.split(':')
+  const idPart = rest.join(':')
+  if (
+    (scopePart === 'personal' || scopePart === 'workspace') &&
+    idPart.trim()
+  ) {
+    return { scope: scopePart, id: idPart.trim() }
+  }
+  return null
 }
 
 const shallowEqual = (a: TeamsActionValues, b: TeamsActionValues) => {
@@ -457,8 +491,8 @@ export default function TeamsAction({
   const [connectionsFetched, setConnectionsFetched] = useState(false)
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [connectionsError, setConnectionsError] = useState<string | null>(null)
-  const [microsoftConnection, setMicrosoftConnection] =
-    useState<ProviderConnection | null>(null)
+  const [microsoftConnections, setMicrosoftConnections] =
+    useState<ProviderConnectionSet | null>(null)
 
   const [teams, setTeams] = useState<MicrosoftTeam[]>([])
   const [teamsLoading, setTeamsLoading] = useState(false)
@@ -476,6 +510,73 @@ export default function TeamsAction({
   const [channelsRequestId, setChannelsRequestId] = useState(0)
   const [membersRequestId, setMembersRequestId] = useState(0)
   const internalUpdateRef = useRef(false)
+
+  const findConnectionById = useCallback(
+    (scope?: ConnectionScope | null, id?: string | null) => {
+      if (!microsoftConnections || !scope || !id) return null
+      if (scope === 'personal') {
+        const personal = microsoftConnections.personal
+        if (!personal.connected || !personal.id) return null
+        return personal.id === id ? personal : null
+      }
+
+      return (
+        microsoftConnections.workspace.find((entry) => entry.id === id) ?? null
+      )
+    },
+    [microsoftConnections]
+  )
+
+  const findConnectionByEmail = useCallback(
+    (email?: string | null) => {
+      if (!microsoftConnections) return null
+      const normalized = email?.trim().toLowerCase()
+      if (!normalized) return null
+
+      const personal = microsoftConnections.personal
+      if (
+        personal.connected &&
+        personal.accountEmail &&
+        personal.accountEmail.trim().toLowerCase() === normalized
+      ) {
+        return personal
+      }
+
+      return (
+        microsoftConnections.workspace.find(
+          (entry) =>
+            entry.accountEmail &&
+            entry.accountEmail.trim().toLowerCase() === normalized
+        ) ?? null
+      )
+    },
+    [microsoftConnections]
+  )
+
+  const connectionChoices = useMemo(() => {
+    if (!microsoftConnections)
+      return [] as (
+        | ProviderConnectionSet['personal']
+        | ProviderConnectionSet['workspace'][number]
+      )[]
+
+    const entries: (
+      | ProviderConnectionSet['personal']
+      | ProviderConnectionSet['workspace'][number]
+    )[] = []
+    const personal = microsoftConnections.personal
+    if (personal.connected && personal.id) {
+      entries.push(personal)
+    }
+    for (const entry of microsoftConnections.workspace) {
+      if (entry.id) {
+        entries.push(entry)
+      }
+    }
+    return entries
+  }, [microsoftConnections])
+
+  const hasMicrosoftAccount = connectionChoices.length > 0
 
   useEffect(() => {
     const normalized = normalizeParams(args)
@@ -519,8 +620,6 @@ export default function TeamsAction({
     ? (params.cardMode as DelegatedCardMode) || delegatedCardModes[0]
     : delegatedCardModes[0]
 
-  const hasMicrosoftAccount = Boolean(microsoftConnection?.connected)
-
   useEffect(() => {
     if (!isDelegated || connectionsFetched) return
 
@@ -531,7 +630,7 @@ export default function TeamsAction({
     fetchConnections()
       .then((data) => {
         if (!active) return
-        setMicrosoftConnection(data.microsoft ?? null)
+        setMicrosoftConnections(data.microsoft ?? null)
         setConnectionsError(null)
       })
       .catch((error) => {
@@ -541,7 +640,7 @@ export default function TeamsAction({
             ? error.message
             : 'Failed to load Microsoft integrations'
         setConnectionsError(message)
-        setMicrosoftConnection(null)
+        setMicrosoftConnections(null)
       })
       .finally(() => {
         if (!active) return
@@ -555,19 +654,80 @@ export default function TeamsAction({
   }, [isDelegated, connectionsFetched])
 
   useEffect(() => {
-    if (!isDelegated || !hasMicrosoftAccount) return
+    if (!isDelegated) {
+      setParams((prev) => {
+        if (
+          !prev.oauthProvider &&
+          !prev.oauthConnectionScope &&
+          !prev.oauthConnectionId &&
+          !prev.oauthAccountEmail
+        ) {
+          return prev
+        }
+        return {
+          ...prev,
+          oauthProvider: '',
+          oauthConnectionScope: '',
+          oauthConnectionId: '',
+          oauthAccountEmail: ''
+        }
+      })
+      return
+    }
+
+    if (!microsoftConnections) return
 
     setParams((prev) => {
       const nextProvider = 'microsoft'
-      const nextConnectionId = prev.oauthConnectionId?.trim() || 'microsoft'
-      const nextEmail =
-        microsoftConnection?.accountEmail?.trim() ||
-        prev.oauthAccountEmail ||
-        ''
+      const rawScope = prev.oauthConnectionScope
+      const scope =
+        rawScope === 'personal' || rawScope === 'workspace'
+          ? (rawScope as ConnectionScope)
+          : undefined
+      const id = prev.oauthConnectionId?.trim() || undefined
+      const email = prev.oauthAccountEmail?.trim() || undefined
+
+      let selected = findConnectionById(scope, id)
+      if (!selected && email) {
+        selected = findConnectionByEmail(email)
+      }
+      if (!selected) {
+        const personal = microsoftConnections.personal
+        if (personal.connected && personal.id) {
+          selected = personal
+        }
+      }
+      if (!selected && microsoftConnections.workspace.length === 1) {
+        selected = microsoftConnections.workspace[0]
+      }
+
+      if (!selected) {
+        if (
+          prev.oauthConnectionScope ||
+          prev.oauthConnectionId ||
+          prev.oauthAccountEmail ||
+          prev.oauthProvider
+        ) {
+          return {
+            ...prev,
+            oauthProvider: nextProvider,
+            oauthConnectionScope: '',
+            oauthConnectionId: '',
+            oauthAccountEmail: ''
+          }
+        }
+        if (prev.oauthProvider === nextProvider) return prev
+        return { ...prev, oauthProvider: nextProvider }
+      }
+
+      const nextScope = selected.scope
+      const nextId = selected.id ?? ''
+      const nextEmail = selected.accountEmail ?? ''
 
       if (
         prev.oauthProvider === nextProvider &&
-        prev.oauthConnectionId === nextConnectionId &&
+        prev.oauthConnectionScope === nextScope &&
+        prev.oauthConnectionId === nextId &&
         prev.oauthAccountEmail === nextEmail
       ) {
         return prev
@@ -576,11 +736,17 @@ export default function TeamsAction({
       return {
         ...prev,
         oauthProvider: nextProvider,
-        oauthConnectionId: nextConnectionId,
+        oauthConnectionScope: nextScope,
+        oauthConnectionId: nextId,
         oauthAccountEmail: nextEmail
       }
     })
-  }, [isDelegated, hasMicrosoftAccount, microsoftConnection])
+  }, [
+    isDelegated,
+    microsoftConnections,
+    findConnectionByEmail,
+    findConnectionById
+  ])
 
   useEffect(() => {
     if (!isDelegated || !hasMicrosoftAccount) {
@@ -762,11 +928,24 @@ export default function TeamsAction({
     if (isDelegated) {
       if (connectionsError) {
         errors.oauthConnectionId = connectionsError
-      } else if (!connectionsLoading && !hasMicrosoftAccount) {
-        errors.oauthConnectionId =
-          'Connect the Microsoft integration in Settings → Integrations.'
-      } else if (hasMicrosoftAccount && !params.oauthConnectionId?.trim()) {
-        errors.oauthConnectionId = 'Select a connected Microsoft account'
+      } else if (!connectionsLoading) {
+        if (!hasMicrosoftAccount) {
+          errors.oauthConnectionId =
+            'Connect the Microsoft integration in Settings → Integrations.'
+        } else {
+          const scope = params.oauthConnectionScope
+          const id = params.oauthConnectionId?.trim()
+          if (scope !== 'personal' && scope !== 'workspace') {
+            errors.oauthConnectionId = 'Select a connected Microsoft account'
+          } else if (
+            !connectionChoices.some(
+              (choice) => choice.scope === scope && choice.id === id
+            )
+          ) {
+            errors.oauthConnectionId =
+              'Selected Microsoft connection is no longer available. Refresh your integrations.'
+          }
+        }
       }
 
       if (teamsError) {
@@ -819,6 +998,7 @@ export default function TeamsAction({
     delegatedCardMode,
     connectionsError,
     connectionsLoading,
+    connectionChoices,
     hasMicrosoftAccount,
     teamsError,
     teamsLoading,
@@ -1006,18 +1186,98 @@ export default function TeamsAction({
     return selections
   }, [params.mentions])
 
-  const accountOptions = useMemo(() => {
-    if (!hasMicrosoftAccount) return []
-    const label = microsoftConnection?.accountEmail
-      ? `Microsoft (${microsoftConnection.accountEmail})`
-      : 'Microsoft account'
-    return [
-      {
-        value: 'microsoft',
-        label
+  const connectionOptionGroups = useMemo<NodeDropdownOptionGroup[]>(() => {
+    if (!microsoftConnections) return []
+    const groups: NodeDropdownOptionGroup[] = []
+    const personal = microsoftConnections.personal
+    if (personal.connected && personal.id) {
+      groups.push({
+        label: 'Your connections',
+        options: [
+          {
+            value: buildConnectionValue('personal', personal.id),
+            label: personal.accountEmail?.trim() || 'Personal Microsoft account'
+          }
+        ]
+      })
+    }
+
+    const workspaceOptions = microsoftConnections.workspace
+      .filter((entry) => typeof entry.id === 'string' && entry.id)
+      .map((entry) => {
+        const id = entry.id as string
+        const workspaceName = entry.workspaceName?.trim()
+        const accountEmail = entry.accountEmail?.trim()
+        const label = workspaceName
+          ? accountEmail
+            ? `${workspaceName} · ${accountEmail}`
+            : `${workspaceName} credential`
+          : accountEmail || 'Workspace credential'
+        return {
+          value: buildConnectionValue('workspace', id),
+          label
+        }
+      })
+
+    if (workspaceOptions.length > 0) {
+      groups.push({
+        label: 'Workspace connections',
+        options: workspaceOptions
+      })
+    }
+
+    return groups
+  }, [microsoftConnections])
+
+  const selectedConnectionValue = useMemo(() => {
+    const scope = params.oauthConnectionScope
+    const id = params.oauthConnectionId
+    if (scope !== 'personal' && scope !== 'workspace') return ''
+    if (!id) return ''
+    return buildConnectionValue(scope, id)
+  }, [params.oauthConnectionScope, params.oauthConnectionId])
+
+  const selectedConnection = useMemo(() => {
+    const scope =
+      params.oauthConnectionScope === 'personal' ||
+      params.oauthConnectionScope === 'workspace'
+        ? (params.oauthConnectionScope as ConnectionScope)
+        : undefined
+    const id = params.oauthConnectionId?.trim() || undefined
+    return findConnectionById(scope, id)
+  }, [
+    findConnectionById,
+    params.oauthConnectionId,
+    params.oauthConnectionScope
+  ])
+
+  const handleConnectionChange = useCallback(
+    (value: string) => {
+      setDirty(true)
+      const parsed = parseConnectionValue(value)
+      if (!parsed) {
+        setParams((prev) => ({
+          ...prev,
+          oauthProvider: 'microsoft',
+          oauthConnectionScope: '',
+          oauthConnectionId: '',
+          oauthAccountEmail: ''
+        }))
+        return
       }
-    ]
-  }, [hasMicrosoftAccount, microsoftConnection])
+      const match = findConnectionById(parsed.scope, parsed.id)
+      setParams((prev) => ({
+        ...prev,
+        oauthProvider: 'microsoft',
+        oauthConnectionScope: parsed.scope,
+        oauthConnectionId: parsed.id,
+        oauthAccountEmail: match?.accountEmail ?? ''
+      }))
+    },
+    [findConnectionById, setParams]
+  )
+
+  const usingWorkspaceCredential = selectedConnection?.scope === 'workspace'
 
   const teamsOptions = useMemo(
     () =>
@@ -1180,40 +1440,43 @@ export default function TeamsAction({
             Graph permissions.
           </p>
           <NodeDropdownField
-            options={accountOptions}
-            value={params.oauthConnectionId || ''}
-            onChange={(val) => {
-              setDirty(true)
-              setParams((prev) => ({
-                ...prev,
-                oauthProvider: 'microsoft',
-                oauthConnectionId: val,
-                oauthAccountEmail:
-                  microsoftConnection?.accountEmail?.trim() ||
-                  prev.oauthAccountEmail ||
-                  ''
-              }))
-            }}
+            options={connectionOptionGroups}
+            value={selectedConnectionValue}
+            onChange={handleConnectionChange}
             placeholder={
               connectionsLoading
-                ? 'Loading Microsoft accounts…'
-                : 'Select Microsoft account'
+                ? 'Loading Microsoft connections…'
+                : connectionOptionGroups.length > 0
+                  ? 'Select Microsoft connection'
+                  : 'No Microsoft connections available'
             }
-            disabled={!hasMicrosoftAccount}
+            disabled={!hasMicrosoftAccount || connectionsLoading}
             loading={connectionsLoading}
             emptyMessage={
-              connectionsError || 'No Microsoft accounts connected yet'
+              connectionsError || 'No Microsoft connections connected yet'
             }
           />
-          {validationErrors.oauthConnectionId && (
+          {connectionsError && <p className={errorClass}>{connectionsError}</p>}
+          {!connectionsError && validationErrors.oauthConnectionId && (
             <p className={errorClass}>{validationErrors.oauthConnectionId}</p>
           )}
-          {!connectionsLoading && !hasMicrosoftAccount && !connectionsError && (
+          {!connectionsLoading && !connectionsError && !hasMicrosoftAccount && (
             <p className={helperClass}>
               Connect the Microsoft integration in Settings → Integrations, then
               return to enable delegated messaging.
             </p>
           )}
+          {usingWorkspaceCredential &&
+            selectedConnection?.scope === 'workspace' && (
+              <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-700 shadow-sm dark:border-blue-400/60 dark:bg-blue-500/10 dark:text-blue-200">
+                This action will run using the workspace credential
+                {selectedConnection.workspaceName
+                  ? ` "${selectedConnection.workspaceName}"`
+                  : ''}
+                . Workspace admins manage refresh tokens in Settings →
+                Integrations.
+              </p>
+            )}
           {connectionsError && (
             <button
               type="button"

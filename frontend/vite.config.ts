@@ -11,6 +11,23 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 // https://vite.dev/config/
+const isTestEnv =
+  process.env.NODE_ENV === 'test' || process.env.VITEST === 'true'
+
+const certDirectory = path.join(__dirname, '../../../certs')
+const keyPath = path.join(certDirectory, 'localhost+2-key.pem')
+const certPath = path.join(certDirectory, 'localhost+2.pem')
+
+const httpsConfig =
+  !isTestEnv && fs.existsSync(keyPath) && fs.existsSync(certPath)
+    ? {
+        https: {
+          key: fs.readFileSync(keyPath),
+          cert: fs.readFileSync(certPath)
+        }
+      }
+    : {}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -49,13 +66,6 @@ export default defineConfig({
     }
   },
   server: {
-    https: {
-      key: fs.readFileSync(
-        path.join(__dirname, '../../../certs', 'localhost+2-key.pem')
-      ),
-      cert: fs.readFileSync(
-        path.join(__dirname, '../../../certs', 'localhost+2.pem')
-      )
-    }
+    ...httpsConfig
   }
 })

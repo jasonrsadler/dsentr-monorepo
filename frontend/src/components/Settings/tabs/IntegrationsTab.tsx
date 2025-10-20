@@ -3,13 +3,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { API_BASE_URL } from '@/lib/config'
 import {
   OAuthProvider,
-  ProviderConnection,
+  ProviderConnectionSet,
   disconnectProvider,
   fetchConnections,
-  refreshProvider
+  refreshProvider,
+  promoteConnection
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+import ConfirmDialog from '@/components/UI/Dialog/ConfirmDialog'
 
 export type IntegrationNotice =
   | { kind: 'connected'; provider?: OAuthProvider }
@@ -55,12 +57,32 @@ export default function IntegrationsTab({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<
-    Record<OAuthProvider, ProviderConnection>
+    Record<OAuthProvider, ProviderConnectionSet>
   >({
-    google: { connected: false },
-    microsoft: { connected: false }
+    google: {
+      personal: {
+        scope: 'personal',
+        id: null,
+        connected: false,
+        isShared: false
+      },
+      workspace: []
+    },
+    microsoft: {
+      personal: {
+        scope: 'personal',
+        id: null,
+        connected: false,
+        isShared: false
+      },
+      workspace: []
+    }
   })
   const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
+  const [promoteDialogProvider, setPromoteDialogProvider] =
+    useState<OAuthProvider | null>(null)
+  const [promoteBusyProvider, setPromoteBusyProvider] =
+    useState<OAuthProvider | null>(null)
 
   const planTier = useMemo<PlanTier>((): PlanTier => {
     return normalizePlanTier(
@@ -69,6 +91,7 @@ export default function IntegrationsTab({
   }, [currentWorkspace?.workspace.plan, userPlan])
   const isSoloPlan = planTier === 'solo'
   const isViewer = workspaceRole === 'viewer'
+  const canPromote = workspaceRole === 'owner' || workspaceRole === 'admin'
 
   const openPlanSettings = useCallback(() => {
     try {
@@ -80,25 +103,41 @@ export default function IntegrationsTab({
     }
   }, [])
 
+  const loadConnections = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await fetchConnections()
+      setStatuses(data)
+      setError(null)
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to load connections'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     let active = true
-    setLoading(true)
-    fetchConnections()
-      .then((data) => {
+    ;(async () => {
+      setLoading(true)
+      try {
+        const data = await fetchConnections()
         if (!active) return
         setStatuses(data)
         setError(null)
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!active) return
         setError(
           err instanceof Error ? err.message : 'Failed to load connections'
         )
-      })
-      .finally(() => {
-        if (!active) return
-        setLoading(false)
-      })
+      } finally {
+        if (active) {
+          setLoading(false)
+        }
+      }
+    })()
 
     return () => {
       active = false
@@ -138,7 +177,17 @@ export default function IntegrationsTab({
       await disconnectProvider(provider)
       setStatuses((prev) => ({
         ...prev,
-        [provider]: { connected: false }
+        [provider]: {
+          personal: {
+            scope: 'personal',
+            id: null,
+            connected: false,
+            accountEmail: undefined,
+            expiresAt: undefined,
+            isShared: false
+          },
+          workspace: prev[provider]?.workspace ?? []
+        }
       }))
     } catch (err) {
       const message =
@@ -155,7 +204,22 @@ export default function IntegrationsTab({
       const updated = await refreshProvider(provider)
       setStatuses((prev) => ({
         ...prev,
-        [provider]: updated
+        [provider]: {
+          personal: {
+            ...(prev[provider]?.personal ?? {
+              scope: 'personal',
+              id: null,
+              connected: false,
+              accountEmail: undefined,
+              expiresAt: undefined,
+              isShared: false
+            }),
+            connected: true,
+            accountEmail: updated.accountEmail,
+            expiresAt: updated.expiresAt
+          },
+          workspace: prev[provider]?.workspace ?? []
+        }
       }))
     } catch (err) {
       const message =
@@ -234,10 +298,19 @@ export default function IntegrationsTab({
         <div className="space-y-4">
           {PROVIDERS.map((provider) => {
             const status = statuses[provider.key]
-            const connected = status?.connected ?? false
-            const accountEmail = status?.accountEmail
-            const expiresAt = status?.expiresAt
+            const personal = status?.personal
+            const connected = personal?.connected ?? false
+            const accountEmail = personal?.accountEmail
+            const expiresAt = personal?.expiresAt
             const busy = busyProvider === provider.key
+            const promoting = promoteBusyProvider === provider.key
+            const workspaceConnections = status?.workspace ?? []
+            const promoteDisabled =
+              !workspaceId ||
+              promoting ||
+              busy ||
+              !connected ||
+              personal?.isShared
 
             return (
               <section
@@ -258,18 +331,29 @@ export default function IntegrationsTab({
                       <>
                         <button
                           onClick={() => handleRefresh(provider.key)}
-                          disabled={busy}
+                          disabled={busy || promoting}
                           className="rounded-md border border-zinc-300 px-3 py-1 text-sm text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
                         >
                           Refresh token
                         </button>
                         <button
                           onClick={() => handleDisconnect(provider.key)}
-                          disabled={busy}
+                          disabled={busy || promoting}
                           className="rounded-md bg-red-500 px-3 py-1 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
                         >
                           Disconnect
                         </button>
+                        {canPromote && !personal?.isShared ? (
+                          <button
+                            onClick={() =>
+                              setPromoteDialogProvider(provider.key)
+                            }
+                            disabled={promoteDisabled}
+                            className="rounded-md bg-indigo-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            Promote to Workspace
+                          </button>
+                        ) : null}
                       </>
                     ) : (
                       <button
@@ -290,6 +374,14 @@ export default function IntegrationsTab({
                     </dt>
                     <dd>{connected ? 'Connected' : 'Not connected'}</dd>
                   </div>
+                  {personal?.isShared ? (
+                    <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-300">
+                      <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                        Sharing:
+                      </dt>
+                      <dd>Promoted to workspace</dd>
+                    </div>
+                  ) : null}
                   {accountEmail && (
                     <div className="flex items-center gap-2">
                       <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
@@ -315,11 +407,84 @@ export default function IntegrationsTab({
                     </dd>
                   </div>
                 </dl>
+                <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
+                  <div className="font-semibold text-zinc-700 dark:text-zinc-200">
+                    Workspace connections
+                  </div>
+                  {workspaceConnections.length === 0 ? (
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      No workspace connections have been shared yet.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {workspaceConnections.map((entry) => (
+                        <li
+                          key={entry.id}
+                          className="rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-800"
+                        >
+                          <div className="font-medium text-zinc-700 dark:text-zinc-100">
+                            {entry.workspaceName}
+                          </div>
+                          <div className="text-zinc-600 dark:text-zinc-300">
+                            {entry.accountEmail || 'Delegated account'}
+                          </div>
+                          <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                            Shared by {entry.sharedByName || 'workspace admin'}
+                            {entry.sharedByEmail
+                              ? ` (${entry.sharedByEmail})`
+                              : ''}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </section>
             )
           })}
         </div>
       )}
+      <ConfirmDialog
+        isOpen={promoteDialogProvider !== null}
+        title="Promote OAuth Connection"
+        message="Share this connection with your workspace so other members can run workflows using it?"
+        confirmText="Promote"
+        onCancel={() => setPromoteDialogProvider(null)}
+        onConfirm={async () => {
+          const provider = promoteDialogProvider
+          if (!provider) return
+          const personal = statuses[provider]?.personal
+          if (!workspaceId) {
+            setError('No active workspace selected for promotion')
+            setPromoteDialogProvider(null)
+            return
+          }
+          if (!personal?.id) {
+            setError('Missing connection identifier. Refresh and try again.')
+            setPromoteDialogProvider(null)
+            return
+          }
+          try {
+            setPromoteBusyProvider(provider)
+            await promoteConnection({
+              workspaceId,
+              provider,
+              connectionId: personal.id
+            })
+            await loadConnections()
+            setError(null)
+          } catch (err) {
+            setError(
+              err instanceof Error
+                ? err.message
+                : 'Failed to promote connection'
+            )
+          } finally {
+            setPromoteBusyProvider(null)
+            setPromoteDialogProvider(null)
+          }
+        }}
+      />
     </div>
   )
 }
