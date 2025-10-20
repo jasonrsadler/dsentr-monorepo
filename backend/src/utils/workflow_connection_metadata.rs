@@ -165,3 +165,77 @@ fn read_string(value: Option<&Value>) -> Option<String> {
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::workflow_run::WorkflowRun;
+    use serde_json::json;
+    use time::OffsetDateTime;
+    use uuid::Uuid;
+
+    #[test]
+    fn collect_extracts_user_and_workspace_connections() {
+        let workspace_id = Uuid::new_v4();
+        let snapshot = json!({
+            "nodes": [
+                {"data": {"connection": {"connectionScope": "workspace", "connectionId": workspace_id}}},
+                {"data": {"connection": {"connectionScope": "user"}}}
+            ]
+        });
+
+        let metadata = collect(&snapshot);
+        assert_eq!(metadata.len(), 2);
+        assert!(metadata
+            .iter()
+            .any(|entry| entry.connection_type == "workspace"));
+        assert!(metadata.iter().any(|entry| entry.connection_type == "user"));
+    }
+
+    #[test]
+    fn build_run_events_emits_metadata_for_each_connection() {
+        let workspace_id = Uuid::new_v4();
+        let run = WorkflowRun {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            workflow_id: Uuid::new_v4(),
+            workspace_id: Some(workspace_id),
+            snapshot: json!({}),
+            status: "queued".into(),
+            error: None,
+            idempotency_key: None,
+            started_at: OffsetDateTime::now_utc(),
+            finished_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let workspace_conn = Uuid::new_v4();
+        let metadata = vec![
+            ConnectionMetadata::workspace(workspace_conn),
+            ConnectionMetadata::user(),
+        ];
+
+        let events = build_run_events(&run, "worker", &metadata);
+        assert_eq!(events.len(), 2);
+
+        let mut workspace_event = None;
+        let mut user_event = None;
+        for event in events {
+            if event.connection_type.as_deref() == Some("workspace") {
+                workspace_event = Some(event);
+            } else {
+                user_event = Some(event);
+            }
+        }
+
+        let workspace_event = workspace_event.expect("workspace event exists");
+        assert_eq!(workspace_event.connection_id, Some(workspace_conn));
+        assert_eq!(workspace_event.workspace_id, Some(workspace_id));
+        assert_eq!(workspace_event.triggered_by, "worker");
+
+        let user_event = user_event.expect("user event exists");
+        assert_eq!(user_event.connection_type.as_deref(), Some("user"));
+        assert!(user_event.connection_id.is_none());
+    }
+}

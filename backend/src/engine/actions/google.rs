@@ -374,11 +374,15 @@ mod tests {
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
     use crate::db::{
         mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
-        workspace_connection_repository::NoopWorkspaceConnectionRepository,
+        workspace_connection_repository::{
+            NoopWorkspaceConnectionRepository, WorkspaceConnectionRepository,
+        },
     };
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
-    use crate::services::oauth::workspace_service::WorkspaceOAuthService;
+    use crate::services::oauth::workspace_service::{
+        WorkspaceOAuthService, WorkspaceTokenRefresher,
+    };
     use crate::services::smtp_mailer::MockMailer;
     use once_cell::sync::Lazy;
     use reqwest::Client;
@@ -393,16 +397,18 @@ mod tests {
     use uuid::Uuid;
 
     use crate::db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository};
-    use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
+    use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection};
     use crate::services::oauth::account_service::OAuthAccountService;
     use crate::services::smtp_mailer::Mailer;
+    use crate::utils::encryption::encrypt_secret;
     use async_trait::async_trait;
     use axum::body::{Body, Bytes};
     use axum::extract::State;
-    use axum::http::{Method, StatusCode, Uri};
+    use axum::http::{HeaderMap, Method, StatusCode, Uri};
     use axum::response::Response;
     use axum::routing::post;
     use axum::Router;
+    use sqlx::Error as SqlxError;
 
     static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -433,6 +439,148 @@ mod tests {
                 env::remove_var(self.key);
             }
         }
+    }
+
+    #[derive(Default)]
+    struct NoopUserTokenRepo;
+
+    #[async_trait]
+    impl UserOAuthTokenRepository for NoopUserTokenRepo {
+        async fn upsert_token(
+            &self,
+            _new_token: NewUserOAuthToken,
+        ) -> Result<UserOAuthToken, SqlxError> {
+            Err(SqlxError::RowNotFound)
+        }
+
+        async fn find_by_user_and_provider(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<Option<UserOAuthToken>, SqlxError> {
+            Ok(None)
+        }
+
+        async fn delete_token(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<UserOAuthToken>, SqlxError> {
+            Ok(vec![])
+        }
+
+        async fn mark_shared(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _is_shared: bool,
+        ) -> Result<UserOAuthToken, SqlxError> {
+            Err(SqlxError::RowNotFound)
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingWorkspaceConnections {
+        connection: Mutex<Option<WorkspaceConnection>>,
+        find_calls: Mutex<Vec<Uuid>>,
+    }
+
+    impl RecordingWorkspaceConnections {
+        fn with_connection(connection: WorkspaceConnection) -> Self {
+            Self {
+                connection: Mutex::new(Some(connection)),
+                find_calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn find_calls(&self) -> Vec<Uuid> {
+            self.find_calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceConnectionRepository for RecordingWorkspaceConnections {
+        async fn insert_connection(
+            &self,
+            _new_connection: crate::db::workspace_connection_repository::NewWorkspaceConnection,
+        ) -> Result<WorkspaceConnection, SqlxError> {
+            Err(SqlxError::RowNotFound)
+        }
+
+        async fn find_by_id(
+            &self,
+            connection_id: Uuid,
+        ) -> Result<Option<WorkspaceConnection>, SqlxError> {
+            self.find_calls.lock().unwrap().push(connection_id);
+            let guard = self.connection.lock().unwrap();
+            Ok(guard.clone().filter(|conn| conn.id == connection_id))
+        }
+
+        async fn find_by_workspace_and_provider(
+            &self,
+            workspace_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<WorkspaceConnection>, SqlxError> {
+            let guard = self.connection.lock().unwrap();
+            Ok(guard
+                .clone()
+                .filter(|conn| conn.workspace_id == workspace_id && conn.provider == provider))
+        }
+
+        async fn update_tokens(
+            &self,
+            connection_id: Uuid,
+            access_token: String,
+            refresh_token: String,
+            expires_at: OffsetDateTime,
+        ) -> Result<WorkspaceConnection, SqlxError> {
+            let mut guard = self.connection.lock().unwrap();
+            if let Some(existing) = guard.as_mut() {
+                if existing.id == connection_id {
+                    existing.access_token = access_token;
+                    existing.refresh_token = refresh_token;
+                    existing.expires_at = expires_at;
+                    existing.updated_at = OffsetDateTime::now_utc();
+                    return Ok(existing.clone());
+                }
+            }
+            Err(SqlxError::RowNotFound)
+        }
+
+        async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
+        async fn record_audit_event(
+            &self,
+            _event: crate::db::workspace_connection_repository::NewWorkspaceAuditEvent,
+        ) -> Result<crate::models::oauth_token::WorkspaceAuditEvent, SqlxError> {
+            Err(SqlxError::RowNotFound)
+        }
+    }
+
+    fn workspace_oauth_with_connection(
+        connection: WorkspaceConnection,
+        key: Arc<Vec<u8>>,
+    ) -> (
+        Arc<WorkspaceOAuthService>,
+        Arc<RecordingWorkspaceConnections>,
+    ) {
+        let repo = Arc::new(RecordingWorkspaceConnections::with_connection(connection));
+        let service = Arc::new(WorkspaceOAuthService::new(
+            Arc::new(NoopUserTokenRepo::default()),
+            repo.clone(),
+            OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
+            key,
+        ));
+        (service, repo)
     }
 
     fn test_config() -> Arc<Config> {
@@ -723,10 +871,168 @@ mod tests {
         assert!(err.contains("workspace connection not found"));
     }
 
+    #[tokio::test]
+    async fn workspace_connection_uses_workspace_token() {
+        let (addr, mut rx, handle) = spawn_sheets_stub_server(|| {
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::from(
+                    json!({
+                        "updates": {
+                            "updatedRange": "Sheet1!A1:A1",
+                            "updatedRows": 1,
+                            "updatedColumns": 1
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set(
+            "GOOGLE_SHEETS_API_BASE",
+            format!("http://{}/v4/spreadsheets", addr),
+        );
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+
+        let connection = WorkspaceConnection {
+            id: connection_id,
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + TimeDuration::hours(1),
+            account_email: "workspace@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let (workspace_service, repo) =
+            workspace_oauth_with_connection(connection, Arc::clone(&encryption_key));
+
+        let http_client = Arc::new(
+            Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap(),
+        );
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let mut state = test_state(oauth_accounts, http_client);
+        state.workspace_oauth = workspace_service;
+
+        let mut run = sample_run(Uuid::new_v4());
+        run.workspace_id = Some(workspace_id);
+
+        let node = Node {
+            id: "node-workspace".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "spreadsheetId": "sheet123",
+                    "worksheet": "Sheet1",
+                    "columns": [
+                        {"key": "A", "value": "value"}
+                    ],
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": connection_id,
+                        "accountEmail": "workspace@example.com"
+                    }
+                }
+            }),
+        };
+
+        let (output, _) = execute_sheets(&node, &Value::Null, &state, &run)
+            .await
+            .expect("workspace connection succeeds");
+
+        assert_eq!(output["accountEmail"], "workspace@example.com");
+
+        let request = rx.recv().await.expect("sheet request captured");
+        handle.abort();
+        let auth_header = request
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+            .map(|(_, value)| value.clone())
+            .expect("authorization header");
+        assert_eq!(auth_header, "Bearer workspace-access");
+
+        let calls = repo.find_calls();
+        assert_eq!(calls, vec![connection_id]);
+    }
+
+    #[tokio::test]
+    async fn workspace_connection_workspace_mismatch_surfaces_message() {
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let workspace_id = Uuid::new_v4();
+        let other_workspace = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+
+        let connection = WorkspaceConnection {
+            id: connection_id,
+            workspace_id: other_workspace,
+            created_by: Uuid::new_v4(),
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + TimeDuration::hours(1),
+            account_email: "workspace@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let (workspace_service, repo) =
+            workspace_oauth_with_connection(connection, Arc::clone(&encryption_key));
+
+        let http_client = Arc::new(Client::new());
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let mut state = test_state(oauth_accounts, http_client);
+        state.workspace_oauth = workspace_service;
+
+        let mut run = sample_run(Uuid::new_v4());
+        run.workspace_id = Some(workspace_id);
+
+        let node = Node {
+            id: "node-workspace-mismatch".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "spreadsheetId": "sheet123",
+                    "worksheet": "Sheet1",
+                    "columns": [
+                        {"key": "A", "value": "1"}
+                    ],
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": connection_id,
+                        "accountEmail": "workspace@example.com"
+                    }
+                }
+            }),
+        };
+
+        let err = execute_sheets(&node, &Value::Null, &state, &run)
+            .await
+            .expect_err("mismatched workspace should fail");
+
+        assert!(err.contains("does not belong to this workspace"));
+        let calls = repo.find_calls();
+        assert_eq!(calls, vec![connection_id]);
+    }
+
     #[derive(Debug)]
     struct RecordedRequest {
         method: Method,
         uri: Uri,
+        headers: Vec<(String, String)>,
         body: Vec<u8>,
     }
 
@@ -743,14 +1049,25 @@ mod tests {
         State(state): State<StubState<F>>,
         method: Method,
         uri: Uri,
+        headers: HeaderMap,
         body: Bytes,
     ) -> Response<Body>
     where
         F: Fn() -> Response<Body> + Send + Sync + Clone + 'static,
     {
+        let headers: Vec<(String, String)> = headers
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
         let record = RecordedRequest {
             method,
             uri,
+            headers,
             body: body.to_vec(),
         };
         let _ = state.tx.send(record);

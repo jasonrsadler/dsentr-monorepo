@@ -169,9 +169,6 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     }
     snapshot["_trigger_context"] = context;
 
-    if let Some(obj) = snapshot.as_object_mut() {
-        obj.remove("_connection_metadata");
-    }
     let connection_metadata = workflow_connection_metadata::collect(&snapshot);
     workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
 
@@ -190,12 +187,7 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     let events =
         workflow_connection_metadata::build_run_events(&run, &triggered_by, &connection_metadata);
     for event in events {
-        if let Err(err) = state.workflow_repo.record_run_event(event).await {
-            eprintln!(
-                "worker: failed to record schedule run event {}: {:?}",
-                run.id, err
-            );
-        }
+        state.workflow_repo.record_run_event(event).await?;
     }
 
     let now = Utc::now();
@@ -217,4 +209,230 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
+    use crate::db::mock_db::{MockDb, NoopWorkspaceRepository};
+    use crate::db::workflow_repository::{MockWorkflowRepository, WorkflowRepository};
+    use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
+    use crate::models::workflow::Workflow;
+    use crate::models::workflow_run::WorkflowRun;
+    use crate::models::workflow_run_event::WorkflowRunEvent;
+    use crate::models::workflow_schedule::WorkflowSchedule;
+    use crate::services::oauth::account_service::OAuthAccountService;
+    use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
+    use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
+    use crate::services::oauth::workspace_service::WorkspaceOAuthService;
+    use crate::services::smtp_mailer::MockMailer;
+    use crate::state::AppState;
+    use mockall::predicate;
+    use reqwest::Client;
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+    use time::{Duration as TimeDuration, OffsetDateTime};
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn trigger_schedule_records_connection_run_events() {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let workflow_id = Uuid::new_v4();
+        let workspace_connection = Uuid::new_v4();
+
+        let workflow = Workflow {
+            id: workflow_id,
+            user_id,
+            workspace_id: Some(workspace_id),
+            name: "Scheduled".into(),
+            description: None,
+            data: json!({
+                "nodes": [
+                    {
+                        "data": {
+                            "connection": {
+                                "connectionScope": "workspace",
+                                "connectionId": workspace_connection
+                            }
+                        }
+                    },
+                    {
+                        "data": {
+                            "connection": {
+                                "connectionScope": "user"
+                            }
+                        }
+                    }
+                ]
+            }),
+            concurrency_limit: 1,
+            egress_allowlist: vec![],
+            require_hmac: false,
+            hmac_replay_window_sec: 0,
+            webhook_salt: Uuid::new_v4(),
+            locked_by: None,
+            locked_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let events: Arc<Mutex<Vec<_>>> = Arc::new(Mutex::new(Vec::new()));
+        let runs: Arc<Mutex<Vec<WorkflowRun>>> = Arc::new(Mutex::new(Vec::new()));
+        let marks: Arc<Mutex<Vec<Uuid>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let mut repo = MockWorkflowRepository::new();
+
+        let workflow_clone = workflow.clone();
+        repo.expect_find_workflow_by_id()
+            .with(predicate::always(), predicate::eq(workflow_id))
+            .returning(move |_, _| {
+                let workflow = workflow_clone.clone();
+                Box::pin(async move { Ok(Some(workflow)) })
+            });
+
+        let runs_clone = runs.clone();
+        repo.expect_create_workflow_run().returning(
+            move |user_id_param, workflow_id_param, workspace_id_param, snapshot, _| {
+                let runs = runs_clone.clone();
+                Box::pin(async move {
+                    let run = WorkflowRun {
+                        id: Uuid::new_v4(),
+                        user_id: user_id_param,
+                        workflow_id: workflow_id_param,
+                        workspace_id: workspace_id_param,
+                        snapshot,
+                        status: "queued".into(),
+                        error: None,
+                        idempotency_key: None,
+                        started_at: OffsetDateTime::now_utc(),
+                        finished_at: None,
+                        created_at: OffsetDateTime::now_utc(),
+                        updated_at: OffsetDateTime::now_utc(),
+                    };
+                    runs.lock().unwrap().push(run.clone());
+                    Ok(run)
+                })
+            },
+        );
+
+        let events_clone = events.clone();
+        repo.expect_record_run_event().returning(move |event| {
+            let events = events_clone.clone();
+            Box::pin(async move {
+                events.lock().unwrap().push(event.clone());
+                Ok(WorkflowRunEvent {
+                    id: Uuid::new_v4(),
+                    workflow_run_id: event.workflow_run_id,
+                    workflow_id: event.workflow_id,
+                    workspace_id: event.workspace_id,
+                    triggered_by: event.triggered_by,
+                    connection_type: event.connection_type,
+                    connection_id: event.connection_id,
+                    recorded_at: OffsetDateTime::now_utc(),
+                })
+            })
+        });
+
+        let marks_clone = marks.clone();
+        repo.expect_mark_schedule_run()
+            .returning(move |schedule_id, _last_run, _next_run| {
+                let marks = marks_clone.clone();
+                Box::pin(async move {
+                    marks.lock().unwrap().push(schedule_id);
+                    Ok(())
+                })
+            });
+
+        repo.expect_disable_workflow_schedule().times(0);
+
+        let workflow_repo: Arc<dyn WorkflowRepository> = Arc::new(repo);
+
+        let config = Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+        });
+
+        let state = AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo,
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            http_client: Arc::new(Client::new()),
+            config: Arc::clone(&config),
+            worker_id: Arc::new("worker".into()),
+            worker_lease_seconds: 30,
+        };
+
+        let schedule = WorkflowSchedule {
+            id: Uuid::new_v4(),
+            workflow_id,
+            user_id,
+            config: json!({
+                "startDate": "2024-01-01",
+                "startTime": "00:00",
+                "timezone": "UTC"
+            }),
+            next_run_at: Some(OffsetDateTime::now_utc() + TimeDuration::minutes(5)),
+            last_run_at: None,
+            enabled: true,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        trigger_schedule(&state, schedule.clone())
+            .await
+            .expect("schedule triggers");
+
+        let events = events.lock().unwrap().clone();
+        assert_eq!(events.len(), 2);
+        let mut workspace_event = None;
+        let mut user_event = None;
+        for event in events {
+            if event.connection_type.as_deref() == Some("workspace") {
+                workspace_event = Some(event);
+            } else {
+                user_event = Some(event);
+            }
+        }
+
+        let workspace_event = workspace_event.expect("workspace event exists");
+        assert_eq!(workspace_event.connection_id, Some(workspace_connection));
+        assert_eq!(workspace_event.workflow_id, workflow_id);
+        assert_eq!(workspace_event.workspace_id, Some(workspace_id));
+        assert_eq!(
+            workspace_event.triggered_by,
+            format!("schedule:{}", schedule.id)
+        );
+
+        let user_event = user_event.expect("user event exists");
+        assert_eq!(user_event.connection_type.as_deref(), Some("user"));
+        assert!(user_event.connection_id.is_none());
+        assert_eq!(user_event.workflow_run_id, workspace_event.workflow_run_id);
+
+        let recorded_runs = runs.lock().unwrap();
+        assert_eq!(recorded_runs.len(), 1);
+        assert_eq!(recorded_runs[0].workflow_id, workflow_id);
+
+        assert!(marks.lock().unwrap().contains(&schedule.id));
+    }
 }

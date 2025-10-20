@@ -57,7 +57,7 @@ use routes::{
 use services::oauth::account_service::OAuthAccountService;
 use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
-use services::oauth::workspace_service::WorkspaceOAuthService;
+use services::oauth::workspace_service::{WorkspaceOAuthService, WorkspaceTokenRefresher};
 use sqlx::PgPool;
 use std::{net::SocketAddr, sync::Arc};
 #[cfg(not(feature = "tls"))]
@@ -197,10 +197,12 @@ async fn main() {
         http_client_arc.clone(),
         &config.oauth,
     ));
+    let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
+        oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
     let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
         oauth_repo.clone(),
         workspace_connection_repo.clone(),
-        oauth_accounts.clone(),
+        workspace_token_refresher,
         encryption_key.clone(),
     ));
 

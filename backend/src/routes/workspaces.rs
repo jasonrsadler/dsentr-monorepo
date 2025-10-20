@@ -1530,8 +1530,10 @@ mod tests {
     use crate::routes::auth::{claims::Claims, session::AuthSession};
     use crate::services::{
         oauth::{
-            account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
-            google::mock_google_oauth::MockGoogleOAuth, workspace_service::WorkspaceOAuthService,
+            account_service::OAuthAccountService,
+            github::mock_github_oauth::MockGitHubOAuth,
+            google::mock_google_oauth::MockGoogleOAuth,
+            workspace_service::{WorkspaceOAuthService, WorkspaceTokenRefresher},
         },
         smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig},
     };
@@ -2397,11 +2399,13 @@ mod tests {
             connection_repo.clone();
         let user_token_repo: Arc<dyn UserOAuthTokenRepository> = user_repo.clone();
         let oauth_accounts = OAuthAccountService::test_stub();
+        let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
 
         let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
             user_token_repo.clone(),
             workspace_connection_repo.clone(),
-            oauth_accounts.clone(),
+            workspace_token_refresher,
             encryption_key,
         ));
 

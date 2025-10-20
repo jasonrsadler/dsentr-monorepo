@@ -11,6 +11,7 @@ use crate::models::workflow_schedule::WorkflowSchedule;
 use time::OffsetDateTime;
 
 #[async_trait]
+#[cfg_attr(test, mockall::automock)]
 #[allow(clippy::too_many_arguments)]
 pub trait WorkflowRepository: Send + Sync {
     async fn create_workflow(

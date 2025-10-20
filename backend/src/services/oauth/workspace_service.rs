@@ -15,7 +15,9 @@ use crate::models::oauth_token::{
     ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection,
     WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED,
 };
-use crate::services::oauth::account_service::{OAuthAccountError, OAuthAccountService};
+use crate::services::oauth::account_service::{
+    AuthorizationTokens, OAuthAccountError, OAuthAccountService,
+};
 use crate::utils::encryption::{decrypt_secret, encrypt_secret, EncryptionError};
 
 #[derive(Debug, Clone)]
@@ -44,11 +46,31 @@ pub enum WorkspaceOAuthError {
     OAuth(#[from] OAuthAccountError),
 }
 
+#[async_trait::async_trait]
+pub trait WorkspaceTokenRefresher: Send + Sync {
+    async fn refresh_access_token(
+        &self,
+        provider: ConnectedOAuthProvider,
+        refresh_token: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError>;
+}
+
+#[async_trait::async_trait]
+impl WorkspaceTokenRefresher for OAuthAccountService {
+    async fn refresh_access_token(
+        &self,
+        provider: ConnectedOAuthProvider,
+        refresh_token: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        OAuthAccountService::refresh_access_token(self, provider, refresh_token).await
+    }
+}
+
 #[derive(Clone)]
 pub struct WorkspaceOAuthService {
     user_tokens: Arc<dyn UserOAuthTokenRepository>,
     workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
-    oauth_accounts: Arc<OAuthAccountService>,
+    oauth_accounts: Arc<dyn WorkspaceTokenRefresher>,
     encryption_key: Arc<Vec<u8>>,
     connection_locks: Arc<DashMap<Uuid, Arc<Mutex<()>>>>,
 }
@@ -57,7 +79,7 @@ impl WorkspaceOAuthService {
     pub fn new(
         user_tokens: Arc<dyn UserOAuthTokenRepository>,
         workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
-        oauth_accounts: Arc<OAuthAccountService>,
+        oauth_accounts: Arc<dyn WorkspaceTokenRefresher>,
         encryption_key: Arc<Vec<u8>>,
     ) -> Self {
         Self {
@@ -309,7 +331,7 @@ impl WorkspaceOAuthService {
         Arc::new(Self {
             user_tokens: Arc::new(StubUserRepo),
             workspace_connections: Arc::new(StubWorkspaceRepo),
-            oauth_accounts: OAuthAccountService::test_stub(),
+            oauth_accounts: OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
             encryption_key: Arc::new(vec![0u8; 32]),
             connection_locks: Arc::new(DashMap::new()),
         })
@@ -320,8 +342,10 @@ impl WorkspaceOAuthService {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration as StdDuration;
     use time::Duration;
+    use tokio::time::sleep;
 
     use crate::db::oauth_token_repository::NewUserOAuthToken;
     use crate::utils::encryption::encrypt_secret;
@@ -382,6 +406,8 @@ mod tests {
     struct InMemoryWorkspaceRepo {
         connection: Mutex<Option<WorkspaceConnection>>,
         events: Mutex<Vec<crate::models::oauth_token::WorkspaceAuditEvent>>,
+        find_by_id_calls: Mutex<Vec<Uuid>>,
+        update_calls: Mutex<usize>,
     }
 
     impl InMemoryWorkspaceRepo {
@@ -389,6 +415,8 @@ mod tests {
             Self {
                 connection: Mutex::new(None),
                 events: Mutex::new(Vec::new()),
+                find_by_id_calls: Mutex::new(Vec::new()),
+                update_calls: Mutex::new(0),
             }
         }
     }
@@ -420,6 +448,7 @@ mod tests {
             &self,
             connection_id: Uuid,
         ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            self.find_by_id_calls.lock().unwrap().push(connection_id);
             let guard = self.connection.lock().unwrap();
             Ok(guard.clone().filter(|record| record.id == connection_id))
         }
@@ -445,6 +474,8 @@ mod tests {
             let mut guard = self.connection.lock().unwrap();
             if let Some(conn) = guard.as_mut() {
                 if conn.id == connection_id {
+                    let mut update_guard = self.update_calls.lock().unwrap();
+                    *update_guard += 1;
                     conn.access_token = access_token;
                     conn.refresh_token = refresh_token;
                     conn.expires_at = expires_at;
@@ -477,6 +508,50 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct RecordingTokenRefresher {
+        calls: Arc<Mutex<Vec<String>>>,
+        response: AuthorizationTokens,
+        delay: StdDuration,
+    }
+
+    impl RecordingTokenRefresher {
+        fn new(response: AuthorizationTokens) -> Self {
+            Self {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                response,
+                delay: StdDuration::from_millis(25),
+            }
+        }
+
+        fn without_delay(response: AuthorizationTokens) -> Self {
+            Self {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                response,
+                delay: StdDuration::from_millis(0),
+            }
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceTokenRefresher for RecordingTokenRefresher {
+        async fn refresh_access_token(
+            &self,
+            _provider: ConnectedOAuthProvider,
+            refresh_token: &str,
+        ) -> Result<AuthorizationTokens, OAuthAccountError> {
+            if self.delay > StdDuration::from_millis(0) {
+                sleep(self.delay).await;
+            }
+            self.calls.lock().unwrap().push(refresh_token.to_string());
+            Ok(self.response.clone())
+        }
+    }
+
     #[tokio::test]
     async fn promote_connection_copies_encrypted_tokens_and_marks_shared() {
         let user_id = Uuid::new_v4();
@@ -504,10 +579,12 @@ mod tests {
         let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
 
         let oauth_accounts = OAuthAccountService::test_stub();
+        let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
         let service = WorkspaceOAuthService::new(
             user_repo.clone(),
             workspace_repo.clone(),
-            oauth_accounts,
+            workspace_token_refresher,
             key,
         );
 
@@ -564,7 +641,10 @@ mod tests {
         });
 
         let oauth_accounts = OAuthAccountService::test_stub();
-        let service = WorkspaceOAuthService::new(user_repo, workspace_repo, oauth_accounts, key);
+        let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
+        let service =
+            WorkspaceOAuthService::new(user_repo, workspace_repo, workspace_token_refresher, key);
 
         let connection = service
             .get_connection(workspace_id, ConnectedOAuthProvider::Microsoft)
@@ -610,7 +690,10 @@ mod tests {
         });
 
         let oauth_accounts = OAuthAccountService::test_stub();
-        let service = WorkspaceOAuthService::new(user_repo, workspace_repo, oauth_accounts, key);
+        let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
+        let service =
+            WorkspaceOAuthService::new(user_repo, workspace_repo, workspace_token_refresher, key);
 
         let connection = service
             .ensure_valid_workspace_token(workspace_id, connection_id)
@@ -622,5 +705,191 @@ mod tests {
         assert_eq!(connection.provider, ConnectedOAuthProvider::Google);
         assert_eq!(connection.access_token, "existing-access");
         assert_eq!(connection.refresh_token, "existing-refresh");
+    }
+
+    #[tokio::test]
+    async fn ensure_valid_workspace_token_refreshes_when_expired() {
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![13u8; 32]);
+        let expired_at = OffsetDateTime::now_utc() + Duration::seconds(10);
+        let encrypted_access = encrypt_secret(&key, "stale-access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "stale-refresh").unwrap();
+
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access,
+                refresh_token: encrypted_refresh,
+                expires_at: expired_at,
+                account_email: "workspace@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(None),
+            shared_flag: Mutex::new(false),
+        });
+
+        let refreshed_tokens = AuthorizationTokens {
+            access_token: "refreshed-access".into(),
+            refresh_token: "refreshed-refresh".into(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
+            account_email: "workspace@example.com".into(),
+        };
+        let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
+        let service = WorkspaceOAuthService::new(
+            user_repo,
+            workspace_repo.clone(),
+            Arc::new(refresher.clone()) as Arc<dyn WorkspaceTokenRefresher>,
+            key.clone(),
+        );
+
+        let connection = service
+            .ensure_valid_workspace_token(workspace_id, connection_id)
+            .await
+            .expect("refresh succeeds");
+
+        assert_eq!(connection.access_token, "refreshed-access");
+        assert_eq!(connection.refresh_token, "refreshed-refresh");
+        assert!(connection.expires_at > expired_at);
+
+        let calls = refresher.calls();
+        assert_eq!(calls, vec!["stale-refresh".to_string()]);
+
+        let update_calls = *workspace_repo.update_calls.lock().unwrap();
+        assert_eq!(update_calls, 1);
+    }
+
+    #[tokio::test]
+    async fn ensure_valid_workspace_token_rejects_mismatched_workspace() {
+        let workspace_id = Uuid::new_v4();
+        let other_workspace = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![17u8; 32]);
+        let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+        let encrypted_access = encrypt_secret(&key, "access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "refresh").unwrap();
+
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id: other_workspace,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Microsoft,
+                access_token: encrypted_access,
+                refresh_token: encrypted_refresh,
+                expires_at,
+                account_email: "workspace@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(None),
+            shared_flag: Mutex::new(false),
+        });
+
+        let refresher = RecordingTokenRefresher::without_delay(AuthorizationTokens {
+            access_token: "unused".into(),
+            refresh_token: "unused".into(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "workspace@example.com".into(),
+        });
+
+        let service = WorkspaceOAuthService::new(
+            user_repo,
+            workspace_repo,
+            Arc::new(refresher) as Arc<dyn WorkspaceTokenRefresher>,
+            key,
+        );
+
+        let err = service
+            .ensure_valid_workspace_token(workspace_id, connection_id)
+            .await
+            .expect_err("workspace mismatch should be not found");
+
+        assert!(matches!(err, WorkspaceOAuthError::NotFound));
+    }
+
+    #[tokio::test]
+    async fn ensure_valid_workspace_token_refreshes_once_with_concurrent_calls() {
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![19u8; 32]);
+        let expired_at = OffsetDateTime::now_utc() - Duration::minutes(5);
+        let encrypted_access = encrypt_secret(&key, "old-access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "old-refresh").unwrap();
+
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access,
+                refresh_token: encrypted_refresh,
+                expires_at: expired_at,
+                account_email: "workspace@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(None),
+            shared_flag: Mutex::new(false),
+        });
+
+        let refreshed_tokens = AuthorizationTokens {
+            access_token: "next-access".into(),
+            refresh_token: "next-refresh".into(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(3),
+            account_email: "workspace@example.com".into(),
+        };
+        let refresher = RecordingTokenRefresher::new(refreshed_tokens.clone());
+        let service = Arc::new(WorkspaceOAuthService::new(
+            user_repo,
+            workspace_repo.clone(),
+            Arc::new(refresher.clone()) as Arc<dyn WorkspaceTokenRefresher>,
+            key,
+        ));
+
+        let svc1 = service.clone();
+        let svc2 = service.clone();
+
+        let (res1, res2) = tokio::join!(
+            svc1.ensure_valid_workspace_token(workspace_id, connection_id),
+            svc2.ensure_valid_workspace_token(workspace_id, connection_id),
+        );
+
+        let conn1 = res1.expect("first call succeeds");
+        let conn2 = res2.expect("second call succeeds");
+
+        assert_eq!(conn1.access_token, "next-access");
+        assert_eq!(conn2.access_token, "next-access");
+        assert_eq!(conn1.refresh_token, "next-refresh");
+        assert_eq!(conn2.refresh_token, "next-refresh");
+
+        let calls = refresher.calls();
+        assert_eq!(calls, vec!["old-refresh".to_string()]);
+
+        let update_calls = *workspace_repo.update_calls.lock().unwrap();
+        assert_eq!(update_calls, 1);
     }
 }
