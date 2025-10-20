@@ -336,6 +336,7 @@ async fn ensure_workspace_token(
             expires_at: connection.expires_at,
             account_email: connection.account_email,
             is_shared: true,
+            updated_at: connection.updated_at,
         })
         .map_err(map_workspace_oauth_error)
 }
@@ -644,6 +645,7 @@ mod tests {
             shared_by_first_name: None,
             shared_by_last_name: None,
             shared_by_email: None,
+            updated_at: now,
         };
 
         let record = WorkspaceConnection {

@@ -32,6 +32,7 @@ pub async fn refresh_connection(
             success: true,
             account_email: token.account_email,
             expires_at: token.expires_at,
+            last_refreshed_at: token.updated_at,
         })
         .into_response(),
         Err(err) => map_oauth_error(err),
@@ -96,6 +97,7 @@ pub async fn list_connections(
             account_email: token.account_email,
             expires_at: token.expires_at,
             is_shared: token.is_shared,
+            last_refreshed_at: token.updated_at,
         })
         .collect();
 
@@ -122,6 +124,7 @@ pub async fn list_connections(
                 workspace_name: connection.workspace_name,
                 shared_by_name,
                 shared_by_email,
+                last_refreshed_at: connection.updated_at,
             }
         })
         .collect();

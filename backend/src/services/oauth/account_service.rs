@@ -28,6 +28,7 @@ pub struct StoredOAuthToken {
     pub expires_at: OffsetDateTime,
     pub account_email: String,
     pub is_shared: bool,
+    pub updated_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +117,7 @@ impl OAuthAccountService {
             expires_at: stored.expires_at,
             account_email: stored.account_email,
             is_shared: stored.is_shared,
+            updated_at: stored.updated_at,
         })
     }
 
@@ -169,6 +171,7 @@ impl OAuthAccountService {
             decrypted.expires_at = updated.expires_at;
             decrypted.account_email = updated.account_email;
             decrypted.is_shared = updated.is_shared;
+            decrypted.updated_at = updated.updated_at;
         }
 
         Ok(decrypted)
@@ -474,6 +477,7 @@ impl OAuthAccountService {
             expires_at: record.expires_at,
             account_email: record.account_email,
             is_shared: record.is_shared,
+            updated_at: record.updated_at,
         })
     }
 

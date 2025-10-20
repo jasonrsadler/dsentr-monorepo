@@ -36,6 +36,7 @@ pub struct WorkspaceConnectionListing {
     pub shared_by_first_name: Option<String>,
     pub shared_by_last_name: Option<String>,
     pub shared_by_email: Option<String>,
+    pub updated_at: time::OffsetDateTime,
 }
 
 #[async_trait]

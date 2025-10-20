@@ -139,7 +139,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 wc.expires_at,
                 owner.first_name AS shared_by_first_name,
                 owner.last_name AS shared_by_last_name,
-                owner.email AS shared_by_email
+                owner.email AS shared_by_email,
+                wc.updated_at
             FROM workspace_connections wc
             JOIN workspaces w ON w.id = wc.workspace_id
             LEFT JOIN users owner ON owner.id = wc.created_by
@@ -167,7 +168,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 wc.expires_at,
                 owner.first_name AS shared_by_first_name,
                 owner.last_name AS shared_by_last_name,
-                owner.email AS shared_by_email
+                owner.email AS shared_by_email,
+                wc.updated_at
             FROM workspace_connections wc
             JOIN workspace_members wm ON wm.workspace_id = wc.workspace_id
             JOIN workspaces w ON w.id = wc.workspace_id

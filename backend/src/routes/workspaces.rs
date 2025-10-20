@@ -1817,6 +1817,7 @@ mod tests {
                     shared_by_first_name: None,
                     shared_by_last_name: None,
                     shared_by_email: None,
+                    updated_at: record.updated_at,
                 })
                 .collect())
         }
@@ -1839,6 +1840,7 @@ mod tests {
                     shared_by_first_name: None,
                     shared_by_last_name: None,
                     shared_by_email: None,
+                    updated_at: record.updated_at,
                 })
                 .collect())
         }

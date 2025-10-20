@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
 };
 use axum_extra::extract::cookie::CookieJar;
@@ -38,7 +38,7 @@ use urlencoding::encode;
 use uuid::Uuid;
 
 use super::{
-    accounts::list_connections,
+    accounts::{list_connections, refresh_connection},
     connect::{google_connect_start, ConnectQuery},
     helpers::{
         build_state_cookie, error_message_for_redirect, handle_callback, parse_provider,
@@ -141,10 +141,14 @@ impl UserOAuthTokenRepository for TokenRepo {
 
     async fn find_by_user_and_provider(
         &self,
-        _user_id: Uuid,
-        _provider: ConnectedOAuthProvider,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
     ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
-        Ok(None)
+        Ok(self
+            .tokens
+            .iter()
+            .find(|token| token.user_id == user_id && token.provider == provider)
+            .cloned())
     }
 
     async fn delete_token(
@@ -262,7 +266,9 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
 async fn list_connections_returns_personal_and_workspace_entries() {
     let config = stub_config();
     let user_id = Uuid::new_v4();
-    let personal_expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+    let now = OffsetDateTime::now_utc();
+    let personal_expires_at = now + Duration::hours(1);
+    let personal_updated_at = now - Duration::minutes(5);
 
     let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
         .expect("encrypt access token");
@@ -279,8 +285,8 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         expires_at: personal_expires_at,
         account_email: "user@example.com".into(),
         is_shared: false,
-        created_at: OffsetDateTime::now_utc(),
-        updated_at: OffsetDateTime::now_utc(),
+        created_at: personal_updated_at - Duration::hours(1),
+        updated_at: personal_updated_at,
     };
 
     let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
@@ -298,6 +304,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
     let workspace_connection_id = Uuid::new_v4();
     let workspace_id = Uuid::new_v4();
     let workspace_expires_at = personal_expires_at + Duration::hours(4);
+    let workspace_updated_at = now - Duration::minutes(2);
     let listing = WorkspaceConnectionListing {
         id: workspace_connection_id,
         workspace_id,
@@ -308,6 +315,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         shared_by_first_name: Some("Alice ".into()),
         shared_by_last_name: Some(" Example".into()),
         shared_by_email: Some(" alice@example.com ".into()),
+        updated_at: workspace_updated_at,
     };
 
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
@@ -352,6 +360,13 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         personal_entry["expiresAt"].as_str(),
         Some(expected_personal_expires.as_str())
     );
+    let expected_personal_refreshed = personal_updated_at
+        .format(&Rfc3339)
+        .expect("format personal refreshed");
+    assert_eq!(
+        personal_entry["lastRefreshedAt"].as_str(),
+        Some(expected_personal_refreshed.as_str())
+    );
 
     let workspace = json["workspace"].as_array().expect("workspace array");
     assert_eq!(workspace.len(), 1);
@@ -389,6 +404,86 @@ async fn list_connections_returns_personal_and_workspace_entries() {
     assert_eq!(
         workspace_entry["expiresAt"].as_str(),
         Some(expected_workspace_expires.as_str())
+    );
+    let expected_workspace_refreshed = workspace_updated_at
+        .format(&Rfc3339)
+        .expect("format workspace refreshed");
+    assert_eq!(
+        workspace_entry["lastRefreshedAt"].as_str(),
+        Some(expected_workspace_refreshed.as_str())
+    );
+}
+
+#[tokio::test]
+async fn refresh_connection_returns_last_refreshed_timestamp() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let now = OffsetDateTime::now_utc();
+    let expires_at = now + Duration::hours(2);
+    let updated_at = now - Duration::minutes(1);
+
+    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
+        .expect("encrypt access token");
+    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
+        .expect("encrypt refresh token");
+
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
+        tokens: vec![UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access,
+            refresh_token: encrypted_refresh,
+            expires_at,
+            account_email: "user@example.com".into(),
+            is_shared: false,
+            created_at: updated_at - Duration::hours(1),
+            updated_at,
+        }],
+    });
+
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+    let oauth_client = Arc::new(reqwest::Client::new());
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        encryption_key,
+        oauth_client,
+        &config.oauth,
+    ));
+
+    let mut state = stub_state(config.clone());
+    state.oauth_accounts = oauth_service;
+
+    let claims = Claims {
+        id: user_id.to_string(),
+        ..stub_claims()
+    };
+
+    let response = refresh_connection(
+        State(state),
+        AuthSession(claims),
+        Path("google".to_string()),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+
+    assert_eq!(json["success"].as_bool(), Some(true));
+    assert_eq!(json["account_email"].as_str(), Some("user@example.com"));
+    let expected_expires = expires_at
+        .format(&Rfc3339)
+        .expect("format expires timestamp");
+    assert_eq!(json["expires_at"].as_str(), Some(expected_expires.as_str()));
+    let expected_updated = updated_at
+        .format(&Rfc3339)
+        .expect("format updated timestamp");
+    assert_eq!(
+        json["last_refreshed_at"].as_str(),
+        Some(expected_updated.as_str())
     );
 }
 

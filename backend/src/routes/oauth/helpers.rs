@@ -26,6 +26,8 @@ pub(crate) struct PersonalConnectionPayload {
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) expires_at: OffsetDateTime,
     pub(crate) is_shared: bool,
+    #[serde(with = "time::serde::rfc3339")]
+    pub(crate) last_refreshed_at: OffsetDateTime,
 }
 
 #[derive(Serialize)]
@@ -40,6 +42,8 @@ pub(crate) struct WorkspaceConnectionPayload {
     pub(crate) workspace_name: String,
     pub(crate) shared_by_name: Option<String>,
     pub(crate) shared_by_email: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub(crate) last_refreshed_at: OffsetDateTime,
 }
 
 #[derive(Serialize)]
@@ -56,6 +60,8 @@ pub(crate) struct RefreshResponse {
     pub(crate) account_email: String,
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) expires_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub(crate) last_refreshed_at: OffsetDateTime,
 }
 
 pub(crate) async fn handle_callback(
