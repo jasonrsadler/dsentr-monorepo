@@ -1,3 +1,4 @@
+import { ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface JsonDialogProps {
@@ -5,13 +6,15 @@ interface JsonDialogProps {
   title?: string
   jsonText: string
   onClose: () => void
+  content?: ReactNode
 }
 
 export default function JsonDialog({
   isOpen,
   title = 'Details',
   jsonText,
-  onClose
+  onClose,
+  content
 }: JsonDialogProps) {
   return (
     <AnimatePresence>
@@ -51,10 +54,12 @@ export default function JsonDialog({
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto">
-              <pre className="text-xs whitespace-pre-wrap break-words bg-white/80 dark:bg-black/30 p-2 rounded border border-zinc-200 dark:border-zinc-700">
-                {jsonText}
-              </pre>
+            <div className="flex-1 overflow-auto text-sm text-zinc-700 dark:text-zinc-200">
+              {content ?? (
+                <pre className="text-xs whitespace-pre-wrap break-words bg-white/80 dark:bg-black/30 p-2 rounded border border-zinc-200 dark:border-zinc-700">
+                  {jsonText}
+                </pre>
+              )}
             </div>
           </motion.div>
         </motion.div>
