@@ -1,5 +1,3 @@
-pub(crate) use std::collections::HashMap;
-
 pub(crate) use axum::{
     extract::{Path, Query, State},
     response::{IntoResponse, Redirect, Response},

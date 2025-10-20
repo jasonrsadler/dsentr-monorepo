@@ -25,7 +25,21 @@ pub struct NewWorkspaceAuditEvent {
     pub metadata: Value,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct WorkspaceConnectionListing {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub workspace_name: String,
+    pub provider: ConnectedOAuthProvider,
+    pub account_email: String,
+    pub expires_at: time::OffsetDateTime,
+    pub shared_by_first_name: Option<String>,
+    pub shared_by_last_name: Option<String>,
+    pub shared_by_email: Option<String>,
+}
+
 #[async_trait]
+#[allow(dead_code)]
 pub trait WorkspaceConnectionRepository: Send + Sync {
     async fn insert_connection(
         &self,
@@ -42,6 +56,16 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         workspace_id: Uuid,
         provider: ConnectedOAuthProvider,
     ) -> Result<Option<WorkspaceConnection>, sqlx::Error>;
+
+    async fn list_for_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error>;
+
+    async fn list_for_user_memberships(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error>;
 
     async fn update_tokens(
         &self,
@@ -60,6 +84,7 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
 }
 
 #[derive(Default)]
+#[allow(dead_code)]
 pub struct NoopWorkspaceConnectionRepository;
 
 #[async_trait]
@@ -84,6 +109,20 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         _provider: ConnectedOAuthProvider,
     ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
         Ok(None)
+    }
+
+    async fn list_for_workspace(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+        Ok(Vec::new())
+    }
+
+    async fn list_for_user_memberships(
+        &self,
+        _user_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+        Ok(Vec::new())
     }
 
     async fn update_tokens(

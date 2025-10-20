@@ -21,6 +21,7 @@ const MICROSOFT_REVOCATION_URL: &str =
 
 #[derive(Debug, Clone)]
 pub struct StoredOAuthToken {
+    pub id: Uuid,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,
@@ -108,6 +109,7 @@ impl OAuthAccountService {
             .await?;
 
         Ok(StoredOAuthToken {
+            id: stored.id,
             provider,
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
@@ -163,6 +165,7 @@ impl OAuthAccountService {
                     account_email: record.account_email,
                 })
                 .await?;
+            decrypted.id = updated.id;
             decrypted.expires_at = updated.expires_at;
             decrypted.account_email = updated.account_email;
             decrypted.is_shared = updated.is_shared;
@@ -464,6 +467,7 @@ impl OAuthAccountService {
         let access_token = decrypt_secret(&self.encryption_key, &record.access_token)?;
         let refresh_token = decrypt_secret(&self.encryption_key, &record.refresh_token)?;
         Ok(StoredOAuthToken {
+            id: record.id,
             provider: record.provider,
             access_token,
             refresh_token,

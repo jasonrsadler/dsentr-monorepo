@@ -1,7 +1,7 @@
 use super::{
     helpers::{
-        default_provider_statuses, map_oauth_error, parse_provider, provider_to_key,
-        ConnectionsResponse, RefreshResponse,
+        map_oauth_error, parse_provider, ConnectionsResponse, PersonalConnectionPayload,
+        RefreshResponse, WorkspaceConnectionPayload,
     },
     prelude::*,
 };
@@ -69,30 +69,85 @@ pub async fn list_connections(
         Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
     };
 
-    match state.oauth_accounts.list_tokens(user_id).await {
-        Ok(tokens) => {
-            let mut providers = default_provider_statuses();
+    let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
+        Ok(tokens) => tokens,
+        Err(OAuthAccountError::NotFound) => Vec::new(),
+        Err(err) => return map_oauth_error(err),
+    };
 
-            for token in tokens {
-                let key = provider_to_key(token.provider);
-                if let Some(entry) = providers.get_mut(key) {
-                    entry.connected = true;
-                    entry.account_email = Some(token.account_email);
-                    entry.expires_at = Some(token.expires_at);
-                }
-            }
-
-            Json(ConnectionsResponse {
-                success: true,
-                providers,
-            })
-            .into_response()
+    let workspace_connections = match state
+        .workspace_connection_repo
+        .list_for_user_memberships(user_id)
+        .await
+    {
+        Ok(connections) => connections,
+        Err(err) => {
+            error!(?err, "Failed to load workspace OAuth connections");
+            return JsonResponse::server_error("Failed to load workspace connections")
+                .into_response();
         }
-        Err(OAuthAccountError::NotFound) => Json(ConnectionsResponse {
-            success: true,
-            providers: default_provider_statuses(),
+    };
+
+    let personal = personal_tokens
+        .into_iter()
+        .map(|token| PersonalConnectionPayload {
+            id: token.id,
+            provider: token.provider,
+            account_email: token.account_email,
+            expires_at: token.expires_at,
+            is_shared: token.is_shared,
         })
-        .into_response(),
-        Err(err) => map_oauth_error(err),
+        .collect();
+
+    let workspace = workspace_connections
+        .into_iter()
+        .map(|connection| {
+            let shared_by_name = format_shared_name(
+                &connection.shared_by_first_name,
+                &connection.shared_by_last_name,
+            );
+            let shared_by_email = connection
+                .shared_by_email
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string());
+
+            WorkspaceConnectionPayload {
+                id: connection.id,
+                provider: connection.provider,
+                account_email: connection.account_email,
+                expires_at: connection.expires_at,
+                workspace_id: connection.workspace_id,
+                workspace_name: connection.workspace_name,
+                shared_by_name,
+                shared_by_email,
+            }
+        })
+        .collect();
+
+    Json(ConnectionsResponse {
+        success: true,
+        personal,
+        workspace,
+    })
+    .into_response()
+}
+
+fn format_shared_name(first: &Option<String>, last: &Option<String>) -> Option<String> {
+    let first = first
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    let last = last
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+
+    match (first, last) {
+        (None, None) => None,
+        (Some(first), None) => Some(first.to_string()),
+        (None, Some(last)) => Some(last.to_string()),
+        (Some(first), Some(last)) => Some(format!("{} {}", first, last)),
     }
 }

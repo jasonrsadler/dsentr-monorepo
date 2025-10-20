@@ -1512,7 +1512,7 @@ mod tests {
         oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
         workspace_connection_repository::{
             NewWorkspaceAuditEvent, NewWorkspaceConnection, NoopWorkspaceConnectionRepository,
-            WorkspaceConnectionRepository,
+            WorkspaceConnectionListing, WorkspaceConnectionRepository,
         },
         workspace_repository::WorkspaceRepository,
     };
@@ -1797,6 +1797,50 @@ mod tests {
                 .iter()
                 .find(|record| record.workspace_id == workspace_id && record.provider == provider)
                 .cloned())
+        }
+
+        async fn list_for_workspace(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+            let guard = self.connections.lock().unwrap();
+            Ok(guard
+                .iter()
+                .filter(|record| record.workspace_id == workspace_id)
+                .map(|record| WorkspaceConnectionListing {
+                    id: record.id,
+                    workspace_id: record.workspace_id,
+                    workspace_name: String::new(),
+                    provider: record.provider,
+                    account_email: record.account_email.clone(),
+                    expires_at: record.expires_at,
+                    shared_by_first_name: None,
+                    shared_by_last_name: None,
+                    shared_by_email: None,
+                })
+                .collect())
+        }
+
+        async fn list_for_user_memberships(
+            &self,
+            user_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+            let guard = self.connections.lock().unwrap();
+            Ok(guard
+                .iter()
+                .filter(|record| record.created_by == user_id)
+                .map(|record| WorkspaceConnectionListing {
+                    id: record.id,
+                    workspace_id: record.workspace_id,
+                    workspace_name: String::new(),
+                    provider: record.provider,
+                    account_email: record.account_email.clone(),
+                    expires_at: record.expires_at,
+                    shared_by_first_name: None,
+                    shared_by_last_name: None,
+                    shared_by_email: None,
+                })
+                .collect())
         }
 
         async fn update_tokens(
@@ -2431,7 +2475,7 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
-            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
             mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -2453,7 +2497,7 @@ mod tests {
             db: db.clone(),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
-            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

@@ -1027,7 +1027,7 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
-            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

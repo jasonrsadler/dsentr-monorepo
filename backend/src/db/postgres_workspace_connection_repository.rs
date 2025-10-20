@@ -5,7 +5,8 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::db::workspace_connection_repository::{
-    NewWorkspaceAuditEvent, NewWorkspaceConnection, WorkspaceConnectionRepository,
+    NewWorkspaceAuditEvent, NewWorkspaceConnection, WorkspaceConnectionListing,
+    WorkspaceConnectionRepository,
 };
 use crate::models::oauth_token::{
     ConnectedOAuthProvider, WorkspaceAuditEvent, WorkspaceConnection,
@@ -120,6 +121,64 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             provider as ConnectedOAuthProvider,
         )
         .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn list_for_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+        sqlx::query_as::<_, WorkspaceConnectionListing>(
+            r#"
+            SELECT
+                wc.id,
+                wc.workspace_id,
+                w.name AS workspace_name,
+                wc.provider,
+                wc.account_email,
+                wc.expires_at,
+                owner.first_name AS shared_by_first_name,
+                owner.last_name AS shared_by_last_name,
+                owner.email AS shared_by_email
+            FROM workspace_connections wc
+            JOIN workspaces w ON w.id = wc.workspace_id
+            LEFT JOIN users owner ON owner.id = wc.created_by
+            WHERE wc.workspace_id = $1
+            ORDER BY wc.created_at ASC
+            "#,
+        )
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn list_for_user_memberships(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+        sqlx::query_as::<_, WorkspaceConnectionListing>(
+            r#"
+            SELECT DISTINCT ON (wc.id)
+                wc.id,
+                wc.workspace_id,
+                w.name AS workspace_name,
+                wc.provider,
+                wc.account_email,
+                wc.expires_at,
+                owner.first_name AS shared_by_first_name,
+                owner.last_name AS shared_by_last_name,
+                owner.email AS shared_by_email
+            FROM workspace_connections wc
+            JOIN workspace_members wm ON wm.workspace_id = wc.workspace_id
+            JOIN workspaces w ON w.id = wc.workspace_id
+            LEFT JOIN users owner ON owner.id = wc.created_by
+            WHERE wm.user_id = $1
+              AND w.deleted_at IS NULL
+            ORDER BY wc.id, wc.created_at ASC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
         .await
     }
 

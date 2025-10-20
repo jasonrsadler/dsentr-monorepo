@@ -692,7 +692,7 @@ mod tests {
                 db: Arc::new(repo),
                 workflow_repo: Arc::new(NoopWorkflowRepository),
                 workspace_repo,
-                workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
+                workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
                 mailer: Arc::new(mailer),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),
                 google_oauth: Arc::new(MockGoogleOAuth::default()),

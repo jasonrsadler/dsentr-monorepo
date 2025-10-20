@@ -9,9 +9,14 @@ use std::sync::Arc;
 use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
 use crate::db::{
     mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
-    workspace_connection_repository::NoopWorkspaceConnectionRepository,
+    oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
+    workspace_connection_repository::{
+        NewWorkspaceAuditEvent, NewWorkspaceConnection, NoopWorkspaceConnectionRepository,
+        WorkspaceConnectionListing, WorkspaceConnectionRepository,
+    },
     workspace_repository::WorkspaceRepository,
 };
+use crate::models::oauth_token::{UserOAuthToken, WorkspaceAuditEvent, WorkspaceConnection};
 use crate::models::user::UserRole;
 use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
 use crate::routes::auth::{claims::Claims, session::AuthSession};
@@ -25,16 +30,19 @@ use crate::services::{
     smtp_mailer::MockMailer,
 };
 use crate::state::AppState;
+use crate::utils::encryption::encrypt_secret;
+use serde_json::Value;
 use sqlx::Error;
-use time::OffsetDateTime;
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 use urlencoding::encode;
 use uuid::Uuid;
 
 use super::{
+    accounts::list_connections,
     connect::{google_connect_start, ConnectQuery},
     helpers::{
-        build_state_cookie, default_provider_statuses, error_message_for_redirect, handle_callback,
-        parse_provider, CallbackQuery, GOOGLE_STATE_COOKIE,
+        build_state_cookie, error_message_for_redirect, handle_callback, parse_provider,
+        CallbackQuery, GOOGLE_STATE_COOKIE,
     },
     prelude::ConnectedOAuthProvider,
 };
@@ -64,7 +72,7 @@ fn stub_state(config: Arc<Config>) -> AppState {
         db: Arc::new(MockDb::default()),
         workflow_repo: Arc::new(NoopWorkflowRepository),
         workspace_repo: Arc::new(NoopWorkspaceRepository),
-        workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
+        workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
         mailer: Arc::new(MockMailer::default()),
         google_oauth: Arc::new(MockGoogleOAuth::default()),
         github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -115,6 +123,273 @@ fn workspace_membership(
         },
         role,
     }
+}
+
+#[derive(Clone)]
+struct TokenRepo {
+    tokens: Vec<UserOAuthToken>,
+}
+
+#[async_trait]
+impl UserOAuthTokenRepository for TokenRepo {
+    async fn upsert_token(
+        &self,
+        _new_token: NewUserOAuthToken,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn find_by_user_and_provider(
+        &self,
+        _user_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn delete_token(
+        &self,
+        _user_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn list_tokens_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+        Ok(self
+            .tokens
+            .iter()
+            .filter(|token| token.user_id == user_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn mark_shared(
+        &self,
+        _user_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+        _is_shared: bool,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+}
+
+#[derive(Clone)]
+struct WorkspaceConnectionsStub {
+    entries: Vec<(Uuid, WorkspaceConnectionListing)>,
+}
+
+impl WorkspaceConnectionsStub {
+    fn new(entries: Vec<(Uuid, WorkspaceConnectionListing)>) -> Self {
+        Self { entries }
+    }
+}
+
+#[async_trait]
+impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
+    async fn insert_connection(
+        &self,
+        _new_connection: NewWorkspaceConnection,
+    ) -> Result<WorkspaceConnection, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn find_by_id(
+        &self,
+        _connection_id: Uuid,
+    ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn find_by_workspace_and_provider(
+        &self,
+        _workspace_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn list_for_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+        Ok(self
+            .entries
+            .iter()
+            .filter(|(_, record)| record.workspace_id == workspace_id)
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn list_for_user_memberships(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+        Ok(self
+            .entries
+            .iter()
+            .filter(|(member_id, _)| *member_id == user_id)
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn update_tokens(
+        &self,
+        _connection_id: Uuid,
+        _access_token: String,
+        _refresh_token: String,
+        _expires_at: OffsetDateTime,
+    ) -> Result<WorkspaceConnection, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn record_audit_event(
+        &self,
+        _event: NewWorkspaceAuditEvent,
+    ) -> Result<WorkspaceAuditEvent, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+}
+
+#[tokio::test]
+async fn list_connections_returns_personal_and_workspace_entries() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let personal_expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+
+    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
+        .expect("encrypt access token");
+    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
+        .expect("encrypt refresh token");
+
+    let personal_token_id = Uuid::new_v4();
+    let personal_token = UserOAuthToken {
+        id: personal_token_id,
+        user_id,
+        provider: ConnectedOAuthProvider::Google,
+        access_token: encrypted_access,
+        refresh_token: encrypted_refresh,
+        expires_at: personal_expires_at,
+        account_email: "user@example.com".into(),
+        is_shared: false,
+        created_at: OffsetDateTime::now_utc(),
+        updated_at: OffsetDateTime::now_utc(),
+    };
+
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
+        tokens: vec![personal_token],
+    });
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+    let oauth_client = Arc::new(reqwest::Client::new());
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        encryption_key,
+        oauth_client,
+        &config.oauth,
+    ));
+
+    let workspace_connection_id = Uuid::new_v4();
+    let workspace_id = Uuid::new_v4();
+    let workspace_expires_at = personal_expires_at + Duration::hours(4);
+    let listing = WorkspaceConnectionListing {
+        id: workspace_connection_id,
+        workspace_id,
+        workspace_name: "Shared Workspace".into(),
+        provider: ConnectedOAuthProvider::Google,
+        account_email: "shared@example.com".into(),
+        expires_at: workspace_expires_at,
+        shared_by_first_name: Some("Alice ".into()),
+        shared_by_last_name: Some(" Example".into()),
+        shared_by_email: Some(" alice@example.com ".into()),
+    };
+
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(vec![(user_id, listing)]));
+
+    let mut state = stub_state(config.clone());
+    state.oauth_accounts = oauth_service;
+    state.workspace_connection_repo = workspace_repo;
+
+    let claims = Claims {
+        id: user_id.to_string(),
+        ..stub_claims()
+    };
+
+    let response = list_connections(State(state), AuthSession(claims)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+
+    assert_eq!(json["success"].as_bool(), Some(true));
+    let personal = json["personal"].as_array().expect("personal array");
+    assert_eq!(personal.len(), 1);
+    let personal_entry = &personal[0];
+    let expected_personal_id = personal_token_id.to_string();
+    let expected_personal_expires = personal_expires_at
+        .format(&Rfc3339)
+        .expect("format personal expires");
+    assert_eq!(personal_entry["provider"].as_str(), Some("google"));
+    assert_eq!(
+        personal_entry["id"].as_str(),
+        Some(expected_personal_id.as_str())
+    );
+    assert_eq!(
+        personal_entry["accountEmail"].as_str(),
+        Some("user@example.com")
+    );
+    assert_eq!(personal_entry["isShared"].as_bool(), Some(false));
+    assert_eq!(
+        personal_entry["expiresAt"].as_str(),
+        Some(expected_personal_expires.as_str())
+    );
+
+    let workspace = json["workspace"].as_array().expect("workspace array");
+    assert_eq!(workspace.len(), 1);
+    let workspace_entry = &workspace[0];
+    let expected_workspace_id = workspace_connection_id.to_string();
+    let expected_workspace_uuid = workspace_id.to_string();
+    let expected_workspace_expires = workspace_expires_at
+        .format(&Rfc3339)
+        .expect("format workspace expires");
+    assert_eq!(workspace_entry["provider"].as_str(), Some("google"));
+    assert_eq!(
+        workspace_entry["id"].as_str(),
+        Some(expected_workspace_id.as_str())
+    );
+    assert_eq!(
+        workspace_entry["workspaceId"].as_str(),
+        Some(expected_workspace_uuid.as_str())
+    );
+    assert_eq!(
+        workspace_entry["workspaceName"].as_str(),
+        Some("Shared Workspace")
+    );
+    assert_eq!(
+        workspace_entry["accountEmail"].as_str(),
+        Some("shared@example.com")
+    );
+    assert_eq!(
+        workspace_entry["sharedByName"].as_str(),
+        Some("Alice Example")
+    );
+    assert_eq!(
+        workspace_entry["sharedByEmail"].as_str(),
+        Some("alice@example.com")
+    );
+    assert_eq!(
+        workspace_entry["expiresAt"].as_str(),
+        Some(expected_workspace_expires.as_str())
+    );
 }
 
 #[async_trait]
@@ -275,14 +550,6 @@ fn parse_provider_handles_known_values() {
         Some(ConnectedOAuthProvider::Microsoft)
     );
     assert_eq!(parse_provider("unknown"), None);
-}
-
-#[test]
-fn default_provider_statuses_include_all_providers() {
-    let statuses = default_provider_statuses();
-    assert!(statuses.contains_key("google"));
-    assert!(statuses.contains_key("microsoft"));
-    assert!(!statuses["google"].connected);
 }
 
 #[tokio::test]

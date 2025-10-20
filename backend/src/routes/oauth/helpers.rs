@@ -18,17 +18,36 @@ pub(crate) struct CallbackQuery {
 }
 
 #[derive(Serialize)]
-pub(crate) struct ProviderStatus {
-    pub(crate) connected: bool,
-    pub(crate) account_email: Option<String>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub(crate) expires_at: Option<OffsetDateTime>,
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PersonalConnectionPayload {
+    pub(crate) id: Uuid,
+    pub(crate) provider: ConnectedOAuthProvider,
+    pub(crate) account_email: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub(crate) expires_at: OffsetDateTime,
+    pub(crate) is_shared: bool,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkspaceConnectionPayload {
+    pub(crate) id: Uuid,
+    pub(crate) provider: ConnectedOAuthProvider,
+    pub(crate) account_email: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub(crate) expires_at: OffsetDateTime,
+    pub(crate) workspace_id: Uuid,
+    pub(crate) workspace_name: String,
+    pub(crate) shared_by_name: Option<String>,
+    pub(crate) shared_by_email: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionsResponse {
     pub(crate) success: bool,
-    pub(crate) providers: HashMap<String, ProviderStatus>,
+    pub(crate) personal: Vec<PersonalConnectionPayload>,
+    pub(crate) workspace: Vec<WorkspaceConnectionPayload>,
 }
 
 #[derive(Serialize)]
@@ -203,25 +222,4 @@ pub(crate) fn error_message_for_redirect(err: &OAuthAccountError) -> String {
             "The OAuth provider did not return a refresh token.".to_string()
         }
     }
-}
-
-pub(crate) fn default_provider_statuses() -> HashMap<String, ProviderStatus> {
-    HashMap::from([
-        (
-            "google".to_string(),
-            ProviderStatus {
-                connected: false,
-                account_email: None,
-                expires_at: None,
-            },
-        ),
-        (
-            "microsoft".to_string(),
-            ProviderStatus {
-                connected: false,
-                account_email: None,
-                expires_at: None,
-            },
-        ),
-    ])
 }

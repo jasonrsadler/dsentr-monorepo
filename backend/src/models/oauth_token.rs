@@ -23,7 +23,9 @@ pub struct UserOAuthToken {
     pub expires_at: OffsetDateTime,
     pub account_email: String,
     pub is_shared: bool,
+    #[allow(dead_code)]
     pub created_at: OffsetDateTime,
+    #[allow(dead_code)]
     pub updated_at: OffsetDateTime,
 }
 
@@ -42,11 +44,13 @@ pub struct WorkspaceConnection {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct WorkspaceAuditEvent {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub actor_id: Uuid,
     pub event_type: String,
     pub metadata: serde_json::Value,
+    #[allow(dead_code)]
     pub created_at: OffsetDateTime,
 }

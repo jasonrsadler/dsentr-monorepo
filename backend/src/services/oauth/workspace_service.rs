@@ -8,6 +8,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::db::oauth_token_repository::UserOAuthTokenRepository;
+#[cfg(test)]
+use crate::db::workspace_connection_repository::WorkspaceConnectionListing;
 use crate::db::workspace_connection_repository::{
     NewWorkspaceAuditEvent, NewWorkspaceConnection, WorkspaceConnectionRepository,
 };
@@ -21,6 +23,7 @@ use crate::services::oauth::account_service::{
 use crate::utils::encryption::{decrypt_secret, encrypt_secret, EncryptionError};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DecryptedWorkspaceConnection {
     pub id: Uuid,
     pub workspace_id: Uuid,
@@ -135,6 +138,7 @@ impl WorkspaceOAuthService {
         Ok(connection)
     }
 
+    #[allow(dead_code)]
     pub async fn get_connection(
         &self,
         workspace_id: Uuid,
@@ -306,6 +310,20 @@ impl WorkspaceOAuthService {
                 Ok(None)
             }
 
+            async fn list_for_workspace(
+                &self,
+                _workspace_id: Uuid,
+            ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+                Ok(Vec::new())
+            }
+
+            async fn list_for_user_memberships(
+                &self,
+                _user_id: Uuid,
+            ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+                Ok(Vec::new())
+            }
+
             async fn update_tokens(
                 &self,
                 _connection_id: Uuid,
@@ -462,6 +480,52 @@ mod tests {
             Ok(guard.clone().filter(|record| {
                 record.workspace_id == workspace_id && record.provider == provider
             }))
+        }
+
+        async fn list_for_workspace(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+            let guard = self.connection.lock().unwrap();
+            Ok(guard
+                .clone()
+                .filter(|record| record.workspace_id == workspace_id)
+                .into_iter()
+                .map(|record| WorkspaceConnectionListing {
+                    id: record.id,
+                    workspace_id: record.workspace_id,
+                    workspace_name: String::new(),
+                    provider: record.provider,
+                    account_email: record.account_email.clone(),
+                    expires_at: record.expires_at,
+                    shared_by_first_name: None,
+                    shared_by_last_name: None,
+                    shared_by_email: None,
+                })
+                .collect())
+        }
+
+        async fn list_for_user_memberships(
+            &self,
+            user_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+            let guard = self.connection.lock().unwrap();
+            Ok(guard
+                .clone()
+                .filter(|record| record.created_by == user_id)
+                .into_iter()
+                .map(|record| WorkspaceConnectionListing {
+                    id: record.id,
+                    workspace_id: record.workspace_id,
+                    workspace_name: String::new(),
+                    provider: record.provider,
+                    account_email: record.account_email.clone(),
+                    expires_at: record.expires_at,
+                    shared_by_first_name: None,
+                    shared_by_last_name: None,
+                    shared_by_email: None,
+                })
+                .collect())
         }
 
         async fn update_tokens(

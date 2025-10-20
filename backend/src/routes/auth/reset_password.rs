@@ -273,7 +273,7 @@ mod tests {
             db,
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
-            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
             mailer: Arc::new(crate::services::smtp_mailer::MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

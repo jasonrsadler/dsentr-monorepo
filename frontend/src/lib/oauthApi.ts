@@ -33,36 +33,29 @@ export interface ProviderConnectionSet {
 
 type ProviderConnectionMap = Record<OAuthProvider, ProviderConnectionSet>
 
-interface RawPersonalConnection {
-  id?: string | null
-  connected?: boolean
-  account_email?: string | null
-  expires_at?: string | null
-  is_shared?: boolean
+interface PersonalConnectionPayload {
+  id: string
+  provider: OAuthProvider
+  accountEmail: string
+  expiresAt: string
+  isShared: boolean
 }
 
-interface RawWorkspaceConnection {
-  id?: string | null
-  account_email?: string | null
-  expires_at?: string | null
-  workspace_id?: string | null
-  workspace_name?: string | null
-  shared_by_name?: string | null
-  shared_by_email?: string | null
-  shared_by?: {
-    name?: string | null
-    email?: string | null
-  } | null
-}
-
-interface RawProviderConnections {
-  personal?: RawPersonalConnection | null
-  workspace?: RawWorkspaceConnection[] | null
+interface WorkspaceConnectionPayload {
+  id: string
+  provider: OAuthProvider
+  accountEmail: string
+  expiresAt: string
+  workspaceId: string
+  workspaceName: string
+  sharedByName?: string | null
+  sharedByEmail?: string | null
 }
 
 interface ConnectionsApiResponse {
   success: boolean
-  providers: Record<string, RawProviderConnections>
+  personal?: PersonalConnectionPayload[] | null
+  workspace?: WorkspaceConnectionPayload[] | null
 }
 
 interface RefreshApiResponse {
@@ -85,47 +78,6 @@ const defaultProviderConnections = (): ProviderConnectionSet => ({
   workspace: []
 })
 
-const mapPersonalConnection = (
-  raw?: RawPersonalConnection | null
-): PersonalConnectionInfo => {
-  if (!raw) return defaultPersonalConnection()
-  return {
-    scope: 'personal',
-    id: typeof raw.id === 'string' && raw.id ? raw.id : null,
-    connected: Boolean(raw.connected),
-    accountEmail: raw.account_email ?? undefined,
-    expiresAt: raw.expires_at ?? undefined,
-    isShared: Boolean(raw.is_shared)
-  }
-}
-
-const mapWorkspaceConnection = (
-  raw: RawWorkspaceConnection | null | undefined
-): WorkspaceConnectionInfo | null => {
-  if (!raw) return null
-  const id = typeof raw.id === 'string' && raw.id ? raw.id : null
-  const workspaceId =
-    typeof raw.workspace_id === 'string' && raw.workspace_id
-      ? raw.workspace_id
-      : null
-  if (!id || !workspaceId) return null
-
-  const sharedByName = raw.shared_by_name ?? raw.shared_by?.name ?? undefined
-  const sharedByEmail = raw.shared_by_email ?? raw.shared_by?.email ?? undefined
-
-  return {
-    scope: 'workspace',
-    id,
-    connected: true,
-    accountEmail: raw.account_email ?? undefined,
-    expiresAt: raw.expires_at ?? undefined,
-    workspaceId,
-    workspaceName: raw.workspace_name ?? 'Workspace connection',
-    sharedByName,
-    sharedByEmail
-  }
-}
-
 export async function fetchConnections(): Promise<ProviderConnectionMap> {
   const res = await fetch(`${API_BASE_URL}/api/oauth/connections`, {
     credentials: 'include'
@@ -141,19 +93,66 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
     microsoft: defaultProviderConnections()
   }
 
-  Object.entries(data.providers || {}).forEach(([key, value]) => {
-    if (key === 'google' || key === 'microsoft') {
-      const personal = mapPersonalConnection(value?.personal)
-      const workspace = Array.isArray(value?.workspace)
-        ? value!
-            .workspace!.map((entry) => mapWorkspaceConnection(entry))
-            .filter((entry): entry is WorkspaceConnectionInfo => entry !== null)
-        : []
+  const normalize = (value?: string | null): string | undefined => {
+    if (typeof value !== 'string') {
+      return undefined
+    }
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
 
-      map[key] = {
-        personal,
-        workspace
+  const personalEntries = Array.isArray(data.personal) ? data.personal : []
+  personalEntries.forEach((entry) => {
+    if (
+      !entry ||
+      (entry.provider !== 'google' && entry.provider !== 'microsoft')
+    ) {
+      return
+    }
+
+    map[entry.provider] = {
+      ...map[entry.provider],
+      personal: {
+        scope: 'personal',
+        id: entry.id,
+        connected: true,
+        accountEmail: normalize(entry.accountEmail),
+        expiresAt: entry.expiresAt ?? undefined,
+        isShared: Boolean(entry.isShared)
       }
+    }
+  })
+
+  const workspaceEntries = Array.isArray(data.workspace) ? data.workspace : []
+  workspaceEntries.forEach((entry) => {
+    if (
+      !entry ||
+      (entry.provider !== 'google' && entry.provider !== 'microsoft')
+    ) {
+      return
+    }
+
+    const connectionId = entry.id?.trim()
+    const workspaceId = entry.workspaceId?.trim()
+    if (!connectionId || !workspaceId) {
+      return
+    }
+
+    const workspaceInfo: WorkspaceConnectionInfo = {
+      scope: 'workspace',
+      id: connectionId,
+      connected: true,
+      accountEmail: normalize(entry.accountEmail),
+      expiresAt: entry.expiresAt ?? undefined,
+      workspaceId,
+      workspaceName: normalize(entry.workspaceName) ?? 'Workspace connection',
+      sharedByName: normalize(entry.sharedByName),
+      sharedByEmail: normalize(entry.sharedByEmail)
+    }
+
+    map[entry.provider] = {
+      ...map[entry.provider],
+      workspace: [...map[entry.provider].workspace, workspaceInfo]
     }
   })
 

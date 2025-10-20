@@ -534,6 +534,26 @@ mod tests {
                 .filter(|conn| conn.workspace_id == workspace_id && conn.provider == provider))
         }
 
+        async fn list_for_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<
+            Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+            SqlxError,
+        > {
+            Ok(Vec::new())
+        }
+
+        async fn list_for_user_memberships(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<
+            Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+            SqlxError,
+        > {
+            Ok(Vec::new())
+        }
+
         async fn update_tokens(
             &self,
             connection_id: Uuid,
@@ -575,7 +595,7 @@ mod tests {
     ) {
         let repo = Arc::new(RecordingWorkspaceConnections::with_connection(connection));
         let service = Arc::new(WorkspaceOAuthService::new(
-            Arc::new(NoopUserTokenRepo::default()),
+            Arc::new(NoopUserTokenRepo),
             repo.clone(),
             OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
             key,
@@ -626,7 +646,7 @@ mod tests {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
-            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository::default()),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
             mailer: Arc::new(MockMailer::default()) as Arc<dyn Mailer>,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
