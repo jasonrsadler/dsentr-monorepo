@@ -12,7 +12,15 @@ type PlatformParams = Record<string, any>
 const DEFAULT_TEAMS_CARD_MODE = 'Simple card builder'
 
 const allowedKeys: Record<MessagingPlatform, string[]> = {
-  Slack: ['channel', 'message', 'token'],
+  Slack: [
+    'channel',
+    'message',
+    'token',
+    'connectionScope',
+    'connectionId',
+    'accountEmail',
+    'connection'
+  ],
   Teams: [
     'deliveryMethod',
     'webhookType',
@@ -56,7 +64,13 @@ const sanitizeParams = (
         typeof entry === 'object' && entry !== null ? { ...entry } : entry
       )
     } else if (value === undefined || value === null) {
-      acc[key] = key === 'mentions' ? [] : ''
+      if (key === 'mentions') {
+        acc[key] = []
+      } else if (key === 'connection') {
+        // leave connection undefined so consumers can detect manual tokens vs OAuth
+      } else {
+        acc[key] = ''
+      }
     } else if (typeof value === 'object') {
       acc[key] = { ...value }
     } else if (typeof value === 'string') {

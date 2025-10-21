@@ -7,6 +7,7 @@ interface NodeSecretDropdownProps {
   value?: string
   onChange: (value: string) => void
   placeholder?: string
+  disabled?: boolean
 }
 
 interface SecretOption {
@@ -28,7 +29,8 @@ export default function NodeSecretDropdown({
   service,
   value,
   onChange,
-  placeholder = 'Select secret'
+  placeholder = 'Select secret',
+  disabled = false
 }: NodeSecretDropdownProps) {
   const { secrets, loading, saveSecret } = useSecrets()
   const [open, setOpen] = useState(false)
@@ -104,14 +106,19 @@ export default function NodeSecretDropdown({
     }
   }
 
+  const effectiveDisabled = disabled || (loading && options.length === 0)
+
   return (
     <div className="text-xs">
       <div className="relative inline-block w-full">
         <button
           type="button"
-          onClick={() => setOpen((prev) => !prev)}
+          onClick={() => {
+            if (effectiveDisabled) return
+            setOpen((prev) => !prev)
+          }}
           className="relative w-full text-left px-2 py-1 border rounded bg-zinc-50 dark:bg-zinc-800"
-          disabled={loading && options.length === 0}
+          disabled={effectiveDisabled}
         >
           {displayLabel}
           <svg

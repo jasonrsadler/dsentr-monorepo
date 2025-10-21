@@ -261,7 +261,14 @@ export async function fetchConnections(
   options?: ConnectionCacheOptions
 ): Promise<ProviderConnectionMap> {
   const targetWorkspace = resolveWorkspaceId(options?.workspaceId)
-  const url = new URL(`${API_BASE_URL}/api/oauth/connections`)
+  const normalizedBase = (
+    typeof API_BASE_URL === 'string' && API_BASE_URL.trim().length > 0
+      ? API_BASE_URL.trim()
+      : typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost'
+  ).replace(/\/$/, '')
+  const url = new URL('/api/oauth/connections', normalizedBase)
   if (targetWorkspace) {
     url.searchParams.set('workspace', targetWorkspace)
   }
