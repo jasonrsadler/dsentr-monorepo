@@ -1,5 +1,5 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
-import SendGridAction from './SendGridAction'
+import SendGridAction from '../src/components/workflow/Actions/Email/Services/SendGridAction'
 import { vi } from 'vitest'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 

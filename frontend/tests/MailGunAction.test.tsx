@@ -1,5 +1,5 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
-import MailGunAction from './MailGunAction'
+import MailGunAction from '../src/components/workflow/Actions/Email/Services/MailGunAction'
 import { vi } from 'vitest'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 

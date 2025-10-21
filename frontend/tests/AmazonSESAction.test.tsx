@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
-import AmazonSESAction from './AmazonSESAction'
+import AmazonSESAction from '@/components/Workflow/Actions/Email/Services/AmazonSESAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 
 const secrets = {

@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 
-import SheetsAction from '../SheetsAction'
+import SheetsAction from '../src/components/workflow/Actions/Google/SheetsAction'
 import { updateCachedConnections } from '@/lib/oauthApi'
 import { useAuth } from '@/stores/auth'
 
@@ -48,19 +48,19 @@ const buildGoogleConnections = (includeWorkspace: boolean) => ({
   },
   workspace: includeWorkspace
     ? [
-        {
-          scope: 'workspace' as const,
-          id: 'google-workspace',
-          connected: true,
-          accountEmail: 'ops@example.com',
-          expiresAt: '2025-01-01T00:00:00.000Z',
-          workspaceId: 'ws-1',
-          workspaceName: 'Operations',
-          sharedByName: 'Team Admin',
-          sharedByEmail: 'admin@example.com',
-          requiresReconnect: false
-        }
-      ]
+      {
+        scope: 'workspace' as const,
+        id: 'google-workspace',
+        connected: true,
+        accountEmail: 'ops@example.com',
+        expiresAt: '2025-01-01T00:00:00.000Z',
+        workspaceId: 'ws-1',
+        workspaceName: 'Operations',
+        sharedByName: 'Team Admin',
+        sharedByEmail: 'admin@example.com',
+        requiresReconnect: false
+      }
+    ]
     : []
 })
 

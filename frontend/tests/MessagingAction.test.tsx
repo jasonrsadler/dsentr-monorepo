@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
-import MessagingAction from './MessagingAction'
+import MessagingAction from '../src/components/workflow/Actions/Messaging/MessagingAction'
 
 describe('MessagingAction', () => {
   beforeEach(() => {

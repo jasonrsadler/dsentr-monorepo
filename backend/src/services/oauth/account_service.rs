@@ -121,7 +121,7 @@ impl OAuthAccountService {
     }
 
     pub fn slack_scopes(&self) -> &'static str {
-        "chat:write,channels:read,groups:read,users:read,users:read.email,offline_access"
+        "chat:write,channels:read,groups:read,users:read,users:read.email"
     }
 
     pub async fn save_authorization(

@@ -1,6 +1,6 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
-import SMTPAction from './SMTPAction'
+import SMTPAction from '../src/components/workflow/Actions/Email/Services/SMTPAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 
 const secrets = {
