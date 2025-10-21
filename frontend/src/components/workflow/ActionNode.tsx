@@ -1,13 +1,13 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import deepEqual from 'fast-deep-equal'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import ActionTypeDropdown from './ActionTypeDropdown'
 import ActionServiceDropdown from './ActionServiceDropdown'
 import SendGridAction from './Actions/Email/Services/SendGridAction'
-import NodeInputField from '../UI/InputFields/NodeInputField'
-import NodeCheckBoxField from '../UI/InputFields/NodeCheckboxField'
-import NodeHeader from '../UI/ReactFlow/NodeHeader'
+import NodeInputField from '../ui/input-fields/NodeInputField'
+import NodeCheckBoxField from '../ui/input-fields/NodeCheckboxField'
+import NodeHeader from '../ui/react-flow/NodeHeader'
 import MailGunAction from './Actions/Email/Services/MailGunAction'
 import SMTPAction from './Actions/Email/Services/SMTPAction'
 import AmazonSESAction from './Actions/Email/Services/AmazonSESAction'
@@ -46,32 +46,121 @@ function normalizeActionType(value: any): string {
   }
 }
 
+type NodeStatusSnapshot = {
+  isRunning: boolean
+  isSucceeded: boolean
+  isFailed: boolean
+}
+
+type ActionNodeData = {
+  id?: string
+  label?: string
+  actionType?: string
+  params?: Record<string, any>
+  inputs?: Record<string, any>
+  timeout?: number
+  retries?: number
+  stopOnError?: boolean
+  dirty?: boolean
+  expanded?: boolean
+  labelError?: string | null
+  hasValidationErrors?: boolean
+  childHasValidationErrors?: boolean
+  nodeStatus?: Partial<NodeStatusSnapshot>
+  status?: Partial<NodeStatusSnapshot>
+  isRunning?: boolean
+  isSucceeded?: boolean
+  isFailed?: boolean
+}
+
+const EMPTY_PARAMS: Record<string, any> = Object.freeze({})
+
+type NodeUpdatePayload = {
+  label: string
+  actionType: string
+  params: Record<string, any>
+  timeout: number
+  retries: number
+  stopOnError: boolean
+  dirty: boolean
+  expanded: boolean
+  hasValidationErrors: boolean
+  labelError: string | null
+  childHasValidationErrors: boolean
+}
+
+function nodeUpdatesEqual(
+  previous: NodeUpdatePayload | undefined,
+  next: NodeUpdatePayload
+) {
+  if (!previous) {
+    return false
+  }
+  if (previous.label !== next.label) return false
+  if (previous.actionType !== next.actionType) return false
+  if (!deepEqual(previous.params, next.params)) return false
+  if (previous.timeout !== next.timeout) return false
+  if (previous.retries !== next.retries) return false
+  if (previous.stopOnError !== next.stopOnError) return false
+  if (previous.dirty !== next.dirty) return false
+  if (previous.expanded !== next.expanded) return false
+  if (previous.hasValidationErrors !== next.hasValidationErrors) return false
+  if ((previous.labelError ?? null) !== (next.labelError ?? null)) return false
+  if (previous.childHasValidationErrors !== next.childHasValidationErrors) {
+    return false
+  }
+  return true
+}
+
+function deriveNodeStatus(data?: ActionNodeData): NodeStatusSnapshot {
+  if (!data) {
+    return { isRunning: false, isSucceeded: false, isFailed: false }
+  }
+
+  const nested =
+    (typeof data.nodeStatus === 'object' && data.nodeStatus) ||
+    (typeof data.status === 'object' && data.status) ||
+    {}
+  const nestedRecord = nested as Record<string, unknown>
+
+  const resolve = (value: unknown): boolean => {
+    if (typeof value === 'boolean') return value
+    return Boolean(value)
+  }
+
+  const isRunning = resolve(
+    data.isRunning ?? nestedRecord.isRunning ?? nestedRecord.running
+  )
+  const isSucceeded = resolve(
+    data.isSucceeded ?? nestedRecord.isSucceeded ?? nestedRecord.succeeded
+  )
+  const isFailed = resolve(
+    data.isFailed ?? nestedRecord.isFailed ?? nestedRecord.failed
+  )
+
+  return { isRunning, isSucceeded, isFailed }
+}
+
 interface ActionNodeProps {
   id: string
   data: any
   selected: boolean
-  onRun?: (id: string, params: any) => Promise<void>
+  onRun?: (id: string, params: any) => Promise<void> | void
   onRemove?: (id: string) => void
-  onDirtyChange?: (dirty: boolean, data: any) => void
-  onUpdateNode?: (id: string, data: any, suppressDirty?: boolean) => void
-  isRunning?: boolean
-  isSucceeded?: boolean
-  isFailed?: boolean
+  onChange?: (id: string, data: any, suppressDirty?: boolean) => void
+  markDirty?: () => void
   planTier?: string | null
   onRestrictionNotice?: (message: string) => void
 }
 
-export default function ActionNode({
+function ActionNode({
   id,
-  data,
+  data: _data,
   selected,
   onRun,
   onRemove,
-  onDirtyChange,
-  onUpdateNode,
-  isRunning,
-  isSucceeded,
-  isFailed,
+  onChange,
+  markDirty,
   planTier,
   onRestrictionNotice
 }: ActionNodeProps) {
@@ -80,127 +169,110 @@ export default function ActionNode({
     [planTier]
   )
   const isSoloPlan = normalizedPlanTier === 'solo'
-  const isNewNode = useMemo(() => !data?.id, [data?.id])
-  const dataLabel = data?.label
-  const dataExpanded = data?.expanded ?? false
-  const dataActionType = data?.actionType
-  const dataParams = data?.params
-  const dataInputs = data?.inputs
-  const dataTimeout = data?.timeout
-  const dataRetries = data?.retries
-  const dataStopOnError = data?.stopOnError
-  const dataDirty = data?.dirty
-  const dataLabelError = data?.labelError ?? null
 
-  const [expanded, setExpanded] = useState(dataExpanded)
-  const [dirty, setDirty] = useState(dataDirty ?? isNewNode)
+  const nodeData = useMemo(() => (_data ?? {}) as ActionNodeData, [_data])
+
+  const baseParams = useMemo<Record<string, any>>(() => {
+    if (nodeData?.params && typeof nodeData.params === 'object') {
+      return nodeData.params as Record<string, any>
+    }
+    if (nodeData?.inputs && typeof nodeData.inputs === 'object') {
+      return nodeData.inputs as Record<string, any>
+    }
+    return EMPTY_PARAMS
+  }, [nodeData?.inputs, nodeData?.params])
+
+  const applyParamDefaults = useCallback(
+    (candidate: Record<string, any>, nextActionType: string) => {
+      let next = candidate
+
+      const ensureValue = (key: string, value: unknown) => {
+        if (next[key] === value) {
+          return
+        }
+        next = next === candidate ? { ...candidate } : { ...next }
+        next[key] = value
+      }
+
+      const normalizedType = normalizeActionType(nextActionType).toLowerCase()
+
+      if (isSoloPlan && normalizedType === 'messaging') {
+        const rawPlatform =
+          typeof next?.platform === 'string' ? next.platform.trim() : ''
+        if (!rawPlatform) {
+          ensureValue('platform', 'Google Chat')
+        }
+      }
+
+      if (normalizedType === 'email') {
+        const service =
+          typeof next?.service === 'string'
+            ? next.service.trim().toLowerCase()
+            : ''
+        if (service === 'mailgun') {
+          const region =
+            typeof next?.region === 'string' && next.region
+              ? next.region
+              : 'US (api.mailgun.net)'
+          ensureValue('region', region)
+        }
+        if (service === 'amazon ses') {
+          const awsRegion =
+            typeof next?.awsRegion === 'string' && next.awsRegion
+              ? next.awsRegion
+              : 'us-east-1'
+          const sesVersion =
+            typeof next?.sesVersion === 'string' && next.sesVersion
+              ? next.sesVersion
+              : 'v2'
+          ensureValue('awsRegion', awsRegion)
+          ensureValue('sesVersion', sesVersion)
+        }
+      }
+
+      return next
+    },
+    [isSoloPlan]
+  )
+
+  const params = useMemo<Record<string, any>>(
+    () => applyParamDefaults(baseParams, actionTypeValue),
+    [applyParamDefaults, baseParams, actionTypeValue]
+  )
+
+  const label = nodeData?.label ?? 'Action'
+  const actionTypeValue = normalizeActionType(nodeData?.actionType)
+  const normalizedActionType = useMemo(
+    () => actionTypeValue.toLowerCase(),
+    [actionTypeValue]
+  )
+  const timeout = nodeData?.timeout ?? 5000
+  const retries = nodeData?.retries ?? 0
+  const stopOnError =
+    nodeData?.stopOnError === undefined ? true : Boolean(nodeData.stopOnError)
+  const isNewNode = !nodeData?.id
+  const dirty = nodeData?.dirty ?? isNewNode
+  const expanded = Boolean(nodeData?.expanded)
+  const labelError = nodeData?.labelError ?? null
+  const childHasValidationErrors = Boolean(nodeData?.childHasValidationErrors)
+  const { isRunning, isSucceeded, isFailed } = useMemo(
+    () => deriveNodeStatus(nodeData),
+    [nodeData]
+  )
+
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [running, setRunning] = useState(false)
-  const [actionType, setActionType] = useState<string>(
-    normalizeActionType(data?.actionType)
-  )
-  const [params, setParams] = useState(() => ({
-    service: '',
-    ...(data?.params || data?.inputs || {})
-  }))
-  const [timeout, setTimeoutMs] = useState(data?.timeout || 5000)
-  const [retries, setRetries] = useState(data?.retries || 0)
-  const [stopOnError, setStopOnError] = useState(data?.stopOnError ?? true)
-  const [label, setLabel] = useState(dataLabel || 'Action')
-  const [labelError, setLabelError] = useState<string | null>(dataLabelError)
 
-  type IncomingSnapshot = {
-    label: string
-    expanded: boolean
-    actionType: string
-    params: Record<string, unknown>
-    timeout: number
-    retries: number
-    stopOnError: boolean
-    dirty: boolean
-  }
+  const lastNodeUpdateRef = useRef<NodeUpdatePayload | undefined>(undefined)
+  const lastPlanNoticeRef = useRef<string | null>(null)
 
-  const lastSyncedFromDataRef = useRef<IncomingSnapshot | null>(null)
-
-  useEffect(() => {
-    lastSyncedFromDataRef.current = null
-  }, [id])
-
-  // React Flow safe pattern: keep local state aligned with incoming canvas
-  // data, but guard with a snapshot comparison so unchanged props do not
-  // trigger another render cycle. Without this guard, React Flow can get stuck
-  // in an infinite update loop as identical payloads bounce between node state
-  // and the parent graph store.
-  useEffect(() => {
-    const incomingParams: Record<string, unknown> = {
-      service: '',
-      ...((dataParams || dataInputs || {}) as Record<string, unknown>)
-    }
-    const incomingState: IncomingSnapshot = {
-      label: dataLabel || 'Action',
-      expanded: dataExpanded,
-      actionType: normalizeActionType(dataActionType),
-      params: incomingParams,
-      timeout: dataTimeout || 5000,
-      retries: dataRetries || 0,
-      stopOnError: dataStopOnError ?? true,
-      dirty: dataDirty ?? isNewNode
-    }
-
-    const lastSynced = lastSyncedFromDataRef.current
-    if (lastSynced && deepEqual(lastSynced, incomingState)) {
-      return
-    }
-    lastSyncedFromDataRef.current = incomingState
-
-    setLabel((prev) =>
-      prev === incomingState.label ? prev : incomingState.label
-    )
-    setExpanded((prev) =>
-      prev === incomingState.expanded ? prev : incomingState.expanded
-    )
-    setActionType((prev) =>
-      prev === incomingState.actionType ? prev : incomingState.actionType
-    )
-    setParams((prev) =>
-      deepEqual(prev, incomingState.params) ? prev : incomingState.params
-    )
-    setTimeoutMs((prev) =>
-      prev === incomingState.timeout ? prev : incomingState.timeout
-    )
-    setRetries((prev) =>
-      prev === incomingState.retries ? prev : incomingState.retries
-    )
-    setStopOnError((prev) =>
-      prev === incomingState.stopOnError ? prev : incomingState.stopOnError
-    )
-    setDirty((prev) =>
-      prev === incomingState.dirty ? prev : incomingState.dirty
-    )
-  }, [
-    dataActionType,
-    dataDirty,
-    dataExpanded,
-    dataInputs,
-    dataLabel,
-    dataParams,
-    dataRetries,
-    dataStopOnError,
-    dataTimeout,
-    isNewNode
-  ])
-
-  const [prevService, setPrevService] = useState('')
-
-  const [hasValidationErrors, setHasValidationErrors] = useState(false)
-  const normalizedActionType = useMemo(
-    () => actionType.toLowerCase(),
-    [actionType]
-  )
   const normalizedMessagingPlatform = useMemo(() => {
-    if (!params || typeof (params as any).platform !== 'string') return ''
-    return ((params as any).platform as string).trim().toLowerCase()
+    if (typeof params?.platform !== 'string') {
+      return ''
+    }
+    return (params.platform as string).trim().toLowerCase()
   }, [params])
+
   const messagingRestrictionKey = useMemo(() => {
     if (!isSoloPlan) return null
     if (normalizedActionType !== 'messaging') return null
@@ -208,25 +280,143 @@ export default function ActionNode({
     if (normalizedMessagingPlatform === 'teams') return 'teams' as const
     return null
   }, [isSoloPlan, normalizedActionType, normalizedMessagingPlatform])
-  const planRestrictionMessage = useMemo(() => {
-    if (!isSoloPlan) return null
-    if (normalizedActionType === 'sheets') {
-      return PLAN_RESTRICTION_MESSAGES.sheets
-    }
-    if (messagingRestrictionKey) {
-      return PLAN_RESTRICTION_MESSAGES[messagingRestrictionKey]
-    }
-    return null
-  }, [isSoloPlan, normalizedActionType, messagingRestrictionKey])
-  const combinedHasValidationErrors =
-    hasValidationErrors ||
-    Boolean(labelError) ||
-    Boolean(planRestrictionMessage)
-  const lastPlanNoticeRef = useRef<string | null>(null)
+
+  const computePlanRestrictionMessage = useCallback(
+    (nextActionType: string, candidateParams: Record<string, any>) => {
+      if (!isSoloPlan) return null
+      const normalizedType = normalizeActionType(nextActionType).toLowerCase()
+      if (normalizedType === 'sheets') {
+        return PLAN_RESTRICTION_MESSAGES.sheets
+      }
+      if (normalizedType !== 'messaging') {
+        return null
+      }
+      const platform =
+        typeof candidateParams?.platform === 'string'
+          ? (candidateParams.platform as string).trim().toLowerCase()
+          : ''
+      if (platform === 'slack') {
+        return PLAN_RESTRICTION_MESSAGES.slack
+      }
+      if (platform === 'teams') {
+        return PLAN_RESTRICTION_MESSAGES.teams
+      }
+      return null
+    },
+    [isSoloPlan]
+  )
+
+  const planRestrictionMessage = useMemo(
+    () => computePlanRestrictionMessage(actionTypeValue, params),
+    [actionTypeValue, params, computePlanRestrictionMessage]
+  )
+
+  const combinedHasValidationErrors = useMemo(
+    () =>
+      childHasValidationErrors ||
+      Boolean(labelError) ||
+      Boolean(planRestrictionMessage),
+    [childHasValidationErrors, labelError, planRestrictionMessage]
+  )
 
   useEffect(() => {
-    setLabelError(dataLabelError)
-  }, [dataLabelError])
+    lastNodeUpdateRef.current = undefined
+  }, [id])
+
+  const handleChange = useCallback(
+    (
+      partial: Partial<
+        NodeUpdatePayload & { childHasValidationErrors?: boolean }
+      >,
+      options?: { suppressDirty?: boolean }
+    ) => {
+      const nextActionType = normalizeActionType(
+        (partial.actionType ?? actionTypeValue) as string
+      )
+      const initialParams = (partial.params ?? params) as Record<string, any>
+      const nextTimeout =
+        partial.timeout !== undefined ? Number(partial.timeout) : timeout
+      const nextRetries =
+        partial.retries !== undefined ? Number(partial.retries) : retries
+      const nextStopOnError =
+        partial.stopOnError !== undefined
+          ? Boolean(partial.stopOnError)
+          : stopOnError
+      const nextExpanded =
+        partial.expanded !== undefined ? Boolean(partial.expanded) : expanded
+      const nextDirty =
+        partial.dirty !== undefined ? Boolean(partial.dirty) : dirty
+      const nextLabel = partial.label ?? label
+      const nextLabelError =
+        partial.labelError !== undefined ? partial.labelError : labelError
+      const nextChildErrors =
+        partial.childHasValidationErrors !== undefined
+          ? Boolean(partial.childHasValidationErrors)
+          : childHasValidationErrors
+      const requestedHasValidationErrors =
+        partial.hasValidationErrors !== undefined
+          ? Boolean(partial.hasValidationErrors)
+          : undefined
+
+      const resolvedParams = applyParamDefaults(initialParams, nextActionType)
+
+      const restrictionMessage = computePlanRestrictionMessage(
+        nextActionType,
+        resolvedParams
+      )
+      const nextHasValidationErrors =
+        requestedHasValidationErrors ??
+        (nextChildErrors ||
+          Boolean(nextLabelError) ||
+          Boolean(restrictionMessage))
+
+      const payload: NodeUpdatePayload = {
+        label: nextLabel,
+        actionType: nextActionType,
+        params: resolvedParams,
+        timeout: nextTimeout,
+        retries: nextRetries,
+        stopOnError: nextStopOnError,
+        dirty: nextDirty,
+        expanded: nextExpanded,
+        hasValidationErrors: nextHasValidationErrors,
+        labelError: nextLabelError ?? null,
+        childHasValidationErrors: nextChildErrors
+      }
+
+      if (nodeUpdatesEqual(lastNodeUpdateRef.current, payload)) {
+        return
+      }
+
+      lastNodeUpdateRef.current = {
+        ...payload,
+        params: payload.params
+      }
+
+      onChange?.(id, payload, options?.suppressDirty ?? false)
+
+      if (!options?.suppressDirty && payload.dirty !== dirty) {
+        markDirty?.()
+      }
+    },
+    [
+      actionTypeValue,
+      applyParamDefaults,
+      childHasValidationErrors,
+      computePlanRestrictionMessage,
+      dirty,
+      expanded,
+      id,
+      label,
+      labelError,
+      markDirty,
+      onChange,
+      params,
+      retries,
+      stopOnError,
+      timeout
+    ]
+  )
 
   useEffect(() => {
     if (!onRestrictionNotice) return
@@ -239,20 +429,6 @@ export default function ActionNode({
     }
   }, [planRestrictionMessage, onRestrictionNotice])
 
-  useEffect(() => {
-    if (!isSoloPlan) return
-    if (normalizedActionType !== 'messaging') return
-    setParams((prev) => {
-      if (!prev || typeof prev !== 'object') return prev
-      const platform =
-        typeof (prev as any).platform === 'string'
-          ? ((prev as any).platform as string)
-          : ''
-      if (platform && platform.trim()) return prev
-      return { ...prev, platform: 'Google Chat' }
-    })
-  }, [isSoloPlan, normalizedActionType])
-
   const openPlanSettings = useCallback(() => {
     try {
       window.dispatchEvent(
@@ -262,73 +438,6 @@ export default function ActionNode({
       console.error((err as Error).message)
     }
   }, [])
-
-  useEffect(() => {
-    if (params.service !== prevService) {
-      setParams((prev) => {
-        switch (params.service.toLowerCase()) {
-          case 'mailgun':
-            return { ...prev, region: prev.region || 'US (api.mailgun.net)' }
-          case 'amazon ses':
-            return {
-              ...prev,
-              awsRegion: prev.awsRegion || 'us-east-1',
-              sesVersion: prev.sesVersion || 'v2'
-            }
-          default:
-            return prev
-        }
-      })
-      setPrevService(params.service || '')
-    }
-  }, [params.service, prevService])
-
-  const currentNodeState = useMemo(
-    () => ({
-      label,
-      actionType: normalizedActionType,
-      params,
-      timeout,
-      retries,
-      stopOnError,
-      dirty,
-      expanded,
-      hasValidationErrors: combinedHasValidationErrors
-    }),
-    [
-      combinedHasValidationErrors,
-      dirty,
-      expanded,
-      normalizedActionType,
-      params,
-      retries,
-      stopOnError,
-      timeout,
-      label
-    ]
-  )
-
-  const lastSyncedStateRef = useRef<typeof currentNodeState | null>(null)
-  const lastDirtyStatusRef = useRef<boolean | null>(null)
-
-  useEffect(() => {
-    const previousState = lastSyncedStateRef.current
-    const stateChanged =
-      !previousState || !deepEqual(previousState, currentNodeState)
-
-    if (stateChanged) {
-      lastSyncedStateRef.current = currentNodeState
-      // React Flow safe pattern: Only notify the canvas when the payload truly
-      // changes. Guarding with a deep-equality check prevents infinite update
-      // loops between local state and the parent graph store.
-      onUpdateNode?.(id, currentNodeState, true)
-    }
-
-    if (dirty !== lastDirtyStatusRef.current) {
-      lastDirtyStatusRef.current = dirty
-      onDirtyChange?.(dirty, currentNodeState)
-    }
-  }, [currentNodeState, dirty, id, onDirtyChange, onUpdateNode])
 
   const handleRun = async () => {
     setRunning(true)
@@ -346,6 +455,7 @@ export default function ActionNode({
       : isRunning
         ? 'ring-2 ring-sky-500'
         : ''
+
   return (
     <motion.div
       className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
@@ -382,10 +492,11 @@ export default function ActionNode({
           hasValidationErrors={combinedHasValidationErrors}
           expanded={expanded}
           onLabelChange={(val) => {
-            setLabel(val)
-            setDirty(true)
+            handleChange({ label: val, dirty: true })
           }}
-          onExpanded={() => setExpanded((prev) => !prev)}
+          onExpanded={() =>
+            handleChange({ expanded: !expanded }, { suppressDirty: true })
+          }
           onConfirmingDelete={() => setConfirmingDelete(true)}
         />
         {labelError && (
@@ -412,8 +523,7 @@ export default function ActionNode({
               <ActionTypeDropdown
                 value={normalizedActionType}
                 onChange={(t) => {
-                  setActionType(t)
-                  setDirty(true)
+                  handleChange({ actionType: t, dirty: true })
                 }}
                 disabledOptions={
                   isSoloPlan
@@ -422,10 +532,10 @@ export default function ActionNode({
                       }
                     : {}
                 }
-                onBlockedSelect={(id, reason) => {
+                onBlockedSelect={(blockedId, reason) => {
                   if (!onRestrictionNotice) return
                   const fallback =
-                    id === 'sheets'
+                    blockedId === 'sheets'
                       ? PLAN_RESTRICTION_MESSAGES.sheets
                       : 'This action is locked on your current plan.'
                   onRestrictionNotice(reason || fallback)
@@ -450,9 +560,12 @@ export default function ActionNode({
                   <WebhookAction
                     args={params}
                     onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                      setParams((prev) => ({ ...prev, ...updatedParams }))
-                      setHasValidationErrors(nodeHasErrors)
-                      setDirty((prev) => childDirty || prev)
+                      const nextParams = { ...params, ...updatedParams }
+                      handleChange({
+                        params: nextParams,
+                        dirty: childDirty ? true : dirty,
+                        childHasValidationErrors: nodeHasErrors
+                      })
                     }}
                   />
                 </div>
@@ -460,19 +573,31 @@ export default function ActionNode({
               {normalizedActionType === 'email' && (
                 <div className="flex flex-col gap-2">
                   <ActionServiceDropdown
-                    value={params.service}
+                    value={
+                      typeof params?.service === 'string'
+                        ? (params.service as string)
+                        : ''
+                    }
                     onChange={(val) => {
-                      setParams((prev) => ({ ...prev, service: val }))
-                      setDirty(true)
+                      handleChange({
+                        params: {
+                          ...params,
+                          service: val
+                        },
+                        dirty: true
+                      })
                     }}
                   />
                   {params.service === 'Mailgun' && (
                     <MailGunAction
                       args={params}
                       onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                        setParams((prev) => ({ ...prev, ...updatedParams }))
-                        setHasValidationErrors(nodeHasErrors)
-                        setDirty((prev) => childDirty || prev)
+                        const nextParams = { ...params, ...updatedParams }
+                        handleChange({
+                          params: nextParams,
+                          dirty: childDirty ? true : dirty,
+                          childHasValidationErrors: nodeHasErrors
+                        })
                       }}
                     />
                   )}
@@ -480,9 +605,12 @@ export default function ActionNode({
                     <SendGridAction
                       args={params}
                       onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                        setParams((prev) => ({ ...prev, ...updatedParams }))
-                        setHasValidationErrors(nodeHasErrors)
-                        setDirty((prev) => childDirty || prev)
+                        const nextParams = { ...params, ...updatedParams }
+                        handleChange({
+                          params: nextParams,
+                          dirty: childDirty ? true : dirty,
+                          childHasValidationErrors: nodeHasErrors
+                        })
                       }}
                     />
                   )}
@@ -490,9 +618,12 @@ export default function ActionNode({
                     <SMTPAction
                       args={params}
                       onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                        setParams((prev) => ({ ...prev, ...updatedParams }))
-                        setHasValidationErrors(nodeHasErrors)
-                        setDirty((prev) => childDirty || prev)
+                        const nextParams = { ...params, ...updatedParams }
+                        handleChange({
+                          params: nextParams,
+                          dirty: childDirty ? true : dirty,
+                          childHasValidationErrors: nodeHasErrors
+                        })
                       }}
                     />
                   )}
@@ -500,9 +631,12 @@ export default function ActionNode({
                     <AmazonSESAction
                       args={params}
                       onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                        setParams((prev) => ({ ...prev, ...updatedParams }))
-                        setHasValidationErrors(nodeHasErrors)
-                        setDirty((prev) => childDirty || prev)
+                        const nextParams = { ...params, ...updatedParams }
+                        handleChange({
+                          params: nextParams,
+                          dirty: childDirty ? true : dirty,
+                          childHasValidationErrors: nodeHasErrors
+                        })
                       }}
                     />
                   )}
@@ -512,9 +646,12 @@ export default function ActionNode({
                 <MessagingAction
                   args={params}
                   onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                    setParams((prev) => ({ ...prev, ...updatedParams }))
-                    setHasValidationErrors(nodeHasErrors)
-                    setDirty((prev) => childDirty || prev)
+                    const nextParams = { ...params, ...updatedParams }
+                    handleChange({
+                      params: nextParams,
+                      dirty: childDirty ? true : dirty,
+                      childHasValidationErrors: nodeHasErrors
+                    })
                   }}
                   disabledPlatforms={
                     isSoloPlan
@@ -538,9 +675,12 @@ export default function ActionNode({
                 <SheetsAction
                   args={params}
                   onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                    setParams((prev) => ({ ...prev, ...updatedParams }))
-                    setHasValidationErrors(nodeHasErrors)
-                    setDirty((prev) => childDirty || prev)
+                    const nextParams = { ...params, ...updatedParams }
+                    handleChange({
+                      params: nextParams,
+                      dirty: childDirty ? true : dirty,
+                      childHasValidationErrors: nodeHasErrors
+                    })
                   }}
                 />
               )}
@@ -548,9 +688,12 @@ export default function ActionNode({
                 <HttpRequestAction
                   args={params}
                   onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                    setParams((prev) => ({ ...prev, ...updatedParams }))
-                    setHasValidationErrors(nodeHasErrors)
-                    setDirty((prev) => childDirty || prev)
+                    const nextParams = { ...params, ...updatedParams }
+                    handleChange({
+                      params: nextParams,
+                      dirty: childDirty ? true : dirty,
+                      childHasValidationErrors: nodeHasErrors
+                    })
                   }}
                 />
               )}
@@ -563,9 +706,12 @@ export default function ActionNode({
                     dirty
                   }}
                   onChange={(updatedParams, nodeHasErrors, childDirty) => {
-                    setParams((prev) => ({ ...prev, ...updatedParams }))
-                    setHasValidationErrors(nodeHasErrors)
-                    setDirty((prev) => childDirty || prev)
+                    const nextParams = { ...params, ...updatedParams }
+                    handleChange({
+                      params: nextParams,
+                      dirty: childDirty ? true : dirty,
+                      childHasValidationErrors: nodeHasErrors
+                    })
                   }}
                 />
               )}
@@ -575,8 +721,7 @@ export default function ActionNode({
                   type="number"
                   value={timeout}
                   onChange={(val) => {
-                    setTimeoutMs(Number(val))
-                    setDirty(true)
+                    handleChange({ timeout: Number(val), dirty: true })
                   }}
                   className="w-20 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
                 />
@@ -585,8 +730,7 @@ export default function ActionNode({
                   type="number"
                   value={retries}
                   onChange={(val) => {
-                    setRetries(Number(val))
-                    setDirty(true)
+                    handleChange({ retries: Number(val), dirty: true })
                   }}
                   className="w-12 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
                 />
@@ -594,8 +738,7 @@ export default function ActionNode({
                 <NodeCheckBoxField
                   checked={stopOnError}
                   onChange={(val) => {
-                    setStopOnError(val)
-                    setDirty(true)
+                    handleChange({ stopOnError: val, dirty: true })
                   }}
                 >
                   Stop on error
@@ -641,3 +784,5 @@ export default function ActionNode({
     </motion.div>
   )
 }
+
+export default memo(ActionNode)

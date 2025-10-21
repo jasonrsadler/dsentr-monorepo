@@ -15,7 +15,7 @@ import {
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
-import ConfirmDialog from '@/components/UI/Dialog/ConfirmDialog'
+import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog'
 
 export type IntegrationNotice =
   | { kind: 'connected'; provider?: OAuthProvider }
@@ -251,7 +251,7 @@ export default function IntegrationsTab({
       setBusyProvider(provider)
       try {
         for (const entry of sharedConnections) {
-          if (removeBusyId === entry.id) {
+          if (!entry.id || removeBusyId === entry.id) {
             continue
           }
           await unshareWorkspaceConnection(entry.workspaceId, entry.id)
@@ -301,7 +301,6 @@ export default function IntegrationsTab({
   const handleDisconnect = useCallback(
     (provider: OAuthProvider) => {
       const status = statuses[provider]
-      const personal = status?.personal
       const workspaceConnections = (status?.workspace ?? []).filter(
         (entry) => !workspaceId || entry.workspaceId === workspaceId
       )

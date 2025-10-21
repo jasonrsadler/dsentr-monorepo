@@ -9,6 +9,22 @@ describe('authApi', () => {
   // Mock fetch globally for all tests
   const globalFetch = global.fetch
 
+  const createMockAuthState = (
+    overrides: Partial<ReturnType<typeof useAuth.getState>> = {}
+  ): ReturnType<typeof useAuth.getState> => ({
+    user: null,
+    isLoading: false,
+    memberships: [],
+    currentWorkspaceId: null,
+    requiresOnboarding: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    checkAuth: vi.fn().mockResolvedValue(undefined),
+    setCurrentWorkspaceId: vi.fn(),
+    refreshMemberships: vi.fn().mockResolvedValue([]),
+    ...overrides
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -93,13 +109,9 @@ describe('authApi', () => {
       const user = { id: 'user123', email: 'user@example.com' }
       const loginSpy = vi.fn()
       // Mock Zustand useAuth.getState()
-      vi.spyOn(useAuth, 'getState').mockReturnValue({
-        user: null,
-        isLoading: false,
-        login: loginSpy,
-        logout: vi.fn(),
-        checkAuth: vi.fn().mockResolvedValue(undefined)
-      })
+      vi.spyOn(useAuth, 'getState').mockReturnValue(
+        createMockAuthState({ login: loginSpy })
+      )
 
       const responseData = {
         success: true,
@@ -133,13 +145,7 @@ describe('authApi', () => {
 
     it('should return failure if response.ok is false or data.success false', async () => {
       vi.spyOn(csrfCache, 'getCsrfToken').mockResolvedValue('csrf')
-      vi.spyOn(useAuth, 'getState').mockReturnValue({
-        user: null,
-        isLoading: false,
-        login: vi.fn(),
-        logout: vi.fn(),
-        checkAuth: vi.fn().mockResolvedValue(undefined)
-      })
+      vi.spyOn(useAuth, 'getState').mockReturnValue(createMockAuthState())
 
       // Case 1: res.ok = false
       global.fetch = vi.fn().mockResolvedValue({
@@ -172,13 +178,7 @@ describe('authApi', () => {
 
     it('should return failure on fetch error', async () => {
       vi.spyOn(csrfCache, 'getCsrfToken').mockResolvedValue('csrf')
-      vi.spyOn(useAuth, 'getState').mockReturnValue({
-        user: null,
-        isLoading: false,
-        login: vi.fn(),
-        logout: vi.fn(),
-        checkAuth: vi.fn().mockResolvedValue(undefined)
-      })
+      vi.spyOn(useAuth, 'getState').mockReturnValue(createMockAuthState())
 
       global.fetch = vi.fn().mockRejectedValue(new Error('Network fail'))
 
@@ -199,21 +199,18 @@ describe('authApi', () => {
       // Save original location
       originalLocation = window.location
 
-      // @ts-expect-error override readonly
-      delete window.location
-
-      // Replace with mock object
-      // @ts-expect-error
-      window.location = {
-        ...originalLocation,
-        href: ''
-      } as unknown as Location
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...originalLocation, href: '' }
+      })
     })
 
     afterEach(() => {
       // Restore original location
-      // @ts-expect-error
-      window.location = originalLocation
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation
+      })
     })
 
     it.each(['google', 'github', 'apple'] as const)(

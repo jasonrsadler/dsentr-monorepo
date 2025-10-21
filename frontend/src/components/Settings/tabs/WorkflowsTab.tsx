@@ -60,8 +60,12 @@ export default function WorkflowsTab({
         window.dispatchEvent(
           new CustomEvent('workflow-deleted', { detail: { id: selected.id } })
         )
-      } catch (e) {
-        console.error(e.message)
+      } catch (error) {
+        if (error instanceof Error) {
+          console.error(error.message)
+        } else {
+          console.error(error)
+        }
       }
     } finally {
       setBusy(false)

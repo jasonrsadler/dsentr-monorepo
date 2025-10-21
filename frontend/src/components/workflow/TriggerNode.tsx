@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { memo, useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import {
@@ -11,15 +11,14 @@ import {
   RefreshCcw
 } from 'lucide-react'
 import TriggerTypeDropdown from './TriggerTypeDropdown'
-import KeyValuePair from '../UI/ReactFlow/KeyValuePair'
+import KeyValuePair from '../ui/react-flow/KeyValuePair'
 import {
   CalendarMonth,
   formatDisplayDate,
   formatDisplayTime,
   getInitialMonth,
   parseTime,
-  toISODateString,
-  toTimeString
+  toISODateString
 } from '../ui/schedule/utils'
 import { ScheduleCalendar } from '../ui/schedule/ScheduleCalendar'
 import { ScheduleTimePicker } from '../ui/schedule/ScheduleTimePicker'
@@ -79,6 +78,85 @@ type NodeUpdatePayload = {
   triggerType: string
   scheduleConfig?: ScheduleConfig
   hasValidationErrors: boolean
+}
+
+type NodeStatusSnapshot = {
+  isRunning: boolean
+  isSucceeded: boolean
+  isFailed: boolean
+}
+
+type TriggerNodeData = {
+  id?: string
+  label?: string
+  expanded?: boolean
+  inputs?: TriggerInput[]
+  dirty?: boolean
+  triggerType?: string
+  scheduleConfig?: Partial<ScheduleConfig>
+  labelError?: string | null
+  wfEpoch?: number
+  nodeStatus?: Partial<NodeStatusSnapshot> & {
+    running?: boolean
+    succeeded?: boolean
+    failed?: boolean
+  }
+  status?: Partial<NodeStatusSnapshot> & {
+    running?: boolean
+    succeeded?: boolean
+    failed?: boolean
+  }
+  isRunning?: boolean
+  isSucceeded?: boolean
+  isFailed?: boolean
+}
+
+const EMPTY_TRIGGER_NODE_DATA: TriggerNodeData = Object.freeze({})
+
+function deriveNodeStatus(data?: TriggerNodeData): NodeStatusSnapshot {
+  if (!data) {
+    return { isRunning: false, isSucceeded: false, isFailed: false }
+  }
+
+  const nested =
+    (typeof data.nodeStatus === 'object' && data.nodeStatus) ||
+    (typeof data.status === 'object' && data.status) ||
+    {}
+  const nestedRecord = nested as Record<string, unknown>
+
+  const resolve = (value: unknown): boolean => {
+    if (typeof value === 'boolean') return value
+    return Boolean(value)
+  }
+
+  const isRunning = resolve(
+    data.isRunning ?? nestedRecord.isRunning ?? nestedRecord.running
+  )
+  const isSucceeded = resolve(
+    data.isSucceeded ?? nestedRecord.isSucceeded ?? nestedRecord.succeeded
+  )
+  const isFailed = resolve(
+    data.isFailed ?? nestedRecord.isFailed ?? nestedRecord.failed
+  )
+
+  return { isRunning, isSucceeded, isFailed }
+}
+
+interface TriggerNodeProps {
+  id: string
+  data?: TriggerNodeData
+  selected: boolean
+  onLabelChange?: (id: string, label: string) => void
+  onRun?: (id: string, inputs: TriggerInput[]) => Promise<void> | void
+  onRemove?: (id: string) => void
+  onChange?: (
+    id: string,
+    data: NodeUpdatePayload,
+    suppressDirty?: boolean
+  ) => void
+  markDirty?: () => void
+  planTier?: string | null
+  onRestrictionNotice?: (message: string) => void
 }
 
 function inputsEqual(a: TriggerInput[], b: TriggerInput[]) {
@@ -148,23 +226,18 @@ function normalizeScheduleConfig(
   }
 }
 
-export default function TriggerNode({
+function TriggerNode({
   id,
   data,
   selected,
   onLabelChange,
   onRun,
   onRemove,
-  onDirtyChange,
-  onUpdateNode,
-  isRunning,
-  isSucceeded,
-  isFailed,
+  onChange,
+  markDirty,
   planTier,
   onRestrictionNotice
-}) {
-  const isNewNode = !data?.id
-
+}: TriggerNodeProps) {
   const normalizedPlanTier = useMemo(
     () => normalizePlanTier(planTier),
     [planTier]
@@ -178,19 +251,42 @@ export default function TriggerNode({
       return 'UTC'
     }
   }, [])
-  const [label, setLabel] = useState(data?.label ?? 'Trigger')
-  const [expanded, setExpanded] = useState(data?.expanded ?? false)
-  const [inputs, setInputs] = useState(data?.inputs ?? [])
-  const [dirty, setDirty] = useState(data?.dirty ?? isNewNode)
+  const nodeData = useMemo(
+    () => (data ?? EMPTY_TRIGGER_NODE_DATA) as TriggerNodeData,
+    [data]
+  )
+  const nodeDerived = useMemo(() => {
+    const isNewNode = !nodeData?.id
+    const dirty =
+      typeof nodeData?.dirty === 'boolean' ? nodeData.dirty : isNewNode
+    return {
+      dirty,
+      expanded: Boolean(nodeData?.expanded),
+      wfEpoch: nodeData?.wfEpoch ?? 0
+    }
+  }, [nodeData])
+  const label = nodeData.label ?? 'Trigger'
+  const rawInputs = nodeData.inputs
+  const inputs = useMemo<TriggerInput[]>(
+    () => (Array.isArray(rawInputs) ? (rawInputs as TriggerInput[]) : []),
+    [rawInputs]
+  )
+  const triggerType = nodeData?.triggerType ?? 'Manual'
+  const rawScheduleConfig = nodeData.scheduleConfig
+  const labelError = nodeData.labelError ?? null
+  const expanded = nodeDerived.expanded
+  const dirty = nodeDerived.dirty
+  const wfEpoch = nodeDerived.wfEpoch
+  const { isRunning, isSucceeded, isFailed } = useMemo(
+    () => deriveNodeStatus(nodeData),
+    [nodeData]
+  )
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [running, setRunning] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [triggerType, setTriggerType] = useState(data?.triggerType ?? 'Manual')
-  const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>(() =>
-    normalizeScheduleConfig(data?.scheduleConfig, defaultTimezone)
-  )
-  const [labelError, setLabelError] = useState<string | null>(
-    data?.labelError ?? null
+  const scheduleConfig = useMemo(
+    () => normalizeScheduleConfig(rawScheduleConfig, defaultTimezone),
+    [rawScheduleConfig, defaultTimezone]
   )
   const normalizedTriggerType = useMemo(
     () =>
@@ -235,21 +331,8 @@ export default function TriggerNode({
   const datePickerContainerRef = useRef<HTMLDivElement | null>(null)
   const timePickerContainerRef = useRef<HTMLDivElement | null>(null)
   const timezonePickerContainerRef = useRef<HTMLDivElement | null>(null)
-  const lastNodeUpdateRef = useRef<NodeUpdatePayload>()
+  const lastNodeUpdateRef = useRef<NodeUpdatePayload | undefined>(undefined)
   const lastPlanNoticeRef = useRef<string | null>(null)
-
-  const updateSchedule = (
-    updater: (previous: ScheduleConfig) => ScheduleConfig
-  ) => {
-    setScheduleConfig((prev) => {
-      const next = updater(prev)
-      if (scheduleConfigsEqual(prev, next)) {
-        return prev
-      }
-      setDirty(true)
-      return next
-    })
-  }
 
   const selectedTime = useMemo(
     () => parseTime(scheduleConfig.startTime),
@@ -266,12 +349,7 @@ export default function TriggerNode({
   }, [])
 
   useEffect(() => {
-    if (data?.dirty === undefined) return
-    setDirty((prev) => (prev === data.dirty ? prev : data.dirty))
-  }, [data?.dirty])
-
-  useEffect(() => {
-    setDatePickerMonth((prev) => {
+    setDatePickerMonth((prev: CalendarMonth) => {
       const next = getInitialMonth(scheduleConfig.startDate)
       return prev.year === next.year && prev.month === next.month ? prev : next
     })
@@ -347,43 +425,6 @@ export default function TriggerNode({
     }
   }, [timezonePickerOpen])
 
-  // Reset local state when node id changes (e.g., new node or remount on workflow switch)
-  useEffect(() => {
-    const nextLabel = data?.label ?? 'Trigger'
-    setLabel((prev) => (prev === nextLabel ? prev : nextLabel))
-
-    const nextExpanded = data?.expanded ?? false
-    setExpanded((prev) => (prev === nextExpanded ? prev : nextExpanded))
-
-    const nextInputs = data?.inputs ?? []
-    setInputs((prev) => (inputsEqual(prev, nextInputs) ? prev : nextInputs))
-
-    const nextTriggerType = data?.triggerType ?? 'Manual'
-    setTriggerType((prev) =>
-      prev === nextTriggerType ? prev : nextTriggerType
-    )
-
-    const normalizedSchedule = normalizeScheduleConfig(
-      data?.scheduleConfig,
-      defaultTimezone
-    )
-    setScheduleConfig((prev) =>
-      scheduleConfigsEqual(prev, normalizedSchedule) ? prev : normalizedSchedule
-    )
-
-    const nextLabelError = data?.labelError ?? null
-    setLabelError((prev) => (prev === nextLabelError ? prev : nextLabelError))
-  }, [
-    id,
-    data?.label,
-    data?.expanded,
-    data?.inputs,
-    data?.triggerType,
-    data?.scheduleConfig,
-    defaultTimezone,
-    data?.labelError
-  ])
-
   useEffect(() => {
     if (!onRestrictionNotice) return
     if (scheduleRestrictionMessage) {
@@ -405,63 +446,141 @@ export default function TriggerNode({
     }
   }, [])
 
-  const hasInvalidInputs = useMemo(() => {
-    if (inputs.length === 0) return false
-    return inputs.some((i) => !i.key.trim() || !i.value.trim())
-  }, [inputs])
+  const evaluateInputs = useCallback((candidate: TriggerInput[]) => {
+    if (!candidate || candidate.length === 0) {
+      return { hasInvalidInputs: false, hasDuplicateKeys: false }
+    }
+    const trimmedKeys = candidate.map((input) => input.key.trim())
+    const trimmedValues = candidate.map((input) => input.value.trim())
+    const hasInvalidInputs =
+      trimmedKeys.some((key) => !key) || trimmedValues.some((value) => !value)
+    const filteredKeys = trimmedKeys.filter((key) => key)
+    const hasDuplicateKeys = new Set(filteredKeys).size !== filteredKeys.length
+    return { hasInvalidInputs, hasDuplicateKeys }
+  }, [])
 
-  const hasDuplicateKeys = useMemo(() => {
-    const keys = inputs.map((i) => i.key.trim()).filter((k) => k)
-    return new Set(keys).size !== keys.length
-  }, [inputs])
+  const { hasInvalidInputs, hasDuplicateKeys } = useMemo(
+    () => evaluateInputs(inputs),
+    [inputs, evaluateInputs]
+  )
 
-  const combinedHasValidationErrors =
-    hasDuplicateKeys ||
-    hasInvalidInputs ||
-    Boolean(labelError) ||
-    scheduleRestricted
+  const computeHasValidationErrors = useCallback(
+    (overrides?: {
+      inputs?: TriggerInput[]
+      labelError?: string | null
+      triggerType?: string
+    }) => {
+      const nextInputs = overrides?.inputs ?? inputs
+      const nextLabelError =
+        overrides && 'labelError' in overrides
+          ? overrides.labelError
+          : labelError
+      const nextTriggerType = overrides?.triggerType ?? triggerType
+      const { hasInvalidInputs: nextInvalid, hasDuplicateKeys: nextDuplicate } =
+        evaluateInputs(nextInputs)
+      const normalizedNextTriggerType =
+        typeof nextTriggerType === 'string'
+          ? nextTriggerType.trim().toLowerCase()
+          : 'manual'
+      const nextScheduleRestricted =
+        isSoloPlan && normalizedNextTriggerType === 'schedule'
+      return (
+        nextDuplicate ||
+        nextInvalid ||
+        Boolean(nextLabelError) ||
+        nextScheduleRestricted
+      )
+    },
+    [evaluateInputs, inputs, labelError, triggerType, isSoloPlan]
+  )
+
+  const combinedHasValidationErrors = useMemo(
+    () => computeHasValidationErrors(),
+    [computeHasValidationErrors]
+  )
 
   useEffect(() => {
-    // notify node update; suppress marking workflow dirty if clearing programmatically
-    const schedulePayload =
-      triggerType === 'Schedule' ? scheduleConfig : undefined
+    lastNodeUpdateRef.current = undefined
+  }, [id, wfEpoch])
 
-    const payload: NodeUpdatePayload = {
-      label,
-      inputs,
+  const handleChange = useCallback(
+    (
+      partial: Partial<NodeUpdatePayload>,
+      options?: { suppressDirty?: boolean }
+    ) => {
+      const nextInputs = partial.inputs ?? inputs
+      const nextLabel = partial.label ?? label
+      const nextTriggerType = partial.triggerType ?? triggerType
+      const nextLabelError =
+        partial.labelError !== undefined ? partial.labelError : labelError
+      const nextDirty = partial.dirty ?? dirty
+      const nextExpanded = partial.expanded ?? expanded
+      const nextScheduleConfigCandidate =
+        partial.scheduleConfig ?? scheduleConfig
+      const nextHasValidationErrors =
+        partial.hasValidationErrors ??
+        computeHasValidationErrors({
+          inputs: nextInputs,
+          labelError: nextLabelError,
+          triggerType: nextTriggerType
+        })
+      const normalizedNextTriggerType =
+        typeof nextTriggerType === 'string'
+          ? nextTriggerType.trim().toLowerCase()
+          : 'manual'
+      const payload: NodeUpdatePayload = {
+        label: nextLabel,
+        inputs: nextInputs,
+        dirty: nextDirty,
+        expanded: nextExpanded,
+        triggerType: nextTriggerType,
+        hasValidationErrors: nextHasValidationErrors,
+        ...(normalizedNextTriggerType === 'schedule' &&
+        nextScheduleConfigCandidate
+          ? { scheduleConfig: nextScheduleConfigCandidate }
+          : {})
+      }
+
+      if (nodeUpdatesEqual(lastNodeUpdateRef.current, payload)) {
+        return
+      }
+
+      lastNodeUpdateRef.current = {
+        ...payload,
+        inputs: payload.inputs.map((input) => ({ ...input })),
+        scheduleConfig: cloneScheduleConfig(payload.scheduleConfig)
+      }
+
+      onChange?.(id, payload, options?.suppressDirty ?? false)
+      if (payload.dirty && !options?.suppressDirty) {
+        markDirty?.()
+      }
+    },
+    [
+      computeHasValidationErrors,
       dirty,
       expanded,
-      triggerType,
-      ...(schedulePayload ? { scheduleConfig: schedulePayload } : {}),
-      hasValidationErrors: combinedHasValidationErrors
-    }
+      id,
+      inputs,
+      label,
+      labelError,
+      markDirty,
+      onChange,
+      scheduleConfig,
+      triggerType
+    ]
+  )
 
-    if (nodeUpdatesEqual(lastNodeUpdateRef.current, payload)) {
-      return
-    }
-
-    lastNodeUpdateRef.current = {
-      ...payload,
-      inputs: inputs.map((input) => ({ ...input })),
-      scheduleConfig: cloneScheduleConfig(schedulePayload)
-    }
-
-    onUpdateNode?.(id, payload, true)
-    if (dirty) {
-      onDirtyChange?.(dirty, payload)
-    }
-  }, [
-    label,
-    inputs,
-    dirty,
-    expanded,
-    triggerType,
-    scheduleConfig,
-    id,
-    onDirtyChange,
-    onUpdateNode,
-    combinedHasValidationErrors
-  ])
+  const updateSchedule = useCallback(
+    (updater: (previous: ScheduleConfig) => ScheduleConfig) => {
+      const next = updater(scheduleConfig)
+      if (scheduleConfigsEqual(scheduleConfig, next)) {
+        return
+      }
+      handleChange({ scheduleConfig: next, dirty: true })
+    },
+    [handleChange, scheduleConfig]
+  )
 
   const handleRun = async () => {
     setRunning(true)
@@ -505,8 +624,12 @@ export default function TriggerNode({
             <input
               value={label}
               onChange={(e) => {
-                setLabel(e.target.value)
-                setDirty(true)
+                const nextValue = e.target.value
+                const hasChanged = nextValue !== label
+                handleChange({
+                  label: nextValue,
+                  dirty: hasChanged ? true : dirty
+                })
               }}
               onBlur={() => {
                 setEditing(false)
@@ -533,7 +656,9 @@ export default function TriggerNode({
           )}
           <div className="flex gap-1">
             <button
-              onClick={() => setExpanded((prev) => !prev)}
+              onClick={() =>
+                handleChange({ expanded: !expanded }, { suppressDirty: true })
+              }
               className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"
             >
               {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -572,9 +697,8 @@ export default function TriggerNode({
               <TriggerTypeDropdown
                 value={triggerType}
                 onChange={(type) => {
-                  setTriggerType(type)
-                  onUpdateNode?.(id, { triggerType: type, dirty: true })
-                  setDirty(true)
+                  if (type === triggerType) return
+                  handleChange({ triggerType: type, dirty: true })
                 }}
                 disabledOptions={
                   isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
@@ -637,10 +761,10 @@ export default function TriggerNode({
                                 month={datePickerMonth}
                                 selectedDate={scheduleConfig.startDate}
                                 todayISO={todayISO}
-                                onMonthChange={(nextMonth) =>
+                                onMonthChange={(nextMonth: CalendarMonth) =>
                                   setDatePickerMonth(nextMonth)
                                 }
-                                onSelectDate={(isoDate) => {
+                                onSelectDate={(isoDate: string) => {
                                   updateSchedule((prev) => ({
                                     ...prev,
                                     startDate: isoDate
@@ -685,7 +809,7 @@ export default function TriggerNode({
                               >
                                 <ScheduleTimePicker
                                   selectedTime={selectedTime}
-                                  onSelect={(time) => {
+                                  onSelect={(time: string) => {
                                     updateSchedule((prev) => ({
                                       ...prev,
                                       startTime: time
@@ -731,10 +855,10 @@ export default function TriggerNode({
                                   options={filteredTimezoneOptions}
                                   selectedTimezone={scheduleConfig.timezone}
                                   search={timezoneSearch}
-                                  onSearchChange={(value) =>
+                                  onSearchChange={(value: string) =>
                                     setTimezoneSearch(value)
                                   }
-                                  onSelect={(timezone) => {
+                                  onSelect={(timezone: string) => {
                                     updateSchedule((prev) => ({
                                       ...prev,
                                       timezone
@@ -832,12 +956,20 @@ export default function TriggerNode({
                 )
               ) : null}
               <KeyValuePair
-                key={`kv-${id}-${data?.wfEpoch ?? ''}`}
+                key={`kv-${id}-${wfEpoch ?? ''}`}
                 title="Input Variables"
                 variables={inputs}
-                onChange={(updatedVars, nodeHasErrors, childDirty) => {
-                  setInputs(updatedVars)
-                  setDirty((prev) => prev || childDirty)
+                onChange={(
+                  updatedVars: TriggerInput[],
+                  _nodeHasErrors,
+                  childDirty: boolean
+                ) => {
+                  const nextDirty =
+                    dirty || childDirty || !inputsEqual(inputs, updatedVars)
+                  handleChange({
+                    inputs: updatedVars,
+                    dirty: nextDirty
+                  })
                 }}
               />
             </motion.div>
@@ -880,3 +1012,5 @@ export default function TriggerNode({
     </motion.div>
   )
 }
+
+export default memo(TriggerNode)

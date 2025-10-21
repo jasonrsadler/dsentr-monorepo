@@ -25,7 +25,7 @@ export default function ActionTypeDropdown({
   const selectedLabel =
     actionTypes.find((a) => a.id === value)?.label || 'Select Action'
 
-  const handleSelect = (id) => {
+  const handleSelect = (id: string) => {
     if (disabledOptions[id]) {
       onBlockedSelect?.(id, disabledOptions[id])
       return

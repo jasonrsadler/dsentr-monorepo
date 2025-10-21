@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import deepEqual from 'fast-deep-equal'
 import NodeDropdownField, {
   type NodeDropdownOptionGroup
-} from '@/components/UI/InputFields/NodeDropdownField'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
+} from '@/components/ui/input-fields/NodeDropdownField'
+import NodeInputField from '@/components/ui/input-fields/NodeInputField'
+import NodeSecretDropdown from '@/components/ui/input-fields/NodeSecretDropdown'
 import {
   fetchConnections,
   getCachedConnections,
@@ -597,10 +597,9 @@ export default function SlackAction({
       <p className="text-xs text-slate-500">
         Slack OAuth connections require the following scopes:{' '}
         <code>chat:write</code>, <code>channels:read</code>,{' '}
-        <code>groups:read</code>, <code>users:read</code>,{' '}
-        and <code>users:read.email</code>. Messages
-        are sent as the connected Slack user and must target channels they can
-        access.
+        <code>groups:read</code>, <code>users:read</code>, and{' '}
+        <code>users:read.email</code>. Messages are sent as the connected Slack
+        user and must target channels they can access.
       </p>
     </div>
   )

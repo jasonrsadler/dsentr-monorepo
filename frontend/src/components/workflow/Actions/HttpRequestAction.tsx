@@ -1,9 +1,9 @@
-import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
-import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
-import NodeCheckBoxField from '@/components/UI/InputFields/NodeCheckboxField'
-import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import NodeDropdownField from '@/components/ui/input-fields/NodeDropdownField'
+import NodeInputField from '@/components/ui/input-fields/NodeInputField'
+import NodeSecretDropdown from '@/components/ui/input-fields/NodeSecretDropdown'
+import NodeTextAreaField from '@/components/ui/input-fields/NodeTextAreaField'
+import NodeCheckBoxField from '@/components/ui/input-fields/NodeCheckboxField'
+import KeyValuePair from '@/components/ui/react-flow/KeyValuePair'
 import { useState, useEffect } from 'react'
 
 interface HttpRequestActionProps {

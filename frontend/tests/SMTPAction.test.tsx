@@ -1,12 +1,16 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import SMTPAction from '../src/components/workflow/Actions/Email/Services/SMTPAction'
-import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+import { renderWithSecrets } from 'tests/test-utils/renderWithSecrets'
+import type { SecretStore } from '@/lib/optionsApi'
 
-const secrets = {
+const secrets: SecretStore = {
   email: {
     smtp: {
-      primary: 'secret'
+      primary: {
+        value: 'secret',
+        ownerId: ''
+      }
     }
   }
 }

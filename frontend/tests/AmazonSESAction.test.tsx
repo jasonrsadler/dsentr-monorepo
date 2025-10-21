@@ -1,12 +1,16 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
-import AmazonSESAction from '@/components/Workflow/Actions/Email/Services/AmazonSESAction'
-import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+import AmazonSESAction from '@/components/workflow/Actions/Email/Services/AmazonSESAction'
+import { renderWithSecrets } from 'tests/test-utils/renderWithSecrets'
+import type { SecretStore } from '@/lib/optionsApi'
 
-const secrets = {
+const secrets: SecretStore = {
   email: {
     amazon_ses: {
-      primary: 'secret'
+      primary: {
+        value: 'secret',
+        ownerId: ''
+      }
     }
   }
 }

@@ -4,7 +4,7 @@ import ShieldIcon from '@/assets/svg-components/ShieldIcon'
 import ModularAnimation from '@/components/ModularAnimation'
 import { usePageMeta } from '@/hooks/usePageMeta'
 import { MetaTags } from '@/components/MetaTags'
-import { NavigateButton } from './components/UI/Buttons/NavigateButton'
+import { NavigateButton } from './components/ui/buttons/NavigateButton'
 
 export default function Home() {
   usePageMeta({

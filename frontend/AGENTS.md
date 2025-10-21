@@ -1,3 +1,26 @@
+# ⚠ ReactFlow + Zustand Architecture (MANDATORY)
+- **Lock discipline.** Never mutate workflow graph state while a persistence or evaluation lock is active. All canvas writes
+  must go through the store's serialized action queue so concurrent saves or executions cannot interleave. When you acquire the
+  `workflowLock`, release it in a `finally` clause and short-circuit UI updates until the lock clears.
+- **Dirty-state contract.** Treat `workflowDirty` as the single truth for unsaved changes. Toggle it only through the dedicated
+  Zustand actions, and reset node-level dirty flags from within the same transaction that persists the workflow. Never derive
+  dirtiness from React Flow props or local component state.
+- **Memoized handlers only.** All canvas callbacks (`onNodesChange`, `onEdgesChange`, `onNodeDragStop`, etc.) must be wrapped in
+  `useCallback` (or equivalent memo helpers) with stable selector inputs so React Flow can reuse handler instances between
+  renders. Refrain from inline lambdas that capture mutable state.
+- **Node purity rules.** Node components must remain referentially pure: compute derived props with `useMemo`, keep side effects
+  inside `useEffect` that depend on memoized selectors, and avoid firing store updates during render. Only emit store actions
+  from vetted effect or event handler paths after confirming the payload actually changed.
+
+# ⚠ ReactFlow Development Standard (HIGH PRIORITY)
+- All React Flow canvas features must continue to use the Zustand-driven unidirectional workflow architecture.
+- Treat the workflow store as the single source of truth: read via selectors, mutate via dispatched actions only.
+- Keep data flowing in one direction—store ➜ component props/derived selectors ➜ user interaction callbacks ➜ store actions.
+- Do not introduce cross-component prop mutation, ad-hoc event buses, or direct store mutations.
+- Define any new canvas state alongside typed selectors/actions in the shared workflow store modules and reuse existing helpers when possible.
+- Run side effects (async loads, debounced persistence, telemetry) inside dedicated store actions/effects so components remain pure.
+- When updating nodes or edges, emit Zustand actions that describe intent rather than mutating React Flow internals directly.
+
 # Frontend Agent Notes
 
 ## Context
@@ -51,3 +74,10 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - SendGrid action synchronizes props via snapshots and suppresses redundant onChange emissions to avoid React Flow maximum update depth errors.
 - Custom code action now normalizes state snapshots, caches the last emission, and guards prop-to-state sync so React Flow doesn't hit maximum update depth while editing scripts or IO pairs.
 - Teams action now initializes its connection sanitizer before dependent callbacks so React Flow renders don't encounter temporal dead zone reference errors.
+- Documented the high-priority React Flow standard that enforces the Zustand-driven unidirectional workflow architecture.
+- Documented the mandatory React Flow + Zustand architecture contract covering lock discipline, dirty-state management, memoized handlers, and node purity rules.
+- Dashboard workflow view now listens directly to the workflow store so the toolbar's save indicator reacts immediately to node or edge edits.
+- Workflow toolbar dirty indicator now flips immediately when canvas edits occur so the save button activates as soon as the workflow changes.
+- Workflow saves now merge sanitized node snapshots without reflagging the workflow as dirty, ensuring the toolbar save button disables once persistence completes.
+- Workflow node dirty badges now reset after a successful save unless validation errors remain, so only nodes requiring attention retain their badge indicators.
+- FlowCanvas now clears node dirty flags during saves and avoids inferring dirtiness from validation status when reloading graphs, keeping validation badges visible without re-triggering unsaved-change indicators.

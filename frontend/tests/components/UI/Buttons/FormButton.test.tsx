@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { FormButton } from '@/components/UI/Buttons/FormButton'
+import { FormButton } from '@/components/ui/buttons/FormButton'
 
 test('renders with children and type submit', () => {
   render(<FormButton>Click Me</FormButton>)

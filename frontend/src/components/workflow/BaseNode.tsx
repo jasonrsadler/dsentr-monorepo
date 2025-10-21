@@ -1,17 +1,29 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import { ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
+import { type Dispatch, type ReactNode, type SetStateAction } from 'react'
+
+interface BaseNodeProps {
+  id: string
+  selected?: boolean
+  label?: string
+  dirty?: boolean
+  expanded: boolean
+  setExpanded: Dispatch<SetStateAction<boolean>>
+  onRemove?: (id: string) => void
+  children?: ReactNode
+}
 
 export default function BaseNode({
   id,
-  selected,
-  label,
-  dirty,
+  selected = false,
+  label = '',
+  dirty = false,
   expanded,
   setExpanded,
   onRemove,
   children
-}) {
+}: BaseNodeProps) {
   return (
     <motion.div
       layout

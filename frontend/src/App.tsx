@@ -16,7 +16,7 @@ import LogoutHandler from '@/Logout'
 import ForgotPassword from '@/ForgotPassword'
 import ResetPassword from './ResetPassword'
 import NotFound from '@/components/NotFound'
-import Dashboard from './layouts/DashboardLayouts/Dashboard'
+import Dashboard from './layouts/dashboard-layouts/Dashboard'
 import WorkspaceOnboarding from './WorkspaceOnboarding'
 
 export default function App() {

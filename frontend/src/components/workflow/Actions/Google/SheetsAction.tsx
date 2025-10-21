@@ -1,8 +1,8 @@
 import NodeDropdownField, {
   type NodeDropdownOptionGroup
-} from '@/components/UI/InputFields/NodeDropdownField'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+} from '@/components/ui/input-fields/NodeDropdownField'
+import NodeInputField from '@/components/ui/input-fields/NodeInputField'
+import KeyValuePair from '@/components/ui/react-flow/KeyValuePair'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
@@ -109,7 +109,7 @@ export default function SheetsAction({
     worksheet: args.worksheet || '',
     columns: args.columns || [],
     accountEmail: args.accountEmail || '',
-    oauthConnectionScope: args.oauthConnectionScope || '',
+    oauthConnectionScope: args.oauthConnectionScope,
     oauthConnectionId: args.oauthConnectionId || ''
   })
   const [connectionState, setConnectionState] =
@@ -263,7 +263,7 @@ export default function SheetsAction({
         ) {
           return {
             ...prev,
-            oauthConnectionScope: '',
+            oauthConnectionScope: undefined,
             oauthConnectionId: '',
             accountEmail: ''
           }
@@ -290,7 +290,7 @@ export default function SheetsAction({
         ) {
           return {
             ...prev,
-            oauthConnectionScope: '',
+            oauthConnectionScope: undefined,
             oauthConnectionId: '',
             accountEmail: ''
           }
@@ -355,7 +355,7 @@ export default function SheetsAction({
       if (columnError) errors.columnsError = columnError
     }
     const selectedScope =
-      updatedParams.oauthConnectionScope ?? params.oauthConnectionScope ?? ''
+      updatedParams.oauthConnectionScope ?? params.oauthConnectionScope
     const selectedId =
       updatedParams.oauthConnectionId ?? params.oauthConnectionId ?? ''
 
@@ -478,7 +478,7 @@ export default function SheetsAction({
       if (!parsed) {
         setParams((prev) => ({
           ...prev,
-          oauthConnectionScope: '',
+          oauthConnectionScope: undefined,
           oauthConnectionId: '',
           accountEmail: ''
         }))

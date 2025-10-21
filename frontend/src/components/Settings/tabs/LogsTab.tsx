@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import JsonDialog from '@/components/UI/Dialog/JsonDialog'
+import JsonDialog from '@/components/ui/dialog/JsonDialog'
 import { useSecrets } from '@/contexts/SecretsContext'
 import {
   getWorkflowLogs,

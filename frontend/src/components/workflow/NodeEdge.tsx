@@ -1,5 +1,17 @@
-import { BaseEdge, getBezierPath } from '@xyflow/react'
+import {
+  BaseEdge,
+  getBezierPath,
+  type Edge,
+  type EdgeProps
+} from '@xyflow/react'
 import { Trash2 } from 'lucide-react'
+
+type NodeEdgeVariant = 'default' | 'bold' | 'dashed'
+
+type NodeEdgeProps = EdgeProps<Edge<Record<string, unknown>>> & {
+  onDelete?: (id: string) => void
+  onChangeType?: (id: string, edgeType: NodeEdgeVariant) => void
+}
 
 export default function NodeEdge({
   id,
@@ -15,7 +27,7 @@ export default function NodeEdge({
   markerEnd,
   onDelete,
   onChangeType
-}) {
+}: NodeEdgeProps) {
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -25,7 +37,7 @@ export default function NodeEdge({
     targetPosition
   })
 
-  const edgeType = data?.edgeType || 'default'
+  const edgeType = (data?.edgeType as NodeEdgeVariant | undefined) ?? 'default'
 
   return (
     <>
@@ -54,7 +66,9 @@ export default function NodeEdge({
             <select
               title="Edge Type"
               value={edgeType}
-              onChange={(e) => onChangeType?.(id, e.target.value)}
+              onChange={(e) =>
+                onChangeType?.(id, e.target.value as NodeEdgeVariant)
+              }
               className="px-8 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 text-xs"
             >
               <option value="default">Default</option>

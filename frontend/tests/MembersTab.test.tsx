@@ -1,7 +1,7 @@
 import { describe, beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import MembersTab from './MembersTab'
+import MembersTab from '@/components/settings/tabs/MembersTab'
 import { useAuth } from '@/stores/auth'
 import {
   HttpError,
@@ -137,7 +137,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'User',
           plan: 'workspace',
           role: 'owner',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [soloMembership],
         currentWorkspaceId: soloMembership.workspace.id
@@ -163,7 +164,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'Tester',
           plan: 'solo',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [soloMembership, workspaceMembership],
         currentWorkspaceId: soloMembership.workspace.id
@@ -202,7 +204,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'Member',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [workspaceMembership, soloMembership],
         currentWorkspaceId: workspaceMembership.workspace.id,
@@ -252,7 +255,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'User',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [workspaceMembership, soloMembership],
         currentWorkspaceId: workspaceMembership.workspace.id,
@@ -301,7 +305,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'Only',
           plan: 'workspace',
           role: 'user',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [viewerWorkspaceMembership, soloMembership],
         currentWorkspaceId: viewerWorkspaceMembership.workspace.id,
@@ -351,7 +356,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'User',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [workspaceMembership],
         currentWorkspaceId: workspaceMembership.workspace.id
@@ -413,7 +419,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'User',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [workspaceMembership],
         currentWorkspaceId: workspaceMembership.workspace.id
@@ -446,7 +453,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'Member',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [workspaceMembership, soloMembership],
         currentWorkspaceId: workspaceMembership.workspace.id,
@@ -503,7 +511,8 @@ describe('MembersTab workspace actions', () => {
           last_name: 'User',
           plan: 'workspace',
           role: 'admin',
-          companyName: null
+          companyName: null,
+          oauthProvider: 'email'
         },
         memberships: [workspaceMembership],
         currentWorkspaceId: workspaceMembership.workspace.id

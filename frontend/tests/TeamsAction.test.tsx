@@ -1,14 +1,25 @@
 import { screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { vi } from 'vitest'
-import TeamsAction from './TeamsAction'
-import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+import { vi, type MockInstance } from 'vitest'
+import TeamsAction from '../src/components/workflow/Actions/Messaging/Services/TeamsAction'
+import { renderWithSecrets } from 'tests/test-utils/renderWithSecrets'
 import { updateCachedConnections } from '@/lib/oauthApi'
 import { useAuth } from '@/stores/auth'
+import type { SecretStore } from '@/lib/optionsApi'
 
-const secrets = {
+const requestInfoToUrl = (input: RequestInfo | URL): string => {
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.toString()
+  if (input instanceof Request) return input.url
+  return String(input)
+}
+
+const secrets: SecretStore = {
   messaging: {
     teams: {
-      existing: 'abc'
+      existing: {
+        value: 'abc',
+        ownerId: ''
+      }
     }
   }
 }
@@ -41,8 +52,27 @@ describe('TeamsAction', () => {
       headers: { 'Content-Type': 'application/json' }
     })
 
+  let fetchMock: MockInstance<typeof fetch>
+
   beforeEach(() => {
     vi.useFakeTimers()
+    fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url = requestInfoToUrl(input)
+        if (url.includes('/api/oauth/connections')) {
+          return Promise.resolve(
+            createJsonResponse({
+              success: true,
+              personal: [],
+              workspace: [],
+              providers: { microsoft: { connected: false } }
+            })
+          )
+        }
+
+        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+      })
     act(() => {
       useAuth.setState((state) => ({
         ...state,
@@ -302,31 +332,22 @@ describe('TeamsAction', () => {
   })
 
   it('shows guidance when delegated OAuth has no Microsoft connection', async () => {
-    const fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = requestInfoToUrl(input)
 
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              providers: {
-                microsoft: { connected: false }
-              }
-            })
-          )
-        }
+      if (url.includes('/api/oauth/connections')) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            providers: {
+              microsoft: { connected: false }
+            }
+          })
+        )
+      }
 
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
+      return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+    })
 
     const onChange = vi.fn()
     renderWithSecrets(
@@ -357,76 +378,67 @@ describe('TeamsAction', () => {
   })
 
   it('loads teams, channels, and members for delegated OAuth messaging', async () => {
-    const fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = requestInfoToUrl(input)
 
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              providers: {
-                microsoft: {
-                  connected: true,
-                  account_email: 'alice@example.com'
-                }
+      if (url.includes('/api/oauth/connections')) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            providers: {
+              microsoft: {
+                connected: true,
+                account_email: 'alice@example.com'
               }
-            })
-          )
-        }
+            }
+          })
+        )
+      }
 
-        if (
-          url.includes('/api/microsoft/teams/team-1/channels/channel-1/members')
-        ) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              members: [
-                {
-                  id: 'member-1',
-                  userId: 'user-1',
-                  displayName: 'Jane Doe',
-                  email: 'jane@example.com'
-                }
-              ]
-            })
-          )
-        }
+      if (
+        url.includes('/api/microsoft/teams/team-1/channels/channel-1/members')
+      ) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            members: [
+              {
+                id: 'member-1',
+                userId: 'user-1',
+                displayName: 'Jane Doe',
+                email: 'jane@example.com'
+              }
+            ]
+          })
+        )
+      }
 
-        if (url.includes('/api/microsoft/teams/team-1/channels')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              channels: [
-                { id: 'channel-1', displayName: 'General' },
-                { id: 'channel-2', displayName: 'Announcements' }
-              ]
-            })
-          )
-        }
+      if (url.includes('/api/microsoft/teams/team-1/channels')) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            channels: [
+              { id: 'channel-1', displayName: 'General' },
+              { id: 'channel-2', displayName: 'Announcements' }
+            ]
+          })
+        )
+      }
 
-        if (url.includes('/api/microsoft/teams')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              teams: [
-                { id: 'team-1', displayName: 'Team One' },
-                { id: 'team-2', displayName: 'Team Two' }
-              ]
-            })
-          )
-        }
+      if (url.includes('/api/microsoft/teams')) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            teams: [
+              { id: 'team-1', displayName: 'Team One' },
+              { id: 'team-2', displayName: 'Team Two' }
+            ]
+          })
+        )
+      }
 
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
+      return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+    })
 
     const onChange = vi.fn()
     renderWithSecrets(
@@ -503,51 +515,42 @@ describe('TeamsAction', () => {
   })
 
   it('clears delegated workspace selections when a shared credential is removed while editing', async () => {
-    const fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = requestInfoToUrl(input)
 
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              personal: [
-                {
-                  id: 'microsoft-personal',
-                  provider: 'microsoft',
-                  accountEmail: 'owner@example.com',
-                  expiresAt: '2025-01-01T00:00:00.000Z',
-                  isShared: true,
-                  requiresReconnect: false
-                }
-              ],
-              workspace: [
-                {
-                  id: 'workspace-shared',
-                  provider: 'microsoft',
-                  accountEmail: 'ops@example.com',
-                  expiresAt: '2025-01-01T00:00:00.000Z',
-                  workspaceId: 'ws-1',
-                  workspaceName: 'Operations',
-                  sharedByName: 'Owner User',
-                  sharedByEmail: 'owner@example.com',
-                  requiresReconnect: false
-                }
-              ]
-            })
-          )
-        }
+      if (url.includes('/api/oauth/connections')) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            personal: [
+              {
+                id: 'microsoft-personal',
+                provider: 'microsoft',
+                accountEmail: 'owner@example.com',
+                expiresAt: '2025-01-01T00:00:00.000Z',
+                isShared: true,
+                requiresReconnect: false
+              }
+            ],
+            workspace: [
+              {
+                id: 'workspace-shared',
+                provider: 'microsoft',
+                accountEmail: 'ops@example.com',
+                expiresAt: '2025-01-01T00:00:00.000Z',
+                workspaceId: 'ws-1',
+                workspaceName: 'Operations',
+                sharedByName: 'Owner User',
+                sharedByEmail: 'owner@example.com',
+                requiresReconnect: false
+              }
+            ]
+          })
+        )
+      }
 
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
+      return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+    })
 
     const onChange = vi.fn()
     renderWithSecrets(
@@ -612,7 +615,7 @@ describe('TeamsAction', () => {
   })
 
   it('removes revoked workspace credentials from delegated selections', async () => {
-    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+    fetchMock.mockResolvedValueOnce(
       createJsonResponse({
         success: true,
         personal: [
@@ -675,69 +678,60 @@ describe('TeamsAction', () => {
   })
 
   it('builds delegated adaptive cards without manual JSON', async () => {
-    const fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = requestInfoToUrl(input)
 
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              providers: {
-                microsoft: {
-                  connected: true,
-                  account_email: 'alice@example.com'
-                }
+      if (url.includes('/api/oauth/connections')) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            providers: {
+              microsoft: {
+                connected: true,
+                account_email: 'alice@example.com'
               }
-            })
-          )
-        }
+            }
+          })
+        )
+      }
 
-        if (
-          url.includes('/api/microsoft/teams/team-1/channels/channel-1/members')
-        ) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              members: []
-            })
-          )
-        }
+      if (
+        url.includes('/api/microsoft/teams/team-1/channels/channel-1/members')
+      ) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            members: []
+          })
+        )
+      }
 
-        if (url.includes('/api/microsoft/teams/team-1/channels')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              channels: [
-                { id: 'channel-1', displayName: 'General' },
-                { id: 'channel-2', displayName: 'Announcements' }
-              ]
-            })
-          )
-        }
+      if (url.includes('/api/microsoft/teams/team-1/channels')) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            channels: [
+              { id: 'channel-1', displayName: 'General' },
+              { id: 'channel-2', displayName: 'Announcements' }
+            ]
+          })
+        )
+      }
 
-        if (url.includes('/api/microsoft/teams')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              teams: [
-                { id: 'team-1', displayName: 'Team One' },
-                { id: 'team-2', displayName: 'Team Two' }
-              ]
-            })
-          )
-        }
+      if (url.includes('/api/microsoft/teams')) {
+        return Promise.resolve(
+          createJsonResponse({
+            success: true,
+            teams: [
+              { id: 'team-1', displayName: 'Team One' },
+              { id: 'team-2', displayName: 'Team Two' }
+            ]
+          })
+        )
+      }
 
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
+      return Promise.reject(new Error(`Unhandled fetch: ${url}`))
+    })
 
     const onChange = vi.fn()
     renderWithSecrets(

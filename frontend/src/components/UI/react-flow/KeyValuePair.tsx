@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Trash2, Plus } from 'lucide-react'
-import NodeInputField from '../InputFields/NodeInputField'
+import NodeInputField from '../input-fields/NodeInputField'
 
 interface KeyValuePairProps {
   title?: string

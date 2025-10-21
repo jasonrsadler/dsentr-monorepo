@@ -15,7 +15,7 @@ export default function TriggerTypeDropdown({
 }) {
   const [open, setOpen] = useState(false)
 
-  const handleSelect = (type) => {
+  const handleSelect = (type: string) => {
     if (disabledOptions[type]) {
       onBlockedSelect?.(type, disabledOptions[type])
       return
