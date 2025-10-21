@@ -60,6 +60,13 @@ describe('IntegrationsTab', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setCachedConnections.mockImplementation(() => {})
+    promoteConnection.mockResolvedValue({
+      workspaceConnectionId: 'workspace-generated-id',
+      createdBy: 'user-id'
+    })
+    unshareWorkspaceConnection.mockResolvedValue(undefined)
+    disconnectProvider.mockResolvedValue(undefined)
+    refreshProvider.mockResolvedValue(undefined as any)
   })
 
   it('promotes a personal connection to the workspace', async () => {
@@ -191,6 +198,16 @@ describe('IntegrationsTab', () => {
       connectionId: 'google-personal'
     })
 
+    const lastCacheCall =
+      setCachedConnections.mock.calls[
+        setCachedConnections.mock.calls.length - 1
+      ]
+    expect(lastCacheCall?.[1]).toEqual({ workspaceId: 'ws-1' })
+    const cachedSnapshot = lastCacheCall?.[0] as any
+    const workspaceEntries = cachedSnapshot.google.workspace
+    const lastWorkspaceEntry = workspaceEntries[workspaceEntries.length - 1]
+    expect(lastWorkspaceEntry.id).toBe('workspace-generated-id')
+
     expect(
       await screen.findByText(/Promoted to workspace/i)
     ).toBeInTheDocument()
@@ -199,6 +216,86 @@ describe('IntegrationsTab', () => {
     await waitFor(() => {
       expect(screen.getAllByText(/Last refreshed/)).toHaveLength(2)
     })
+  })
+
+  it('removes a newly promoted workspace connection without refreshing', async () => {
+    fetchConnections.mockResolvedValueOnce({
+      google: {
+        personal: {
+          scope: 'personal',
+          id: 'google-personal',
+          connected: true,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      },
+      microsoft: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      },
+      slack: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      }
+    })
+
+    const user = userEvent.setup()
+    render(<IntegrationsTab />)
+
+    await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+
+    const promoteButton = await screen.findByRole('button', {
+      name: /Promote to Workspace/i
+    })
+    await user.click(promoteButton)
+
+    const confirmPromote = await screen.findByRole('button', {
+      name: /^Promote$/i
+    })
+    await user.click(confirmPromote)
+
+    await waitFor(() => expect(promoteConnection).toHaveBeenCalledTimes(1))
+
+    const removeButton = await screen.findByRole('button', {
+      name: /Remove from workspace/i
+    })
+    await user.click(removeButton)
+
+    await screen.findByText(/Remove Workspace Connection/i)
+    const confirmButtons = await screen.findAllByRole('button', {
+      name: /^Remove$/i
+    })
+    const confirmRemove = confirmButtons[confirmButtons.length - 1]
+    await user.click(confirmRemove)
+
+    await waitFor(() =>
+      expect(unshareWorkspaceConnection).toHaveBeenCalledWith(
+        'ws-1',
+        'workspace-generated-id'
+      )
+    )
   })
 
   it('preserves existing token metadata when refresh response omits fields', async () => {

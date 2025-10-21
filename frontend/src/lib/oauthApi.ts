@@ -39,6 +39,22 @@ type ProviderConnectionMap = Record<OAuthProvider, ProviderConnectionSet>
 
 const PROVIDER_KEYS: OAuthProvider[] = ['google', 'microsoft', 'slack']
 
+const resolveApiBaseUrl = (): string => {
+  const rawBase =
+    typeof API_BASE_URL === 'string' && API_BASE_URL.trim().length > 0
+      ? API_BASE_URL.trim()
+      : typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost'
+
+  return rawBase.replace(/\/$/, '')
+}
+
+const buildApiUrl = (path: string): string => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return new URL(normalizedPath, resolveApiBaseUrl()).toString()
+}
+
 type ConnectionListener = (snapshot: ProviderConnectionMap | null) => void
 type RawConnectionListener = (
   snapshot: ProviderConnectionMap | null,
@@ -261,14 +277,7 @@ export async function fetchConnections(
   options?: ConnectionCacheOptions
 ): Promise<ProviderConnectionMap> {
   const targetWorkspace = resolveWorkspaceId(options?.workspaceId)
-  const normalizedBase = (
-    typeof API_BASE_URL === 'string' && API_BASE_URL.trim().length > 0
-      ? API_BASE_URL.trim()
-      : typeof window !== 'undefined' && window.location?.origin
-        ? window.location.origin
-        : 'http://localhost'
-  ).replace(/\/$/, '')
-  const url = new URL('/api/oauth/connections', normalizedBase)
+  const url = new URL('/api/oauth/connections', resolveApiBaseUrl())
   if (targetWorkspace) {
     url.searchParams.set('workspace', targetWorkspace)
   }
@@ -358,7 +367,7 @@ export async function disconnectProvider(
   provider: OAuthProvider
 ): Promise<void> {
   const csrfToken = await getCsrfToken()
-  const res = await fetch(`${API_BASE_URL}/api/oauth/${provider}/disconnect`, {
+  const res = await fetch(buildApiUrl(`/api/oauth/${provider}/disconnect`), {
     method: 'DELETE',
     credentials: 'include',
     headers: {
@@ -381,7 +390,7 @@ export async function unshareWorkspaceConnection(
 ): Promise<void> {
   const csrfToken = await getCsrfToken()
   const res = await fetch(
-    `${API_BASE_URL}/api/workspaces/${workspaceId}/connections/${connectionId}`,
+    buildApiUrl(`/api/workspaces/${workspaceId}/connections/${connectionId}`),
     {
       method: 'DELETE',
       credentials: 'include',
@@ -409,7 +418,7 @@ export async function refreshProvider(
   >
 > {
   const csrfToken = await getCsrfToken()
-  const res = await fetch(`${API_BASE_URL}/api/oauth/${provider}/refresh`, {
+  const res = await fetch(buildApiUrl(`/api/oauth/${provider}/refresh`), {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -476,6 +485,20 @@ export const markProviderRevoked = (provider: OAuthProvider) => {
   })
 }
 
+interface PromoteConnectionResponse {
+  success?: boolean
+  workspace_connection_id?: string | null
+  workspaceConnectionId?: string | null
+  created_by?: string | null
+  createdBy?: string | null
+  message?: string | null
+}
+
+export interface PromoteConnectionResult {
+  workspaceConnectionId: string
+  createdBy?: string
+}
+
 export async function promoteConnection({
   workspaceId,
   provider,
@@ -484,10 +507,10 @@ export async function promoteConnection({
   workspaceId: string
   provider: OAuthProvider
   connectionId: string
-}): Promise<void> {
+}): Promise<PromoteConnectionResult> {
   const csrfToken = await getCsrfToken()
   const res = await fetch(
-    `${API_BASE_URL}/api/workspaces/${workspaceId}/connections/promote`,
+    buildApiUrl(`/api/workspaces/${workspaceId}/connections/promote`),
     {
       method: 'POST',
       credentials: 'include',
@@ -502,11 +525,34 @@ export async function promoteConnection({
     }
   )
 
-  if (!res.ok) {
-    const message = await res
-      .json()
-      .then((body) => body?.message)
-      .catch(() => null)
+  const data = (await res
+    .json()
+    .catch(() => null)) as PromoteConnectionResponse | null
+
+  const normalizeId = (value?: string | null): string | null => {
+    if (typeof value !== 'string') {
+      return null
+    }
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
+  }
+
+  const workspaceConnectionId =
+    normalizeId(data?.workspace_connection_id) ??
+    normalizeId(data?.workspaceConnectionId ?? null)
+
+  if (!res.ok || !workspaceConnectionId) {
+    const message = typeof data?.message === 'string' ? data?.message : null
     throw new Error(message || 'Failed to promote connection')
+  }
+
+  const createdBy =
+    normalizeId(data?.created_by) ??
+    normalizeId(data?.createdBy ?? null) ??
+    undefined
+
+  return {
+    workspaceConnectionId,
+    createdBy
   }
 }

@@ -75,6 +75,8 @@ pub struct OAuthAccountService {
     slack: OAuthProviderConfig,
     #[cfg(test)]
     refresh_override: Option<Arc<RefreshOverride>>,
+    #[cfg(test)]
+    revocation_override: Option<Arc<RevocationOverride>>,
 }
 
 impl OAuthAccountService {
@@ -95,6 +97,8 @@ impl OAuthAccountService {
             slack: settings.slack.clone(),
             #[cfg(test)]
             refresh_override: None,
+            #[cfg(test)]
+            revocation_override: None,
         }
     }
 
@@ -110,6 +114,17 @@ impl OAuthAccountService {
             + 'static,
     {
         self.refresh_override = override_fn.map(|func| func as Arc<RefreshOverride>);
+    }
+
+    #[cfg(test)]
+    pub fn set_revocation_override<F>(&mut self, override_fn: Option<Arc<F>>)
+    where
+        F: for<'a> Fn(ConnectedOAuthProvider, &'a str) -> Result<(), OAuthAccountError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.revocation_override = override_fn.map(|func| func as Arc<RevocationOverride>);
     }
 
     pub fn google_scopes(&self) -> &'static str {
@@ -130,6 +145,15 @@ impl OAuthAccountService {
         provider: ConnectedOAuthProvider,
         tokens: AuthorizationTokens,
     ) -> Result<StoredOAuthToken, OAuthAccountError> {
+        if let Some(existing) = self
+            .repo
+            .find_by_user_and_provider(user_id, provider)
+            .await?
+        {
+            let stored = self.decrypt_record(existing)?;
+            self.revoke_existing_credentials(provider, &stored).await;
+        }
+
         let encrypted_access = encrypt_secret(&self.encryption_key, &tokens.access_token)?;
         let encrypted_refresh = encrypt_secret(&self.encryption_key, &tokens.refresh_token)?;
 
@@ -250,9 +274,7 @@ impl OAuthAccountService {
             .await?
         {
             let decrypted = self.decrypt_record(existing)?;
-            let _ = self
-                .revoke_refresh_token(provider, &decrypted.refresh_token)
-                .await;
+            self.revoke_existing_credentials(provider, &decrypted).await;
         }
         self.repo.delete_token(user_id, provider).await?;
         Ok(())
@@ -723,17 +745,58 @@ impl OAuthAccountService {
         })
     }
 
-    async fn revoke_refresh_token(
+    async fn revoke_existing_credentials(
         &self,
         provider: ConnectedOAuthProvider,
-        refresh_token: &str,
+        stored: &StoredOAuthToken,
+    ) {
+        if !stored.refresh_token.trim().is_empty() {
+            if let Err(err) = self
+                .revoke_provider_token(provider, &stored.refresh_token)
+                .await
+            {
+                warn!(
+                    ?err,
+                    provider = ?provider,
+                    token_id = %stored.id,
+                    "failed to revoke stored refresh token"
+                );
+            }
+        }
+
+        if matches!(provider, ConnectedOAuthProvider::Slack)
+            && !stored.access_token.trim().is_empty()
+        {
+            if let Err(err) = self
+                .revoke_provider_token(provider, &stored.access_token)
+                .await
+            {
+                warn!(
+                    ?err,
+                    provider = ?provider,
+                    token_id = %stored.id,
+                    "failed to revoke stored access token"
+                );
+            }
+        }
+    }
+
+    async fn revoke_provider_token(
+        &self,
+        provider: ConnectedOAuthProvider,
+        token: &str,
     ) -> Result<(), OAuthAccountError> {
+        #[cfg(test)]
+        if let Some(override_fn) = &self.revocation_override {
+            return override_fn(provider, token);
+        }
+
         match provider {
             ConnectedOAuthProvider::Google => {
                 let response = self
                     .client
                     .post(GOOGLE_REVOCATION_URL)
-                    .form(&[("token", refresh_token)])
+                    .form(&[("token", token)])
                     .send()
                     .await?;
 
@@ -753,7 +816,7 @@ impl OAuthAccountService {
                     .client
                     .post(MICROSOFT_REVOCATION_URL)
                     .form(&[
-                        ("token", refresh_token),
+                        ("token", token),
                         ("token_type_hint", "refresh_token"),
                         ("client_id", self.microsoft.client_id.as_str()),
                     ])
@@ -782,7 +845,7 @@ impl OAuthAccountService {
                     .client
                     .post(SLACK_REVOCATION_URL)
                     .form(&[
-                        ("token", refresh_token),
+                        ("token", token),
                         ("client_id", self.slack.client_id.as_str()),
                         ("client_secret", self.slack.client_secret.as_str()),
                     ])
@@ -1086,6 +1149,10 @@ type RefreshOverride = dyn for<'a> Fn(ConnectedOAuthProvider, &'a str) -> Result
     + Sync;
 
 #[cfg(test)]
+type RevocationOverride =
+    dyn for<'a> Fn(ConnectedOAuthProvider, &'a str) -> Result<(), OAuthAccountError> + Send + Sync;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository};
@@ -1328,6 +1395,122 @@ mod tests {
             _provider: ConnectedOAuthProvider,
             _is_shared: bool,
         ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+    }
+
+    #[derive(Default)]
+    struct UpsertingTokenRepo {
+        token: Mutex<Option<UserOAuthToken>>,
+    }
+
+    impl UpsertingTokenRepo {
+        fn with_existing(token: UserOAuthToken) -> Self {
+            Self {
+                token: Mutex::new(Some(token)),
+            }
+        }
+
+        fn current(&self) -> Option<UserOAuthToken> {
+            self.token.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl UserOAuthTokenRepository for UpsertingTokenRepo {
+        async fn upsert_token(
+            &self,
+            new_token: NewUserOAuthToken,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            let mut guard = self.token.lock().unwrap();
+            let now = OffsetDateTime::now_utc();
+
+            let mut record = guard
+                .clone()
+                .filter(|existing| {
+                    existing.user_id == new_token.user_id && existing.provider == new_token.provider
+                })
+                .unwrap_or_else(|| UserOAuthToken {
+                    id: Uuid::new_v4(),
+                    user_id: new_token.user_id,
+                    provider: new_token.provider,
+                    access_token: new_token.access_token.clone(),
+                    refresh_token: new_token.refresh_token.clone(),
+                    expires_at: new_token.expires_at,
+                    account_email: new_token.account_email.clone(),
+                    is_shared: false,
+                    created_at: now,
+                    updated_at: now,
+                });
+
+            record.access_token = new_token.access_token.clone();
+            record.refresh_token = new_token.refresh_token.clone();
+            record.expires_at = new_token.expires_at;
+            record.account_email = new_token.account_email.clone();
+            record.updated_at = now;
+
+            *guard = Some(record.clone());
+            Ok(record)
+        }
+
+        async fn find_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            Ok(self
+                .token
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|token| token.user_id == user_id && token.provider == provider))
+        }
+
+        async fn delete_token(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.token.lock().unwrap();
+            if guard
+                .as_ref()
+                .map(|token| token.user_id == user_id && token.provider == provider)
+                .unwrap_or(false)
+            {
+                *guard = None;
+            }
+            Ok(())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            user_id: Uuid,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            Ok(self
+                .token
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|token| token.user_id == user_id)
+                .into_iter()
+                .collect())
+        }
+
+        async fn mark_shared(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+            is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            let mut guard = self.token.lock().unwrap();
+            if let Some(token) = guard
+                .as_mut()
+                .filter(|token| token.user_id == user_id && token.provider == provider)
+            {
+                token.is_shared = is_shared;
+                token.updated_at = OffsetDateTime::now_utc();
+                return Ok(token.clone());
+            }
             Err(Error::RowNotFound)
         }
     }
@@ -1578,6 +1761,102 @@ mod tests {
             workspace_repo.stale_calls(),
             vec![(user_id, ConnectedOAuthProvider::Microsoft)]
         );
+    }
+
+    #[tokio::test]
+    async fn save_authorization_revokes_existing_slack_credentials() {
+        let user_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+        let key = Arc::new(vec![11u8; 32]);
+
+        let existing_access = "old-access";
+        let existing_refresh = "old-refresh";
+
+        let stored_token = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypt_secret(key.as_ref(), existing_access)
+                .expect("access token encryption succeeds"),
+            refresh_token: encrypt_secret(key.as_ref(), existing_refresh)
+                .expect("refresh token encryption succeeds"),
+            expires_at: now,
+            account_email: "owner@example.com".into(),
+            is_shared: false,
+            created_at: now - Duration::hours(1),
+            updated_at: now - Duration::minutes(15),
+        };
+
+        let repo = Arc::new(UpsertingTokenRepo::with_existing(stored_token));
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let client = Arc::new(Client::new());
+
+        let mut service = OAuthAccountService::new(
+            repo.clone(),
+            workspace_repo,
+            key.clone(),
+            client,
+            &OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/slack".into(),
+                },
+                token_encryption_key: (*key).clone(),
+            },
+        );
+
+        let revocations = Arc::new(Mutex::new(Vec::new()));
+        service.set_revocation_override(Some(Arc::new({
+            let revocations = Arc::clone(&revocations);
+            move |provider: ConnectedOAuthProvider, token: &str| {
+                revocations
+                    .lock()
+                    .unwrap()
+                    .push((provider, token.to_string()));
+                Ok(())
+            }
+        })));
+
+        let new_tokens = AuthorizationTokens {
+            access_token: "new-access".into(),
+            refresh_token: "new-refresh".into(),
+            expires_at: now + Duration::hours(2),
+            account_email: "updated@example.com".into(),
+        };
+
+        let stored = service
+            .save_authorization(user_id, ConnectedOAuthProvider::Slack, new_tokens.clone())
+            .await
+            .expect("save should succeed");
+
+        assert_eq!(stored.access_token, new_tokens.access_token);
+        assert_eq!(stored.refresh_token, new_tokens.refresh_token);
+        assert_eq!(stored.account_email, new_tokens.account_email);
+
+        let recorded = revocations.lock().unwrap().clone();
+        assert_eq!(
+            recorded,
+            vec![
+                (ConnectedOAuthProvider::Slack, existing_refresh.to_string()),
+                (ConnectedOAuthProvider::Slack, existing_access.to_string()),
+            ]
+        );
+
+        let persisted = repo
+            .current()
+            .expect("repo should retain most recent token record");
+        assert_eq!(persisted.account_email, new_tokens.account_email);
     }
 
     #[test]

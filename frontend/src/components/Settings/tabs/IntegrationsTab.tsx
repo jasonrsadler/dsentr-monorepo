@@ -678,11 +678,15 @@ export default function IntegrationsTab({
           }
           try {
             setPromoteBusyProvider(provider)
-            await promoteConnection({
+            const promotion = await promoteConnection({
               workspaceId,
               provider,
               connectionId: personal.id
             })
+            const workspaceConnectionId = promotion.workspaceConnectionId
+            if (!workspaceConnectionId) {
+              throw new Error('Missing workspace connection identifier')
+            }
             const workspaceName =
               currentWorkspace?.workspace.name?.trim() ?? 'Workspace connection'
             const sharedByName =
@@ -706,12 +710,13 @@ export default function IntegrationsTab({
               }
 
               const filteredWorkspace = (existing.workspace ?? []).filter(
-                (entry) => entry.id !== personal.id
+                (entry) =>
+                  entry.id !== workspaceConnectionId && entry.id !== personal.id
               )
 
               const workspaceEntry: WorkspaceConnectionInfo = {
                 scope: 'workspace',
-                id: personal.id,
+                id: workspaceConnectionId,
                 connected: true,
                 provider,
                 accountEmail: personal.accountEmail,
