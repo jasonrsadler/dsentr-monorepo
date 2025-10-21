@@ -3,8 +3,10 @@ use super::prelude::*;
 pub(crate) const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub(crate) const MICROSOFT_AUTH_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+pub(crate) const SLACK_AUTH_URL: &str = "https://slack.com/oauth/v2/authorize";
 pub(crate) const GOOGLE_STATE_COOKIE: &str = "oauth_google_state";
 pub(crate) const MICROSOFT_STATE_COOKIE: &str = "oauth_microsoft_state";
+pub(crate) const SLACK_STATE_COOKIE: &str = "oauth_slack_state";
 pub(crate) const STATE_COOKIE_MAX_MINUTES: i64 = 10;
 pub(crate) const OAUTH_PLAN_RESTRICTION_MESSAGE: &str =
     "OAuth integrations are available on workspace plans and above. Upgrade to connect accounts.";
@@ -160,6 +162,7 @@ pub(crate) fn parse_provider(raw: &str) -> Option<ConnectedOAuthProvider> {
     match raw.to_ascii_lowercase().as_str() {
         "google" => Some(ConnectedOAuthProvider::Google),
         "microsoft" => Some(ConnectedOAuthProvider::Microsoft),
+        "slack" => Some(ConnectedOAuthProvider::Slack),
         _ => None,
     }
 }
@@ -168,6 +171,7 @@ pub(crate) fn provider_to_key(provider: ConnectedOAuthProvider) -> &'static str 
     match provider {
         ConnectedOAuthProvider::Google => "google",
         ConnectedOAuthProvider::Microsoft => "microsoft",
+        ConnectedOAuthProvider::Slack => "slack",
     }
 }
 

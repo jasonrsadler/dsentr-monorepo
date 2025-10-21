@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub enum ConnectedOAuthProvider {
     Google,
     Microsoft,
+    Slack,
 }
 
 #[allow(dead_code)]

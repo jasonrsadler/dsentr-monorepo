@@ -39,10 +39,10 @@ use uuid::Uuid;
 
 use super::{
     accounts::{list_connections, refresh_connection, ListConnectionsQuery},
-    connect::{google_connect_start, ConnectQuery},
+    connect::{google_connect_start, slack_connect_start, ConnectQuery},
     helpers::{
         build_state_cookie, error_message_for_redirect, handle_callback, parse_provider,
-        CallbackQuery, GOOGLE_STATE_COOKIE,
+        CallbackQuery, GOOGLE_STATE_COOKIE, SLACK_STATE_COOKIE,
     },
     prelude::ConnectedOAuthProvider,
 };
@@ -61,6 +61,11 @@ fn stub_config() -> Arc<Config> {
                 client_id: "client".into(),
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost/microsoft".into(),
+            },
+            slack: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/slack".into(),
             },
             token_encryption_key: vec![0u8; 32],
         },
@@ -486,8 +491,9 @@ async fn list_connections_without_workspace_excludes_shared_entries() {
         requires_reconnect: false,
     };
 
-    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
-        Arc::new(WorkspaceConnectionsStub::new(vec![(user_id, workspace_listing)]));
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> = Arc::new(
+        WorkspaceConnectionsStub::new(vec![(user_id, workspace_listing)]),
+    );
     let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
         tokens: vec![personal_token],
     });
@@ -906,6 +912,7 @@ fn parse_provider_handles_known_values() {
         parse_provider("microsoft"),
         Some(ConnectedOAuthProvider::Microsoft)
     );
+    assert_eq!(parse_provider("slack"), Some(ConnectedOAuthProvider::Slack));
     assert_eq!(parse_provider("unknown"), None);
 }
 
@@ -1001,6 +1008,63 @@ async fn workspace_plan_google_start_sets_state_cookie() {
     assert!(cookies
         .iter()
         .any(|cookie| cookie.contains(GOOGLE_STATE_COOKIE)));
+}
+
+#[tokio::test]
+async fn solo_plan_slack_start_redirects_with_upgrade_message() {
+    let config = stub_config();
+    let state = stub_state(config.clone());
+    let claims = Claims {
+        plan: Some("solo".into()),
+        ..stub_claims()
+    };
+
+    let response = slack_connect_start(
+        State(state),
+        AuthSession(claims),
+        Query(ConnectQuery::default()),
+        CookieJar::new(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("location header present")
+        .to_str()
+        .unwrap();
+    assert!(location.contains("connected=false"));
+    assert!(location.contains("provider=slack"));
+}
+
+#[tokio::test]
+async fn workspace_plan_slack_start_sets_state_cookie() {
+    let config = stub_config();
+    let state = stub_state(config.clone());
+    let claims = Claims {
+        plan: Some("workspace".into()),
+        ..stub_claims()
+    };
+
+    let response = slack_connect_start(
+        State(state),
+        AuthSession(claims),
+        Query(ConnectQuery::default()),
+        CookieJar::new(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let cookies = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(cookies
+        .iter()
+        .any(|cookie| cookie.contains(SLACK_STATE_COOKIE)));
 }
 
 #[tokio::test]

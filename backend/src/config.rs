@@ -13,6 +13,7 @@ pub struct OAuthProviderConfig {
 pub struct OAuthSettings {
     pub google: OAuthProviderConfig,
     pub microsoft: OAuthProviderConfig,
+    pub slack: OAuthProviderConfig,
     pub token_encryption_key: Vec<u8>,
 }
 
@@ -48,6 +49,15 @@ impl Config {
                 .expect("MICROSOFT_INTEGRATIONS_REDIRECT_URI must be set"),
         };
 
+        let slack = OAuthProviderConfig {
+            client_id: env::var("SLACK_INTEGRATIONS_CLIENT_ID")
+                .expect("SLACK_INTEGRATIONS_CLIENT_ID must be set"),
+            client_secret: env::var("SLACK_INTEGRATIONS_CLIENT_SECRET")
+                .expect("SLACK_INTEGRATIONS_CLIENT_SECRET must be set"),
+            redirect_uri: env::var("SLACK_INTEGRATIONS_REDIRECT_URI")
+                .expect("SLACK_INTEGRATIONS_REDIRECT_URI must be set"),
+        };
+
         let encryption_key_b64 =
             env::var("OAUTH_TOKEN_ENCRYPTION_KEY").expect("OAUTH_TOKEN_ENCRYPTION_KEY must be set");
         let token_encryption_key =
@@ -64,6 +74,7 @@ impl Config {
             oauth: OAuthSettings {
                 google,
                 microsoft,
+                slack,
                 token_encryption_key,
             },
         }

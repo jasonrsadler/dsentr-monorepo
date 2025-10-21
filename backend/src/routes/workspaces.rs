@@ -2515,6 +2515,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "https://app.example.com/oauth/microsoft".into(),
                 },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/slack".into(),
+                },
                 token_encryption_key: vec![0; 32],
             },
         })

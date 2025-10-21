@@ -22,6 +22,9 @@ const MICROSOFT_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oaut
 const MICROSOFT_USERINFO_URL: &str = "https://graph.microsoft.com/v1.0/me";
 const MICROSOFT_REVOCATION_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/logout";
+const SLACK_TOKEN_URL: &str = "https://slack.com/api/oauth.v2.access";
+const SLACK_USER_INFO_URL: &str = "https://slack.com/api/users.info";
+const SLACK_REVOCATION_URL: &str = "https://slack.com/api/auth.revoke";
 
 #[derive(Debug, Clone)]
 pub struct StoredOAuthToken {
@@ -69,6 +72,7 @@ pub struct OAuthAccountService {
     client: Arc<Client>,
     google: OAuthProviderConfig,
     microsoft: OAuthProviderConfig,
+    slack: OAuthProviderConfig,
     #[cfg(test)]
     refresh_override: Option<Arc<RefreshOverride>>,
 }
@@ -88,6 +92,7 @@ impl OAuthAccountService {
             client,
             google: settings.google.clone(),
             microsoft: settings.microsoft.clone(),
+            slack: settings.slack.clone(),
             #[cfg(test)]
             refresh_override: None,
         }
@@ -113,6 +118,10 @@ impl OAuthAccountService {
 
     pub fn microsoft_scopes(&self) -> &'static str {
         "offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMember.Read.All ChannelMessage.Send"
+    }
+
+    pub fn slack_scopes(&self) -> &'static str {
+        "chat:write,channels:read,groups:read,users:read,users:read.email,offline_access"
     }
 
     pub async fn save_authorization(
@@ -269,6 +278,7 @@ impl OAuthAccountService {
         match provider {
             ConnectedOAuthProvider::Google => self.exchange_google_code(code).await,
             ConnectedOAuthProvider::Microsoft => self.exchange_microsoft_code(code).await,
+            ConnectedOAuthProvider::Slack => self.exchange_slack_code(code).await,
         }
     }
 
@@ -398,6 +408,93 @@ impl OAuthAccountService {
         })
     }
 
+    async fn exchange_slack_code(
+        &self,
+        code: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        #[derive(Deserialize)]
+        struct SlackAuthedUser {
+            id: Option<String>,
+            access_token: Option<String>,
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+            expiration: Option<i64>,
+        }
+
+        #[derive(Deserialize)]
+        struct SlackTokenResponse {
+            ok: bool,
+            error: Option<String>,
+            access_token: Option<String>,
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+            authed_user: Option<SlackAuthedUser>,
+        }
+
+        let response: SlackTokenResponse = self
+            .client
+            .post(SLACK_TOKEN_URL)
+            .form(&[
+                ("code", code),
+                ("client_id", self.slack.client_id.as_str()),
+                ("client_secret", self.slack.client_secret.as_str()),
+                ("redirect_uri", self.slack.redirect_uri.as_str()),
+                ("grant_type", "authorization_code"),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        if !response.ok {
+            let message = response
+                .error
+                .unwrap_or_else(|| "Slack OAuth exchange failed".to_string());
+            return Err(OAuthAccountError::InvalidResponse(message));
+        }
+
+        let authed_user = response.authed_user.as_ref().ok_or_else(|| {
+            OAuthAccountError::InvalidResponse("Slack response missing user context".into())
+        })?;
+
+        let access_token = authed_user
+            .access_token
+            .as_ref()
+            .or(response.access_token.as_ref())
+            .ok_or_else(|| {
+                OAuthAccountError::InvalidResponse("Slack response missing access token".into())
+            })?
+            .to_string();
+
+        let refresh_token = authed_user
+            .refresh_token
+            .as_ref()
+            .or(response.refresh_token.as_ref())
+            .ok_or_else(|| {
+                OAuthAccountError::InvalidResponse("Slack response missing refresh token".into())
+            })?
+            .to_string();
+
+        let user_id = authed_user.id.as_ref().ok_or_else(|| {
+            OAuthAccountError::InvalidResponse("Slack response missing user id".into())
+        })?;
+
+        let expires_at = slack_expiration(
+            authed_user.expires_in.or(response.expires_in),
+            authed_user.expiration,
+        )?;
+
+        let account_email = self.fetch_slack_email(&access_token, user_id).await?;
+
+        Ok(AuthorizationTokens {
+            access_token,
+            refresh_token,
+            expires_at,
+            account_email,
+        })
+    }
+
     pub async fn refresh_access_token(
         &self,
         provider: ConnectedOAuthProvider,
@@ -410,6 +507,7 @@ impl OAuthAccountService {
         match provider {
             ConnectedOAuthProvider::Google => self.refresh_google_token(refresh_token).await,
             ConnectedOAuthProvider::Microsoft => self.refresh_microsoft_token(refresh_token).await,
+            ConnectedOAuthProvider::Slack => self.refresh_slack_token(refresh_token).await,
         }
     }
 
@@ -532,21 +630,127 @@ impl OAuthAccountService {
         })
     }
 
+    async fn refresh_slack_token(
+        &self,
+        refresh_token: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        #[derive(Deserialize)]
+        struct SlackAuthedUser {
+            access_token: Option<String>,
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+            expiration: Option<i64>,
+        }
+
+        #[derive(Deserialize)]
+        struct SlackRefreshResponse {
+            ok: bool,
+            error: Option<String>,
+            access_token: Option<String>,
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+            authed_user: Option<SlackAuthedUser>,
+        }
+
+        let response = self
+            .client
+            .post(SLACK_TOKEN_URL)
+            .form(&[
+                ("client_id", self.slack.client_id.as_str()),
+                ("client_secret", self.slack.client_secret.as_str()),
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+            ])
+            .send()
+            .await?;
+
+        if let Err(err) = response.error_for_status_ref() {
+            return Err(OAuthAccountError::Http(err));
+        }
+
+        let body: SlackRefreshResponse = response.json().await?;
+
+        if !body.ok {
+            if let Some(error) = body.error.as_deref() {
+                let lowered = error.to_ascii_lowercase();
+                if lowered.contains("invalid_refresh_token")
+                    || lowered.contains("invalid_grant")
+                    || lowered.contains("token_revoked")
+                {
+                    return Err(OAuthAccountError::TokenRevoked {
+                        provider: ConnectedOAuthProvider::Slack,
+                    });
+                }
+            }
+
+            let message = body
+                .error
+                .unwrap_or_else(|| "Slack refresh failed".to_string());
+            return Err(OAuthAccountError::InvalidResponse(message));
+        }
+
+        let access_token = body
+            .authed_user
+            .as_ref()
+            .and_then(|user| user.access_token.as_ref())
+            .or(body.access_token.as_ref())
+            .ok_or_else(|| {
+                OAuthAccountError::InvalidResponse("Slack refresh missing access token".into())
+            })?
+            .to_string();
+
+        let new_refresh = body
+            .authed_user
+            .as_ref()
+            .and_then(|user| user.refresh_token.as_ref())
+            .or(body.refresh_token.as_ref())
+            .map(|token| token.to_string())
+            .unwrap_or_else(|| refresh_token.to_string());
+
+        let expires_at = slack_expiration(
+            body.authed_user
+                .as_ref()
+                .and_then(|user| user.expires_in)
+                .or(body.expires_in),
+            body.authed_user.as_ref().and_then(|user| user.expiration),
+        )?;
+
+        Ok(AuthorizationTokens {
+            access_token,
+            refresh_token: new_refresh,
+            expires_at,
+            account_email: String::new(),
+        })
+    }
+
     async fn revoke_refresh_token(
         &self,
         provider: ConnectedOAuthProvider,
         refresh_token: &str,
     ) -> Result<(), OAuthAccountError> {
-        let response = match provider {
+        match provider {
             ConnectedOAuthProvider::Google => {
-                self.client
+                let response = self
+                    .client
                     .post(GOOGLE_REVOCATION_URL)
                     .form(&[("token", refresh_token)])
                     .send()
-                    .await?
+                    .await?;
+
+                if response.status() == StatusCode::OK
+                    || response.status() == StatusCode::NO_CONTENT
+                {
+                    Ok(())
+                } else {
+                    Err(OAuthAccountError::InvalidResponse(format!(
+                        "Failed to revoke token: {}",
+                        response.status()
+                    )))
+                }
             }
             ConnectedOAuthProvider::Microsoft => {
-                self.client
+                let response = self
+                    .client
                     .post(MICROSOFT_REVOCATION_URL)
                     .form(&[
                         ("token", refresh_token),
@@ -554,18 +758,106 @@ impl OAuthAccountService {
                         ("client_id", self.microsoft.client_id.as_str()),
                     ])
                     .send()
-                    .await?
-            }
-        };
+                    .await?;
 
-        if response.status() == StatusCode::OK || response.status() == StatusCode::NO_CONTENT {
-            Ok(())
-        } else {
-            Err(OAuthAccountError::InvalidResponse(format!(
-                "Failed to revoke token: {}",
-                response.status()
-            )))
+                if response.status() == StatusCode::OK
+                    || response.status() == StatusCode::NO_CONTENT
+                {
+                    Ok(())
+                } else {
+                    Err(OAuthAccountError::InvalidResponse(format!(
+                        "Failed to revoke token: {}",
+                        response.status()
+                    )))
+                }
+            }
+            ConnectedOAuthProvider::Slack => {
+                #[derive(Deserialize)]
+                struct SlackRevocationResponse {
+                    ok: bool,
+                    error: Option<String>,
+                }
+
+                let response = self
+                    .client
+                    .post(SLACK_REVOCATION_URL)
+                    .form(&[
+                        ("token", refresh_token),
+                        ("client_id", self.slack.client_id.as_str()),
+                        ("client_secret", self.slack.client_secret.as_str()),
+                    ])
+                    .send()
+                    .await?;
+
+                let status = response.status();
+                if status.is_success() {
+                    let body: SlackRevocationResponse = response.json().await?;
+                    if body.ok {
+                        Ok(())
+                    } else {
+                        Err(OAuthAccountError::InvalidResponse(
+                            body.error
+                                .unwrap_or_else(|| "Slack revocation failed".into()),
+                        ))
+                    }
+                } else {
+                    Err(OAuthAccountError::InvalidResponse(format!(
+                        "Failed to revoke token: {}",
+                        status
+                    )))
+                }
+            }
         }
+    }
+
+    async fn fetch_slack_email(
+        &self,
+        access_token: &str,
+        user_id: &str,
+    ) -> Result<String, OAuthAccountError> {
+        #[derive(Deserialize)]
+        struct SlackProfile {
+            email: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct SlackUser {
+            profile: Option<SlackProfile>,
+        }
+
+        #[derive(Deserialize)]
+        struct SlackUserInfoResponse {
+            ok: bool,
+            error: Option<String>,
+            user: Option<SlackUser>,
+        }
+
+        let response = self
+            .client
+            .get(SLACK_USER_INFO_URL)
+            .query(&[("user", user_id)])
+            .bearer_auth(access_token)
+            .send()
+            .await?;
+
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return Err(OAuthAccountError::TokenRevoked {
+                provider: ConnectedOAuthProvider::Slack,
+            });
+        }
+
+        let body: SlackUserInfoResponse = response.json().await?;
+        if !body.ok {
+            let message = body
+                .error
+                .unwrap_or_else(|| "Slack user info request failed".to_string());
+            return Err(OAuthAccountError::InvalidResponse(message));
+        }
+
+        body.user
+            .and_then(|user| user.profile)
+            .and_then(|profile| profile.email)
+            .ok_or_else(|| OAuthAccountError::InvalidResponse("Slack user email missing".into()))
     }
 
     fn decrypt_record(
@@ -738,6 +1030,11 @@ impl OAuthAccountService {
                 client_secret: "stub".into(),
                 redirect_uri: "http://localhost".into(),
             },
+            slack: OAuthProviderConfig {
+                client_id: "stub".into(),
+                client_secret: "stub".into(),
+                redirect_uri: "http://localhost".into(),
+            },
             token_encryption_key: vec![0u8; 32],
         };
         Arc::new(Self::new(
@@ -748,6 +1045,23 @@ impl OAuthAccountService {
             &settings,
         ))
     }
+}
+
+fn slack_expiration(
+    expires_in: Option<i64>,
+    expiration: Option<i64>,
+) -> Result<OffsetDateTime, OAuthAccountError> {
+    if let Some(seconds) = expires_in {
+        return Ok(OffsetDateTime::now_utc() + Duration::seconds(seconds));
+    }
+
+    if let Some(timestamp) = expiration {
+        return OffsetDateTime::from_unix_timestamp(timestamp).map_err(|_| {
+            OAuthAccountError::InvalidResponse("Invalid Slack expiration timestamp".into())
+        });
+    }
+
+    Ok(OffsetDateTime::now_utc() + Duration::hours(1))
 }
 
 pub(crate) fn is_revocation_signal(status: Option<StatusCode>, body: &str) -> bool {
@@ -929,6 +1243,11 @@ mod tests {
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost".into(),
             },
+            slack: OAuthProviderConfig {
+                client_id: "id".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost".into(),
+            },
             token_encryption_key: vec![0u8; 32],
         };
         let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
@@ -936,6 +1255,7 @@ mod tests {
         assert!(scopes.contains("email"));
         assert!(scopes.contains("https://www.googleapis.com/auth/spreadsheets"));
         assert!(service.microsoft_scopes().contains("offline_access"));
+        assert!(service.slack_scopes().contains("users:read"));
     }
 
     #[derive(Default)]
@@ -1155,6 +1475,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/microsoft".into(),
                 },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/slack".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -1230,6 +1555,11 @@ mod tests {
                     client_id: "client".into(),
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/slack".into(),
                 },
                 token_encryption_key: (*key).clone(),
             },

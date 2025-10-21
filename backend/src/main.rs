@@ -43,6 +43,7 @@ use routes::{
     oauth::{
         disconnect_connection, google_connect_callback, google_connect_start, list_connections,
         microsoft_connect_callback, microsoft_connect_start, refresh_connection,
+        slack_connect_callback, slack_connect_start,
     },
     options::secrets::{delete_secret, list_secrets, upsert_secret},
     workflows::{
@@ -420,7 +421,9 @@ async fn main() {
         .route("/google/start", get(google_connect_start))
         .route("/google/callback", get(google_connect_callback))
         .route("/microsoft/start", get(microsoft_connect_start))
-        .route("/microsoft/callback", get(microsoft_connect_callback));
+        .route("/microsoft/callback", get(microsoft_connect_callback))
+        .route("/slack/start", get(slack_connect_start))
+        .route("/slack/callback", get(slack_connect_callback));
 
     let oauth_private_routes = Router::new()
         .route("/connections", get(list_connections))

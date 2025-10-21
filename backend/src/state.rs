@@ -137,6 +137,11 @@ mod tests {
                     client_secret: "stub".into(),
                     redirect_uri: "http://localhost".into(),
                 },
+                slack: crate::config::OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
                 token_encryption_key: vec![0u8; 32],
             },
         });
