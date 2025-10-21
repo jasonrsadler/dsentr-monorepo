@@ -10,7 +10,8 @@ import {
   refreshProvider,
   promoteConnection,
   unshareWorkspaceConnection,
-  setCachedConnections
+  setCachedConnections,
+  markProviderRevoked
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
@@ -49,6 +50,20 @@ const PROVIDERS: ProviderMeta[] = [
   }
 ]
 
+const emptyProviderState = (): ProviderConnectionSet => ({
+  personal: {
+    scope: 'personal',
+    id: null,
+    connected: false,
+    accountEmail: undefined,
+    expiresAt: undefined,
+    lastRefreshedAt: undefined,
+    requiresReconnect: false,
+    isShared: false
+  },
+  workspace: []
+})
+
 export default function IntegrationsTab({
   notice,
   onDismissNotice
@@ -63,26 +78,8 @@ export default function IntegrationsTab({
   const [statuses, setStatuses] = useState<
     Record<OAuthProvider, ProviderConnectionSet>
   >({
-    google: {
-      personal: {
-        scope: 'personal',
-        id: null,
-        connected: false,
-        lastRefreshedAt: undefined,
-        isShared: false
-      },
-      workspace: []
-    },
-    microsoft: {
-      personal: {
-        scope: 'personal',
-        id: null,
-        connected: false,
-        lastRefreshedAt: undefined,
-        isShared: false
-      },
-      workspace: []
-    }
+    google: emptyProviderState(),
+    microsoft: emptyProviderState()
   })
   const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
   const [promoteDialogProvider, setPromoteDialogProvider] =
@@ -245,18 +242,7 @@ export default function IntegrationsTab({
         }
         await disconnectProvider(provider)
         setStatuses((prev) => {
-          const existing = prev[provider] ?? {
-            personal: {
-              scope: 'personal' as const,
-              id: null,
-              connected: false,
-              accountEmail: undefined,
-              expiresAt: undefined,
-              lastRefreshedAt: undefined,
-              isShared: false
-            },
-            workspace: [] as WorkspaceConnectionInfo[]
-          }
+          const existing = prev[provider] ?? emptyProviderState()
           const filteredWorkspace = existing.workspace
             .filter(
               (entry) =>
@@ -273,6 +259,7 @@ export default function IntegrationsTab({
                 accountEmail: undefined,
                 expiresAt: undefined,
                 lastRefreshedAt: undefined,
+                requiresReconnect: false,
                 isShared: false
               },
               workspace: filteredWorkspace
@@ -319,18 +306,12 @@ export default function IntegrationsTab({
     try {
       const updated = await refreshProvider(provider)
       setStatuses((prev) => {
-        const previousPersonal = prev[provider]?.personal ?? {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          isShared: false
-        }
+        const previousPersonal =
+          prev[provider]?.personal ?? emptyProviderState().personal
         const nextPersonal = {
           ...previousPersonal,
-          connected: true
+          connected: true,
+          requiresReconnect: false
         }
 
         if (typeof updated.accountEmail !== 'undefined') {
@@ -355,6 +336,23 @@ export default function IntegrationsTab({
         return nextState
       })
     } catch (err) {
+      if (err && typeof err === 'object' && (err as any).requiresReconnect) {
+        markProviderRevoked(provider)
+        setStatuses((prev) => {
+          const revoked = emptyProviderState()
+          revoked.personal.requiresReconnect = true
+          return {
+            ...prev,
+            [provider]: revoked
+          }
+        })
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Connection requires reconnection'
+        )
+        return
+      }
       const message =
         err instanceof Error ? err.message : 'Failed to refresh tokens'
       setError(message)
@@ -436,9 +434,14 @@ export default function IntegrationsTab({
             const accountEmail = personal?.accountEmail
             const expiresAt = personal?.expiresAt
             const lastRefreshedAt = personal?.lastRefreshedAt
+            const personalRequiresReconnect =
+              personal?.requiresReconnect ?? false
             const busy = busyProvider === provider.key
             const promoting = promoteBusyProvider === provider.key
             const workspaceConnections = status?.workspace ?? []
+            const workspaceRequiresReconnect = workspaceConnections.some(
+              (entry) => entry.requiresReconnect
+            )
             const promoteDisabled =
               !workspaceId ||
               promoting ||
@@ -506,8 +509,20 @@ export default function IntegrationsTab({
                     <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
                       Status:
                     </dt>
-                    <dd>{connected ? 'Connected' : 'Not connected'}</dd>
+                    <dd>
+                      {personalRequiresReconnect
+                        ? 'Reconnect required'
+                        : connected
+                          ? 'Connected'
+                          : 'Not connected'}
+                    </dd>
                   </div>
+                  {personalRequiresReconnect ? (
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      This connection was revoked by the provider. Reconnect to
+                      restore access.
+                    </p>
+                  ) : null}
                   {personal?.isShared ? (
                     <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-300">
                       <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
@@ -553,6 +568,12 @@ export default function IntegrationsTab({
                   <div className="font-semibold text-zinc-700 dark:text-zinc-200">
                     Workspace connections
                   </div>
+                  {workspaceRequiresReconnect ? (
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      One or more shared credentials were revoked. Workspace
+                      admins must reconnect them to continue using workflows.
+                    </p>
+                  ) : null}
                   {workspaceConnections.length === 0 ? (
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
                       No workspace connections have been shared yet.
@@ -562,7 +583,11 @@ export default function IntegrationsTab({
                       {workspaceConnections.map((entry) => (
                         <li
                           key={entry.id}
-                          className="rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-800"
+                          className={`rounded border px-3 py-2 text-xs ${
+                            entry.requiresReconnect
+                              ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-500/70 dark:bg-red-500/10 dark:text-red-200'
+                              : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                          }`}
                         >
                           <div className="font-medium text-zinc-700 dark:text-zinc-100">
                             {entry.workspaceName}
@@ -580,6 +605,11 @@ export default function IntegrationsTab({
                             <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
                               Last refreshed{' '}
                               {new Date(entry.lastRefreshedAt).toLocaleString()}
+                            </div>
+                          ) : null}
+                          {entry.requiresReconnect ? (
+                            <div className="text-[11px] font-semibold text-red-600 dark:text-red-300">
+                              Reconnect required by the credential owner.
                             </div>
                           ) : null}
                           {canPromote ? (
@@ -650,6 +680,7 @@ export default function IntegrationsTab({
 
               const nextPersonal = {
                 ...existing.personal,
+                requiresReconnect: false,
                 isShared: true
               }
 
@@ -668,7 +699,8 @@ export default function IntegrationsTab({
                 workspaceId,
                 workspaceName,
                 sharedByName,
-                sharedByEmail
+                sharedByEmail,
+                requiresReconnect: false
               }
 
               const nextState = {

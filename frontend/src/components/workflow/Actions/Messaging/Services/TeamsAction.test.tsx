@@ -498,7 +498,8 @@ describe('TeamsAction', () => {
                   provider: 'microsoft',
                   accountEmail: 'owner@example.com',
                   expiresAt: '2025-01-01T00:00:00.000Z',
-                  isShared: true
+                  isShared: true,
+                  requiresReconnect: false
                 }
               ],
               workspace: [
@@ -510,7 +511,8 @@ describe('TeamsAction', () => {
                   workspaceId: 'ws-1',
                   workspaceName: 'Operations',
                   sharedByName: 'Owner User',
-                  sharedByEmail: 'owner@example.com'
+                  sharedByEmail: 'owner@example.com',
+                  requiresReconnect: false
                 }
               ]
             })
@@ -572,6 +574,69 @@ describe('TeamsAction', () => {
         screen.getByRole('button', { name: 'Select Microsoft connection' })
       ).toBeInTheDocument()
     })
+
+    const lastCall = onChange.mock.calls.at(-1)
+    expect(lastCall?.[0]).toMatchObject({
+      oauthProvider: 'microsoft',
+      oauthConnectionScope: '',
+      oauthConnectionId: '',
+      oauthAccountEmail: ''
+    })
+  })
+
+  it('removes revoked workspace credentials from delegated selections', async () => {
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      createJsonResponse({
+        success: true,
+        personal: [
+          {
+            id: 'microsoft-personal',
+            provider: 'microsoft',
+            accountEmail: 'owner@example.com',
+            expiresAt: '2025-01-01T00:00:00.000Z',
+            isShared: true,
+            requiresReconnect: false
+          }
+        ],
+        workspace: [
+          {
+            id: 'workspace-shared',
+            provider: 'microsoft',
+            accountEmail: 'ops@example.com',
+            expiresAt: '2025-01-01T00:00:00.000Z',
+            workspaceId: 'ws-1',
+            workspaceName: 'Operations',
+            sharedByName: 'Owner User',
+            sharedByEmail: 'owner@example.com',
+            requiresReconnect: true
+          }
+        ]
+      })
+    )
+
+    const onChange = vi.fn()
+    renderWithSecrets(
+      <TeamsAction
+        args={{
+          ...baseArgs,
+          deliveryMethod: 'Delegated OAuth (Post as user)',
+          oauthProvider: 'microsoft',
+          oauthConnectionScope: 'workspace',
+          oauthConnectionId: 'workspace-shared',
+          oauthAccountEmail: 'ops@example.com'
+        }}
+        onChange={onChange}
+      />,
+      { secrets }
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Select Microsoft connection' })
+      ).toBeInTheDocument()
+    )
 
     const lastCall = onChange.mock.calls.at(-1)
     expect(lastCall?.[0]).toMatchObject({

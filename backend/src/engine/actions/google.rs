@@ -5,10 +5,11 @@ use crate::engine::graph::Node;
 use crate::engine::templating::templ_str;
 use crate::models::oauth_token::ConnectedOAuthProvider;
 use crate::models::workflow_run::WorkflowRun;
-use crate::services::oauth::account_service::OAuthAccountError;
+use crate::services::oauth::account_service::{is_revocation_signal, OAuthAccountError};
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
 use crate::state::AppState;
 use serde_json::{json, Map, Value};
+use tracing::warn;
 use uuid::Uuid;
 
 const DEFAULT_SHEETS_BASE: &str = "https://sheets.googleapis.com/v4/spreadsheets";
@@ -105,7 +106,20 @@ pub(crate) async fn execute_sheets(
         row_values[offset] = entry.value.clone();
     }
 
-    let (access_token, resolved_email) = match connection_usage {
+    enum ConnectionContext {
+        Personal {
+            user_id: Uuid,
+            account_email: Option<String>,
+        },
+        Workspace {
+            workspace_id: Uuid,
+            connection_id: Uuid,
+            created_by: Uuid,
+            account_email: Option<String>,
+        },
+    }
+
+    let (access_token, resolved_email, connection_context) = match connection_usage {
         super::NodeConnectionUsage::Workspace(info) => {
             let workspace_id = run.workspace_id.ok_or_else(|| {
                 "This workflow run is not associated with a workspace. Promote the Google connection to the workspace or switch the action back to a personal connection.".to_string()
@@ -132,6 +146,12 @@ pub(crate) async fn execute_sheets(
             (
                 connection.access_token.clone(),
                 connection.account_email.clone(),
+                ConnectionContext::Workspace {
+                    workspace_id,
+                    connection_id: connection.id,
+                    created_by: connection.created_by,
+                    account_email: Some(connection.account_email.clone()),
+                },
             )
         }
         super::NodeConnectionUsage::User(info) => {
@@ -166,7 +186,14 @@ pub(crate) async fn execute_sheets(
                         "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
                     );
                 }
-                (token.access_token.clone(), token.account_email.clone())
+                (
+                    token.access_token.clone(),
+                    token.account_email.clone(),
+                    ConnectionContext::Personal {
+                        user_id: run.user_id,
+                        account_email: Some(token.account_email.clone()),
+                    },
+                )
             } else {
                 let Some(expected) = expected_email else {
                     return Err(
@@ -180,7 +207,14 @@ pub(crate) async fn execute_sheets(
                     );
                 }
 
-                (token.access_token.clone(), token.account_email.clone())
+                (
+                    token.access_token.clone(),
+                    token.account_email.clone(),
+                    ConnectionContext::Personal {
+                        user_id: run.user_id,
+                        account_email: Some(token.account_email.clone()),
+                    },
+                )
             }
         }
     };
@@ -235,6 +269,77 @@ pub(crate) async fn execute_sheets(
         .map_err(|e| format!("Google Sheets response read failed: {e}"))?;
 
     if !status.is_success() {
+        if is_revocation_signal(Some(status), &body_text) {
+            let (account_email, message) = match &connection_context {
+                ConnectionContext::Personal {
+                    user_id,
+                    account_email,
+                } => {
+                    if let Err(err) = state
+                        .oauth_accounts
+                        .handle_revoked_token(*user_id, ConnectedOAuthProvider::Google)
+                        .await
+                    {
+                        warn!(
+                            user_id = %user_id,
+                            error = %err,
+                            "failed to purge revoked personal google token"
+                        );
+                    }
+
+                    (
+                        account_email.clone(),
+                        "Google revoked the connected account. Reconnect it from Settings → Integrations.".to_string(),
+                    )
+                }
+                ConnectionContext::Workspace {
+                    workspace_id,
+                    connection_id,
+                    created_by,
+                    account_email,
+                } => {
+                    if let Err(err) = state
+                        .workspace_oauth
+                        .handle_revoked_connection(*workspace_id, *connection_id)
+                        .await
+                    {
+                        warn!(
+                            workspace_id = %workspace_id,
+                            connection_id = %connection_id,
+                            error = %err,
+                            "failed to remove revoked workspace google connection"
+                        );
+                    }
+
+                    if let Err(err) = state
+                        .oauth_accounts
+                        .handle_revoked_token(*created_by, ConnectedOAuthProvider::Google)
+                        .await
+                    {
+                        warn!(
+                            created_by = %created_by,
+                            error = %err,
+                            "failed to purge creator's personal google token after workspace revocation"
+                        );
+                    }
+
+                    (
+                        account_email.clone(),
+                        "Google revoked the shared workspace connection. Ask the owner to reconnect it from Settings → Integrations.".to_string(),
+                    )
+                }
+            };
+
+            warn!(
+                status = %status,
+                account_email = account_email.as_deref().unwrap_or("unknown"),
+                body = %body_text,
+                "google sheets api returned revocation signal"
+            );
+
+            return Err(message);
+        }
+
         let detail =
             extract_error_message(&body_text).unwrap_or_else(|| body_text.trim().to_string());
         let detail = if detail.is_empty() {
@@ -357,6 +462,10 @@ fn map_oauth_error(err: OAuthAccountError) -> String {
     match err {
         OAuthAccountError::NotFound => {
             "No connected Google account found. Connect one from Settings → Integrations."
+                .to_string()
+        }
+        OAuthAccountError::TokenRevoked { .. } => {
+            "The connected Google account was revoked. Reconnect it from Settings → Integrations."
                 .to_string()
         }
         other => format!("Failed to obtain Google access token: {other}"),
@@ -618,6 +727,14 @@ mod tests {
         }
 
         async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
+        async fn mark_connections_stale_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), SqlxError> {
             Ok(())
         }
 

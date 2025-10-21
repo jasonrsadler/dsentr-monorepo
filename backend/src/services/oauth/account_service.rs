@@ -4,6 +4,7 @@ use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::config::{OAuthProviderConfig, OAuthSettings};
@@ -56,6 +57,8 @@ pub enum OAuthAccountError {
     InvalidResponse(String),
     #[error("refresh token missing in response")]
     MissingRefreshToken,
+    #[error("oauth token revoked for {provider:?}")]
+    TokenRevoked { provider: ConnectedOAuthProvider },
 }
 
 #[derive(Clone)]
@@ -66,6 +69,8 @@ pub struct OAuthAccountService {
     client: Arc<Client>,
     google: OAuthProviderConfig,
     microsoft: OAuthProviderConfig,
+    #[cfg(test)]
+    refresh_override: Option<Arc<RefreshOverride>>,
 }
 
 impl OAuthAccountService {
@@ -83,7 +88,23 @@ impl OAuthAccountService {
             client,
             google: settings.google.clone(),
             microsoft: settings.microsoft.clone(),
+            #[cfg(test)]
+            refresh_override: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn set_refresh_override<F>(&mut self, override_fn: Option<Arc<F>>)
+    where
+        F: for<'a> Fn(
+                ConnectedOAuthProvider,
+                &'a str,
+            ) -> Result<AuthorizationTokens, OAuthAccountError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.refresh_override = override_fn.map(|func| func as Arc<RefreshOverride>);
     }
 
     pub fn google_scopes(&self) -> &'static str {
@@ -152,9 +173,21 @@ impl OAuthAccountService {
         let mut decrypted = self.decrypt_record(record.clone())?;
         let now = OffsetDateTime::now_utc();
         if decrypted.expires_at <= now + Duration::seconds(60) {
-            let refreshed = self
+            let refreshed = match self
                 .refresh_access_token(provider, &decrypted.refresh_token)
-                .await?;
+                .await
+            {
+                Ok(tokens) => tokens,
+                Err(err) => {
+                    if matches!(err, OAuthAccountError::TokenRevoked { .. }) {
+                        self.repo.delete_token(user_id, provider).await?;
+                        self.workspace_connections
+                            .mark_connections_stale_for_creator(user_id, provider)
+                            .await?;
+                    }
+                    return Err(err);
+                }
+            };
             decrypted.access_token = refreshed.access_token.clone();
             decrypted.refresh_token = refreshed.refresh_token.clone();
             decrypted.expires_at = refreshed.expires_at;
@@ -213,6 +246,18 @@ impl OAuthAccountService {
                 .await;
         }
         self.repo.delete_token(user_id, provider).await?;
+        Ok(())
+    }
+
+    pub async fn handle_revoked_token(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<(), OAuthAccountError> {
+        self.repo.delete_token(user_id, provider).await?;
+        self.workspace_connections
+            .mark_connections_stale_for_creator(user_id, provider)
+            .await?;
         Ok(())
     }
 
@@ -358,6 +403,10 @@ impl OAuthAccountService {
         provider: ConnectedOAuthProvider,
         refresh_token: &str,
     ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        #[cfg(test)]
+        if let Some(override_fn) = &self.refresh_override {
+            return override_fn(provider, refresh_token);
+        }
         match provider {
             ConnectedOAuthProvider::Google => self.refresh_google_token(refresh_token).await,
             ConnectedOAuthProvider::Microsoft => self.refresh_microsoft_token(refresh_token).await,
@@ -376,7 +425,7 @@ impl OAuthAccountService {
             refresh_token: Option<String>,
         }
 
-        let response: TokenResponse = self
+        let response = self
             .client
             .post(GOOGLE_TOKEN_URL)
             .form(&[
@@ -386,10 +435,28 @@ impl OAuthAccountService {
                 ("grant_type", "refresh_token"),
             ])
             .send()
-            .await?
-            .error_for_status()?
-            .json()
             .await?;
+
+        if let Err(err) = response.error_for_status_ref() {
+            let body = response.text().await.unwrap_or_else(|_| String::new());
+            if is_revocation_signal(err.status(), &body) {
+                warn!(
+                    provider = "google",
+                    status = ?err.status(),
+                    body = %body,
+                    "google oauth refresh token revoked"
+                );
+                return Err(OAuthAccountError::TokenRevoked {
+                    provider: ConnectedOAuthProvider::Google,
+                });
+            }
+            return Err(OAuthAccountError::Http(err));
+        }
+
+        let response: TokenResponse = response
+            .json()
+            .await
+            .map_err(|err| OAuthAccountError::InvalidResponse(err.to_string()))?;
 
         let new_refresh = response
             .refresh_token
@@ -417,7 +484,7 @@ impl OAuthAccountService {
             refresh_token: Option<String>,
         }
 
-        let response: TokenResponse = self
+        let response = self
             .client
             .post(MICROSOFT_TOKEN_URL)
             .form(&[
@@ -428,10 +495,28 @@ impl OAuthAccountService {
                 ("redirect_uri", self.microsoft.redirect_uri.as_str()),
             ])
             .send()
-            .await?
-            .error_for_status()?
-            .json()
             .await?;
+
+        if let Err(err) = response.error_for_status_ref() {
+            let body = response.text().await.unwrap_or_else(|_| String::new());
+            if is_revocation_signal(err.status(), &body) {
+                warn!(
+                    provider = "microsoft",
+                    status = ?err.status(),
+                    body = %body,
+                    "microsoft oauth refresh token revoked"
+                );
+                return Err(OAuthAccountError::TokenRevoked {
+                    provider: ConnectedOAuthProvider::Microsoft,
+                });
+            }
+            return Err(OAuthAccountError::Http(err));
+        }
+
+        let response: TokenResponse = response
+            .json()
+            .await
+            .map_err(|err| OAuthAccountError::InvalidResponse(err.to_string()))?;
 
         let new_refresh = response
             .refresh_token
@@ -621,6 +706,14 @@ impl OAuthAccountService {
                 Ok(())
             }
 
+            async fn mark_connections_stale_for_creator(
+                &self,
+                _creator_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
             async fn record_audit_event(
                 &self,
                 _event: crate::db::workspace_connection_repository::NewWorkspaceAuditEvent,
@@ -657,6 +750,27 @@ impl OAuthAccountService {
     }
 }
 
+pub(crate) fn is_revocation_signal(status: Option<StatusCode>, body: &str) -> bool {
+    if matches!(status, Some(StatusCode::UNAUTHORIZED)) {
+        return true;
+    }
+
+    if let Some(StatusCode::BAD_REQUEST) = status {
+        let lowered = body.to_ascii_lowercase();
+        if lowered.contains("invalid_grant") || lowered.contains("revoked") {
+            return true;
+        }
+    }
+
+    let lowered = body.to_ascii_lowercase();
+    lowered.contains("invalid_grant") || lowered.contains("token revoked")
+}
+
+#[cfg(test)]
+type RefreshOverride = dyn for<'a> Fn(ConnectedOAuthProvider, &'a str) -> Result<AuthorizationTokens, OAuthAccountError>
+    + Send
+    + Sync;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -664,6 +778,7 @@ mod tests {
     use crate::db::workspace_connection_repository::WorkspaceConnectionRepository;
     use async_trait::async_trait;
     use sqlx::Error;
+    use std::sync::Mutex;
 
     struct InMemoryRepo;
 
@@ -781,6 +896,14 @@ mod tests {
             Ok(())
         }
 
+        async fn mark_connections_stale_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
         async fn record_audit_event(
             &self,
             _event: crate::db::workspace_connection_repository::NewWorkspaceAuditEvent,
@@ -813,5 +936,331 @@ mod tests {
         assert!(scopes.contains("email"));
         assert!(scopes.contains("https://www.googleapis.com/auth/spreadsheets"));
         assert!(service.microsoft_scopes().contains("offline_access"));
+    }
+
+    #[derive(Default)]
+    struct RecordingTokenRepo {
+        token: Mutex<Option<UserOAuthToken>>,
+        delete_calls: Mutex<Vec<(Uuid, ConnectedOAuthProvider)>>,
+    }
+
+    impl RecordingTokenRepo {
+        fn new(token: UserOAuthToken) -> Self {
+            Self {
+                token: Mutex::new(Some(token)),
+                delete_calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn delete_calls(&self) -> Vec<(Uuid, ConnectedOAuthProvider)> {
+            self.delete_calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl UserOAuthTokenRepository for RecordingTokenRepo {
+        async fn upsert_token(
+            &self,
+            _new_token: NewUserOAuthToken,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+
+        async fn find_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            let guard = self.token.lock().unwrap();
+            Ok(guard
+                .as_ref()
+                .filter(|token| token.user_id == user_id && token.provider == provider)
+                .cloned())
+        }
+
+        async fn delete_token(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.token.lock().unwrap();
+            if guard
+                .as_ref()
+                .map(|token| token.user_id == user_id && token.provider == provider)
+                .unwrap_or(false)
+            {
+                *guard = None;
+            }
+            self.delete_calls.lock().unwrap().push((user_id, provider));
+            Ok(())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            Ok(Vec::new())
+        }
+
+        async fn mark_shared(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingWorkspaceRepo {
+        stale_calls: Mutex<Vec<(Uuid, ConnectedOAuthProvider)>>,
+    }
+
+    impl RecordingWorkspaceRepo {
+        fn stale_calls(&self) -> Vec<(Uuid, ConnectedOAuthProvider)> {
+            self.stale_calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceConnectionRepository for RecordingWorkspaceRepo {
+        async fn insert_connection(
+            &self,
+            _new_connection: crate::db::workspace_connection_repository::NewWorkspaceConnection,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+
+        async fn find_by_id(
+            &self,
+            _connection_id: Uuid,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn find_by_workspace_and_provider(
+            &self,
+            _workspace_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn list_for_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<
+            Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+            sqlx::Error,
+        > {
+            Ok(Vec::new())
+        }
+
+        async fn list_for_user_memberships(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<
+            Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+            sqlx::Error,
+        > {
+            Ok(Vec::new())
+        }
+
+        async fn update_tokens_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+            _account_email: String,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn update_tokens(
+            &self,
+            _connection_id: Uuid,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+
+        async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn mark_connections_stale_for_creator(
+            &self,
+            creator_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            self.stale_calls
+                .lock()
+                .unwrap()
+                .push((creator_id, provider));
+            Ok(())
+        }
+
+        async fn record_audit_event(
+            &self,
+            _event: crate::db::workspace_connection_repository::NewWorkspaceAuditEvent,
+        ) -> Result<WorkspaceAuditEvent, sqlx::Error> {
+            Err(Error::RowNotFound)
+        }
+    }
+
+    #[tokio::test]
+    async fn ensure_valid_access_token_marks_revoked_tokens_as_stale() {
+        let user_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+        let key = Arc::new(vec![42u8; 32]);
+
+        let encrypted_access =
+            encrypt_secret(&key, "access-before-revocation").expect("encrypt access");
+        let encrypted_refresh = encrypt_secret(&key, "plain-refresh").expect("encrypt refresh");
+
+        let stored_token = UserOAuthToken {
+            id: token_id,
+            user_id,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access,
+            refresh_token: encrypted_refresh,
+            expires_at: now,
+            account_email: "owner@example.com".into(),
+            is_shared: true,
+            created_at: now - Duration::hours(1),
+            updated_at: now - Duration::minutes(10),
+        };
+
+        let token_repo = Arc::new(RecordingTokenRepo::new(stored_token));
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let mut service = OAuthAccountService::new(
+            token_repo.clone(),
+            workspace_repo.clone(),
+            key.clone(),
+            Arc::new(Client::new()),
+            &OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/microsoft".into(),
+                },
+                token_encryption_key: (*key).clone(),
+            },
+        );
+
+        fn revoked_override(
+            provider: ConnectedOAuthProvider,
+            token: &str,
+        ) -> Result<AuthorizationTokens, OAuthAccountError> {
+            assert_eq!(provider, ConnectedOAuthProvider::Google);
+            assert_eq!(token, "plain-refresh");
+            Err(OAuthAccountError::TokenRevoked { provider })
+        }
+
+        service.set_refresh_override(Some(Arc::new(revoked_override)));
+
+        let err = service
+            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Google)
+            .await
+            .expect_err("revocation should return error");
+
+        match err {
+            OAuthAccountError::TokenRevoked { provider } => {
+                assert_eq!(provider, ConnectedOAuthProvider::Google);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        assert!(token_repo.token.lock().unwrap().is_none());
+        assert_eq!(
+            token_repo.delete_calls.lock().unwrap().as_slice(),
+            &[(user_id, ConnectedOAuthProvider::Google)]
+        );
+        assert_eq!(
+            workspace_repo.stale_calls.lock().unwrap().as_slice(),
+            &[(user_id, ConnectedOAuthProvider::Google)]
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_revoked_token_removes_personal_credentials_and_marks_workspace() {
+        let user_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+        let key = Arc::new(vec![7u8; 32]);
+
+        let stored_token = UserOAuthToken {
+            id: token_id,
+            user_id,
+            provider: ConnectedOAuthProvider::Microsoft,
+            access_token: "enc-access".into(),
+            refresh_token: "enc-refresh".into(),
+            expires_at: now,
+            account_email: "owner@example.com".into(),
+            is_shared: true,
+            created_at: now - Duration::hours(2),
+            updated_at: now - Duration::hours(1),
+        };
+
+        let token_repo = Arc::new(RecordingTokenRepo::new(stored_token));
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let service = OAuthAccountService::new(
+            token_repo.clone(),
+            workspace_repo.clone(),
+            key.clone(),
+            Arc::new(Client::new()),
+            &OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/microsoft".into(),
+                },
+                token_encryption_key: (*key).clone(),
+            },
+        );
+
+        service
+            .handle_revoked_token(user_id, ConnectedOAuthProvider::Microsoft)
+            .await
+            .expect("revoked cleanup should succeed");
+
+        assert_eq!(
+            token_repo.delete_calls(),
+            vec![(user_id, ConnectedOAuthProvider::Microsoft)]
+        );
+        assert_eq!(
+            workspace_repo.stale_calls(),
+            vec![(user_id, ConnectedOAuthProvider::Microsoft)]
+        );
+    }
+
+    #[test]
+    fn revocation_signal_detects_unauthorized_status() {
+        assert!(is_revocation_signal(Some(StatusCode::UNAUTHORIZED), ""));
+    }
+
+    #[test]
+    fn revocation_signal_detects_invalid_grant_keyword() {
+        assert!(is_revocation_signal(
+            Some(StatusCode::BAD_REQUEST),
+            "invalid_grant"
+        ));
+        assert!(is_revocation_signal(None, "Token revoked by admin"));
     }
 }

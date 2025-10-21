@@ -22,7 +22,7 @@ use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceR
 use crate::routes::auth::{claims::Claims, session::AuthSession};
 use crate::services::{
     oauth::{
-        account_service::{OAuthAccountError, OAuthAccountService},
+        account_service::{AuthorizationTokens, OAuthAccountError, OAuthAccountService},
         github::mock_github_oauth::MockGitHubOAuth,
         google::mock_google_oauth::MockGoogleOAuth,
         workspace_service::WorkspaceOAuthService,
@@ -266,6 +266,14 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
         Ok(())
     }
 
+    async fn mark_connections_stale_for_creator(
+        &self,
+        _creator_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
     async fn record_audit_event(
         &self,
         _event: NewWorkspaceAuditEvent,
@@ -316,6 +324,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         shared_by_last_name: Some(" Example".into()),
         shared_by_email: Some(" alice@example.com ".into()),
         updated_at: workspace_updated_at,
+        requires_reconnect: false,
     };
 
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
@@ -373,6 +382,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         personal_entry["expiresAt"].as_str(),
         Some(expected_personal_expires.as_str())
     );
+    assert_eq!(personal_entry["requiresReconnect"].as_bool(), Some(false));
     let expected_personal_refreshed = personal_updated_at
         .format(&Rfc3339)
         .expect("format personal refreshed");
@@ -425,6 +435,67 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         workspace_entry["lastRefreshedAt"].as_str(),
         Some(expected_workspace_refreshed.as_str())
     );
+    assert_eq!(workspace_entry["requiresReconnect"].as_bool(), Some(false));
+}
+
+#[tokio::test]
+async fn list_connections_includes_workspace_reconnect_flag() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let now = OffsetDateTime::now_utc();
+    let workspace_id = Uuid::new_v4();
+    let connection_id = Uuid::new_v4();
+
+    let listing = WorkspaceConnectionListing {
+        id: connection_id,
+        workspace_id,
+        workspace_name: "Requires Attention".into(),
+        provider: ConnectedOAuthProvider::Microsoft,
+        account_email: "shared@example.com".into(),
+        expires_at: now - Duration::hours(1),
+        shared_by_first_name: Some("Taylor".into()),
+        shared_by_last_name: Some("Admin".into()),
+        shared_by_email: Some("taylor@example.com".into()),
+        updated_at: now - Duration::minutes(5),
+        requires_reconnect: true,
+    };
+
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(vec![(user_id, listing)]));
+
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo { tokens: Vec::new() });
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+    let oauth_client = Arc::new(reqwest::Client::new());
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        workspace_repo.clone(),
+        encryption_key,
+        oauth_client,
+        &config.oauth,
+    ));
+
+    let mut state = stub_state(config.clone());
+    state.oauth_accounts = oauth_service;
+    state.workspace_connection_repo = workspace_repo;
+
+    let claims = Claims {
+        id: user_id.to_string(),
+        ..stub_claims()
+    };
+
+    let response = list_connections(State(state), AuthSession(claims)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+
+    let workspace = json["workspace"].as_array().expect("workspace array");
+    assert_eq!(workspace.len(), 1);
+    let entry = &workspace[0];
+    assert_eq!(entry["requiresReconnect"].as_bool(), Some(true));
+    assert_eq!(entry["workspaceName"].as_str(), Some("Requires Attention"));
 }
 
 #[tokio::test]
@@ -491,6 +562,7 @@ async fn refresh_connection_returns_last_refreshed_timestamp() {
     let json: Value = serde_json::from_slice(&body).expect("response json");
 
     assert_eq!(json["success"].as_bool(), Some(true));
+    assert_eq!(json["requires_reconnect"].as_bool(), Some(false));
     assert_eq!(json["account_email"].as_str(), Some("user@example.com"));
     let expected_expires = expires_at
         .format(&Rfc3339)
@@ -503,6 +575,80 @@ async fn refresh_connection_returns_last_refreshed_timestamp() {
         json["last_refreshed_at"].as_str(),
         Some(expected_updated.as_str())
     );
+}
+
+#[tokio::test]
+async fn refresh_connection_returns_conflict_when_revoked() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let now = OffsetDateTime::now_utc();
+
+    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
+        .expect("encrypt access token");
+    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
+        .expect("encrypt refresh token");
+
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
+        tokens: vec![UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access,
+            refresh_token: encrypted_refresh,
+            expires_at: now,
+            account_email: "owner@example.com".into(),
+            is_shared: false,
+            created_at: now - Duration::hours(1),
+            updated_at: now - Duration::minutes(2),
+        }],
+    });
+
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
+
+    let mut oauth_service = OAuthAccountService::new(
+        token_repo,
+        workspace_repo.clone(),
+        Arc::new(config.oauth.token_encryption_key.clone()),
+        Arc::new(reqwest::Client::new()),
+        &config.oauth,
+    );
+
+    fn revoked_override(
+        provider: ConnectedOAuthProvider,
+        _token: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        Err(OAuthAccountError::TokenRevoked { provider })
+    }
+
+    oauth_service.set_refresh_override(Some(Arc::new(revoked_override)));
+
+    let mut state = stub_state(config.clone());
+    state.oauth_accounts = Arc::new(oauth_service);
+    state.workspace_connection_repo = workspace_repo;
+
+    let claims = Claims {
+        id: user_id.to_string(),
+        ..stub_claims()
+    };
+
+    let response = refresh_connection(
+        State(state),
+        AuthSession(claims),
+        Path("google".to_string()),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+
+    assert_eq!(json["success"].as_bool(), Some(false));
+    assert_eq!(json["requires_reconnect"].as_bool(), Some(true));
+    assert!(json["message"].as_str().is_some());
 }
 
 #[async_trait]

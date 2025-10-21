@@ -5,6 +5,7 @@ use super::{
     },
     prelude::*,
 };
+use axum::http::StatusCode;
 
 pub async fn refresh_connection(
     State(state): State<AppState>,
@@ -30,11 +31,27 @@ pub async fn refresh_connection(
     {
         Ok(token) => Json(RefreshResponse {
             success: true,
-            account_email: token.account_email,
-            expires_at: token.expires_at,
-            last_refreshed_at: token.updated_at,
+            requires_reconnect: false,
+            account_email: Some(token.account_email),
+            expires_at: Some(token.expires_at),
+            last_refreshed_at: Some(token.updated_at),
+            message: None,
         })
         .into_response(),
+        Err(OAuthAccountError::TokenRevoked { .. }) => (
+            StatusCode::CONFLICT,
+            Json(RefreshResponse {
+                success: false,
+                requires_reconnect: true,
+                account_email: None,
+                expires_at: None,
+                last_refreshed_at: None,
+                message: Some(
+                    "The OAuth connection was revoked. Reconnect to restore access.".to_string(),
+                ),
+            }),
+        )
+            .into_response(),
         Err(err) => map_oauth_error(err),
     }
 }
@@ -98,6 +115,7 @@ pub async fn list_connections(
             expires_at: token.expires_at,
             is_shared: token.is_shared,
             last_refreshed_at: token.updated_at,
+            requires_reconnect: false,
         })
         .collect();
 
@@ -125,6 +143,7 @@ pub async fn list_connections(
                 shared_by_name,
                 shared_by_email,
                 last_refreshed_at: connection.updated_at,
+                requires_reconnect: connection.requires_reconnect,
             }
         })
         .collect();

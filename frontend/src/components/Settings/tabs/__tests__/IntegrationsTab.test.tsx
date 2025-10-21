@@ -27,7 +27,8 @@ const oauthApiMocks = vi.hoisted(() => ({
   disconnectProvider: vi.fn(),
   promoteConnection: vi.fn(),
   unshareWorkspaceConnection: vi.fn(),
-  setCachedConnections: vi.fn()
+  setCachedConnections: vi.fn(),
+  markProviderRevoked: vi.fn()
 }))
 
 vi.mock('@/lib/oauthApi', () => oauthApiMocks)
@@ -38,7 +39,8 @@ const {
   disconnectProvider,
   promoteConnection,
   unshareWorkspaceConnection,
-  setCachedConnections
+  setCachedConnections,
+  markProviderRevoked
 } = oauthApiMocks
 
 const authStoreMocks = vi.hoisted(() => ({
@@ -71,6 +73,7 @@ describe('IntegrationsTab', () => {
             accountEmail: 'owner@example.com',
             expiresAt: '2025-01-01T00:00:00.000Z',
             lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+            requiresReconnect: false,
             isShared: false
           },
           workspace: []
@@ -83,6 +86,7 @@ describe('IntegrationsTab', () => {
             accountEmail: undefined,
             expiresAt: undefined,
             lastRefreshedAt: undefined,
+            requiresReconnect: false,
             isShared: false
           },
           workspace: []
@@ -97,6 +101,7 @@ describe('IntegrationsTab', () => {
             accountEmail: 'owner@example.com',
             expiresAt: '2025-01-01T00:00:00.000Z',
             lastRefreshedAt: '2025-01-03T11:00:00.000Z',
+            requiresReconnect: false,
             isShared: true
           },
           workspace: [
@@ -110,7 +115,8 @@ describe('IntegrationsTab', () => {
               workspaceId: 'ws-1',
               workspaceName: 'Acme Workspace',
               sharedByName: 'Owner Example',
-              sharedByEmail: 'owner@example.com'
+              sharedByEmail: 'owner@example.com',
+              requiresReconnect: false
             }
           ]
         },
@@ -122,6 +128,7 @@ describe('IntegrationsTab', () => {
             accountEmail: undefined,
             expiresAt: undefined,
             lastRefreshedAt: undefined,
+            requiresReconnect: false,
             isShared: false
           },
           workspace: []
@@ -173,6 +180,7 @@ describe('IntegrationsTab', () => {
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
           lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+          requiresReconnect: false,
           isShared: false
         },
         workspace: []
@@ -185,6 +193,7 @@ describe('IntegrationsTab', () => {
           accountEmail: undefined,
           expiresAt: undefined,
           lastRefreshedAt: undefined,
+          requiresReconnect: false,
           isShared: false
         },
         workspace: []
@@ -261,6 +270,7 @@ describe('IntegrationsTab', () => {
           accountEmail: undefined,
           expiresAt: undefined,
           lastRefreshedAt: undefined,
+          requiresReconnect: false,
           isShared: false
         },
         workspace: []
@@ -361,5 +371,99 @@ describe('IntegrationsTab', () => {
         2
       )
     })
+  })
+
+  it('displays a reconnect warning when the personal credential is revoked', async () => {
+    fetchConnections.mockResolvedValueOnce({
+      google: {
+        personal: {
+          scope: 'personal',
+          id: 'google-personal',
+          connected: false,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+          requiresReconnect: true,
+          isShared: false
+        },
+        workspace: []
+      },
+      microsoft: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      }
+    })
+
+    render(<IntegrationsTab />)
+
+    await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+
+    expect(
+      await screen.findByText(/connection was revoked/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /connect/i })).toBeEnabled()
+  })
+
+  it('clears provider state when refresh indicates revocation', async () => {
+    fetchConnections.mockResolvedValueOnce({
+      google: {
+        personal: {
+          scope: 'personal',
+          id: 'google-personal',
+          connected: true,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      },
+      microsoft: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      }
+    })
+    const revokedError = new Error('revoked') as Error & {
+      requiresReconnect: boolean
+    }
+    revokedError.requiresReconnect = true
+    refreshProvider.mockRejectedValueOnce(revokedError)
+
+    const user = userEvent.setup()
+    render(<IntegrationsTab />)
+
+    await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+
+    const refreshButton = await screen.findByRole('button', {
+      name: /refresh token/i
+    })
+    await user.click(refreshButton)
+
+    await waitFor(() => expect(refreshProvider).toHaveBeenCalledTimes(1))
+    expect(markProviderRevoked).toHaveBeenCalledWith('google')
+
+    expect(
+      await screen.findByText(/reconnect to restore access/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /connect/i })).toBeEnabled()
   })
 })

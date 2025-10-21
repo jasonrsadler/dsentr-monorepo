@@ -17,7 +17,8 @@ const googlePersonalPayload = {
   accountEmail: 'owner@example.com',
   expiresAt: '2025-01-01T00:00:00.000Z',
   isShared: false,
-  lastRefreshedAt: null
+  lastRefreshedAt: null,
+  requiresReconnect: false
 }
 
 const googleWorkspacePayload = {
@@ -29,7 +30,8 @@ const googleWorkspacePayload = {
   workspaceName: 'Operations',
   sharedByName: 'Team Admin',
   sharedByEmail: 'admin@example.com',
-  lastRefreshedAt: null
+  lastRefreshedAt: null,
+  requiresReconnect: false
 }
 
 const buildGoogleConnections = (includeWorkspace: boolean) => ({
@@ -40,6 +42,7 @@ const buildGoogleConnections = (includeWorkspace: boolean) => ({
     accountEmail: 'owner@example.com',
     expiresAt: '2025-01-01T00:00:00.000Z',
     lastRefreshedAt: undefined,
+    requiresReconnect: false,
     isShared: includeWorkspace
   },
   workspace: includeWorkspace
@@ -53,7 +56,8 @@ const buildGoogleConnections = (includeWorkspace: boolean) => ({
           workspaceId: 'ws-1',
           workspaceName: 'Operations',
           sharedByName: 'Team Admin',
-          sharedByEmail: 'admin@example.com'
+          sharedByEmail: 'admin@example.com',
+          requiresReconnect: false
         }
       ]
     : []
@@ -67,6 +71,7 @@ const buildEmptyConnections = () => ({
     accountEmail: undefined,
     expiresAt: undefined,
     lastRefreshedAt: undefined,
+    requiresReconnect: false,
     isShared: false
   },
   workspace: [] as never[]
@@ -189,6 +194,39 @@ describe('SheetsAction', () => {
       updateCachedConnections(() => buildConnectionMap(false))
     })
 
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Select Google connection' })
+      ).toBeInTheDocument()
+    )
+  })
+
+  it('drops revoked personal credentials from the selection', async () => {
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      createJsonResponse({
+        success: true,
+        personal: [
+          {
+            ...googlePersonalPayload,
+            requiresReconnect: true
+          }
+        ],
+        workspace: []
+      })
+    )
+
+    render(
+      <SheetsAction
+        args={{
+          ...baseArgs,
+          accountEmail: 'owner@example.com',
+          oauthConnectionScope: 'personal',
+          oauthConnectionId: 'google-personal'
+        }}
+      />
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Select Google connection' })

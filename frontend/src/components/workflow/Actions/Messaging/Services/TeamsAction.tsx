@@ -795,6 +795,25 @@ export default function TeamsAction({
   const [microsoftConnections, setMicrosoftConnections] =
     useState<ProviderConnectionSet | null>(null)
 
+  const sanitizeConnections = useCallback(
+    (connections: ProviderConnectionSet | null) => {
+      if (!connections) return null
+      const personal = { ...connections.personal }
+      if (personal.requiresReconnect) {
+        personal.connected = false
+        personal.id = null
+      }
+      const workspace = connections.workspace
+        .filter((entry) => !entry.requiresReconnect)
+        .map((entry) => ({ ...entry }))
+      return {
+        personal,
+        workspace
+      }
+    },
+    []
+  )
+
   const [teams, setTeams] = useState<MicrosoftTeam[]>([])
   const [teamsLoading, setTeamsLoading] = useState(false)
   const [teamsError, setTeamsError] = useState<string | null>(null)
@@ -967,7 +986,7 @@ export default function TeamsAction({
 
     const cached = getCachedConnections()
     if (cached?.microsoft) {
-      setMicrosoftConnections(cached.microsoft)
+      setMicrosoftConnections(sanitizeConnections(cached.microsoft))
       setConnectionsError(null)
       setConnectionsLoading(false)
       setConnectionsFetched(true)
@@ -976,7 +995,7 @@ export default function TeamsAction({
     const unsubscribe = subscribeToConnectionUpdates((snapshot) => {
       if (!active) return
       const microsoft = snapshot?.microsoft ?? null
-      setMicrosoftConnections(microsoft)
+      setMicrosoftConnections(sanitizeConnections(microsoft))
       setConnectionsError(null)
       setConnectionsLoading(false)
       setConnectionsFetched(true)
@@ -988,7 +1007,7 @@ export default function TeamsAction({
       fetchConnections()
         .then((data) => {
           if (!active) return
-          setMicrosoftConnections(data.microsoft ?? null)
+          setMicrosoftConnections(sanitizeConnections(data.microsoft ?? null))
           setConnectionsError(null)
         })
         .catch((error) => {
@@ -1011,7 +1030,7 @@ export default function TeamsAction({
       active = false
       unsubscribe()
     }
-  }, [isDelegated, connectionsFetched])
+  }, [isDelegated, connectionsFetched, sanitizeConnections])
 
   useEffect(() => {
     if (!isDelegated) {

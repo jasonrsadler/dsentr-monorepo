@@ -12,6 +12,7 @@ export interface BaseConnectionInfo {
   accountEmail?: string
   expiresAt?: string
   lastRefreshedAt?: string
+  requiresReconnect: boolean
 }
 
 export interface PersonalConnectionInfo extends BaseConnectionInfo {
@@ -104,6 +105,7 @@ interface PersonalConnectionPayload {
   expiresAt: string
   isShared: boolean
   lastRefreshedAt?: string | null
+  requiresReconnect?: boolean | null
 }
 
 interface WorkspaceConnectionPayload {
@@ -116,6 +118,7 @@ interface WorkspaceConnectionPayload {
   sharedByName?: string | null
   sharedByEmail?: string | null
   lastRefreshedAt?: string | null
+  requiresReconnect?: boolean | null
 }
 
 interface ConnectionsApiResponse {
@@ -129,6 +132,9 @@ interface RefreshApiResponse {
   accountEmail?: string | null
   expiresAt?: string | null
   lastRefreshedAt?: string | null
+  requiresReconnect?: boolean | null
+  requires_reconnect?: boolean | null
+  message?: string | null
 }
 
 const defaultPersonalConnection = (): PersonalConnectionInfo => ({
@@ -138,6 +144,7 @@ const defaultPersonalConnection = (): PersonalConnectionInfo => ({
   accountEmail: undefined,
   expiresAt: undefined,
   lastRefreshedAt: undefined,
+  requiresReconnect: false,
   isShared: false
 })
 
@@ -145,6 +152,14 @@ const defaultProviderConnections = (): ProviderConnectionSet => ({
   personal: defaultPersonalConnection(),
   workspace: []
 })
+
+const ensureConnectionMap = (
+  map: ProviderConnectionMap | null
+): ProviderConnectionMap =>
+  map ?? {
+    google: defaultProviderConnections(),
+    microsoft: defaultProviderConnections()
+  }
 
 export async function fetchConnections(): Promise<ProviderConnectionMap> {
   const res = await fetch(`${API_BASE_URL}/api/oauth/connections`, {
@@ -183,10 +198,11 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
       personal: {
         scope: 'personal',
         id: entry.id,
-        connected: true,
+        connected: !entry.requiresReconnect,
         accountEmail: normalize(entry.accountEmail),
         expiresAt: entry.expiresAt ?? undefined,
         lastRefreshedAt: normalize(entry.lastRefreshedAt),
+        requiresReconnect: Boolean(entry.requiresReconnect),
         isShared: Boolean(entry.isShared)
       }
     }
@@ -210,7 +226,7 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
     const workspaceInfo: WorkspaceConnectionInfo = {
       scope: 'workspace',
       id: connectionId,
-      connected: true,
+      connected: !entry.requiresReconnect,
       provider: entry.provider,
       accountEmail: normalize(entry.accountEmail),
       expiresAt: entry.expiresAt ?? undefined,
@@ -218,7 +234,8 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
       workspaceId,
       workspaceName: normalize(entry.workspaceName) ?? 'Workspace connection',
       sharedByName: normalize(entry.sharedByName),
-      sharedByEmail: normalize(entry.sharedByEmail)
+      sharedByEmail: normalize(entry.sharedByEmail),
+      requiresReconnect: Boolean(entry.requiresReconnect)
     }
 
     map[entry.provider] = {
@@ -294,15 +311,25 @@ export async function refreshProvider(
     }
   })
 
-  if (!res.ok) {
-    const message = await res
-      .json()
-      .then((body) => body?.message)
-      .catch(() => null)
-    throw new Error(message || 'Failed to refresh provider tokens')
+  const data = (await res.json().catch(() => null)) as RefreshApiResponse | null
+
+  const requiresReconnect = Boolean(
+    data?.requiresReconnect ?? data?.requires_reconnect
+  )
+
+  if (requiresReconnect) {
+    markProviderRevoked(provider)
+    const error: Error & { requiresReconnect?: boolean } = new Error(
+      data?.message || 'The connection was revoked. Reconnect to continue.'
+    )
+    error.requiresReconnect = true
+    throw error
   }
 
-  const data = (await res.json()) as RefreshApiResponse
+  if (!res.ok) {
+    throw new Error(data?.message || 'Failed to refresh provider tokens')
+  }
+
   const normalize = (value?: string | null): string | undefined => {
     if (typeof value !== 'string') {
       return undefined
@@ -312,10 +339,35 @@ export async function refreshProvider(
   }
   return {
     connected: true,
-    accountEmail: normalize(data.accountEmail),
-    expiresAt: normalize(data.expiresAt),
-    lastRefreshedAt: normalize(data.lastRefreshedAt)
+    accountEmail: normalize(data?.accountEmail),
+    expiresAt: normalize(data?.expiresAt),
+    lastRefreshedAt: normalize(data?.lastRefreshedAt)
   }
+}
+
+export const clearProviderConnections = (provider: OAuthProvider) => {
+  updateCachedConnections((current) => {
+    const map = ensureConnectionMap(current)
+    return {
+      ...map,
+      [provider]: defaultProviderConnections()
+    }
+  })
+}
+
+export const markProviderRevoked = (provider: OAuthProvider) => {
+  updateCachedConnections((current) => {
+    const map = ensureConnectionMap(current)
+    const personal = defaultPersonalConnection()
+    personal.requiresReconnect = true
+    return {
+      ...map,
+      [provider]: {
+        personal,
+        workspace: []
+      }
+    }
+  })
 }
 
 export async function promoteConnection({

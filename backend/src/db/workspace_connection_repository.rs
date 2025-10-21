@@ -37,6 +37,7 @@ pub struct WorkspaceConnectionListing {
     pub shared_by_last_name: Option<String>,
     pub shared_by_email: Option<String>,
     pub updated_at: time::OffsetDateTime,
+    pub requires_reconnect: bool,
 }
 
 #[async_trait]
@@ -87,6 +88,12 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
     ) -> Result<WorkspaceConnection, sqlx::Error>;
 
     async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn mark_connections_stale_for_creator(
+        &self,
+        creator_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error>;
 
     async fn record_audit_event(
         &self,
@@ -159,6 +166,14 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
     }
 
     async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn mark_connections_stale_for_creator(
+        &self,
+        _creator_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error> {
         Ok(())
     }
 

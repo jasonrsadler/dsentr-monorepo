@@ -1538,10 +1538,9 @@ pub async fn remove_workspace_connection(
 mod tests {
     use super::{
         accept_invitation, build_invite_accept_url, change_plan, decline_invitation,
-        leave_workspace, preview_invitation, promote_workspace_connection, remove_workspace_connection,
-        revoke_workspace_member,
-        CompleteOnboardingPayload, InvitationDecisionPayload, PromoteWorkspaceConnectionPayload,
-        RevokeWorkspaceMemberPayload,
+        leave_workspace, preview_invitation, promote_workspace_connection,
+        remove_workspace_connection, revoke_workspace_member, CompleteOnboardingPayload,
+        InvitationDecisionPayload, PromoteWorkspaceConnectionPayload, RevokeWorkspaceMemberPayload,
     };
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
     use crate::db::{
@@ -1860,6 +1859,7 @@ mod tests {
                     shared_by_last_name: None,
                     shared_by_email: None,
                     updated_at: record.updated_at,
+                    requires_reconnect: false,
                 })
                 .collect())
         }
@@ -1883,6 +1883,7 @@ mod tests {
                     shared_by_last_name: None,
                     shared_by_email: None,
                     updated_at: record.updated_at,
+                    requires_reconnect: false,
                 })
                 .collect())
         }
@@ -1935,6 +1936,21 @@ mod tests {
                 guard.retain(|record| record.id != connection_id);
             }
             self.deleted.lock().unwrap().push(connection_id);
+            Ok(())
+        }
+
+        async fn mark_connections_stale_for_creator(
+            &self,
+            creator_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.connections.lock().unwrap();
+            for record in guard.iter_mut() {
+                if record.created_by == creator_id && record.provider == provider {
+                    record.expires_at = OffsetDateTime::now_utc() - time::Duration::minutes(5);
+                    record.updated_at = OffsetDateTime::now_utc();
+                }
+            }
             Ok(())
         }
 

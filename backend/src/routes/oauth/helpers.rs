@@ -28,6 +28,7 @@ pub(crate) struct PersonalConnectionPayload {
     pub(crate) is_shared: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) last_refreshed_at: OffsetDateTime,
+    pub(crate) requires_reconnect: bool,
 }
 
 #[derive(Serialize)]
@@ -44,6 +45,7 @@ pub(crate) struct WorkspaceConnectionPayload {
     pub(crate) shared_by_email: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) last_refreshed_at: OffsetDateTime,
+    pub(crate) requires_reconnect: bool,
 }
 
 #[derive(Serialize)]
@@ -57,11 +59,14 @@ pub(crate) struct ConnectionsResponse {
 #[derive(Serialize)]
 pub(crate) struct RefreshResponse {
     pub(crate) success: bool,
-    pub(crate) account_email: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub(crate) expires_at: OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    pub(crate) last_refreshed_at: OffsetDateTime,
+    pub(crate) requires_reconnect: bool,
+    pub(crate) account_email: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub(crate) expires_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub(crate) last_refreshed_at: Option<OffsetDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) message: Option<String>,
 }
 
 pub(crate) async fn handle_callback(
@@ -206,6 +211,10 @@ pub fn map_oauth_error(err: OAuthAccountError) -> Response {
             error!("OAuth HTTP error: {e}");
             JsonResponse::server_error("Provider request failed").into_response()
         }
+        OAuthAccountError::TokenRevoked { .. } => {
+            JsonResponse::conflict("The OAuth connection was revoked. Reconnect to restore access.")
+                .into_response()
+        }
         OAuthAccountError::InvalidResponse(msg) => JsonResponse::server_error(&msg).into_response(),
         OAuthAccountError::MissingRefreshToken => {
             JsonResponse::server_error("Provider did not return a refresh token").into_response()
@@ -223,6 +232,9 @@ pub(crate) fn error_message_for_redirect(err: &OAuthAccountError) -> String {
         OAuthAccountError::Http(_) => "The OAuth provider request failed.".to_string(),
         OAuthAccountError::InvalidResponse(_) => {
             "Received an invalid response from the OAuth provider.".to_string()
+        }
+        OAuthAccountError::TokenRevoked { .. } => {
+            "The OAuth connection was revoked. Reconnect to continue.".to_string()
         }
         OAuthAccountError::MissingRefreshToken => {
             "The OAuth provider did not return a refresh token.".to_string()

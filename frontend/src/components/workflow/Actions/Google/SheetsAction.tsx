@@ -116,6 +116,25 @@ export default function SheetsAction({
   const [connectionsLoading, setConnectionsLoading] = useState(true)
   const [connectionsError, setConnectionsError] = useState<string | null>(null)
 
+  const sanitizeConnections = useCallback(
+    (connections: ProviderConnectionSet | null) => {
+      if (!connections) return null
+      const personal = { ...connections.personal }
+      if (personal.requiresReconnect) {
+        personal.connected = false
+        personal.id = null
+      }
+      const workspace = connections.workspace
+        .filter((entry) => !entry.requiresReconnect)
+        .map((entry) => ({ ...entry }))
+      return {
+        personal,
+        workspace
+      }
+    },
+    []
+  )
+
   const findConnectionById = useCallback(
     (scope?: ConnectionScope | null, id?: string | null) => {
       if (!connectionState || !scope || !id) return null
@@ -161,7 +180,7 @@ export default function SheetsAction({
 
     const cached = getCachedConnections()
     if (cached?.google) {
-      setConnectionState(cached.google)
+      setConnectionState(sanitizeConnections(cached.google))
       setConnectionsError(null)
       setConnectionsLoading(false)
     }
@@ -169,7 +188,7 @@ export default function SheetsAction({
     const unsubscribe = subscribeToConnectionUpdates((snapshot) => {
       if (!active) return
       const googleConnections = snapshot?.google ?? null
-      setConnectionState(googleConnections)
+      setConnectionState(sanitizeConnections(googleConnections))
       setConnectionsError(null)
       setConnectionsLoading(false)
     })
@@ -180,7 +199,7 @@ export default function SheetsAction({
       fetchConnections()
         .then((connections) => {
           if (!active) return
-          setConnectionState(connections.google ?? null)
+          setConnectionState(sanitizeConnections(connections.google ?? null))
           setConnectionsError(null)
         })
         .catch((error) => {
@@ -202,7 +221,7 @@ export default function SheetsAction({
       active = false
       unsubscribe()
     }
-  }, [])
+  }, [sanitizeConnections])
 
   useEffect(() => {
     if (!connectionState) return

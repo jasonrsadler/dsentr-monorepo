@@ -230,10 +230,39 @@ impl WorkspaceOAuthService {
         let refresh_deadline = OffsetDateTime::now_utc() + Duration::seconds(60);
 
         if decrypted.expires_at <= refresh_deadline {
-            let refreshed = self
+            let refreshed = match self
                 .oauth_accounts
                 .refresh_access_token(decrypted.provider, &decrypted.refresh_token)
-                .await?;
+                .await
+            {
+                Ok(tokens) => tokens,
+                Err(err) => {
+                    if matches!(err, OAuthAccountError::TokenRevoked { .. }) {
+                        self.workspace_connections
+                            .delete_connection(connection_id)
+                            .await?;
+
+                        match self
+                            .user_tokens
+                            .mark_shared(decrypted.created_by, decrypted.provider, false)
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(sqlx::Error::RowNotFound) => {
+                                warn!(
+                                    connection_id = %connection_id,
+                                    provider = ?decrypted.provider,
+                                    created_by = %decrypted.created_by,
+                                    "workspace connection creator lost personal token while handling revocation"
+                                );
+                            }
+                            Err(other) => return Err(WorkspaceOAuthError::Database(other)),
+                        }
+                    }
+
+                    return Err(WorkspaceOAuthError::OAuth(err));
+                }
+            };
 
             let encrypted_access = encrypt_secret(&self.encryption_key, &refreshed.access_token)?;
             let encrypted_refresh = encrypt_secret(&self.encryption_key, &refreshed.refresh_token)?;
@@ -252,6 +281,43 @@ impl WorkspaceOAuthService {
         }
 
         Ok(decrypted)
+    }
+
+    pub async fn handle_revoked_connection(
+        &self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+    ) -> Result<(), WorkspaceOAuthError> {
+        let record = self
+            .workspace_connections
+            .find_by_id(connection_id)
+            .await?
+            .filter(|conn| conn.workspace_id == workspace_id)
+            .ok_or(WorkspaceOAuthError::NotFound)?;
+
+        self.workspace_connections
+            .delete_connection(connection_id)
+            .await?;
+
+        match self
+            .user_tokens
+            .mark_shared(record.created_by, record.provider, false)
+            .await
+        {
+            Ok(_) => {}
+            Err(sqlx::Error::RowNotFound) => {
+                warn!(
+                    connection_id = %connection_id,
+                    workspace_id = %workspace_id,
+                    created_by = %record.created_by,
+                    provider = ?record.provider,
+                    "workspace connection creator missing personal token while handling revocation"
+                );
+            }
+            Err(err) => return Err(WorkspaceOAuthError::Database(err)),
+        }
+
+        Ok(())
     }
 
     fn decrypt_connection(
@@ -404,6 +470,14 @@ impl WorkspaceOAuthService {
                 Ok(())
             }
 
+            async fn mark_connections_stale_for_creator(
+                &self,
+                _creator_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
             async fn record_audit_event(
                 &self,
                 _event: NewWorkspaceAuditEvent,
@@ -464,6 +538,8 @@ mod tests {
             _user_id: Uuid,
             _provider: ConnectedOAuthProvider,
         ) -> Result<(), sqlx::Error> {
+            let mut token = self.token.lock().unwrap();
+            *token = None;
             Ok(())
         }
 
@@ -568,6 +644,7 @@ mod tests {
                     shared_by_last_name: None,
                     shared_by_email: None,
                     updated_at: record.updated_at,
+                    requires_reconnect: false,
                 })
                 .collect())
         }
@@ -592,6 +669,7 @@ mod tests {
                     shared_by_last_name: None,
                     shared_by_email: None,
                     updated_at: record.updated_at,
+                    requires_reconnect: false,
                 })
                 .collect())
         }
@@ -645,6 +723,21 @@ mod tests {
             let mut guard = self.connection.lock().unwrap();
             if guard.as_ref().map(|record| record.id) == Some(connection_id) {
                 *guard = None;
+            }
+            Ok(())
+        }
+
+        async fn mark_connections_stale_for_creator(
+            &self,
+            creator_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.connection.lock().unwrap();
+            if let Some(conn) = guard.as_mut() {
+                if conn.created_by == creator_id && conn.provider == provider {
+                    conn.expires_at = OffsetDateTime::now_utc() - Duration::minutes(5);
+                    conn.updated_at = OffsetDateTime::now_utc();
+                }
             }
             Ok(())
         }
@@ -708,6 +801,20 @@ mod tests {
             }
             self.calls.lock().unwrap().push(refresh_token.to_string());
             Ok(self.response.clone())
+        }
+    }
+
+    #[derive(Clone)]
+    struct RevokingTokenRefresher;
+
+    #[async_trait]
+    impl WorkspaceTokenRefresher for RevokingTokenRefresher {
+        async fn refresh_access_token(
+            &self,
+            provider: ConnectedOAuthProvider,
+            _refresh_token: &str,
+        ) -> Result<AuthorizationTokens, OAuthAccountError> {
+            Err(OAuthAccountError::TokenRevoked { provider })
         }
     }
 
@@ -889,6 +996,67 @@ mod tests {
         assert_eq!(
             events[0].event_type,
             WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_revoked_connection_removes_entry_and_marks_unshared() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let key = Arc::new(vec![17u8; 32]);
+        let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+        let encrypted_access = encrypt_secret(&key, "access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "refresh").unwrap();
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(Some(UserOAuthToken {
+                id: Uuid::new_v4(),
+                user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "user@example.com".into(),
+                is_shared: true,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            })),
+            shared_flag: Mutex::new(true),
+        });
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "user@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
+        let service =
+            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+
+        service
+            .handle_revoked_connection(workspace_id, connection_id)
+            .await
+            .expect("revoked cleanup succeeds");
+
+        assert!(workspace_repo.connection.lock().unwrap().is_none());
+        let shared = *user_repo.shared_flag.lock().unwrap();
+        assert!(
+            !shared,
+            "user token should be marked unshared after revocation"
         );
     }
 
@@ -1174,5 +1342,72 @@ mod tests {
 
         let update_calls = *workspace_repo.update_calls.lock().unwrap();
         assert_eq!(update_calls, 1);
+    }
+
+    #[tokio::test]
+    async fn ensure_valid_workspace_token_removes_connection_when_revoked() {
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![23u8; 32]);
+        let expired_at = OffsetDateTime::now_utc() - Duration::minutes(2);
+
+        let encrypted_access = encrypt_secret(&key, "revoked-access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "revoked-refresh").unwrap();
+
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access,
+                refresh_token: encrypted_refresh,
+                expires_at: expired_at,
+                account_email: "workspace@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(Some(UserOAuthToken {
+                id: Uuid::new_v4(),
+                user_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: String::new(),
+                refresh_token: String::new(),
+                expires_at: OffsetDateTime::now_utc(),
+                account_email: "user@example.com".into(),
+                is_shared: true,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            })),
+            shared_flag: Mutex::new(true),
+        });
+
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            workspace_repo.clone(),
+            Arc::new(RevokingTokenRefresher) as Arc<dyn WorkspaceTokenRefresher>,
+            key,
+        );
+
+        let err = service
+            .ensure_valid_workspace_token(workspace_id, connection_id)
+            .await
+            .expect_err("revoked token should bubble up error");
+
+        match err {
+            WorkspaceOAuthError::OAuth(OAuthAccountError::TokenRevoked { provider }) => {
+                assert_eq!(provider, ConnectedOAuthProvider::Google);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        assert!(workspace_repo.connection.lock().unwrap().is_none());
+        assert!(!*user_repo.shared_flag.lock().unwrap());
     }
 }

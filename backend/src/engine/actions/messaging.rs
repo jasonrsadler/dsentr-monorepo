@@ -2,7 +2,9 @@ use crate::engine::graph::Node;
 use crate::engine::templating::templ_str;
 use crate::models::oauth_token::ConnectedOAuthProvider;
 use crate::models::workflow_run::WorkflowRun;
-use crate::services::oauth::account_service::{OAuthAccountError, StoredOAuthToken};
+use crate::services::oauth::account_service::{
+    is_revocation_signal, OAuthAccountError, StoredOAuthToken,
+};
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
 use crate::state::AppState;
 use reqwest::{
@@ -783,6 +785,9 @@ async fn ensure_microsoft_access_token(
                 "Connect the Microsoft integration before using delegated Teams messaging"
                     .to_string()
             }
+            OAuthAccountError::TokenRevoked { .. } => {
+                "The connected Microsoft account was revoked. Reconnect it from Settings → Integrations.".to_string()
+            }
             other => format!("Failed to refresh Microsoft OAuth token: {other}"),
         })
 }
@@ -791,6 +796,9 @@ fn map_workspace_microsoft_error(err: WorkspaceOAuthError) -> String {
     match err {
         WorkspaceOAuthError::NotFound => {
             "Microsoft workspace connection not found or does not belong to this workspace. Promote the connection again from Settings → Integrations.".to_string()
+        }
+        WorkspaceOAuthError::OAuth(OAuthAccountError::TokenRevoked { .. }) => {
+            "The shared Microsoft credential was revoked by its owner. Ask them to reconnect it in Settings → Integrations.".to_string()
         }
         other => format!("Failed to obtain Microsoft workspace connection: {other}"),
     }
@@ -953,7 +961,20 @@ async fn send_teams_delegated_oauth(
         "Text"
     };
 
-    let (access_token, token_email) = match connection_usage {
+    enum ConnectionContext {
+        Personal {
+            user_id: Uuid,
+            account_email: Option<String>,
+        },
+        Workspace {
+            workspace_id: Uuid,
+            connection_id: Uuid,
+            created_by: Uuid,
+            account_email: Option<String>,
+        },
+    }
+
+    let (access_token, token_email, connection_context) = match connection_usage {
         NodeConnectionUsage::Workspace(info) => {
             let workspace_id = run.workspace_id.ok_or_else(|| {
                 "This workflow run is not associated with a workspace. Promote the Microsoft connection to the workspace or switch the action back to a personal connection.".to_string()
@@ -980,6 +1001,12 @@ async fn send_teams_delegated_oauth(
             (
                 connection.access_token.clone(),
                 connection.account_email.clone(),
+                ConnectionContext::Workspace {
+                    workspace_id,
+                    connection_id: connection.id,
+                    created_by: connection.created_by,
+                    account_email: Some(connection.account_email.clone()),
+                },
             )
         }
         NodeConnectionUsage::User(info) => {
@@ -1011,7 +1038,14 @@ async fn send_teams_delegated_oauth(
                         "Selected Microsoft account does not match the connected account. Refresh your integration settings.".to_string(),
                     );
                 }
-                (token.access_token.clone(), token.account_email.clone())
+                (
+                    token.access_token.clone(),
+                    token.account_email.clone(),
+                    ConnectionContext::Personal {
+                        user_id: run.user_id,
+                        account_email: Some(token.account_email.clone()),
+                    },
+                )
             } else {
                 let Some(expected) = expected_email else {
                     return Err(
@@ -1026,7 +1060,14 @@ async fn send_teams_delegated_oauth(
                     );
                 }
 
-                (token.access_token.clone(), token.account_email.clone())
+                (
+                    token.access_token.clone(),
+                    token.account_email.clone(),
+                    ConnectionContext::Personal {
+                        user_id: run.user_id,
+                        account_email: Some(token.account_email.clone()),
+                    },
+                )
             }
         }
     };
@@ -1086,6 +1127,77 @@ async fn send_teams_delegated_oauth(
     let parsed: Option<Value> = serde_json::from_str(&body_text).ok();
 
     if !status.is_success() {
+        if is_revocation_signal(Some(status), &body_text) {
+            let (account_email, message) = match &connection_context {
+                ConnectionContext::Personal {
+                    user_id,
+                    account_email,
+                } => {
+                    if let Err(err) = state
+                        .oauth_accounts
+                        .handle_revoked_token(*user_id, ConnectedOAuthProvider::Microsoft)
+                        .await
+                    {
+                        warn!(
+                            user_id = %user_id,
+                            error = %err,
+                            "failed to purge revoked personal microsoft token"
+                        );
+                    }
+
+                    (
+                        account_email.clone(),
+                        "Microsoft revoked the connected account. Reconnect it from Settings → Integrations.".to_string(),
+                    )
+                }
+                ConnectionContext::Workspace {
+                    workspace_id,
+                    connection_id,
+                    created_by,
+                    account_email,
+                } => {
+                    if let Err(err) = state
+                        .workspace_oauth
+                        .handle_revoked_connection(*workspace_id, *connection_id)
+                        .await
+                    {
+                        warn!(
+                            workspace_id = %workspace_id,
+                            connection_id = %connection_id,
+                            error = %err,
+                            "failed to remove revoked workspace microsoft connection"
+                        );
+                    }
+
+                    if let Err(err) = state
+                        .oauth_accounts
+                        .handle_revoked_token(*created_by, ConnectedOAuthProvider::Microsoft)
+                        .await
+                    {
+                        warn!(
+                            created_by = %created_by,
+                            error = %err,
+                            "failed to purge creator's personal microsoft token after workspace revocation"
+                        );
+                    }
+
+                    (
+                        account_email.clone(),
+                        "Microsoft revoked the shared workspace connection. Ask the owner to reconnect it from Settings → Integrations.".to_string(),
+                    )
+                }
+            };
+
+            warn!(
+                status = %status,
+                account_email = account_email.as_deref().unwrap_or("unknown"),
+                body = %body_text,
+                "microsoft graph returned revocation signal"
+            );
+
+            return Err(message);
+        }
+
         let message = graph_error_message(parsed.as_ref(), &body_text);
         return Err(format!(
             "Microsoft Graph returned status {}: {}",
@@ -1426,6 +1538,14 @@ mod tests {
         }
 
         async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
+        async fn mark_connections_stale_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), SqlxError> {
             Ok(())
         }
 

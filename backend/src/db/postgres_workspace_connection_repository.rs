@@ -140,10 +140,14 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 owner.first_name AS shared_by_first_name,
                 owner.last_name AS shared_by_last_name,
                 owner.email AS shared_by_email,
-                wc.updated_at
+                wc.updated_at,
+                (owner_token.id IS NULL) AS requires_reconnect
             FROM workspace_connections wc
             JOIN workspaces w ON w.id = wc.workspace_id
             LEFT JOIN users owner ON owner.id = wc.created_by
+            LEFT JOIN user_oauth_tokens owner_token
+                ON owner_token.user_id = wc.created_by
+               AND owner_token.provider = wc.provider
             WHERE wc.workspace_id = $1
             ORDER BY wc.created_at ASC
             "#,
@@ -169,11 +173,15 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 owner.first_name AS shared_by_first_name,
                 owner.last_name AS shared_by_last_name,
                 owner.email AS shared_by_email,
-                wc.updated_at
+                wc.updated_at,
+                (owner_token.id IS NULL) AS requires_reconnect
             FROM workspace_connections wc
             JOIN workspace_members wm ON wm.workspace_id = wc.workspace_id
             JOIN workspaces w ON w.id = wc.workspace_id
             LEFT JOIN users owner ON owner.id = wc.created_by
+            LEFT JOIN user_oauth_tokens owner_token
+                ON owner_token.user_id = wc.created_by
+               AND owner_token.provider = wc.provider
             WHERE wm.user_id = $1
               AND w.deleted_at IS NULL
             ORDER BY wc.id, wc.created_at ASC
@@ -266,6 +274,29 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         )
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    async fn mark_connections_stale_for_creator(
+        &self,
+        creator_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE workspace_connections
+            SET
+                expires_at = now() - INTERVAL '5 minutes',
+                updated_at = now()
+            WHERE created_by = $1
+              AND provider = $2
+            "#,
+        )
+        .bind(creator_id)
+        .bind(provider)
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 

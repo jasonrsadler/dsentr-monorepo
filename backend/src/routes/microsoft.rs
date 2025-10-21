@@ -547,6 +547,14 @@ mod tests {
             Ok(())
         }
 
+        async fn mark_connections_stale_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
         async fn record_audit_event(
             &self,
             _event: NewWorkspaceAuditEvent,
@@ -661,6 +669,7 @@ mod tests {
             shared_by_last_name: None,
             shared_by_email: None,
             updated_at: now,
+            requires_reconnect: false,
         };
 
         let record = WorkspaceConnection {
