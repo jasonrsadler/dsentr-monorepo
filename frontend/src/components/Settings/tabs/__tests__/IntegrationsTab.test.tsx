@@ -90,6 +90,19 @@ describe('IntegrationsTab', () => {
             isShared: false
           },
           workspace: []
+        },
+        slack: {
+          personal: {
+            scope: 'personal',
+            id: null,
+            connected: false,
+            accountEmail: undefined,
+            expiresAt: undefined,
+            lastRefreshedAt: undefined,
+            requiresReconnect: false,
+            isShared: false
+          },
+          workspace: []
         }
       })
       .mockResolvedValueOnce({
@@ -132,6 +145,19 @@ describe('IntegrationsTab', () => {
             isShared: false
           },
           workspace: []
+        },
+        slack: {
+          personal: {
+            scope: 'personal',
+            id: null,
+            connected: false,
+            accountEmail: undefined,
+            expiresAt: undefined,
+            lastRefreshedAt: undefined,
+            requiresReconnect: false,
+            isShared: false
+          },
+          workspace: []
         }
       })
 
@@ -140,6 +166,10 @@ describe('IntegrationsTab', () => {
 
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
+
+    expect(
+      await screen.findByRole('button', { name: /Connect Slack/i })
+    ).toBeInTheDocument()
 
     const initialLastRefreshed = await screen.findAllByText(/Last refreshed/)
     expect(initialLastRefreshed.length).toBeGreaterThan(0)
@@ -187,6 +217,19 @@ describe('IntegrationsTab', () => {
         workspace: []
       },
       microsoft: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      },
+      slack: {
         personal: {
           scope: 'personal',
           id: null,
@@ -277,6 +320,19 @@ describe('IntegrationsTab', () => {
           isShared: false
         },
         workspace: []
+      },
+      slack: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
       }
     })
 
@@ -336,6 +392,19 @@ describe('IntegrationsTab', () => {
           isShared: false
         },
         workspace: []
+      },
+      slack: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
       }
     })
     disconnectProvider.mockResolvedValueOnce(undefined)
@@ -373,7 +442,7 @@ describe('IntegrationsTab', () => {
 
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: /Connect/i })).toHaveLength(
-        2
+        3
       )
     })
   })
@@ -394,6 +463,19 @@ describe('IntegrationsTab', () => {
         workspace: []
       },
       microsoft: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      },
+      slack: {
         personal: {
           scope: 'personal',
           id: null,
@@ -437,6 +519,19 @@ describe('IntegrationsTab', () => {
         workspace: []
       },
       microsoft: {
+        personal: {
+          scope: 'personal',
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        },
+        workspace: []
+      },
+      slack: {
         personal: {
           scope: 'personal',
           id: null,

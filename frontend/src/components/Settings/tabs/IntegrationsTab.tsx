@@ -47,6 +47,13 @@ const PROVIDERS: ProviderMeta[] = [
     description:
       'Connect your Microsoft 365 account to run Outlook and Teams actions with delegated permissions managed by Dsentr.',
     scopes: 'offline_access User.Read'
+  },
+  {
+    key: 'slack',
+    name: 'Slack',
+    description:
+      'Connect your Slack workspace to post messages, manage channels, and automate collaboration from Dsentr workflows.',
+    scopes: 'chat:write channels:read users:read'
   }
 ]
 
@@ -64,6 +71,29 @@ const emptyProviderState = (): ProviderConnectionSet => ({
   workspace: []
 })
 
+const buildInitialStatuses = (): Record<
+  OAuthProvider,
+  ProviderConnectionSet
+> => {
+  const map = {} as Record<OAuthProvider, ProviderConnectionSet>
+  PROVIDERS.forEach((provider) => {
+    map[provider.key] = emptyProviderState()
+  })
+  return map
+}
+
+const cloneProviderState = (
+  state?: ProviderConnectionSet
+): ProviderConnectionSet => {
+  if (!state) {
+    return emptyProviderState()
+  }
+  return {
+    personal: { ...state.personal },
+    workspace: state.workspace.map((entry) => ({ ...entry }))
+  }
+}
+
 export default function IntegrationsTab({
   notice,
   onDismissNotice
@@ -77,10 +107,7 @@ export default function IntegrationsTab({
   const [error, setError] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<
     Record<OAuthProvider, ProviderConnectionSet>
-  >({
-    google: emptyProviderState(),
-    microsoft: emptyProviderState()
-  })
+  >(() => buildInitialStatuses())
   const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
   const [promoteDialogProvider, setPromoteDialogProvider] =
     useState<OAuthProvider | null>(null)
@@ -166,7 +193,11 @@ export default function IntegrationsTab({
       try {
         const data = await fetchConnections({ workspaceId })
         if (!active) return
-        setStatuses(data)
+        const normalized = {} as Record<OAuthProvider, ProviderConnectionSet>
+        PROVIDERS.forEach((provider) => {
+          normalized[provider.key] = cloneProviderState(data[provider.key])
+        })
+        setStatuses(normalized)
         setError(null)
       } catch (err) {
         if (!active) return

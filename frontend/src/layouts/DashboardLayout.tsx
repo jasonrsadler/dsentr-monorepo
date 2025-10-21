@@ -132,8 +132,10 @@ export default function DashboardLayout() {
 
     const providerParamRaw = params.get('provider')
     const providerParam: OAuthProvider | undefined =
-      providerParamRaw === 'google' || providerParamRaw === 'microsoft'
-        ? providerParamRaw
+      providerParamRaw === 'google' ||
+      providerParamRaw === 'microsoft' ||
+      providerParamRaw === 'slack'
+        ? (providerParamRaw as OAuthProvider)
         : undefined
     const error = params.get('error') || undefined
 

@@ -2,7 +2,7 @@ import { API_BASE_URL } from './config'
 import { getCsrfToken } from './csrfCache'
 import { useAuth } from '@/stores/auth'
 
-export type OAuthProvider = 'google' | 'microsoft'
+export type OAuthProvider = 'google' | 'microsoft' | 'slack'
 
 export type ConnectionScope = 'personal' | 'workspace'
 
@@ -37,6 +37,8 @@ export interface ProviderConnectionSet {
 
 type ProviderConnectionMap = Record<OAuthProvider, ProviderConnectionSet>
 
+const PROVIDER_KEYS: OAuthProvider[] = ['google', 'microsoft', 'slack']
+
 type ConnectionListener = (snapshot: ProviderConnectionMap | null) => void
 type RawConnectionListener = (
   snapshot: ProviderConnectionMap | null,
@@ -51,6 +53,22 @@ type ConnectionCacheOptions = {
   workspaceId?: string | null
 }
 
+const defaultPersonalConnection = (): PersonalConnectionInfo => ({
+  scope: 'personal',
+  id: null,
+  connected: false,
+  accountEmail: undefined,
+  expiresAt: undefined,
+  lastRefreshedAt: undefined,
+  requiresReconnect: false,
+  isShared: false
+})
+
+const defaultProviderConnections = (): ProviderConnectionSet => ({
+  personal: defaultPersonalConnection(),
+  workspace: []
+})
+
 const cloneConnectionSet = (
   set: ProviderConnectionSet
 ): ProviderConnectionSet => ({
@@ -60,10 +78,25 @@ const cloneConnectionSet = (
 
 const cloneConnectionMap = (
   map: ProviderConnectionMap
-): ProviderConnectionMap => ({
-  google: cloneConnectionSet(map.google),
-  microsoft: cloneConnectionSet(map.microsoft)
-})
+): ProviderConnectionMap => {
+  const result = {} as ProviderConnectionMap
+  PROVIDER_KEYS.forEach((provider) => {
+    const source = map[provider] ?? defaultProviderConnections()
+    result[provider] = cloneConnectionSet(source)
+  })
+  return result
+}
+
+const createEmptyConnectionMap = (): ProviderConnectionMap => {
+  const map = {} as ProviderConnectionMap
+  PROVIDER_KEYS.forEach((provider) => {
+    map[provider] = defaultProviderConnections()
+  })
+  return map
+}
+
+const isSupportedProvider = (value: unknown): value is OAuthProvider =>
+  PROVIDER_KEYS.includes(value as OAuthProvider)
 
 const normalizeWorkspaceId = (value?: string | null): string | null => {
   if (typeof value !== 'string') {
@@ -211,29 +244,18 @@ interface RefreshApiResponse {
   message?: string | null
 }
 
-const defaultPersonalConnection = (): PersonalConnectionInfo => ({
-  scope: 'personal',
-  id: null,
-  connected: false,
-  accountEmail: undefined,
-  expiresAt: undefined,
-  lastRefreshedAt: undefined,
-  requiresReconnect: false,
-  isShared: false
-})
-
-const defaultProviderConnections = (): ProviderConnectionSet => ({
-  personal: defaultPersonalConnection(),
-  workspace: []
-})
-
 const ensureConnectionMap = (
   map: ProviderConnectionMap | null
-): ProviderConnectionMap =>
-  map ?? {
-    google: defaultProviderConnections(),
-    microsoft: defaultProviderConnections()
-  }
+): ProviderConnectionMap => {
+  const result = {} as ProviderConnectionMap
+  PROVIDER_KEYS.forEach((provider) => {
+    const source = map?.[provider]
+    result[provider] = source
+      ? cloneConnectionSet(source)
+      : defaultProviderConnections()
+  })
+  return result
+}
 
 export async function fetchConnections(
   options?: ConnectionCacheOptions
@@ -253,10 +275,7 @@ export async function fetchConnections(
   }
 
   const data = (await res.json()) as ConnectionsApiResponse
-  const map: ProviderConnectionMap = {
-    google: defaultProviderConnections(),
-    microsoft: defaultProviderConnections()
-  }
+  const map = createEmptyConnectionMap()
 
   const normalize = (value?: string | null): string | undefined => {
     if (typeof value !== 'string') {
@@ -268,15 +287,14 @@ export async function fetchConnections(
 
   const personalEntries = Array.isArray(data.personal) ? data.personal : []
   personalEntries.forEach((entry) => {
-    if (
-      !entry ||
-      (entry.provider !== 'google' && entry.provider !== 'microsoft')
-    ) {
+    if (!entry || !isSupportedProvider(entry.provider)) {
       return
     }
 
-    map[entry.provider] = {
-      ...map[entry.provider],
+    const provider = entry.provider
+
+    map[provider] = {
+      ...map[provider],
       personal: {
         scope: 'personal',
         id: entry.id,
@@ -292,10 +310,7 @@ export async function fetchConnections(
 
   const workspaceEntries = Array.isArray(data.workspace) ? data.workspace : []
   workspaceEntries.forEach((entry) => {
-    if (
-      !entry ||
-      (entry.provider !== 'google' && entry.provider !== 'microsoft')
-    ) {
+    if (!entry || !isSupportedProvider(entry.provider)) {
       return
     }
 
@@ -305,11 +320,13 @@ export async function fetchConnections(
       return
     }
 
+    const provider = entry.provider
+
     const workspaceInfo: WorkspaceConnectionInfo = {
       scope: 'workspace',
       id: connectionId,
       connected: !entry.requiresReconnect,
-      provider: entry.provider,
+      provider,
       accountEmail: normalize(entry.accountEmail),
       expiresAt: entry.expiresAt ?? undefined,
       lastRefreshedAt: normalize(entry.lastRefreshedAt),
@@ -320,9 +337,9 @@ export async function fetchConnections(
       requiresReconnect: Boolean(entry.requiresReconnect)
     }
 
-    map[entry.provider] = {
-      ...map[entry.provider],
-      workspace: [...map[entry.provider].workspace, workspaceInfo]
+    map[provider] = {
+      ...map[provider],
+      workspace: [...map[provider].workspace, workspaceInfo]
     }
   })
 
