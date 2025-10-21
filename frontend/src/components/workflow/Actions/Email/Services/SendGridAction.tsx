@@ -1,76 +1,216 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import deepEqual from 'fast-deep-equal'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 
-interface SendGridActionProps {
+type SendGridSubstitution = { key: string; value: string }
+
+type SendGridActionValues = {
+  apiKey?: string
+  from?: string
+  to?: string
+  templateId?: string
+  substitutions?: SendGridSubstitution[]
+  subject?: string
+  body?: string
+}
+
+type NormalizedSendGridParams = {
   apiKey: string
   from: string
   to: string
-  templateId?: string
-  substitutions?: { key: string; value: string }[]
+  templateId: string
+  substitutions: SendGridSubstitution[]
   subject: string
   body: string
-  dirty: boolean
-  setParams: (params: Partial<SendGridActionProps>) => void
-  setDirty: (dirty: boolean) => void
 }
+
+type SendGridStringKey = Exclude<
+  keyof NormalizedSendGridParams,
+  'substitutions'
+>
+
+interface SendGridActionProps {
+  args: SendGridActionValues
+  onChange?: (
+    args: SendGridActionValues,
+    hasErrors: boolean,
+    dirty: boolean
+  ) => void
+}
+
+const normalizeSubstitutions = (
+  entries: SendGridSubstitution[] | undefined
+): SendGridSubstitution[] => {
+  if (!Array.isArray(entries)) return []
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const key = typeof entry.key === 'string' ? entry.key : ''
+      const value = typeof entry.value === 'string' ? entry.value : ''
+      return { key, value }
+    })
+    .filter((entry): entry is SendGridSubstitution => Boolean(entry))
+}
+
+const normalizeParams = (
+  incoming?: SendGridActionValues
+): NormalizedSendGridParams => {
+  const base: NormalizedSendGridParams = {
+    apiKey: '',
+    from: '',
+    to: '',
+    templateId: '',
+    substitutions: [],
+    subject: '',
+    body: ''
+  }
+
+  if (!incoming || typeof incoming !== 'object') {
+    return base
+  }
+
+  return {
+    apiKey: typeof incoming.apiKey === 'string' ? incoming.apiKey : '',
+    from: typeof incoming.from === 'string' ? incoming.from : '',
+    to: typeof incoming.to === 'string' ? incoming.to : '',
+    templateId:
+      typeof incoming.templateId === 'string' ? incoming.templateId : '',
+    substitutions: normalizeSubstitutions(incoming.substitutions),
+    subject: typeof incoming.subject === 'string' ? incoming.subject : '',
+    body: typeof incoming.body === 'string' ? incoming.body : ''
+  }
+}
+
+const serializeParams = (params: NormalizedSendGridParams) =>
+  JSON.stringify({
+    ...params,
+    substitutions: params.substitutions.map((entry) => ({ ...entry }))
+  })
+
+type SendGridErrors = Partial<Record<keyof NormalizedSendGridParams, string>>
+
+const validate = (values: NormalizedSendGridParams): SendGridErrors => {
+  const errors: SendGridErrors = {}
+  if (!values.apiKey.trim()) errors.apiKey = 'API key is required'
+  if (!values.from.trim()) errors.from = 'From email is required'
+
+  const recipients = values.to
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (recipients.length === 0) {
+    errors.to = 'Recipient email(s) required'
+  } else if (recipients.some((recipient) => !emailRx.test(recipient))) {
+    errors.to = 'One or more recipient emails are invalid'
+  } else if (new Set(recipients).size !== recipients.length) {
+    errors.to = 'Duplicate recipient emails are not allowed'
+  }
+
+  if (!values.templateId.trim()) {
+    if (!values.subject.trim()) errors.subject = 'Subject is required'
+    if (!values.body.trim()) errors.body = 'Message body is required'
+  }
+
+  return errors
+}
+
+const cloneParams = (params: NormalizedSendGridParams) => ({
+  ...params,
+  substitutions: params.substitutions.map((entry) => ({ ...entry }))
+})
 
 export default function SendGridAction({
   args,
   onChange
-}: {
-  args: SendGridActionProps
-  onChange?: (
-    args: Partial<SendGridActionProps>,
-    hasErrors: boolean,
-    dirty: boolean
-  ) => void
-}) {
-  const [_, setDirty] = useState(false)
-  const [params, setParams] = useState({
-    ...args
-  })
-
-  useEffect(() => {
-    onChange?.(params, Object.keys(hasErrors(params)).length > 0, true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params])
-
-  const hasErrors = (updatedParams: Partial<SendGridActionProps>) => {
-    const errors: Partial<SendGridActionProps> = {}
-    if (!updatedParams.apiKey?.trim()) errors.apiKey = 'API key is required'
-    if (!updatedParams.from?.trim()) errors.from = 'From email is required'
-
-    if (!updatedParams.to?.trim()) {
-      errors.to = 'Recipient email(s) required'
-    } else {
-      const recipients = updatedParams.to
-        .split(',')
-        .map((r) => r.trim())
-        .filter(Boolean)
-      const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (recipients.length === 0) errors.to = 'Recipient email(s) required'
-      else if (recipients.some((r) => !emailRx.test(r)))
-        errors.to = 'One or more recipient emails are invalid'
-      else if (new Set(recipients).size !== recipients.length)
-        errors.to = 'Duplicate recipient emails are not allowed'
-    }
-
-    if (!updatedParams.templateId?.trim()) {
-      if (!updatedParams.subject?.trim()) errors.subject = 'Subject is required'
-      if (!updatedParams.body?.trim()) errors.body = 'Message body is required'
-    }
-
-    return errors
+}: SendGridActionProps) {
+  const initialParamsRef = useRef<NormalizedSendGridParams | null>(null)
+  if (!initialParamsRef.current) {
+    initialParamsRef.current = normalizeParams(args)
   }
 
-  const sendGridErrors = useMemo(() => hasErrors(params), [params])
+  const [params, setParams] = useState<NormalizedSendGridParams>(
+    initialParamsRef.current!
+  )
+  const [dirty, setDirty] = useState(false)
+  const [childDirty, setChildDirty] = useState(false)
+  const [childHasErrors, setChildHasErrors] = useState(false)
 
-  const updateField = (key: string, value: string) => {
-    setDirty(true)
-    setParams((prev) => ({ ...prev, [key]: value }))
+  const lastArgsSignatureRef = useRef<string>(
+    serializeParams(initialParamsRef.current!)
+  )
+  const internalUpdateRef = useRef(false)
+  const lastEmittedRef = useRef<{
+    params: NormalizedSendGridParams
+    hasErrors: boolean
+    dirty: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    const normalized = normalizeParams(args)
+    const signature = serializeParams(normalized)
+    if (signature === lastArgsSignatureRef.current) {
+      return
+    }
+
+    lastArgsSignatureRef.current = signature
+    internalUpdateRef.current = true
+    initialParamsRef.current = normalized
+    setParams(normalized)
+    setDirty(false)
+    setChildDirty(false)
+    setChildHasErrors(false)
+  }, [args])
+
+  const validationErrors = useMemo(() => validate(params), [params])
+  const combinedDirty = dirty || childDirty
+
+  useEffect(() => {
+    if (params.templateId) return
+    setChildHasErrors(false)
+    setChildDirty(false)
+  }, [params.templateId])
+
+  useEffect(() => {
+    if (!onChange) return
+
+    if (internalUpdateRef.current) {
+      internalUpdateRef.current = false
+      return
+    }
+    const hasErrors = childHasErrors || Object.keys(validationErrors).length > 0
+    const payload = cloneParams(params)
+    const last = lastEmittedRef.current
+
+    if (
+      last &&
+      last.dirty === combinedDirty &&
+      last.hasErrors === hasErrors &&
+      deepEqual(last.params, payload)
+    ) {
+      return
+    }
+
+    lastEmittedRef.current = {
+      params: payload,
+      hasErrors,
+      dirty: combinedDirty
+    }
+
+    onChange(payload, hasErrors, combinedDirty)
+  }, [childHasErrors, combinedDirty, onChange, params, validationErrors])
+
+  const updateField = (key: SendGridStringKey, value: string) => {
+    setParams((prev) => {
+      if ((prev[key] as string) === value) {
+        return prev
+      }
+      setDirty(true)
+      return { ...prev, [key]: value }
+    })
   }
 
   return (
@@ -78,43 +218,46 @@ export default function SendGridAction({
       <NodeSecretDropdown
         group="email"
         service="sendgrid"
-        value={params.apiKey || ''}
+        value={params.apiKey}
         onChange={(val) => updateField('apiKey', val)}
         placeholder="Select SendGrid API key"
       />
-      {sendGridErrors.apiKey && (
-        <p className="text-xs text-red-500">{sendGridErrors.apiKey}</p>
+      {validationErrors.apiKey && (
+        <p className="text-xs text-red-500">{validationErrors.apiKey}</p>
       )}
 
       <NodeInputField
         type="email"
         placeholder="From Email"
-        value={params.from || ''}
+        value={params.from}
         onChange={(val) => updateField('from', val)}
       />
-      {sendGridErrors.from && (
-        <p className="text-xs text-red-500">{sendGridErrors.from}</p>
+      {validationErrors.from && (
+        <p className="text-xs text-red-500">{validationErrors.from}</p>
       )}
 
       <NodeInputField
         type="text"
         placeholder="Template ID (optional)"
-        value={params.templateId || ''}
+        value={params.templateId}
         onChange={(val) => updateField('templateId', val)}
       />
 
       {params.templateId && (
         <KeyValuePair
           title="Substitution Variables"
-          variables={params.substitutions || []}
-          onChange={(updatedVars, nodeHasErrors, childDirty) => {
-            setParams((prev) => ({ ...prev, substitutions: updatedVars }))
-            setDirty((prev) => prev || childDirty)
-            onChange?.(
-              { ...params, substitutions: updatedVars },
-              nodeHasErrors,
-              childDirty
-            )
+          variables={params.substitutions}
+          onChange={(updatedVars, nodeHasErrors, childDirtyState) => {
+            const normalizedSubs = normalizeSubstitutions(updatedVars)
+            setParams((prev) => {
+              if (deepEqual(prev.substitutions, normalizedSubs)) {
+                return prev
+              }
+              setDirty(true)
+              return { ...prev, substitutions: normalizedSubs }
+            })
+            setChildDirty((prev) => prev || childDirtyState)
+            setChildHasErrors(nodeHasErrors)
           }}
         />
       )}
@@ -125,29 +268,29 @@ export default function SendGridAction({
         value={params.to}
         onChange={(val) => updateField('to', val)}
       />
-      {sendGridErrors.to && (
-        <p className="text-xs text-red-500">{sendGridErrors.to}</p>
+      {validationErrors.to && (
+        <p className="text-xs text-red-500">{validationErrors.to}</p>
       )}
 
       {!params.templateId && (
         <>
           <NodeInputField
             placeholder="Subject"
-            value={params.subject || ''}
+            value={params.subject}
             onChange={(val) => updateField('subject', val)}
           />
-          {sendGridErrors.subject && (
-            <p className="text-xs text-red-500">{sendGridErrors.subject}</p>
+          {validationErrors.subject && (
+            <p className="text-xs text-red-500">{validationErrors.subject}</p>
           )}
 
           <NodeTextAreaField
             placeholder="Message Body"
-            value={params.body || ''}
+            value={params.body}
             rows={4}
             onChange={(val) => updateField('body', val)}
           />
-          {sendGridErrors.body && (
-            <p className="text-xs text-red-500">{sendGridErrors.body}</p>
+          {validationErrors.body && (
+            <p className="text-xs text-red-500">{validationErrors.body}</p>
           )}
         </>
       )}

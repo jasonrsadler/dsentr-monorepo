@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import deepEqual from 'fast-deep-equal'
 import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
 import SlackAction from './Services/SlackAction'
 import TeamsAction from './Services/TeamsAction'
@@ -170,6 +171,11 @@ export default function MessagingAction({
     useState<PlatformParams>(initialChildParams)
   const [childHasErrors, setChildHasErrors] = useState(false)
   const [childDirty, setChildDirty] = useState(false)
+  const lastEmittedRef = useRef<{
+    payload: Record<string, unknown>
+    hasErrors: boolean
+    dirty: boolean
+  } | null>(null)
 
   const validationErrors = useMemo(() => {
     const errors: Record<string, string> = {}
@@ -186,13 +192,53 @@ export default function MessagingAction({
   }, [platform, childParams, childHasErrors, childDirty])
 
   useEffect(() => {
-    onChange?.(
-      { ...childParams, platform },
-      childHasErrors || Object.keys(validationErrors).length > 0,
-      combinedDirty
+    if (!onChange) return
+
+    const payload = { ...childParams, platform }
+    const hasErrors = childHasErrors || Object.keys(validationErrors).length > 0
+    const last = lastEmittedRef.current
+
+    if (
+      last &&
+      last.dirty === combinedDirty &&
+      last.hasErrors === hasErrors &&
+      deepEqual(last.payload, payload)
+    ) {
+      return
+    }
+
+    const snapshot = Object.keys(payload).reduce<Record<string, unknown>>(
+      (acc, key) => {
+        const value = (payload as Record<string, unknown>)[key]
+        if (Array.isArray(value)) {
+          acc[key] = value.map((entry) =>
+            entry && typeof entry === 'object' ? { ...entry } : entry
+          )
+        } else if (value && typeof value === 'object') {
+          acc[key] = { ...(value as Record<string, unknown>) }
+        } else {
+          acc[key] = value
+        }
+        return acc
+      },
+      {}
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [childParams, platform, childHasErrors, validationErrors, combinedDirty])
+
+    lastEmittedRef.current = {
+      payload: snapshot,
+      hasErrors,
+      dirty: combinedDirty
+    }
+
+    onChange(payload, hasErrors, combinedDirty)
+  }, [
+    childParams,
+    platform,
+    childHasErrors,
+    validationErrors,
+    combinedDirty,
+    onChange
+  ])
 
   const handlePlatformChange = (value: string) => {
     const nextPlatform = (value as MessagingPlatform) || 'Slack'

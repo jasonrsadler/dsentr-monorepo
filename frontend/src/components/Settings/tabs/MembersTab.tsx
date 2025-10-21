@@ -238,12 +238,7 @@ export default function MembersTab() {
         setBusy(false)
       }
     },
-    [
-      isWorkspaceAdminOrOwner,
-      refreshSecrets,
-      removeWorkspaceMember,
-      resolvedWorkspaceId
-    ]
+    [isWorkspaceAdminOrOwner, refreshSecrets, resolvedWorkspaceId]
   )
 
   const handleRemove = useCallback(

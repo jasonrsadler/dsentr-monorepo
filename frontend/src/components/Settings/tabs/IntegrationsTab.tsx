@@ -285,7 +285,7 @@ export default function IntegrationsTab({
 
       void performDisconnect(provider, [])
     },
-    [matchesCurrentUser, performDisconnect, statuses]
+    [matchesCurrentUser, performDisconnect, statuses, workspaceId]
   )
 
   const handleRefresh = async (provider: OAuthProvider) => {

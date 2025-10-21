@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import deepEqual from 'fast-deep-equal'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
@@ -39,10 +40,17 @@ export default function ConditionNode({
   isSucceeded,
   isFailed
 }: ConditionNodeProps) {
-  const isNewNode = !data?.id
+  const isNewNode = useMemo(() => !data?.id, [data?.id])
+  const dataExpanded = data?.expanded ?? true
+  const dataDirty = data?.dirty
+  const dataField = data?.field || ''
+  const dataOperator = data?.operator || 'equals'
+  const dataValue = data?.value || ''
+  const dataLabel = data?.label || 'Condition'
+  const dataLabelError = data?.labelError ?? null
 
-  const [expanded, setExpanded] = useState(data?.expanded ?? true)
-  const [dirty, setDirty] = useState(data?.dirty ?? isNewNode)
+  const [expanded, setExpanded] = useState(dataExpanded)
+  const [dirty, setDirty] = useState(dataDirty ?? isNewNode)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [hasValidationErrors, setHasValidationErrors] = useState(false)
   const [labelError, setLabelError] = useState<string | null>(
@@ -50,24 +58,27 @@ export default function ConditionNode({
   )
   const combinedHasValidationErrors = hasValidationErrors || Boolean(labelError)
 
-  const [field, setField] = useState(data?.field || '')
-  const [operator, setOperator] = useState(data?.operator || 'equals')
-  const [value, setValue] = useState(data?.value || '')
-  const [label, setLabel] = useState(data?.label || 'Condition')
+  const [field, setField] = useState(dataField)
+  const [operator, setOperator] = useState(dataOperator)
+  const [value, setValue] = useState(dataValue)
+  const [label, setLabel] = useState(dataLabel)
 
   useEffect(() => {
-    setLabelError(data?.labelError ?? null)
-  }, [data?.labelError])
+    setLabelError(dataLabelError)
+  }, [dataLabelError])
 
   // Sync validation
   useEffect(() => {
     setHasValidationErrors(!field || !operator || !value)
   }, [field, operator, value])
 
-  // Sync node data to parent
-  useEffect(() => {
-    const expression = buildExpression(field, operator, value)
-    const nextData = {
+  const expression = useMemo(
+    () => buildExpression(field, operator, value),
+    [field, operator, value]
+  )
+
+  const currentNodeState = useMemo(
+    () => ({
       label,
       field,
       operator,
@@ -76,40 +87,68 @@ export default function ConditionNode({
       dirty,
       expanded,
       hasValidationErrors: combinedHasValidationErrors
+    }),
+    [
+      combinedHasValidationErrors,
+      dirty,
+      expanded,
+      expression,
+      field,
+      label,
+      operator,
+      value
+    ]
+  )
+
+  const lastSyncedStateRef = useRef<typeof currentNodeState | null>(null)
+  const lastDirtyStatusRef = useRef<boolean | null>(null)
+
+  // Sync node data to parent when payload meaningfully changes
+  useEffect(() => {
+    const previousState = lastSyncedStateRef.current
+    const stateChanged =
+      !previousState || !deepEqual(previousState, currentNodeState)
+
+    if (stateChanged) {
+      lastSyncedStateRef.current = currentNodeState
+      onUpdateNode?.(id, currentNodeState, true)
     }
-    onUpdateNode?.(id, nextData, true)
-    if (dirty) onDirtyChange?.(true, nextData)
-  }, [
-    label,
-    field,
-    operator,
-    value,
-    dirty,
-    expanded,
-    hasValidationErrors,
-    combinedHasValidationErrors,
-    id,
-    onUpdateNode,
-    onDirtyChange
-  ])
+
+    if (dirty !== lastDirtyStatusRef.current) {
+      lastDirtyStatusRef.current = dirty
+      onDirtyChange?.(dirty, currentNodeState)
+    }
+  }, [currentNodeState, dirty, id, onDirtyChange, onUpdateNode])
 
   // Sync dirty from parent
   useEffect(() => {
-    if (data?.dirty !== undefined && data.dirty !== dirty) {
-      setDirty(data.dirty)
+    if (dataDirty !== undefined && dataDirty !== dirty) {
+      setDirty(dataDirty)
     }
-  }, [data?.dirty])
+  }, [dataDirty, dirty])
 
   // Reset local state when node id changes (e.g., new node or remount on workflow switch)
   useEffect(() => {
-    setLabel(data?.label || 'Condition')
-    setExpanded(data?.expanded ?? true)
-    setField(data?.field || '')
-    setOperator(data?.operator || 'equals')
-    setValue(data?.value || '')
-    setDirty(data?.dirty ?? isNewNode)
-    setLabelError(data?.labelError ?? null)
-  }, [id])
+    // React Flow safe pattern: keep local node state synchronized with the
+    // latest canvas data while guarding against render loops.
+    setLabel(dataLabel)
+    setExpanded(dataExpanded)
+    setField(dataField)
+    setOperator(dataOperator)
+    setValue(dataValue)
+    setDirty(dataDirty ?? isNewNode)
+    setLabelError(dataLabelError)
+  }, [
+    id,
+    dataLabel,
+    dataExpanded,
+    dataField,
+    dataOperator,
+    dataValue,
+    dataDirty,
+    dataLabelError,
+    isNewNode
+  ])
 
   const ringClass = isFailed
     ? 'ring-2 ring-red-500'

@@ -176,6 +176,7 @@ export default function Dashboard() {
   // Run state
   const [runOverlayOpen, setRunOverlayOpen] = useState(false)
   const [activeRun, setActiveRun] = useState<WorkflowRunRecord | null>(null)
+  const activeRunId = activeRun?.id ?? null
   const [nodeRuns, setNodeRuns] = useState<WorkflowNodeRunRecord[]>([])
   const pollTimerRef = useRef<any>(null)
   const currentPollRunIdRef = useRef<string | null>(null)
@@ -314,6 +315,7 @@ export default function Dashboard() {
       workflows.find((workflow) => workflow.id === currentWorkflowId) ?? null,
     [workflows, currentWorkflowId]
   )
+  const currentWorkflowIdValue = currentWorkflow?.id ?? null
 
   const isWorkspaceAdmin = useMemo(
     () => workspaceRole === 'owner' || workspaceRole === 'admin',
@@ -422,27 +424,6 @@ export default function Dashboard() {
     refreshPlanUsage()
   }, [normalizeWorkflowData, planTier, refreshPlanUsage, activeWorkspaceId])
 
-  const markWorkflowDirty = useCallback(() => {
-    setError(null)
-  }, [])
-
-  const selectWorkflow = useCallback(
-    (id: string) => {
-      if (id === currentWorkflowId) return
-
-      // If current workflow has unsaved changes, prompt before switching
-      if (workflowDirty) {
-        setPendingSwitchId(id)
-        setShowSwitchConfirm(true)
-        return
-      }
-
-      doSelectWorkflow(id)
-    },
-    [currentWorkflowId, workflows, normalizeWorkflowData, workflowDirty]
-  )
-
-  // Internal function to apply the actual switch logic
   const doSelectWorkflow = useCallback(
     (id: string) => {
       const nextWorkflow = workflows.find((workflow) => workflow.id === id)
@@ -493,6 +474,26 @@ export default function Dashboard() {
       })()
     },
     [workflows, normalizeWorkflowData, activeWorkspaceId]
+  )
+
+  const markWorkflowDirty = useCallback(() => {
+    setError(null)
+  }, [])
+
+  const selectWorkflow = useCallback(
+    (id: string) => {
+      if (id === currentWorkflowId) return
+
+      // If current workflow has unsaved changes, prompt before switching
+      if (workflowDirty) {
+        setPendingSwitchId(id)
+        setShowSwitchConfirm(true)
+        return
+      }
+
+      doSelectWorkflow(id)
+    },
+    [currentWorkflowId, doSelectWorkflow, workflowDirty]
   )
 
   // Confirm-to-switch dialog state
@@ -779,10 +780,10 @@ export default function Dashboard() {
 
   // Keep overlay latched to the selected workflow's next running/queued run via SSE, with REST fallback
   useEffect(() => {
-    if (!runOverlayOpen || !currentWorkflow || activeRun) return
+    if (!runOverlayOpen || !currentWorkflowIdValue || activeRunId) return
 
     const base = (API_BASE_URL || '').replace(/\/$/, '')
-    const url = `${base}/api/workflows/${currentWorkflow.id}/runs/events-stream`
+    const url = `${base}/api/workflows/${currentWorkflowIdValue}/runs/events-stream`
     let es: EventSource | null = null
     let fallbackTimer: any = null
     let backoff = 1500
@@ -811,7 +812,7 @@ export default function Dashboard() {
     const startFallback = () => {
       const doFetch = async () => {
         try {
-          const runs = await listActiveRuns(currentWorkflow.id)
+          const runs = await listActiveRuns(currentWorkflowIdValue)
           if (pickFrom(runs)) return
         } catch (e) {
           console.error(e.message)
@@ -863,7 +864,7 @@ export default function Dashboard() {
         fallbackTimer = null
       }
     }
-  }, [runOverlayOpen, currentWorkflow?.id, activeRun])
+  }, [activeRunId, currentWorkflowIdValue, runOverlayOpen])
 
   // Global runs SSE to drive toolbar status
   useEffect(() => {
@@ -913,9 +914,9 @@ export default function Dashboard() {
 
   // Runs tab: consume SSE of active runs for the selected workflow
   useEffect(() => {
-    if (activePane !== 'runs' || !currentWorkflow) return
+    if (activePane !== 'runs' || !currentWorkflowIdValue) return
     const base = (API_BASE_URL || '').replace(/\/$/, '')
-    const url = `${base}/api/workflows/${currentWorkflow.id}/runs/events-stream`
+    const url = `${base}/api/workflows/${currentWorkflowIdValue}/runs/events-stream`
     let es: EventSource | null = null
     try {
       es = new EventSource(url, { withCredentials: true } as EventSourceInit)
@@ -945,7 +946,7 @@ export default function Dashboard() {
         console.error(e.message)
       }
     }
-  }, [activePane, currentWorkflow?.id])
+  }, [activePane, currentWorkflowIdValue])
 
   const handleRunWorkflow = useCallback(async () => {
     if (!currentWorkflow) return
@@ -978,12 +979,12 @@ export default function Dashboard() {
 
   // Overlay: subscribe to SSE for active run to reduce client work
   useEffect(() => {
-    if (!runOverlayOpen || !currentWorkflow || !activeRun) return
+    if (!runOverlayOpen || !currentWorkflowIdValue || !activeRunId) return
     // Stop any REST polling for this run
     stopPolling()
 
     const base = (API_BASE_URL || '').replace(/\/$/, '')
-    const url = `${base}/api/workflows/${currentWorkflow.id}/runs/${activeRun.id}/events`
+    const url = `${base}/api/workflows/${currentWorkflowIdValue}/runs/${activeRunId}/events`
     let es: EventSource | null = null
     try {
       es = new EventSource(url, { withCredentials: true } as EventSourceInit)
@@ -1031,7 +1032,7 @@ export default function Dashboard() {
         console.error(e.message)
       }
     }
-  }, [runOverlayOpen, currentWorkflow?.id, activeRun?.id, stopPolling])
+  }, [runOverlayOpen, currentWorkflowIdValue, activeRunId, stopPolling])
 
   useEffect(() => {
     // Only recompute dirty state on meta changes while editing in designer.
@@ -1173,13 +1174,14 @@ export default function Dashboard() {
       isSavingRef.current = false
     }
   }, [
+    activeWorkspaceId,
+    addLog,
     canEditCurrentWorkflow,
     currentWorkflow,
+    handleGraphChange,
     isSaving,
     normalizeWorkflowData,
-    handleGraphChange,
-    setRestrictionNotice,
-    activeWorkspaceId
+    setRestrictionNotice
   ])
 
   const handleLockWorkflow = useCallback(async () => {

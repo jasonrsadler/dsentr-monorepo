@@ -19,6 +19,7 @@ seCallback`, `useMemo`) to prevent infinite renders.
   - useCallback for handlers.
   - Only call parent onUpdate when deep-equality shows change.
   - Debounce inputs that propagate to parent.
+  - When mirroring props into local state, keep a `useRef` snapshot of the last payload and short-circuit updates when the next payload is structurally identical. This avoids the React Flow "maximum update depth" loop caused by dispatching redundant setter calls from effects.
 - Signup flows that accept workspace invites must route all query parsing through `parseInviteQuery` in `src/lib/inviteQuery.ts` so redirects and conflict detection stay consistent with backend expectations.
 - Invitation acceptance must always go through a confirmation modal with explicit Accept/Decline actions so users can opt out before hitting the API.
 - The dashboard header now includes a global workspace switcher. It must stay synchronized with `useAuth().currentWorkspaceId`, auto-select a sole workspace, and keep the router query string (`?workspace=`) up to date whenever the selection changes.
@@ -38,3 +39,15 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Workflow nodes clear shared workspace credential selections when the shared connection is removed so users must choose an available credential explicitly.
 - OAuth connection selectors update in real time when workspace credentials are promoted or removed, so open workflows reflect changes without refreshing.
 - Shared credential removal flows now warn about potential workflow failures and ensure personal disconnects also revoke shared workspace connections.
+- Action nodes now deep-compare local state before notifying the canvas so update notifications don't trigger infinite React Flow rerender loops.
+- Action node prop-to-state sync skips redundant param updates to prevent React Flow dirty-check loops when toggling node UI.
+- Condition nodes now deep-compare update payloads before notifying the canvas so toggling other nodes or edges doesn't trigger infinite workflow rerenders.
+- Action nodes no longer mirror their entire config payload in unused state, avoiding React Flow effect loops when props update with identical data.
+- Action nodes now guard prop-to-state synchronization so redundant dirty resets can't cascade into React Flow depth errors when interacting with nodes or edges.
+- Action nodes now cache the last prop snapshot before syncing local state so identical data stops propagating through the canvas and avoids infinite update loops.
+- React Flow canvas documentation now calls out the cached-snapshot guard so future node work avoids reintroducing maximum update depth errors.
+- Teams action now deduplicates Microsoft connection snapshots before mutating state so identical OAuth updates stop retriggering canvas loops.
+- Messaging action caches the last emitted payload and only notifies parents when selections actually change, preventing redundant React Flow updates.
+- SendGrid action synchronizes props via snapshots and suppresses redundant onChange emissions to avoid React Flow maximum update depth errors.
+- Custom code action now normalizes state snapshots, caches the last emission, and guards prop-to-state sync so React Flow doesn't hit maximum update depth while editing scripts or IO pairs.
+- Teams action now initializes its connection sanitizer before dependent callbacks so React Flow renders don't encounter temporal dead zone reference errors.

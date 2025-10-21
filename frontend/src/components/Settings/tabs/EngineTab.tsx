@@ -72,7 +72,7 @@ export default function EngineTab() {
   const baselineLimit = useMemo(() => {
     const raw = (selected as any)?.concurrency_limit
     return typeof raw === 'number' && raw >= 1 ? raw : 1
-  }, [selected?.concurrency_limit, selectedId])
+  }, [selected])
   const [limitInput, setLimitInput] = useState<string>('')
   useEffect(() => {
     if (isSoloPlan) {

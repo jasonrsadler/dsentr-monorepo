@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import deepEqual from 'fast-deep-equal'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import ActionTypeDropdown from './ActionTypeDropdown'
@@ -79,10 +80,20 @@ export default function ActionNode({
     [planTier]
   )
   const isSoloPlan = normalizedPlanTier === 'solo'
-  const isNewNode = !data?.id
+  const isNewNode = useMemo(() => !data?.id, [data?.id])
+  const dataLabel = data?.label
+  const dataExpanded = data?.expanded ?? false
+  const dataActionType = data?.actionType
+  const dataParams = data?.params
+  const dataInputs = data?.inputs
+  const dataTimeout = data?.timeout
+  const dataRetries = data?.retries
+  const dataStopOnError = data?.stopOnError
+  const dataDirty = data?.dirty
+  const dataLabelError = data?.labelError ?? null
 
-  const [expanded, setExpanded] = useState(data?.expanded ?? false)
-  const [dirty, setDirty] = useState(data?.dirty ?? isNewNode)
+  const [expanded, setExpanded] = useState(dataExpanded)
+  const [dirty, setDirty] = useState(dataDirty ?? isNewNode)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [running, setRunning] = useState(false)
   const [actionType, setActionType] = useState<string>(
@@ -95,34 +106,89 @@ export default function ActionNode({
   const [timeout, setTimeoutMs] = useState(data?.timeout || 5000)
   const [retries, setRetries] = useState(data?.retries || 0)
   const [stopOnError, setStopOnError] = useState(data?.stopOnError ?? true)
-  const [_, setConfig] = useState(() => data || { type: '', params: {} })
-  const [label, setLabel] = useState(data?.label || 'Action')
-  const [labelError, setLabelError] = useState<string | null>(
-    data?.labelError ?? null
-  )
+  const [label, setLabel] = useState(dataLabel || 'Action')
+  const [labelError, setLabelError] = useState<string | null>(dataLabelError)
+
+  type IncomingSnapshot = {
+    label: string
+    expanded: boolean
+    actionType: string
+    params: Record<string, unknown>
+    timeout: number
+    retries: number
+    stopOnError: boolean
+    dirty: boolean
+  }
+
+  const lastSyncedFromDataRef = useRef<IncomingSnapshot | null>(null)
 
   useEffect(() => {
-    setConfig(data || { type: '', params: {} })
-  }, [data])
-
-  // Reset local state when node id changes (e.g., new node or remount on workflow switch)
-  useEffect(() => {
-    setLabel(data?.label || 'Action')
-    setExpanded(data?.expanded ?? false)
-    setActionType(normalizeActionType(data?.actionType))
-    setParams(() => ({ service: '', ...(data?.params || data?.inputs || {}) }))
-    setTimeoutMs(data?.timeout || 5000)
-    setRetries(data?.retries || 0)
-    setStopOnError(data?.stopOnError ?? true)
-    setDirty(data?.dirty ?? isNewNode)
+    lastSyncedFromDataRef.current = null
   }, [id])
 
+  // React Flow safe pattern: keep local state aligned with incoming canvas
+  // data, but guard with a snapshot comparison so unchanged props do not
+  // trigger another render cycle. Without this guard, React Flow can get stuck
+  // in an infinite update loop as identical payloads bounce between node state
+  // and the parent graph store.
   useEffect(() => {
-    if (data?.dirty !== undefined && data.dirty !== dirty) {
-      console.log('Sync dirty from parent:', data.dirty)
-      setDirty(data.dirty)
+    const incomingParams: Record<string, unknown> = {
+      service: '',
+      ...((dataParams || dataInputs || {}) as Record<string, unknown>)
     }
-  }, [data?.dirty])
+    const incomingState: IncomingSnapshot = {
+      label: dataLabel || 'Action',
+      expanded: dataExpanded,
+      actionType: normalizeActionType(dataActionType),
+      params: incomingParams,
+      timeout: dataTimeout || 5000,
+      retries: dataRetries || 0,
+      stopOnError: dataStopOnError ?? true,
+      dirty: dataDirty ?? isNewNode
+    }
+
+    const lastSynced = lastSyncedFromDataRef.current
+    if (lastSynced && deepEqual(lastSynced, incomingState)) {
+      return
+    }
+    lastSyncedFromDataRef.current = incomingState
+
+    setLabel((prev) =>
+      prev === incomingState.label ? prev : incomingState.label
+    )
+    setExpanded((prev) =>
+      prev === incomingState.expanded ? prev : incomingState.expanded
+    )
+    setActionType((prev) =>
+      prev === incomingState.actionType ? prev : incomingState.actionType
+    )
+    setParams((prev) =>
+      deepEqual(prev, incomingState.params) ? prev : incomingState.params
+    )
+    setTimeoutMs((prev) =>
+      prev === incomingState.timeout ? prev : incomingState.timeout
+    )
+    setRetries((prev) =>
+      prev === incomingState.retries ? prev : incomingState.retries
+    )
+    setStopOnError((prev) =>
+      prev === incomingState.stopOnError ? prev : incomingState.stopOnError
+    )
+    setDirty((prev) =>
+      prev === incomingState.dirty ? prev : incomingState.dirty
+    )
+  }, [
+    dataActionType,
+    dataDirty,
+    dataExpanded,
+    dataInputs,
+    dataLabel,
+    dataParams,
+    dataRetries,
+    dataStopOnError,
+    dataTimeout,
+    isNewNode
+  ])
 
   const [prevService, setPrevService] = useState('')
 
@@ -159,8 +225,8 @@ export default function ActionNode({
   const lastPlanNoticeRef = useRef<string | null>(null)
 
   useEffect(() => {
-    setLabelError(data?.labelError ?? null)
-  }, [data?.labelError])
+    setLabelError(dataLabelError)
+  }, [dataLabelError])
 
   useEffect(() => {
     if (!onRestrictionNotice) return
@@ -217,51 +283,52 @@ export default function ActionNode({
     }
   }, [params.service, prevService])
 
-  useEffect(() => {
-    onUpdateNode?.(
-      id,
-      {
-        label,
-        actionType: normalizedActionType,
-        params,
-        timeout,
-        retries,
-        stopOnError,
-        dirty,
-        expanded,
-        hasValidationErrors: combinedHasValidationErrors
-      },
-      true
-    )
+  const currentNodeState = useMemo(
+    () => ({
+      label,
+      actionType: normalizedActionType,
+      params,
+      timeout,
+      retries,
+      stopOnError,
+      dirty,
+      expanded,
+      hasValidationErrors: combinedHasValidationErrors
+    }),
+    [
+      combinedHasValidationErrors,
+      dirty,
+      expanded,
+      normalizedActionType,
+      params,
+      retries,
+      stopOnError,
+      timeout,
+      label
+    ]
+  )
 
-    if (dirty) {
-      onDirtyChange?.(true, {
-        label,
-        actionType: normalizedActionType,
-        params,
-        timeout,
-        retries,
-        stopOnError,
-        expanded,
-        hasValidationErrors: combinedHasValidationErrors
-      })
+  const lastSyncedStateRef = useRef<typeof currentNodeState | null>(null)
+  const lastDirtyStatusRef = useRef<boolean | null>(null)
+
+  useEffect(() => {
+    const previousState = lastSyncedStateRef.current
+    const stateChanged =
+      !previousState || !deepEqual(previousState, currentNodeState)
+
+    if (stateChanged) {
+      lastSyncedStateRef.current = currentNodeState
+      // React Flow safe pattern: Only notify the canvas when the payload truly
+      // changes. Guarding with a deep-equality check prevents infinite update
+      // loops between local state and the parent graph store.
+      onUpdateNode?.(id, currentNodeState, true)
     }
-  }, [
-    label,
-    actionType,
-    params,
-    timeout,
-    retries,
-    stopOnError,
-    dirty,
-    expanded,
-    hasValidationErrors,
-    combinedHasValidationErrors,
-    onUpdateNode,
-    id,
-    onDirtyChange,
-    normalizedActionType
-  ])
+
+    if (dirty !== lastDirtyStatusRef.current) {
+      lastDirtyStatusRef.current = dirty
+      onDirtyChange?.(dirty, currentNodeState)
+    }
+  }, [currentNodeState, dirty, id, onDirtyChange, onUpdateNode])
 
   const handleRun = async () => {
     setRunning(true)
