@@ -139,6 +139,7 @@ describe('IntegrationsTab', () => {
     render(<IntegrationsTab />)
 
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+    expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
     const initialLastRefreshed = await screen.findAllByText(/Last refreshed/)
     expect(initialLastRefreshed.length).toBeGreaterThan(0)
@@ -210,6 +211,7 @@ describe('IntegrationsTab', () => {
     render(<IntegrationsTab />)
 
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+    expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
     const refreshButton = await screen.findByRole('button', {
       name: /Refresh token/i
@@ -225,6 +227,7 @@ describe('IntegrationsTab', () => {
       ]
     expect(lastCall).toBeDefined()
     const snapshot = lastCall?.[0] as any
+    expect(lastCall?.[1]).toEqual({ workspaceId: 'ws-1' })
 
     expect(snapshot.google.personal.expiresAt).toBe('2025-01-01T00:00:00.000Z')
     expect(snapshot.google.personal.lastRefreshedAt).toBe(
@@ -281,6 +284,7 @@ describe('IntegrationsTab', () => {
     render(<IntegrationsTab />)
 
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+    expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
     const removeButton = await screen.findByRole('button', {
       name: /Remove from workspace/i
@@ -341,6 +345,7 @@ describe('IntegrationsTab', () => {
     render(<IntegrationsTab />)
 
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+    expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
     const disconnectButton = await screen.findByRole('button', {
       name: /Disconnect/i
     })
@@ -406,11 +411,14 @@ describe('IntegrationsTab', () => {
     render(<IntegrationsTab />)
 
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+    expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
     expect(
       await screen.findByText(/connection was revoked/i)
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /connect/i })).toBeEnabled()
+    expect(
+      screen.getByRole('button', { name: /connect google/i })
+    ).toBeEnabled()
   })
 
   it('clears provider state when refresh indicates revocation', async () => {
@@ -452,6 +460,7 @@ describe('IntegrationsTab', () => {
     render(<IntegrationsTab />)
 
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+    expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
     const refreshButton = await screen.findByRole('button', {
       name: /refresh token/i
@@ -464,6 +473,8 @@ describe('IntegrationsTab', () => {
     expect(
       await screen.findByText(/reconnect to restore access/i)
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /connect/i })).toBeEnabled()
+    expect(
+      screen.getByRole('button', { name: /connect google/i })
+    ).toBeEnabled()
   })
 })

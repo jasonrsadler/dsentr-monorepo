@@ -12,6 +12,7 @@ import {
   type ConnectionScope,
   type ProviderConnectionSet
 } from '@/lib/oauthApi'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import {
   fetchMicrosoftTeams,
   fetchMicrosoftTeamChannels,
@@ -795,6 +796,9 @@ export default function TeamsAction({
   const [microsoftConnections, setMicrosoftConnections] =
     useState<ProviderConnectionSet | null>(null)
 
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const workspaceId = currentWorkspace?.workspace.id ?? null
+
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null) => {
       if (!connections) return null
@@ -984,27 +988,38 @@ export default function TeamsAction({
 
     let active = true
 
-    const cached = getCachedConnections()
+    const cached = getCachedConnections(workspaceId)
     if (cached?.microsoft) {
       setMicrosoftConnections(sanitizeConnections(cached.microsoft))
       setConnectionsError(null)
       setConnectionsLoading(false)
       setConnectionsFetched(true)
+    } else {
+      setMicrosoftConnections(null)
     }
 
-    const unsubscribe = subscribeToConnectionUpdates((snapshot) => {
-      if (!active) return
-      const microsoft = snapshot?.microsoft ?? null
-      setMicrosoftConnections(sanitizeConnections(microsoft))
-      setConnectionsError(null)
-      setConnectionsLoading(false)
-      setConnectionsFetched(true)
-    })
+    const unsubscribe = subscribeToConnectionUpdates(
+      (snapshot) => {
+        if (!active) return
+        const microsoft = snapshot?.microsoft ?? null
+        if (!microsoft) {
+          setMicrosoftConnections(null)
+          setConnectionsLoading(false)
+          setConnectionsFetched(true)
+          return
+        }
+        setMicrosoftConnections(sanitizeConnections(microsoft))
+        setConnectionsError(null)
+        setConnectionsLoading(false)
+        setConnectionsFetched(true)
+      },
+      { workspaceId }
+    )
 
     if (!cached && !connectionsFetched) {
       setConnectionsLoading(true)
       setConnectionsError(null)
-      fetchConnections()
+      fetchConnections({ workspaceId })
         .then((data) => {
           if (!active) return
           setMicrosoftConnections(sanitizeConnections(data.microsoft ?? null))
@@ -1030,7 +1045,7 @@ export default function TeamsAction({
       active = false
       unsubscribe()
     }
-  }, [isDelegated, connectionsFetched, sanitizeConnections])
+  }, [isDelegated, connectionsFetched, sanitizeConnections, workspaceId])
 
   useEffect(() => {
     if (!isDelegated) {

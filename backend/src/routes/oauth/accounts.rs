@@ -7,6 +7,12 @@ use super::{
 };
 use axum::http::StatusCode;
 
+#[derive(Debug, Default, Deserialize)]
+pub struct ListConnectionsQuery {
+    #[serde(default)]
+    pub workspace: Option<Uuid>,
+}
+
 pub async fn refresh_connection(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -81,6 +87,7 @@ pub async fn disconnect_connection(
 pub async fn list_connections(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
+    Query(params): Query<ListConnectionsQuery>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
@@ -119,34 +126,39 @@ pub async fn list_connections(
         })
         .collect();
 
-    let workspace = workspace_connections
-        .into_iter()
-        .map(|connection| {
-            let shared_by_name = format_shared_name(
-                &connection.shared_by_first_name,
-                &connection.shared_by_last_name,
-            );
-            let shared_by_email = connection
-                .shared_by_email
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_string());
+    let workspace = if let Some(workspace_id) = params.workspace {
+        workspace_connections
+            .into_iter()
+            .filter(|connection| connection.workspace_id == workspace_id)
+            .map(|connection| {
+                let shared_by_name = format_shared_name(
+                    &connection.shared_by_first_name,
+                    &connection.shared_by_last_name,
+                );
+                let shared_by_email = connection
+                    .shared_by_email
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| value.to_string());
 
-            WorkspaceConnectionPayload {
-                id: connection.id,
-                provider: connection.provider,
-                account_email: connection.account_email,
-                expires_at: connection.expires_at,
-                workspace_id: connection.workspace_id,
-                workspace_name: connection.workspace_name,
-                shared_by_name,
-                shared_by_email,
-                last_refreshed_at: connection.updated_at,
-                requires_reconnect: connection.requires_reconnect,
-            }
-        })
-        .collect();
+                WorkspaceConnectionPayload {
+                    id: connection.id,
+                    provider: connection.provider,
+                    account_email: connection.account_email,
+                    expires_at: connection.expires_at,
+                    workspace_id: connection.workspace_id,
+                    workspace_name: connection.workspace_name,
+                    shared_by_name,
+                    shared_by_email,
+                    last_refreshed_at: connection.updated_at,
+                    requires_reconnect: connection.requires_reconnect,
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     Json(ConnectionsResponse {
         success: true,

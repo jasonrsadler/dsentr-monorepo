@@ -159,27 +159,12 @@ export default function IntegrationsTab({
     }
   }, [])
 
-  const loadConnections = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await fetchConnections()
-      setStatuses(data)
-      setError(null)
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to load connections'
-      )
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
     let active = true
     ;(async () => {
       setLoading(true)
       try {
-        const data = await fetchConnections()
+        const data = await fetchConnections({ workspaceId })
         if (!active) return
         setStatuses(data)
         setError(null)
@@ -198,7 +183,7 @@ export default function IntegrationsTab({
     return () => {
       active = false
     }
-  }, [])
+  }, [workspaceId])
 
   const noticeText = useMemo(() => {
     if (!notice) return null
@@ -265,7 +250,7 @@ export default function IntegrationsTab({
               workspace: filteredWorkspace
             }
           }
-          setCachedConnections(nextState)
+          setCachedConnections(nextState, { workspaceId })
           return nextState
         })
         setError(null)
@@ -279,14 +264,16 @@ export default function IntegrationsTab({
         setBusyProvider(null)
       }
     },
-    [removeBusyId]
+    [removeBusyId, workspaceId]
   )
 
   const handleDisconnect = useCallback(
     (provider: OAuthProvider) => {
       const status = statuses[provider]
       const personal = status?.personal
-      const workspaceConnections = status?.workspace ?? []
+      const workspaceConnections = (status?.workspace ?? []).filter(
+        (entry) => !workspaceId || entry.workspaceId === workspaceId
+      )
       const sharedConnections = workspaceConnections.filter((entry) =>
         matchesCurrentUser(entry)
       )
@@ -332,7 +319,7 @@ export default function IntegrationsTab({
             }))
           }
         }
-        setCachedConnections(nextState)
+        setCachedConnections(nextState, { workspaceId })
         return nextState
       })
     } catch (err) {
@@ -438,7 +425,9 @@ export default function IntegrationsTab({
               personal?.requiresReconnect ?? false
             const busy = busyProvider === provider.key
             const promoting = promoteBusyProvider === provider.key
-            const workspaceConnections = status?.workspace ?? []
+            const workspaceConnections = (status?.workspace ?? []).filter(
+              (entry) => !workspaceId || entry.workspaceId === workspaceId
+            )
             const workspaceRequiresReconnect = workspaceConnections.some(
               (entry) => entry.requiresReconnect
             )
@@ -494,6 +483,7 @@ export default function IntegrationsTab({
                       </>
                     ) : (
                       <button
+                        aria-label={`Connect ${provider.name}`}
                         onClick={() => handleConnect(provider.key)}
                         disabled={isSoloPlan || isViewer}
                         className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -710,7 +700,7 @@ export default function IntegrationsTab({
                   workspace: [...filteredWorkspace, workspaceEntry]
                 }
               }
-              setCachedConnections(nextState)
+              setCachedConnections(nextState, { workspaceId })
               return nextState
             })
             setError(null)
@@ -792,7 +782,7 @@ export default function IntegrationsTab({
                   workspace: nextWorkspace
                 }
               }
-              setCachedConnections(nextState)
+              setCachedConnections(nextState, { workspaceId })
               return nextState
             })
             setError(null)

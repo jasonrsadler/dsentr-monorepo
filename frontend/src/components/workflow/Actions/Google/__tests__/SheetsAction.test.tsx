@@ -4,6 +4,7 @@ import { vi } from 'vitest'
 
 import SheetsAction from '../SheetsAction'
 import { updateCachedConnections } from '@/lib/oauthApi'
+import { useAuth } from '@/stores/auth'
 
 const createJsonResponse = (body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -94,6 +95,22 @@ const buildConnectionMap = (includeWorkspace: boolean) => ({
   })()
 })
 
+const initialAuthState = useAuth.getState()
+
+const workspaceMembership = {
+  workspace: {
+    id: 'ws-1',
+    name: 'Acme Workspace',
+    plan: 'workspace',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    deleted_at: null,
+    created_by: 'owner',
+    owner_id: 'owner'
+  },
+  role: 'owner' as const
+}
+
 describe('SheetsAction', () => {
   const baseArgs = {
     spreadsheetId: '',
@@ -108,12 +125,22 @@ describe('SheetsAction', () => {
   }
 
   beforeEach(() => {
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        memberships: [workspaceMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id
+      }))
+    })
     updateCachedConnections(() => null)
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
     updateCachedConnections(() => null)
+    act(() => {
+      useAuth.setState(initialAuthState, true)
+    })
   })
 
   it('renders grouped connection options', async () => {

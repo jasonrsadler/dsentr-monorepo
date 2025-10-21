@@ -12,6 +12,7 @@ import {
   type ConnectionScope,
   type ProviderConnectionSet
 } from '@/lib/oauthApi'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
 const MAX_SHEETS_COLUMNS = 18278
 const COLUMN_KEY_REGEX = /^[A-Za-z]+$/
@@ -116,6 +117,9 @@ export default function SheetsAction({
   const [connectionsLoading, setConnectionsLoading] = useState(true)
   const [connectionsError, setConnectionsError] = useState<string | null>(null)
 
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const workspaceId = currentWorkspace?.workspace.id ?? null
+
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null) => {
       if (!connections) return null
@@ -178,25 +182,35 @@ export default function SheetsAction({
   useEffect(() => {
     let active = true
 
-    const cached = getCachedConnections()
+    const cached = getCachedConnections(workspaceId)
     if (cached?.google) {
       setConnectionState(sanitizeConnections(cached.google))
       setConnectionsError(null)
       setConnectionsLoading(false)
+    } else {
+      setConnectionState(null)
     }
 
-    const unsubscribe = subscribeToConnectionUpdates((snapshot) => {
-      if (!active) return
-      const googleConnections = snapshot?.google ?? null
-      setConnectionState(sanitizeConnections(googleConnections))
-      setConnectionsError(null)
-      setConnectionsLoading(false)
-    })
+    const unsubscribe = subscribeToConnectionUpdates(
+      (snapshot) => {
+        if (!active) return
+        const googleConnections = snapshot?.google ?? null
+        if (!googleConnections) {
+          setConnectionState(null)
+          setConnectionsLoading(false)
+          return
+        }
+        setConnectionState(sanitizeConnections(googleConnections))
+        setConnectionsError(null)
+        setConnectionsLoading(false)
+      },
+      { workspaceId }
+    )
 
     if (!cached) {
       setConnectionsLoading(true)
       setConnectionsError(null)
-      fetchConnections()
+      fetchConnections({ workspaceId })
         .then((connections) => {
           if (!active) return
           setConnectionState(sanitizeConnections(connections.google ?? null))
@@ -221,7 +235,7 @@ export default function SheetsAction({
       active = false
       unsubscribe()
     }
-  }, [sanitizeConnections])
+  }, [sanitizeConnections, workspaceId])
 
   useEffect(() => {
     if (!connectionState) return

@@ -3,6 +3,7 @@ import { vi } from 'vitest'
 import TeamsAction from './TeamsAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 import { updateCachedConnections } from '@/lib/oauthApi'
+import { useAuth } from '@/stores/auth'
 
 const secrets = {
   messaging: {
@@ -10,6 +11,22 @@ const secrets = {
       existing: 'abc'
     }
   }
+}
+
+const initialAuthState = useAuth.getState()
+
+const workspaceMembership = {
+  workspace: {
+    id: 'ws-1',
+    name: 'Acme Workspace',
+    plan: 'workspace',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    deleted_at: null,
+    created_by: 'owner',
+    owner_id: 'owner'
+  },
+  role: 'owner' as const
 }
 
 describe('TeamsAction', () => {
@@ -26,6 +43,13 @@ describe('TeamsAction', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        memberships: [workspaceMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id
+      }))
+    })
     updateCachedConnections(() => null)
   })
 
@@ -34,6 +58,9 @@ describe('TeamsAction', () => {
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
     updateCachedConnections(() => null)
+    act(() => {
+      useAuth.setState(initialAuthState, true)
+    })
   })
 
   it('emits changes without validation errors', async () => {

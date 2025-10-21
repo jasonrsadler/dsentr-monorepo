@@ -1,5 +1,6 @@
 import { API_BASE_URL } from './config'
 import { getCsrfToken } from './csrfCache'
+import { useAuth } from '@/stores/auth'
 
 export type OAuthProvider = 'google' | 'microsoft'
 
@@ -37,9 +38,18 @@ export interface ProviderConnectionSet {
 type ProviderConnectionMap = Record<OAuthProvider, ProviderConnectionSet>
 
 type ConnectionListener = (snapshot: ProviderConnectionMap | null) => void
+type RawConnectionListener = (
+  snapshot: ProviderConnectionMap | null,
+  workspaceId: string | null
+) => void
 
 let cachedConnections: ProviderConnectionMap | null = null
-const connectionListeners = new Set<ConnectionListener>()
+let cachedWorkspaceId: string | null = null
+const connectionListeners = new Set<RawConnectionListener>()
+
+type ConnectionCacheOptions = {
+  workspaceId?: string | null
+}
 
 const cloneConnectionSet = (
   set: ProviderConnectionSet
@@ -55,46 +65,110 @@ const cloneConnectionMap = (
   microsoft: cloneConnectionSet(map.microsoft)
 })
 
-const emitCachedConnections = (snapshot: ProviderConnectionMap | null) => {
+const normalizeWorkspaceId = (value?: string | null): string | null => {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+const readActiveWorkspaceId = (): string | null => {
+  try {
+    const state = useAuth.getState()
+    return normalizeWorkspaceId(state?.currentWorkspaceId ?? null)
+  } catch {
+    return null
+  }
+}
+
+const resolveWorkspaceId = (workspaceId?: string | null): string | null => {
+  if (typeof workspaceId !== 'undefined') {
+    return normalizeWorkspaceId(workspaceId)
+  }
+  const activeWorkspace = readActiveWorkspaceId()
+  if (activeWorkspace !== null) {
+    return activeWorkspace
+  }
+  return cachedWorkspaceId
+}
+
+const emitCachedConnections = (
+  snapshot: ProviderConnectionMap | null,
+  options?: ConnectionCacheOptions
+) => {
+  if (options && Object.prototype.hasOwnProperty.call(options, 'workspaceId')) {
+    cachedWorkspaceId = normalizeWorkspaceId(options.workspaceId ?? null)
+  }
+  if (!options && cachedWorkspaceId === null) {
+    cachedWorkspaceId = readActiveWorkspaceId()
+  }
+
   cachedConnections = snapshot ? cloneConnectionMap(snapshot) : null
-  const payload = cachedConnections
-    ? cloneConnectionMap(cachedConnections)
-    : null
+  const workspaceId = cachedWorkspaceId
   connectionListeners.forEach((listener) => {
-    listener(payload)
+    const payload = cachedConnections
+      ? cloneConnectionMap(cachedConnections)
+      : null
+    listener(payload, workspaceId)
   })
 }
 
-export const getCachedConnections = (): ProviderConnectionMap | null => {
-  return cachedConnections ? cloneConnectionMap(cachedConnections) : null
+export const getCachedConnections = (
+  workspaceId?: string | null
+): ProviderConnectionMap | null => {
+  const targetWorkspace = resolveWorkspaceId(workspaceId)
+  if (!cachedConnections || cachedWorkspaceId !== targetWorkspace) {
+    return null
+  }
+  return cloneConnectionMap(cachedConnections)
 }
 
 export const subscribeToConnectionUpdates = (
-  listener: ConnectionListener
+  listener: ConnectionListener,
+  options?: ConnectionCacheOptions
 ): (() => void) => {
-  connectionListeners.add(listener)
-  if (cachedConnections) {
-    listener(cloneConnectionMap(cachedConnections))
+  const targetWorkspace = resolveWorkspaceId(options?.workspaceId)
+
+  const wrappedListener: RawConnectionListener = (snapshot, workspaceId) => {
+    if (workspaceId !== targetWorkspace) {
+      listener(null)
+      return
+    }
+    listener(snapshot ? cloneConnectionMap(snapshot) : null)
   }
+
+  connectionListeners.add(wrappedListener)
+
+  if (cachedConnections && cachedWorkspaceId === targetWorkspace) {
+    listener(cloneConnectionMap(cachedConnections))
+  } else {
+    listener(null)
+  }
+
   return () => {
-    connectionListeners.delete(listener)
+    connectionListeners.delete(wrappedListener)
   }
 }
 
-export const setCachedConnections = (snapshot: ProviderConnectionMap) => {
-  emitCachedConnections(snapshot)
+export const setCachedConnections = (
+  snapshot: ProviderConnectionMap,
+  options?: ConnectionCacheOptions
+) => {
+  emitCachedConnections(snapshot, options)
 }
 
 export const updateCachedConnections = (
   updater: (
     current: ProviderConnectionMap | null
-  ) => ProviderConnectionMap | null
+  ) => ProviderConnectionMap | null,
+  options?: ConnectionCacheOptions
 ): ProviderConnectionMap | null => {
   const current = cachedConnections
     ? cloneConnectionMap(cachedConnections)
     : null
   const next = updater(current)
-  emitCachedConnections(next)
+  emitCachedConnections(next, options)
   return next
 }
 
@@ -161,8 +235,16 @@ const ensureConnectionMap = (
     microsoft: defaultProviderConnections()
   }
 
-export async function fetchConnections(): Promise<ProviderConnectionMap> {
-  const res = await fetch(`${API_BASE_URL}/api/oauth/connections`, {
+export async function fetchConnections(
+  options?: ConnectionCacheOptions
+): Promise<ProviderConnectionMap> {
+  const targetWorkspace = resolveWorkspaceId(options?.workspaceId)
+  const url = new URL(`${API_BASE_URL}/api/oauth/connections`)
+  if (targetWorkspace) {
+    url.searchParams.set('workspace', targetWorkspace)
+  }
+
+  const res = await fetch(url.toString(), {
     credentials: 'include'
   })
 
@@ -244,7 +326,7 @@ export async function fetchConnections(): Promise<ProviderConnectionMap> {
     }
   })
 
-  setCachedConnections(map)
+  setCachedConnections(map, { workspaceId: targetWorkspace })
   return map
 }
 

@@ -38,7 +38,7 @@ use urlencoding::encode;
 use uuid::Uuid;
 
 use super::{
-    accounts::{list_connections, refresh_connection},
+    accounts::{list_connections, refresh_connection, ListConnectionsQuery},
     connect::{google_connect_start, ConnectQuery},
     helpers::{
         build_state_cookie, error_message_for_redirect, handle_callback, parse_provider,
@@ -352,7 +352,14 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         ..stub_claims()
     };
 
-    let response = list_connections(State(state), AuthSession(claims)).await;
+    let response = list_connections(
+        State(state),
+        AuthSession(claims),
+        Query(ListConnectionsQuery {
+            workspace: Some(workspace_id),
+        }),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -439,6 +446,90 @@ async fn list_connections_returns_personal_and_workspace_entries() {
 }
 
 #[tokio::test]
+async fn list_connections_without_workspace_excludes_shared_entries() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let now = OffsetDateTime::now_utc();
+    let personal_expires_at = now + Duration::hours(1);
+
+    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
+        .expect("encrypt access token");
+    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
+        .expect("encrypt refresh token");
+
+    let personal_token = UserOAuthToken {
+        id: Uuid::new_v4(),
+        user_id,
+        provider: ConnectedOAuthProvider::Google,
+        access_token: encrypted_access,
+        refresh_token: encrypted_refresh,
+        expires_at: personal_expires_at,
+        account_email: "user@example.com".into(),
+        is_shared: false,
+        created_at: now - Duration::hours(2),
+        updated_at: now - Duration::minutes(10),
+    };
+
+    let workspace_connection_id = Uuid::new_v4();
+    let workspace_id = Uuid::new_v4();
+    let workspace_listing = WorkspaceConnectionListing {
+        id: workspace_connection_id,
+        workspace_id,
+        workspace_name: "Shared Workspace".into(),
+        provider: ConnectedOAuthProvider::Google,
+        account_email: "shared@example.com".into(),
+        expires_at: personal_expires_at + Duration::hours(4),
+        shared_by_first_name: Some("Taylor".into()),
+        shared_by_last_name: Some("Admin".into()),
+        shared_by_email: Some("taylor@example.com".into()),
+        updated_at: now - Duration::minutes(3),
+        requires_reconnect: false,
+    };
+
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(vec![(user_id, workspace_listing)]));
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
+        tokens: vec![personal_token],
+    });
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+    let oauth_client = Arc::new(reqwest::Client::new());
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        workspace_repo.clone(),
+        encryption_key,
+        oauth_client,
+        &config.oauth,
+    ));
+
+    let mut state = stub_state(config.clone());
+    state.oauth_accounts = oauth_service;
+    state.workspace_connection_repo = workspace_repo;
+
+    let claims = Claims {
+        id: user_id.to_string(),
+        ..stub_claims()
+    };
+
+    let response = list_connections(
+        State(state),
+        AuthSession(claims),
+        Query(ListConnectionsQuery::default()),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+
+    let workspace = json["workspace"].as_array().expect("workspace array");
+    assert!(workspace.is_empty());
+    let personal = json["personal"].as_array().expect("personal array");
+    assert_eq!(personal.len(), 1);
+}
+
+#[tokio::test]
 async fn list_connections_includes_workspace_reconnect_flag() {
     let config = stub_config();
     let user_id = Uuid::new_v4();
@@ -483,7 +574,14 @@ async fn list_connections_includes_workspace_reconnect_flag() {
         ..stub_claims()
     };
 
-    let response = list_connections(State(state), AuthSession(claims)).await;
+    let response = list_connections(
+        State(state),
+        AuthSession(claims),
+        Query(ListConnectionsQuery {
+            workspace: Some(workspace_id),
+        }),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
