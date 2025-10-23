@@ -423,7 +423,12 @@ pub(crate) async fn execute_action(
             .await
         }
         "email" => email::execute_email(node, context, state).await,
-        "messaging" => messaging::execute_messaging(node, context, state, run).await,
+        // Backward/forward compatibility: provider-specific action types
+        // like "teams", "slack", or "googlechat" are routed through the
+        // messaging executor, which will detect the platform from params.
+        "messaging" | "teams" | "slack" | "googlechat" | "microsoftteams" => {
+            messaging::execute_messaging(node, context, state, run).await
+        }
         "sheets" => google::execute_sheets(node, context, state, run).await,
         "code" => code::execute_code(node, context).await,
         _ => Ok((

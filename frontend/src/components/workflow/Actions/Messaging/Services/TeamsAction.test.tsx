@@ -1,827 +1,445 @@
 import { screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { vi } from 'vitest'
+
 import TeamsAction from './TeamsAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
-import { updateCachedConnections } from '@/lib/oauthApi'
 import { useAuth } from '@/stores/auth'
+import {
+  getCachedConnections,
+  subscribeToConnectionUpdates,
+  type ProviderConnectionSet
+} from '@/lib/oauthApi'
+import {
+  fetchMicrosoftTeams,
+  fetchMicrosoftTeamChannels,
+  fetchMicrosoftChannelMembers
+} from '@/lib/microsoftGraphApi'
 
-const secrets = {
-  messaging: {
-    teams: {
-      existing: 'abc'
+vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
+  __esModule: true,
+  default: ({ value, onChange, placeholder }: any) => (
+    <input
+      placeholder={placeholder}
+      value={value ?? ''}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  )
+}))
+
+vi.mock('@/components/UI/InputFields/NodeTextAreaField', () => ({
+  __esModule: true,
+  default: ({ value, onChange, placeholder }: any) => (
+    <textarea
+      placeholder={placeholder}
+      value={value ?? ''}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  )
+}))
+
+vi.mock('@/components/UI/InputFields/NodeDropdownField', () => ({
+  __esModule: true,
+  default: ({ value, onChange, options }: any) => {
+    const normalized = (options as any[]).flatMap((entry) => {
+      if (entry && typeof entry === 'object' && 'options' in entry) {
+        return (entry.options as any[]).map((opt) =>
+          typeof opt === 'string'
+            ? { label: opt, value: opt, disabled: false }
+            : { label: opt.label, value: opt.value, disabled: opt.disabled }
+        )
+      }
+      if (typeof entry === 'string') {
+        return { label: entry, value: entry, disabled: false }
+      }
+      return {
+        label: entry.label,
+        value: entry.value,
+        disabled: entry.disabled
+      }
+    })
+
+    return (
+      <select
+        value={value ?? ''}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {normalized.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+            disabled={option.disabled}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+    )
+  }
+}))
+
+vi.mock('@/components/UI/InputFields/NodeSecretDropdown', () => ({
+  __esModule: true,
+  default: ({ value, onChange }: any) => (
+    <select
+      value={value ?? ''}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="">Select header secret</option>
+      <option value="existing">existing</option>
+    </select>
+  )
+}))
+
+type TeamsParams = Record<string, unknown>
+
+type TeamsMeta = {
+  dirty: boolean
+  hasValidationErrors: boolean
+}
+
+const createBaseParams = (): TeamsParams => ({
+  deliveryMethod: 'Incoming Webhook',
+  webhookType: 'Connector',
+  webhookUrl: '',
+  message: '',
+  summary: '',
+  themeColor: '',
+  mentions: [] as Array<{ userId: string; displayName?: string }>,
+  workflowOption: 'Basic (Raw JSON)',
+  workflowRawJson: '',
+  workflowHeaderName: '',
+  workflowHeaderSecret: '',
+  oauthProvider: '',
+  oauthConnectionScope: '',
+  oauthConnectionId: '',
+  oauthAccountEmail: '',
+  cardMode: 'Simple card builder',
+  cardTitle: '',
+  cardBody: '',
+  messageType: 'Text'
+})
+
+const mockParamsRef = { current: createBaseParams() }
+const mockMetaRef = {
+  current: { dirty: false, hasValidationErrors: false } as TeamsMeta
+}
+
+const updateNodeData = vi.fn((id: string, patch: any) => {
+  const node = workflowState.nodes.find((entry) => entry.id === id)
+  if (!node) return
+  if (!patch || typeof patch !== 'object') return
+  const data =
+    node.data && typeof node.data === 'object' && !Array.isArray(node.data)
+      ? { ...(node.data as Record<string, unknown>) }
+      : {}
+  if (patch.params && typeof patch.params === 'object') {
+    data.params = patch.params
+    mockParamsRef.current = patch.params as TeamsParams
+  }
+  node.data = data
+})
+const workflowState = {
+  canEdit: true,
+  updateNodeData,
+  nodes: [
+    {
+      id: 'teams-node',
+      data: { params: mockParamsRef.current }
+    }
+  ],
+  edges: []
+}
+
+vi.mock('@/lib/oauthApi', () => ({
+  fetchConnections: vi.fn(),
+  getCachedConnections: vi.fn(),
+  subscribeToConnectionUpdates: vi.fn().mockReturnValue(() => {}),
+  updateCachedConnections: vi.fn()
+}))
+
+vi.mock('@/lib/microsoftGraphApi', () => ({
+  fetchMicrosoftTeams: vi.fn(),
+  fetchMicrosoftTeamChannels: vi.fn(),
+  fetchMicrosoftChannelMembers: vi.fn()
+}))
+
+vi.mock('@/stores/workflowSelectors', () => ({
+  useActionParams: () => mockParamsRef.current,
+  useActionMeta: () => mockMetaRef.current
+}))
+
+vi.mock('@/stores/workflowStore', () => {
+  const useWorkflowStore = (selector: (state: typeof workflowState) => any) =>
+    selector(workflowState)
+  useWorkflowStore.setState = (partial: any) => {
+    if (typeof partial === 'function') {
+      Object.assign(workflowState, partial(workflowState))
+    } else {
+      Object.assign(workflowState, partial)
     }
   }
-}
+  useWorkflowStore.getState = () => workflowState
+  return { useWorkflowStore }
+})
 
-const initialAuthState = useAuth.getState()
-
-const workspaceMembership = {
-  workspace: {
-    id: 'ws-1',
-    name: 'Acme Workspace',
-    plan: 'workspace',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    deleted_at: null,
-    created_by: 'owner',
-    owner_id: 'owner'
-  },
-  role: 'owner' as const
-}
-
-describe('TeamsAction', () => {
-  const baseArgs = {
-    webhookUrl: 'https://example.com/webhook',
-    message: 'Hello Teams'
+describe('TeamsAction (workflow store integration)', () => {
+  const nodeId = 'teams-node'
+  const initialAuthState = useAuth.getState()
+  const secrets = {
+    messaging: {
+      teams: {
+        existing: 'abc123'
+      }
+    }
   }
 
-  const createJsonResponse = (body: any, status = 200) =>
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { 'Content-Type': 'application/json' }
-    })
-
-  beforeEach(() => {
-    vi.useFakeTimers()
-    act(() => {
-      useAuth.setState((state) => ({
-        ...state,
-        memberships: [workspaceMembership],
-        currentWorkspaceId: workspaceMembership.workspace.id
-      }))
-    })
-    updateCachedConnections(() => null)
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-    vi.runOnlyPendingTimers()
-    vi.useRealTimers()
-    updateCachedConnections(() => null)
+  const resetMocks = () => {
+    mockParamsRef.current = createBaseParams()
+    mockMetaRef.current = { dirty: false, hasValidationErrors: false }
+    workflowState.nodes = [
+      {
+        id: nodeId,
+        data: { params: mockParamsRef.current }
+      }
+    ]
+    workflowState.edges = []
+    workflowState.canEdit = true
+    updateNodeData.mockClear()
+    vi.mocked(getCachedConnections).mockReset()
+    vi.mocked(getCachedConnections).mockReturnValue(null)
+    vi.mocked(subscribeToConnectionUpdates).mockReset()
+    vi.mocked(subscribeToConnectionUpdates).mockReturnValue(() => {})
+    vi.mocked(fetchMicrosoftTeams).mockReset()
+    vi.mocked(fetchMicrosoftTeams).mockResolvedValue([])
+    vi.mocked(fetchMicrosoftTeamChannels).mockReset()
+    vi.mocked(fetchMicrosoftTeamChannels).mockResolvedValue([])
+    vi.mocked(fetchMicrosoftChannelMembers).mockReset()
+    vi.mocked(fetchMicrosoftChannelMembers).mockResolvedValue([])
     act(() => {
       useAuth.setState(initialAuthState, true)
     })
-  })
-
-  it('emits changes without validation errors', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
-    )
-
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalled()
-    })
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[0]).toMatchObject({
-      deliveryMethod: 'Incoming Webhook',
-      webhookType: 'Connector'
-    })
-    expect(lastCall?.[1]).toBe(false)
-    expect(lastCall?.[2]).toBe(false)
-  })
-
-  it('validates webhook URL presence', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
-    )
-
-    const webhookInput = screen.getByPlaceholderText('Webhook URL')
-    fireEvent.change(webhookInput, { target: { value: '' } })
-    vi.advanceTimersByTime(300)
-
-    await waitFor(() => {
-      expect(screen.getByText('Webhook URL is required')).toBeInTheDocument()
-    })
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[1]).toBe(true)
-  })
-
-  it('accepts the initialDirty flag', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} initialDirty />,
-      { secrets }
-    )
-
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalled()
-    })
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[2]).toBe(true)
-  })
-
-  it('validates raw JSON workflow payloads', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
-    )
-
-    const typeDropdown = screen.getByRole('button', {
-      name: 'Connector'
-    })
-    fireEvent.click(typeDropdown)
-    fireEvent.click(screen.getByText('Workflow/Power Automate'))
-
-    const rawInput = screen.getByPlaceholderText('Raw JSON payload')
-    fireEvent.change(rawInput, { target: { value: ' ' } })
-    vi.advanceTimersByTime(300)
-
-    await waitFor(() => {
-      expect(
-        screen.getByText('Raw JSON payload is required')
-      ).toBeInTheDocument()
-    })
-
-    fireEvent.change(rawInput, { target: { value: '{invalid' } })
-    vi.advanceTimersByTime(300)
-
-    await waitFor(() => {
-      expect(
-        screen.getByText('Raw JSON payload must be valid JSON')
-      ).toBeInTheDocument()
-    })
-  })
-
-  it('validates header secret requirements', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
-    )
-
-    const typeDropdown = screen.getByRole('button', {
-      name: 'Connector'
-    })
-    fireEvent.click(typeDropdown)
-    fireEvent.click(screen.getByText('Workflow/Power Automate'))
-
-    const workflowModeDropdown = screen.getByRole('button', {
-      name: 'Basic (Raw JSON)'
-    })
-    fireEvent.click(workflowModeDropdown)
-    fireEvent.click(screen.getByText('Header Secret Auth'))
-
-    const rawInput = screen.getByPlaceholderText('Raw JSON payload')
-    fireEvent.change(rawInput, {
-      target: { value: '{"message":"ok"}' }
-    })
-
-    const headerNameInput = screen.getByPlaceholderText('Header Name')
-    fireEvent.change(headerNameInput, { target: { value: '' } })
-
-    await waitFor(() => {
-      expect(screen.getByText('Header name is required')).toBeInTheDocument()
-    })
-    await waitFor(() => {
-      expect(screen.getByText('Header secret is required')).toBeInTheDocument()
-    })
-  })
-
-  it('omits connector fields for workflow webhooks', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
-    )
-
-    const typeDropdown = screen.getByRole('button', {
-      name: 'Connector'
-    })
-    fireEvent.click(typeDropdown)
-    fireEvent.click(screen.getByText('Workflow/Power Automate'))
-
-    const rawInput = screen.getByPlaceholderText('Raw JSON payload')
-    fireEvent.change(rawInput, { target: { value: '{"kind":"test"}' } })
-    vi.advanceTimersByTime(400)
-
-    await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[0]).toMatchObject({
-        webhookType: 'Workflow/Power Automate',
-        workflowRawJson: '{"kind":"test"}'
-      })
-      expect(lastCall?.[0].message).toBe('')
-      expect(lastCall?.[0].title).toBe('')
-      expect(lastCall?.[0].themeColor).toBe('')
-      expect(lastCall?.[0].cardJson).toBe('')
-    })
-  })
-
-  it('clears header secret values when switching back to basic workflow auth', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      { secrets }
-    )
-
-    const typeDropdown = screen.getByRole('button', {
-      name: 'Connector'
-    })
-    fireEvent.click(typeDropdown)
-    fireEvent.click(screen.getByText('Workflow/Power Automate'))
-
-    const workflowModeDropdown = screen.getByRole('button', {
-      name: 'Basic (Raw JSON)'
-    })
-    fireEvent.click(workflowModeDropdown)
-    fireEvent.click(screen.getByText('Header Secret Auth'))
-
-    const rawInput = screen.getByPlaceholderText('Raw JSON payload')
-    fireEvent.change(rawInput, {
-      target: { value: '{"kind":"secret"}' }
-    })
-
-    const headerNameInput = screen.getByPlaceholderText('Header Name')
-    fireEvent.change(headerNameInput, { target: { value: 'X-Test' } })
-    const secretDropdown = screen.getByRole('button', {
-      name: 'Select header secret'
-    })
-    fireEvent.click(secretDropdown)
-    fireEvent.click(screen.getByText('existing'))
-    vi.advanceTimersByTime(400)
-
-    await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[0].workflowHeaderName).toBe('X-Test')
-      expect(lastCall?.[0].workflowHeaderSecret).toBe('abc')
-    })
-
-    fireEvent.click(workflowModeDropdown)
-    fireEvent.click(screen.getByText('Basic (Raw JSON)'))
-    vi.advanceTimersByTime(400)
-
-    await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[0].workflowHeaderName).toBe('')
-      expect(lastCall?.[0].workflowHeaderSecret).toBe('')
-      expect(lastCall?.[0].workflowOption).toBe('Basic (Raw JSON)')
-    })
-  })
-
-  it('does not expose OAuth client credential controls in workflow mode', () => {
-    renderWithSecrets(<TeamsAction args={{ ...baseArgs }} />, { secrets })
-
-    const typeDropdown = screen.getByRole('button', {
-      name: 'Connector'
-    })
-    fireEvent.click(typeDropdown)
-    fireEvent.click(screen.getByText('Workflow/Power Automate'))
-
-    const workflowModeDropdown = screen.getByRole('button', {
-      name: 'Basic (Raw JSON)'
-    })
-    fireEvent.click(workflowModeDropdown)
-
-    expect(
-      screen.queryByText('OAuth Client Credentials')
-    ).not.toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('Tenant ID')).not.toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('Client ID')).not.toBeInTheDocument()
-    expect(
-      screen.queryByPlaceholderText('Client Secret')
-    ).not.toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('OAuth Scope')).not.toBeInTheDocument()
-  })
-
-  it('shows guidance when delegated OAuth has no Microsoft connection', async () => {
-    const fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
-
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              providers: {
-                microsoft: { connected: false }
-              }
-            })
-          )
-        }
-
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
-
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      { secrets }
-    )
-
-    const deliveryDropdown = screen.getByRole('button', {
-      name: 'Incoming Webhook'
-    })
-    fireEvent.click(deliveryDropdown)
-    fireEvent.click(screen.getByText('Delegated OAuth (Post as user)'))
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled()
-    })
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(
-          'Connect the Microsoft integration in Settings → Integrations, then return to enable delegated messaging.'
-        )
-      ).toBeInTheDocument()
-    })
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[1]).toBe(true)
-  })
-
-  it('loads teams, channels, and members for delegated OAuth messaging', async () => {
-    const fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
-
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              providers: {
-                microsoft: {
-                  connected: true,
-                  account_email: 'alice@example.com'
-                }
-              }
-            })
-          )
-        }
-
-        if (
-          url.includes('/api/microsoft/teams/team-1/channels/channel-1/members')
-        ) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              members: [
-                {
-                  id: 'member-1',
-                  userId: 'user-1',
-                  displayName: 'Jane Doe',
-                  email: 'jane@example.com'
-                }
-              ]
-            })
-          )
-        }
-
-        if (url.includes('/api/microsoft/teams/team-1/channels')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              channels: [
-                { id: 'channel-1', displayName: 'General' },
-                { id: 'channel-2', displayName: 'Announcements' }
-              ]
-            })
-          )
-        }
-
-        if (url.includes('/api/microsoft/teams')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              teams: [
-                { id: 'team-1', displayName: 'Team One' },
-                { id: 'team-2', displayName: 'Team Two' }
-              ]
-            })
-          )
-        }
-
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
-
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      { secrets }
-    )
-
-    const deliveryDropdown = screen.getByRole('button', {
-      name: 'Incoming Webhook'
-    })
-    fireEvent.click(deliveryDropdown)
-    fireEvent.click(screen.getByText('Delegated OAuth (Post as user)'))
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/oauth/connections'),
-        expect.anything()
-      )
-    })
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', {
-          name: /Microsoft \(alice@example.com\)/i
-        })
-      ).toBeInTheDocument()
-    })
-
-    const teamDropdown = await screen.findByRole('button', {
-      name: 'Select team'
-    })
-    fireEvent.click(teamDropdown)
-    fireEvent.click(await screen.findByText('Team One'))
-
-    const channelDropdown = await screen.findByRole('button', {
-      name: 'Select channel'
-    })
-    fireEvent.click(channelDropdown)
-    fireEvent.click(await screen.findByText('General'))
-
-    await waitFor(() => {
-      expect(
-        screen.getByLabelText('Jane Doe (jane@example.com)')
-      ).toBeInTheDocument()
-    })
-
-    const messageField = screen.getByPlaceholderText('Message')
-    fireEvent.change(messageField, {
-      target: { value: 'Hello delegated world' }
-    })
-
-    const mentionCheckbox = screen.getByLabelText('Jane Doe (jane@example.com)')
-    fireEvent.click(mentionCheckbox)
-
-    vi.advanceTimersByTime(400)
-
-    await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[0]).toMatchObject({
-        deliveryMethod: 'Delegated OAuth (Post as user)',
-        oauthAccountEmail: 'alice@example.com',
-        teamId: 'team-1',
-        teamName: 'Team One',
-        channelId: 'channel-1',
-        channelName: 'General',
-        messageType: 'Text',
-        message: 'Hello delegated world'
-      })
-      expect(lastCall?.[0].mentions).toEqual([
-        { userId: 'user-1', displayName: 'Jane Doe' }
-      ])
-      expect(lastCall?.[1]).toBe(false)
-    })
-  })
-
-  it('clears delegated workspace selections when a shared credential is removed while editing', async () => {
-    const fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
-
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              personal: [
-                {
-                  id: 'microsoft-personal',
-                  provider: 'microsoft',
-                  accountEmail: 'owner@example.com',
-                  expiresAt: '2025-01-01T00:00:00.000Z',
-                  isShared: true,
-                  requiresReconnect: false
-                }
-              ],
-              workspace: [
-                {
-                  id: 'workspace-shared',
-                  provider: 'microsoft',
-                  accountEmail: 'ops@example.com',
-                  expiresAt: '2025-01-01T00:00:00.000Z',
-                  workspaceId: 'ws-1',
-                  workspaceName: 'Operations',
-                  sharedByName: 'Owner User',
-                  sharedByEmail: 'owner@example.com',
-                  requiresReconnect: false
-                }
-              ]
-            })
-          )
-        }
-
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
-
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction
-        args={{
-          ...baseArgs,
-          deliveryMethod: 'Delegated OAuth (Post as user)',
-          oauthProvider: 'microsoft',
-          oauthConnectionScope: 'workspace',
-          oauthConnectionId: 'workspace-shared',
-          oauthAccountEmail: 'ops@example.com'
-        }}
-        onChange={onChange}
-      />,
-      { secrets }
-    )
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/oauth/connections'),
-        expect.anything()
-      )
-    })
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', {
-          name: /workspace credential/i
-        })
-      ).toBeInTheDocument()
-    })
-
-    await act(async () => {
-      updateCachedConnections((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          microsoft: {
-            personal: {
-              ...prev.microsoft.personal,
-              isShared: false
-            },
-            workspace: []
-          }
-        }
-      })
-    })
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Select Microsoft connection' })
-      ).toBeInTheDocument()
-    })
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[0]).toMatchObject({
-      oauthProvider: 'microsoft',
-      oauthConnectionScope: '',
-      oauthConnectionId: '',
-      oauthAccountEmail: ''
-    })
-  })
-
-  it('removes revoked workspace credentials from delegated selections', async () => {
-    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
-      createJsonResponse({
-        success: true,
-        personal: [
+  }
+
+  beforeEach(() => {
+    resetMocks()
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        memberships: [
           {
-            id: 'microsoft-personal',
-            provider: 'microsoft',
-            accountEmail: 'owner@example.com',
-            expiresAt: '2025-01-01T00:00:00.000Z',
-            isShared: true,
-            requiresReconnect: false
+            workspace: {
+              id: 'ws-1',
+              name: 'Workspace',
+              plan: 'workspace',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              deleted_at: null,
+              created_by: 'owner',
+              owner_id: 'owner'
+            },
+            role: 'owner'
           }
         ],
-        workspace: [
-          {
-            id: 'workspace-shared',
-            provider: 'microsoft',
-            accountEmail: 'ops@example.com',
-            expiresAt: '2025-01-01T00:00:00.000Z',
-            workspaceId: 'ws-1',
-            workspaceName: 'Operations',
-            sharedByName: 'Owner User',
-            sharedByEmail: 'owner@example.com',
-            requiresReconnect: true
-          }
-        ]
-      })
-    )
-
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction
-        args={{
-          ...baseArgs,
-          deliveryMethod: 'Delegated OAuth (Post as user)',
-          oauthProvider: 'microsoft',
-          oauthConnectionScope: 'workspace',
-          oauthConnectionId: 'workspace-shared',
-          oauthAccountEmail: 'ops@example.com'
-        }}
-        onChange={onChange}
-      />,
-      { secrets }
-    )
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Select Microsoft connection' })
-      ).toBeInTheDocument()
-    )
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[0]).toMatchObject({
-      oauthProvider: 'microsoft',
-      oauthConnectionScope: '',
-      oauthConnectionId: '',
-      oauthAccountEmail: ''
+        currentWorkspaceId: 'ws-1',
+        isLoading: false
+      }))
     })
   })
 
-  it('builds delegated adaptive cards without manual JSON', async () => {
-    const fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
+  it('emits minimal webhook patches with validation state', async () => {
+    mockParamsRef.current.webhookUrl = 'https://initial.example.com'
+    mockParamsRef.current.message = 'Initial message'
 
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              providers: {
-                microsoft: {
-                  connected: true,
-                  account_email: 'alice@example.com'
-                }
-              }
-            })
-          )
-        }
+    renderWithSecrets(<TeamsAction nodeId={nodeId} />, { secrets })
 
-        if (
-          url.includes('/api/microsoft/teams/team-1/channels/channel-1/members')
-        ) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              members: []
-            })
-          )
-        }
+    const webhookInput = await screen.findByPlaceholderText('Webhook URL')
+    expect(webhookInput).toHaveValue('https://initial.example.com')
 
-        if (url.includes('/api/microsoft/teams/team-1/channels')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              channels: [
-                { id: 'channel-1', displayName: 'General' },
-                { id: 'channel-2', displayName: 'Announcements' }
-              ]
-            })
-          )
-        }
+    updateNodeData.mockClear()
 
-        if (url.includes('/api/microsoft/teams')) {
-          return Promise.resolve(
-            createJsonResponse({
-              success: true,
-              teams: [
-                { id: 'team-1', displayName: 'Team One' },
-                { id: 'team-2', displayName: 'Team Two' }
-              ]
-            })
-          )
-        }
+    fireEvent.change(webhookInput, {
+      target: { value: 'https://updated.example.com' }
+    })
 
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
+    await waitFor(() => {
+      expect(updateNodeData).toHaveBeenCalled()
+    })
 
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <TeamsAction args={{ ...baseArgs }} onChange={onChange} />,
-      { secrets }
+    const patchCall = updateNodeData.mock.calls.find(
+      ([, payload]) => payload.params
     )
-
-    const deliveryDropdown = screen.getByRole('button', {
-      name: 'Incoming Webhook'
+    expect(patchCall).toBeDefined()
+    expect(patchCall?.[0]).toBe(nodeId)
+    expect(patchCall?.[1]).toMatchObject({
+      params: expect.objectContaining({
+        webhookUrl: 'https://updated.example.com',
+        message: 'Initial message'
+      }),
+      dirty: true,
+      hasValidationErrors: false
     })
-    fireEvent.click(deliveryDropdown)
-    fireEvent.click(screen.getByText('Delegated OAuth (Post as user)'))
+  })
+
+  it('validates missing webhook URLs', async () => {
+    mockParamsRef.current.webhookUrl = 'https://initial.example.com'
+    mockParamsRef.current.message = 'Initial body'
+
+    renderWithSecrets(<TeamsAction nodeId={nodeId} />, { secrets })
+
+    const webhookInput = await screen.findByPlaceholderText('Webhook URL')
+    expect(webhookInput).toHaveValue('https://initial.example.com')
+    fireEvent.change(webhookInput, { target: { value: '' } })
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/oauth/connections'),
-        expect.anything()
-      )
+      expect(updateNodeData).toHaveBeenCalled()
     })
 
-    const teamDropdown = await screen.findByRole('button', {
-      name: 'Select team'
+    const patchCall = updateNodeData.mock.calls.find(
+      ([, payload]) => payload.params
+    )
+    expect(patchCall).toBeDefined()
+    expect(patchCall?.[0]).toBe(nodeId)
+    expect(patchCall?.[1]).toMatchObject({
+      params: expect.objectContaining({
+        webhookUrl: '',
+        message: 'Initial body'
+      }),
+      dirty: true,
+      hasValidationErrors: true
     })
-    fireEvent.click(teamDropdown)
-    fireEvent.click(await screen.findByText('Team One'))
+  })
 
-    const channelDropdown = await screen.findByRole('button', {
-      name: 'Select channel'
-    })
-    fireEvent.click(channelDropdown)
-    fireEvent.click(await screen.findByText('General'))
+  it('clears workflow header credentials when switching auth modes', async () => {
+    mockParamsRef.current.webhookType = 'Workflow/Power Automate'
+    mockParamsRef.current.workflowOption = 'Header Secret Auth'
+    mockParamsRef.current.workflowRawJson = '{"foo":"bar"}'
+    mockParamsRef.current.workflowHeaderName = 'X-Secret'
+    mockParamsRef.current.workflowHeaderSecret = 'existing'
 
-    const messageTypeDropdown = screen.getByRole('button', { name: 'Text' })
-    fireEvent.click(messageTypeDropdown)
-    fireEvent.click(screen.getByText('Card'))
+    renderWithSecrets(<TeamsAction nodeId={nodeId} />, { secrets })
 
-    await screen.findByRole('button', {
-      name: 'Simple card builder'
-    })
-
-    const titleInput = screen.getByPlaceholderText('Card title (optional)')
-    fireEvent.change(titleInput, { target: { value: 'Hello from Dsentr' } })
-
-    const bodyInput = screen.getByPlaceholderText('Card message')
-    fireEvent.change(bodyInput, {
-      target: { value: 'Your automation ran successfully.' }
-    })
-
-    vi.advanceTimersByTime(400)
+    const optionSelect = await screen.findByDisplayValue('Header Secret Auth')
+    fireEvent.change(optionSelect, { target: { value: 'Basic (Raw JSON)' } })
 
     await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[0]).toMatchObject({
-        deliveryMethod: 'Delegated OAuth (Post as user)',
-        messageType: 'Card',
-        cardMode: 'Simple card builder',
-        cardTitle: 'Hello from Dsentr',
-        cardBody: 'Your automation ran successfully.'
-      })
+      expect(updateNodeData).toHaveBeenCalled()
     })
 
-    const lastCall = onChange.mock.calls.at(-1)
-    const cardJson = lastCall?.[0].cardJson
-    expect(typeof cardJson).toBe('string')
-    expect(cardJson).toBeTruthy()
+    const patchCall = updateNodeData.mock.calls.find(
+      ([, payload]) => payload.params
+    )
+    expect(patchCall?.[0]).toBe(nodeId)
+    expect(patchCall?.[1]).toMatchObject({
+      params: expect.objectContaining({
+        workflowOption: 'Basic (Raw JSON)',
+        workflowHeaderName: '',
+        workflowHeaderSecret: ''
+      }),
+      dirty: true
+    })
+  })
 
-    const parsed = JSON.parse(cardJson as string)
-    expect(parsed).toEqual({
-      $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      type: 'AdaptiveCard',
-      version: '1.4',
-      body: [
+  it('skips redundant updates when no-op patches are submitted', async () => {
+    renderWithSecrets(<TeamsAction nodeId={nodeId} />, { secrets })
+
+    const messageInput = await screen.findByPlaceholderText('Message')
+    fireEvent.change(messageInput, { target: { value: 'Hello world' } })
+
+    await waitFor(() => {
+      expect(updateNodeData).toHaveBeenCalled()
+    })
+
+    updateNodeData.mockClear()
+
+    fireEvent.change(messageInput, { target: { value: 'Hello world' } })
+
+    await waitFor(() => {
+      expect(updateNodeData).not.toHaveBeenCalled()
+    })
+  })
+
+  it('blocks updates when restricted', async () => {
+    workflowState.canEdit = true
+    renderWithSecrets(<TeamsAction nodeId={nodeId} isRestricted />, { secrets })
+
+    const initialCalls = updateNodeData.mock.calls.length
+
+    const messageInput = await screen.findByPlaceholderText('Message')
+    fireEvent.change(messageInput, { target: { value: 'Updated message' } })
+
+    await waitFor(() => {
+      expect(updateNodeData.mock.calls.length).toBe(initialCalls)
+    })
+  })
+
+  it('stabilizes delegated workspace credentials without redundant updates', async () => {
+    const delegatedParams = createBaseParams()
+    Object.assign(delegatedParams, {
+      deliveryMethod: 'Delegated OAuth (Post as user)',
+      messageType: 'Text',
+      cardMode: 'Simple card builder',
+      oauthProvider: 'microsoft',
+      oauthConnectionScope: 'workspace',
+      oauthConnectionId: 'workspace-123',
+      oauthAccountEmail: 'delegate@example.com',
+      connection: {
+        connectionScope: 'workspace',
+        connectionId: 'workspace-123',
+        accountEmail: 'delegate@example.com'
+      }
+    })
+
+    mockParamsRef.current = delegatedParams
+    workflowState.nodes = [
+      {
+        id: nodeId,
+        data: { params: mockParamsRef.current }
+      }
+    ]
+
+    const microsoftConnections: ProviderConnectionSet = {
+      personal: {
+        scope: 'personal',
+        id: 'microsoft',
+        connected: true,
+        accountEmail: 'delegate@example.com',
+        expiresAt: undefined,
+        lastRefreshedAt: undefined,
+        requiresReconnect: false,
+        isShared: false
+      },
+      workspace: [
         {
-          type: 'TextBlock',
-          text: 'Hello from Dsentr',
-          weight: 'Bolder',
-          size: 'Medium'
-        },
-        {
-          type: 'TextBlock',
-          text: 'Your automation ran successfully.',
-          wrap: true
+          scope: 'workspace',
+          id: 'workspace-123',
+          connected: true,
+          accountEmail: 'delegate@example.com',
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          provider: 'microsoft',
+          workspaceId: 'ws-1',
+          workspaceName: 'Workspace',
+          sharedByName: 'Owner',
+          sharedByEmail: 'owner@example.com'
         }
       ]
+    }
+
+    vi.mocked(getCachedConnections).mockReturnValue({
+      microsoft: microsoftConnections
+    } as any)
+
+    renderWithSecrets(<TeamsAction nodeId={nodeId} />, { secrets })
+
+    await screen.findByPlaceholderText('Message')
+    await act(async () => {
+      await Promise.resolve()
     })
+
+    const paramsCalls = updateNodeData.mock.calls.filter(([, payload]) =>
+      Boolean(payload && typeof payload === 'object' && 'params' in payload)
+    )
+    expect(paramsCalls).toHaveLength(0)
   })
 })

@@ -57,7 +57,7 @@ export default function NodeEdge({
               onChange={(e) => onChangeType?.(id, e.target.value)}
               className="px-8 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 text-xs"
             >
-              <option value="default">Default</option>
+              <option value="default">Normal</option>
               <option value="bold">Bold</option>
               <option value="dashed">Dashed</option>
             </select>

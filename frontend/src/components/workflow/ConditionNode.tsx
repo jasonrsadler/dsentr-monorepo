@@ -1,29 +1,41 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
-import deepEqual from 'fast-deep-equal'
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  type MouseEvent
+} from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
 import NodeHeader from '@/components/UI/ReactFlow/NodeHeader'
+import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
+import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
+
+type ConditionNodeData = {
+  field?: string
+  operator?: string
+  value?: string
+  expression?: string
+  dirty?: boolean
+  expanded?: boolean
+  hasValidationErrors?: boolean
+  label?: string
+  labelError?: string | null
+  hasLabelValidationError?: boolean
+}
 
 interface ConditionNodeProps {
   id: string
-  data: {
-    field?: string
-    operator?: string
-    value?: string
-    expression?: string
-    dirty?: boolean
-    expanded?: boolean
-    hasValidationErrors?: boolean
-    label?: string
-    labelError?: string | null
-    hasLabelValidationError?: boolean
-  }
   selected: boolean
-  onRemove?: (id: string) => void
-  onUpdateNode?: (id: string, data: any, suppressDirty?: boolean) => void
-  onDirtyChange?: (dirty: boolean, data: any) => void
+  isRunning?: boolean
+  isSucceeded?: boolean
+  isFailed?: boolean
+  canEdit?: boolean
+}
+
+type ConditionNodeContentProps = BaseNodeRenderProps<ConditionNodeData> & {
   isRunning?: boolean
   isSucceeded?: boolean
   isFailed?: boolean
@@ -31,124 +43,186 @@ interface ConditionNodeProps {
 
 export default function ConditionNode({
   id,
-  data,
   selected,
-  onRemove,
-  onUpdateNode,
-  onDirtyChange,
+  isRunning,
+  isSucceeded,
+  isFailed,
+  canEdit = true
+}: ConditionNodeProps) {
+  const selectNodeData = useMemo(
+    () => (state: WorkflowState) =>
+      state.nodes.find((node) => node.id === id)?.data as
+        | ConditionNodeData
+        | undefined,
+    [id]
+  )
+  const nodeData = useWorkflowStore(selectNodeData)
+
+  return (
+    <BaseNode<ConditionNodeData>
+      id={id}
+      selected={selected}
+      canEdit={canEdit}
+      fallbackLabel="Condition"
+      defaultExpanded
+      defaultDirty={!nodeData}
+    >
+      {(renderProps) => (
+        <ConditionNodeContent
+          {...renderProps}
+          isRunning={isRunning}
+          isSucceeded={isSucceeded}
+          isFailed={isFailed}
+        />
+      )}
+    </BaseNode>
+  )
+}
+
+function ConditionNodeContent({
+  id,
+  selected,
+  label,
+  expanded,
+  dirty,
+  nodeData,
+  updateData,
+  toggleExpanded,
+  remove,
+  effectiveCanEdit,
   isRunning,
   isSucceeded,
   isFailed
-}: ConditionNodeProps) {
-  const isNewNode = useMemo(() => !data?.id, [data?.id])
-  const dataExpanded = data?.expanded ?? true
-  const dataDirty = data?.dirty
-  const dataField = data?.field || ''
-  const dataOperator = data?.operator || 'equals'
-  const dataValue = data?.value || ''
-  const dataLabel = data?.label || 'Condition'
-  const dataLabelError = data?.labelError ?? null
-
-  const [expanded, setExpanded] = useState(dataExpanded)
-  const [dirty, setDirty] = useState(dataDirty ?? isNewNode)
+}: ConditionNodeContentProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [hasValidationErrors, setHasValidationErrors] = useState(false)
-  const [labelError, setLabelError] = useState<string | null>(
-    data?.labelError ?? null
+
+  const field = typeof nodeData?.field === 'string' ? nodeData.field : ''
+  const operator =
+    typeof nodeData?.operator === 'string' ? nodeData.operator : 'equals'
+  const value = typeof nodeData?.value === 'string' ? nodeData.value : ''
+  const labelError = nodeData?.labelError ?? null
+
+  const computeConditionState = useCallback(
+    (nextField: string, nextOperator: string, nextValue: string) => {
+      const normalizedField = nextField ?? ''
+      const normalizedOperator = nextOperator ?? 'equals'
+      const normalizedValue = nextValue ?? ''
+      const expression = buildExpression(
+        normalizedField,
+        normalizedOperator,
+        normalizedValue
+      )
+      const hasValidationErrors =
+        !normalizedField.trim() ||
+        !normalizedOperator ||
+        !normalizedValue.trim()
+
+      return { expression, hasValidationErrors }
+    },
+    []
   )
+
+  const { expression, hasValidationErrors } = useMemo(
+    () => computeConditionState(field, operator, value),
+    [computeConditionState, field, operator, value]
+  )
+
+  useEffect(() => {
+    if (!effectiveCanEdit) return
+    const patch: Partial<ConditionNodeData> = {}
+    if (nodeData?.expression !== expression) {
+      patch.expression = expression
+    }
+    if ((nodeData?.hasValidationErrors ?? false) !== hasValidationErrors) {
+      patch.hasValidationErrors = hasValidationErrors
+    }
+    if (Object.keys(patch).length === 0) return
+    updateData(patch)
+  }, [
+    effectiveCanEdit,
+    expression,
+    hasValidationErrors,
+    nodeData?.expression,
+    nodeData?.hasValidationErrors,
+    updateData
+  ])
+
   const combinedHasValidationErrors = hasValidationErrors || Boolean(labelError)
 
-  const [field, setField] = useState(dataField)
-  const [operator, setOperator] = useState(dataOperator)
-  const [value, setValue] = useState(dataValue)
-  const [label, setLabel] = useState(dataLabel)
-
-  useEffect(() => {
-    setLabelError(dataLabelError)
-  }, [dataLabelError])
-
-  // Sync validation
-  useEffect(() => {
-    setHasValidationErrors(!field || !operator || !value)
-  }, [field, operator, value])
-
-  const expression = useMemo(
-    () => buildExpression(field, operator, value),
-    [field, operator, value]
+  const handleLabelChange = useCallback(
+    (nextLabel: string) => {
+      if (!effectiveCanEdit) return
+      updateData({ label: nextLabel, dirty: true })
+    },
+    [effectiveCanEdit, updateData]
   )
 
-  const currentNodeState = useMemo(
-    () => ({
-      label,
-      field,
-      operator,
-      value,
-      expression,
-      dirty,
-      expanded,
-      hasValidationErrors: combinedHasValidationErrors
-    }),
-    [
-      combinedHasValidationErrors,
-      dirty,
-      expanded,
-      expression,
-      field,
-      label,
-      operator,
-      value
-    ]
+  const handleToggleExpanded = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault()
+      toggleExpanded()
+    },
+    [toggleExpanded]
   )
 
-  const lastSyncedStateRef = useRef<typeof currentNodeState | null>(null)
-  const lastDirtyStatusRef = useRef<boolean | null>(null)
+  const handleConfirmDelete = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault()
+      if (!effectiveCanEdit) return
+      setConfirmingDelete(true)
+    },
+    [effectiveCanEdit]
+  )
 
-  // Sync node data to parent when payload meaningfully changes
-  useEffect(() => {
-    const previousState = lastSyncedStateRef.current
-    const stateChanged =
-      !previousState || !deepEqual(previousState, currentNodeState)
+  const handleDelete = useCallback(() => {
+    setConfirmingDelete(false)
+    remove()
+  }, [remove])
 
-    if (stateChanged) {
-      lastSyncedStateRef.current = currentNodeState
-      onUpdateNode?.(id, currentNodeState, true)
-    }
+  const handleFieldChange = useCallback(
+    (nextField: string) => {
+      if (!effectiveCanEdit) return
+      const { expression: nextExpression, hasValidationErrors: nextHasErrors } =
+        computeConditionState(nextField, operator, value)
+      updateData({
+        field: nextField,
+        expression: nextExpression,
+        hasValidationErrors: nextHasErrors,
+        dirty: true
+      })
+    },
+    [computeConditionState, effectiveCanEdit, operator, updateData, value]
+  )
 
-    if (dirty !== lastDirtyStatusRef.current) {
-      lastDirtyStatusRef.current = dirty
-      onDirtyChange?.(dirty, currentNodeState)
-    }
-  }, [currentNodeState, dirty, id, onDirtyChange, onUpdateNode])
+  const handleOperatorChange = useCallback(
+    (nextOperator: string) => {
+      if (!effectiveCanEdit) return
+      const { expression: nextExpression, hasValidationErrors: nextHasErrors } =
+        computeConditionState(field, nextOperator, value)
+      updateData({
+        operator: nextOperator,
+        expression: nextExpression,
+        hasValidationErrors: nextHasErrors,
+        dirty: true
+      })
+    },
+    [computeConditionState, effectiveCanEdit, field, updateData, value]
+  )
 
-  // Sync dirty from parent
-  useEffect(() => {
-    if (dataDirty !== undefined && dataDirty !== dirty) {
-      setDirty(dataDirty)
-    }
-  }, [dataDirty, dirty])
-
-  // Reset local state when node id changes (e.g., new node or remount on workflow switch)
-  useEffect(() => {
-    // React Flow safe pattern: keep local node state synchronized with the
-    // latest canvas data while guarding against render loops.
-    setLabel(dataLabel)
-    setExpanded(dataExpanded)
-    setField(dataField)
-    setOperator(dataOperator)
-    setValue(dataValue)
-    setDirty(dataDirty ?? isNewNode)
-    setLabelError(dataLabelError)
-  }, [
-    id,
-    dataLabel,
-    dataExpanded,
-    dataField,
-    dataOperator,
-    dataValue,
-    dataDirty,
-    dataLabelError,
-    isNewNode
-  ])
+  const handleValueChange = useCallback(
+    (nextValue: string) => {
+      if (!effectiveCanEdit) return
+      const { expression: nextExpression, hasValidationErrors: nextHasErrors } =
+        computeConditionState(field, operator, nextValue)
+      updateData({
+        value: nextValue,
+        expression: nextExpression,
+        hasValidationErrors: nextHasErrors,
+        dirty: true
+      })
+    },
+    [computeConditionState, effectiveCanEdit, field, operator, updateData]
+  )
 
   const ringClass = isFailed
     ? 'ring-2 ring-red-500'
@@ -157,10 +231,15 @@ export default function ConditionNode({
       : isRunning
         ? 'ring-2 ring-sky-500'
         : ''
+
   return (
     <motion.div
       className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
-      style={{ width: expanded ? 'auto' : 256, minWidth: 256, maxWidth: 400 }}
+      style={{
+        width: expanded ? 'auto' : 256,
+        minWidth: 256,
+        maxWidth: 400
+      }}
     >
       <Handle
         type="target"
@@ -172,7 +251,6 @@ export default function ConditionNode({
           border: '2px solid white'
         }}
       />
-      {/* True output (top-right) */}
       <Handle
         id="cond-true"
         type="source"
@@ -188,7 +266,6 @@ export default function ConditionNode({
         }}
         title="True"
       />
-      {/* False output (bottom-right) */}
       <Handle
         id="cond-false"
         type="source"
@@ -212,12 +289,9 @@ export default function ConditionNode({
           dirty={dirty}
           hasValidationErrors={combinedHasValidationErrors}
           expanded={expanded}
-          onLabelChange={(val) => {
-            setLabel(val)
-            setDirty(true)
-          }}
-          onExpanded={() => setExpanded((prev) => !prev)}
-          onConfirmingDelete={() => setConfirmingDelete(true)}
+          onLabelChange={handleLabelChange}
+          onExpanded={handleToggleExpanded}
+          onConfirmingDelete={handleConfirmDelete}
         />
         {labelError && (
           <p className="mt-2 text-xs text-red-500">{labelError}</p>
@@ -235,12 +309,9 @@ export default function ConditionNode({
               <NodeInputField
                 placeholder="Field name"
                 value={field}
-                onChange={(val) => {
-                  setField(val)
-                  setDirty(true)
-                }}
+                onChange={handleFieldChange}
               />
-              {hasValidationErrors && !field && (
+              {hasValidationErrors && !field.trim() && (
                 <p className="text-red-500 text-xs mt-1">Field is required</p>
               )}
               <NodeDropdownField
@@ -252,21 +323,14 @@ export default function ConditionNode({
                   'contains'
                 ]}
                 value={operator}
-                onChange={(val) => {
-                  setOperator(val)
-                  setDirty(true)
-                }}
+                onChange={handleOperatorChange}
               />
-
               <NodeInputField
                 placeholder="Comparison value"
                 value={value}
-                onChange={(val) => {
-                  setValue(val)
-                  setDirty(true)
-                }}
+                onChange={handleValueChange}
               />
-              {hasValidationErrors && !value && (
+              {hasValidationErrors && !value.trim() && (
                 <p className="text-red-500 text-xs mt-1">Value is required</p>
               )}
             </motion.div>
@@ -293,10 +357,7 @@ export default function ConditionNode({
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    setConfirmingDelete(false)
-                    onRemove?.(id)
-                  }}
+                  onClick={handleDelete}
                   className="px-2 py-1 text-xs rounded bg-red-500 text-white hover:bg-red-600"
                 >
                   Delete

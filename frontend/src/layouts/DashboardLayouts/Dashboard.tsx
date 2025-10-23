@@ -6,8 +6,14 @@ import FlowCanvas from './FlowCanvas'
 import ActionIcon from '@/assets/svg-components/ActionIcon'
 import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
-import { useWorkflowLogs } from '@/stores/workflowLogs'
+import type { Edge, Node } from '@xyflow/react'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
+import { selectIsSaving, useWorkflowStore } from '@/stores/workflowStore'
+import {
+  normalizeEdgeForPayload,
+  sanitizeNodeData,
+  sortById
+} from '@/lib/workflowGraph'
 import {
   listWorkflows,
   getWorkflow,
@@ -26,6 +32,11 @@ import {
   type WorkflowNodeRunRecord
 } from '@/lib/workflowApi'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+import {
+  hydrateIncomingEdges,
+  hydrateIncomingNodes,
+  normalizeNodesForState
+} from './FlowCanvas.helpers'
 
 const TriggerIcon = () => (
   <svg
@@ -39,139 +50,16 @@ const TriggerIcon = () => (
   </svg>
 )
 
-const createEmptyGraph = () => ({ nodes: [] as any[], edges: [] as any[] })
-function sortById<T extends { id: string }>(arr: T[]): T[] {
-  return [...arr].sort((a, b) => a.id.localeCompare(b.id))
-}
-function sanitizeData(data: any) {
-  if (!data || typeof data !== 'object') return data
-  const { dirty, wfEpoch, ...rest } = data as any
-  return rest
-}
-
-const serializeSnapshot = (
-  meta: { name: string; description: string | null },
-  graph: { nodes: any[]; edges: any[] }
-) => JSON.stringify({ meta, graph })
-
-function normalizeEdgeForPayload(e: any) {
-  const label = (e as any).label ?? null
-  const animated = Boolean((e as any).animated)
-  return {
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    sourceHandle: e.sourceHandle,
-    targetHandle: e.targetHandle,
-    type: e.type,
-    data: e.data,
-    label,
-    animated
-  }
-}
-
-function flatten(obj: any, prefix = ''): Record<string, any> {
-  const out: Record<string, any> = {}
-  if (obj === null || typeof obj !== 'object') {
-    out[prefix || ''] = obj
-    return out
-  }
-  if (Array.isArray(obj)) {
-    obj.forEach((v, i) => {
-      const p = prefix ? `${prefix}[${i}]` : `[${i}]`
-      Object.assign(out, flatten(v, p))
-    })
-    return out
-  }
-  for (const k of Object.keys(obj).sort()) {
-    const p = prefix ? `${prefix}.${k}` : k
-    Object.assign(out, flatten(obj[k], p))
-  }
-  return out
-}
-
-function logSnapshotDiff(
-  where: string,
-  baselineStr: string,
-  currentStr: string
-) {
-  try {
-    if (baselineStr === currentStr) return
-    const a = JSON.parse(baselineStr)
-    const b = JSON.parse(currentStr)
-    const af = flatten(a)
-    const bf = flatten(b)
-    const keys = new Set<string>([...Object.keys(af), ...Object.keys(bf)])
-    const diffs: string[] = []
-    for (const k of Array.from(keys).sort()) {
-      if (af[k] !== bf[k]) {
-        diffs.push(`${k}: ${JSON.stringify(af[k])} -> ${JSON.stringify(bf[k])}`)
-        if (diffs.length >= 25) break
-      }
-    }
-
-    console.groupCollapsed(
-      `[workflow-dirty][${where}] snapshot diff (${diffs.length} shown)`
-    )
-
-    diffs.forEach((d) => console.log(d))
-
-    console.groupEnd()
-  } catch {
-    console.warn('[workflow-dirty] diff failed')
-  }
-}
-
-function deepEqual(a: any, b: any): boolean {
-  if (a === b) return true
-  if (a === null || b === null) return a === b
-  if (typeof a !== typeof b) return false
-  if (typeof a !== 'object') return a === b
-  if (Array.isArray(a) !== Array.isArray(b)) return false
-  if (Array.isArray(a)) {
-    if ((a as any[]).length !== (b as any[]).length) return false
-    for (let i = 0; i < (a as any[]).length; i++) {
-      if (!deepEqual(a[i], b[i])) return false
-    }
-    return true
-  }
-  const ak = Object.keys(a).sort()
-  const bk = Object.keys(b).sort()
-  if (ak.length !== bk.length) return false
-  for (let i = 0; i < ak.length; i++) {
-    if (ak[i] !== bk[i]) return false
-    if (!deepEqual(a[ak[i]], b[bk[i]])) return false
-  }
-  return true
-}
-
 export default function Dashboard() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
   const [hiddenWorkflowCount, setHiddenWorkflowCount] = useState(0)
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(
     null
   )
-  const [workflowData, setWorkflowData] = useState(createEmptyGraph)
-  const [workflowDirty, setWorkflowDirty] = useState(false)
   const [loadingWorkflows, setLoadingWorkflows] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
+  const [isWorkflowActionBusy, setWorkflowActionBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const isSavingRef = useRef(false)
   // Settings moved to DashboardLayout header
-  const addLog = useWorkflowLogs((s) => s.add)
-  const saveRef = useRef<{
-    saveAllNodes?: () => any[]
-    getEdges?: () => any[]
-    setNodesFromToolbar?: (updatedNodes: any[]) => void
-    loadGraph?: (graph: { nodes: any[]; edges: any[] }) => void
-  } | null>(null)
-  const lastSavedSnapshotRef = useRef<string>(
-    serializeSnapshot({ name: '', description: null }, createEmptyGraph())
-  )
-  const pendingSnapshotRef = useRef<string | null>(null)
-  const latestGraphRef = useRef<{ nodes: any[]; edges: any[] }>(
-    createEmptyGraph()
-  )
 
   // Run state
   const [runOverlayOpen, setRunOverlayOpen] = useState(false)
@@ -198,6 +86,7 @@ export default function Dashboard() {
     | 'user'
     | 'viewer'
   const userPlan = useAuth((state) => state.user?.plan ?? null)
+  const workflowSaving = useWorkflowStore(selectIsSaving)
   const planTier = useMemo<PlanTier>(
     () =>
       normalizePlanTier(
@@ -307,8 +196,23 @@ export default function Dashboard() {
       return { nodes, edges }
     }
 
-    return createEmptyGraph()
+    return { nodes: [], edges: [] }
   }, [])
+
+  const pushGraphToStore = useCallback(
+    (graph: { nodes: any[]; edges: any[] }, markDirty: boolean) => {
+      const epoch = Date.now()
+      const incomingNodes = hydrateIncomingNodes(graph?.nodes ?? [], epoch)
+      const incomingEdges = hydrateIncomingEdges(graph?.edges ?? [])
+      const normalizedNodes = normalizeNodesForState(incomingNodes) as Node[]
+      const normalizedEdges = incomingEdges as Edge[]
+
+      const { setGraph } = useWorkflowStore.getState()
+      // Atomically replace graph and control dirty state to avoid transient re-dirty
+      setGraph(normalizedNodes, normalizedEdges, markDirty)
+    },
+    []
+  )
 
   const currentWorkflow = useMemo(
     () =>
@@ -316,7 +220,6 @@ export default function Dashboard() {
     [workflows, currentWorkflowId]
   )
   const currentWorkflowIdValue = currentWorkflow?.id ?? null
-
   const isWorkspaceAdmin = useMemo(
     () => workspaceRole === 'owner' || workspaceRole === 'admin',
     [workspaceRole]
@@ -382,39 +285,17 @@ export default function Dashboard() {
           const [first] = visible
           const normalized = normalizeWorkflowData(first.data)
           setCurrentWorkflowId(first.id)
-          setWorkflowData(normalized)
-          latestGraphRef.current = normalized
-          lastSavedSnapshotRef.current = serializeSnapshot(
-            { name: first.name, description: first.description ?? null },
-            normalized
-          )
+          pushGraphToStore(normalized, false)
         } else {
-          const empty = createEmptyGraph()
           setCurrentWorkflowId(null)
-          setWorkflowData(empty)
-          latestGraphRef.current = empty
-          lastSavedSnapshotRef.current = serializeSnapshot(
-            { name: '', description: null },
-            empty
-          )
+          pushGraphToStore({ nodes: [], edges: [] }, false)
         }
-
-        pendingSnapshotRef.current = null
-        setWorkflowDirty(false)
       } catch (err) {
         console.error('Failed to load workflows', err)
         setError('Failed to load workflows.')
         setWorkflows([])
         setCurrentWorkflowId(null)
-        const empty = createEmptyGraph()
-        setWorkflowData(empty)
-        latestGraphRef.current = empty
-        lastSavedSnapshotRef.current = serializeSnapshot(
-          { name: '', description: null },
-          empty
-        )
-        pendingSnapshotRef.current = null
-        setWorkflowDirty(false)
+        pushGraphToStore({ nodes: [], edges: [] }, false)
       } finally {
         setLoadingWorkflows(false)
       }
@@ -422,13 +303,18 @@ export default function Dashboard() {
 
     fetchWorkflows()
     refreshPlanUsage()
-  }, [normalizeWorkflowData, planTier, refreshPlanUsage, activeWorkspaceId])
+  }, [
+    normalizeWorkflowData,
+    planTier,
+    refreshPlanUsage,
+    activeWorkspaceId,
+    pushGraphToStore
+  ])
 
   const doSelectWorkflow = useCallback(
     (id: string) => {
       const nextWorkflow = workflows.find((workflow) => workflow.id === id)
       setCurrentWorkflowId(id)
-      setWorkflowDirty(false)
       setError(null)
 
       // Always try to fetch fresh data for the selected workflow to avoid shared references/stale state
@@ -440,52 +326,27 @@ export default function Dashboard() {
             prev.map((w) => (w.id === fresh.id ? fresh : w))
           )
           const normalized = normalizeWorkflowData(fresh.data)
-          setWorkflowData(normalized)
-          latestGraphRef.current = normalized
-          lastSavedSnapshotRef.current = serializeSnapshot(
-            { name: fresh.name, description: fresh.description ?? null },
-            normalized
-          )
+          pushGraphToStore(normalized, false)
         } catch (e) {
           // Fallback to local cache if fetch fails
           if (nextWorkflow) {
             const normalized = normalizeWorkflowData(nextWorkflow.data)
-            setWorkflowData(normalized)
-            latestGraphRef.current = normalized
-            lastSavedSnapshotRef.current = serializeSnapshot(
-              {
-                name: nextWorkflow.name,
-                description: nextWorkflow.description ?? null
-              },
-              normalized
-            )
+            pushGraphToStore(normalized, false)
           } else {
-            const empty = createEmptyGraph()
-            setWorkflowData(empty)
-            latestGraphRef.current = empty
-            lastSavedSnapshotRef.current = serializeSnapshot(
-              { name: '', description: null },
-              empty
-            )
+            pushGraphToStore({ nodes: [], edges: [] }, false)
           }
-        } finally {
-          pendingSnapshotRef.current = null
         }
       })()
     },
-    [workflows, normalizeWorkflowData, activeWorkspaceId]
+    [workflows, normalizeWorkflowData, activeWorkspaceId, pushGraphToStore]
   )
-
-  const markWorkflowDirty = useCallback(() => {
-    setError(null)
-  }, [])
 
   const selectWorkflow = useCallback(
     (id: string) => {
       if (id === currentWorkflowId) return
 
       // If current workflow has unsaved changes, prompt before switching
-      if (workflowDirty) {
+      if (useWorkflowStore.getState().isDirty) {
         setPendingSwitchId(id)
         setShowSwitchConfirm(true)
         return
@@ -493,7 +354,7 @@ export default function Dashboard() {
 
       doSelectWorkflow(id)
     },
-    [currentWorkflowId, doSelectWorkflow, workflowDirty]
+    [currentWorkflowId, doSelectWorkflow]
   )
 
   // Confirm-to-switch dialog state
@@ -502,7 +363,14 @@ export default function Dashboard() {
 
   // After save completes successfully (dirty=false and not saving), perform pending switch
   useEffect(() => {
-    if (showSwitchConfirm && pendingSwitchId && !isSaving && !workflowDirty) {
+    const isDirty = useWorkflowStore.getState().isDirty
+    if (
+      showSwitchConfirm &&
+      pendingSwitchId &&
+      !isWorkflowActionBusy &&
+      !workflowSaving &&
+      !isDirty
+    ) {
       const target = pendingSwitchId
       setShowSwitchConfirm(false)
       setPendingSwitchId(null)
@@ -511,15 +379,16 @@ export default function Dashboard() {
   }, [
     showSwitchConfirm,
     pendingSwitchId,
-    isSaving,
-    workflowDirty,
+    isWorkflowActionBusy,
+    workflowSaving,
     doSelectWorkflow
   ])
 
   // Warn on browser tab close/refresh when there are unsaved changes
   useEffect(() => {
     const beforeUnload = (e: BeforeUnloadEvent) => {
-      if (workflowDirty && !isSaving) {
+      const { isDirty } = useWorkflowStore.getState()
+      if (isDirty && !workflowSaving) {
         e.preventDefault()
         // Some browsers require returnValue to be set
         e.returnValue = ''
@@ -529,7 +398,7 @@ export default function Dashboard() {
     }
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
-  }, [workflowDirty, isSaving])
+  }, [workflowSaving])
 
   const renameWorkflow = useCallback(
     (id: string, newName: string) => {
@@ -540,7 +409,7 @@ export default function Dashboard() {
         )
       )
       if (id === currentWorkflowId) {
-        setWorkflowDirty(true)
+        useWorkflowStore.setState({ isDirty: true })
       }
     },
     [canEditCurrentWorkflow, currentWorkflowId]
@@ -548,7 +417,8 @@ export default function Dashboard() {
 
   const handleNewWorkflow = useCallback(async () => {
     // Guard against rapid double-clicks while a create is in-flight
-    if (isSavingRef.current || isSaving || !canEditCurrentWorkflow) return
+    if (isWorkflowActionBusy || workflowSaving || !canEditCurrentWorkflow)
+      return
     if (planTier === 'solo' && workflows.length >= 3) {
       setRestrictionNotice(
         'You have reached the solo plan limit of 3 saved workflows. Upgrade in Settings → Plan to create additional workflows.'
@@ -556,8 +426,7 @@ export default function Dashboard() {
       return
     }
     try {
-      isSavingRef.current = true
-      setIsSaving(true)
+      setWorkflowActionBusy(true)
       setError(null)
 
       const base = 'New Workflow'
@@ -575,7 +444,7 @@ export default function Dashboard() {
       const payload = {
         name: unique,
         description: null,
-        data: createEmptyGraph()
+        data: { nodes: [], edges: [] }
       }
 
       const created = await createWorkflowApi(payload, activeWorkspaceId)
@@ -583,66 +452,26 @@ export default function Dashboard() {
       setCurrentWorkflowId(created.id)
 
       const normalized = normalizeWorkflowData(created.data ?? payload.data)
-      setWorkflowData(normalized)
-      latestGraphRef.current = normalized
-      lastSavedSnapshotRef.current = serializeSnapshot(
-        {
-          name: created.name ?? payload.name,
-          description: created.description ?? null
-        },
-        normalized
-      )
-      pendingSnapshotRef.current = null
-      setWorkflowDirty(false)
+      pushGraphToStore(normalized, false)
       await refreshPlanUsage()
     } catch (err) {
       console.error('Failed to create workflow', err)
       setError('Failed to create workflow.')
       window.alert('Failed to create workflow. Please try again.')
     } finally {
-      setIsSaving(false)
-      isSavingRef.current = false
+      setWorkflowActionBusy(false)
     }
   }, [
     normalizeWorkflowData,
-    isSaving,
+    isWorkflowActionBusy,
+    workflowSaving,
     workflows,
     planTier,
     refreshPlanUsage,
     canEditCurrentWorkflow,
-    activeWorkspaceId
+    activeWorkspaceId,
+    pushGraphToStore
   ])
-
-  const handleGraphChange = useCallback(
-    (graph: { nodes: any[]; edges: any[] }) => {
-      latestGraphRef.current = graph
-      if (isSavingRef.current) {
-        return
-      }
-      const emptyGraph =
-        (graph?.nodes?.length ?? 0) === 0 && (graph?.edges?.length ?? 0) === 0
-      setIsGraphEmpty(emptyGraph)
-      if (!canEditRef.current) {
-        return
-      }
-      const snapshot = serializeSnapshot(currentMeta, graph)
-      const baseline =
-        pendingSnapshotRef.current ?? lastSavedSnapshotRef.current
-      let dirty = true
-      try {
-        const baselineObj = JSON.parse(baseline)
-        const currentObj = JSON.parse(snapshot)
-        dirty = !deepEqual(baselineObj, currentObj)
-      } catch {
-        dirty = snapshot !== baseline
-      }
-      if (dirty) {
-        logSnapshotDiff('graphChange', baseline, snapshot)
-      }
-      setWorkflowDirty(dirty)
-    },
-    [currentMeta]
-  )
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -950,7 +779,7 @@ export default function Dashboard() {
 
   const handleRunWorkflow = useCallback(async () => {
     if (!currentWorkflow) return
-    if (workflowDirty) {
+    if (useWorkflowStore.getState().isDirty) {
       window.alert('Please save the workflow before running.')
       return
     }
@@ -975,7 +804,7 @@ export default function Dashboard() {
         setError(e?.message || 'Failed to start run')
       }
     }
-  }, [currentWorkflow, workflowDirty, pollRun, refreshPlanUsage])
+  }, [currentWorkflow, pollRun, refreshPlanUsage])
 
   // Overlay: subscribe to SSE for active run to reduce client work
   useEffect(() => {
@@ -1034,56 +863,39 @@ export default function Dashboard() {
     }
   }, [runOverlayOpen, currentWorkflowIdValue, activeRunId, stopPolling])
 
-  useEffect(() => {
-    // Only recompute dirty state on meta changes while editing in designer.
-    // Avoids marking dirty when switching workflows from the Runs tab.
-    if (activePane !== 'designer') return
-    handleGraphChange(latestGraphRef.current)
-  }, [currentMeta, handleGraphChange, activePane])
+  const applyGraphToCanvas = useCallback(
+    (graph: { nodes: any[]; edges: any[] }) => {
+      setError(null)
+      const normalized = normalizeWorkflowData(graph)
+      pushGraphToStore(normalized, true)
+    },
+    [normalizeWorkflowData, setError, pushGraphToStore]
+  )
 
   const handleSave = useCallback(async () => {
     if (
-      !saveRef.current ||
       !currentWorkflow ||
-      isSaving ||
+      isWorkflowActionBusy ||
+      workflowSaving ||
       !canEditCurrentWorkflow
     ) {
       return
     }
 
-    const nodesData = saveRef.current.saveAllNodes?.() || []
-    const edgesData = saveRef.current.getEdges?.() || []
+    const { getGraph, setSaving, markClean } = useWorkflowStore.getState()
 
-    const cleanNodes = sortById(
-      nodesData.map((n: any) => ({
-        id: n.id,
-        type: n.type,
-        position: n.position,
-        data: sanitizeData(n.data)
-      }))
-    )
-    const cleanEdges = sortById(edgesData.map(normalizeEdgeForPayload))
-    const payloadGraph = {
-      nodes: cleanNodes,
-      edges: cleanEdges
-    }
-
-    const pendingSnapshot = serializeSnapshot(
-      {
-        name: currentWorkflow.name,
-        description: currentWorkflow.description ?? null
-      },
-      payloadGraph
-    )
-
-    pendingSnapshotRef.current = pendingSnapshot
-    setWorkflowDirty(false)
-    isSavingRef.current = true
-    setIsSaving(true)
+    setSaving(true)
     setError(null)
 
-    saveRef.current.setNodesFromToolbar?.(nodesData)
     try {
+      const { nodes, edges } = getGraph()
+      const cleanNodes = sortById(nodes.map(sanitizeNodeData))
+      const cleanEdges = sortById(edges.map(normalizeEdgeForPayload))
+      const payloadGraph = {
+        nodes: cleanNodes,
+        edges: cleanEdges
+      }
+
       const updated = await updateWorkflowApi(
         currentWorkflow.id,
         {
@@ -1101,57 +913,8 @@ export default function Dashboard() {
       )
 
       const normalized = normalizeWorkflowData(updated.data ?? payloadGraph)
-      setWorkflowData(normalized)
-      latestGraphRef.current = normalized
-
-      const savedSnapshot = serializeSnapshot(
-        {
-          name: updated.name ?? currentWorkflow.name,
-          description:
-            updated.description ?? currentWorkflow.description ?? null
-        },
-        normalized
-      )
-
-      // Prepare diffs for logs from previous saved snapshot to new saved snapshot (user data only)
-      try {
-        const prevSaved = JSON.parse(lastSavedSnapshotRef.current)
-        const currSaved = JSON.parse(savedSnapshot)
-        const prevFlat = flatten(prevSaved)
-        const currFlat = flatten(currSaved)
-        const diffs: { path: string; from: unknown; to: unknown }[] = []
-        const keys = new Set<string>([
-          ...Object.keys(prevFlat),
-          ...Object.keys(currFlat)
-        ])
-        for (const k of Array.from(keys).sort()) {
-          if (!k.startsWith('graph.nodes[')) continue
-          if (k.includes('.position')) continue
-          if (!k.includes('.data.')) continue
-          if (prevFlat[k] !== currFlat[k]) {
-            diffs.push({ path: k, from: prevFlat[k], to: currFlat[k] })
-            if (diffs.length >= 100) break
-          }
-        }
-        if (diffs.length > 0) {
-          addLog({
-            id:
-              typeof crypto !== 'undefined' && 'randomUUID' in crypto
-                ? crypto.randomUUID()
-                : `${Date.now()}`,
-            workflowId: updated.id,
-            workflowName: updated.name ?? currentWorkflow.name,
-            timestamp: Date.now(),
-            diffs
-          })
-        }
-      } catch (e) {
-        console.error(e.message)
-      }
-
-      lastSavedSnapshotRef.current = savedSnapshot
-      pendingSnapshotRef.current = null
-      setWorkflowDirty(false)
+      // After a successful save, reflect the server graph and mark clean
+      pushGraphToStore(normalized, false)
     } catch (err) {
       console.error('Failed to save workflow', err)
       if (
@@ -1167,20 +930,18 @@ export default function Dashboard() {
         setError((err as any)?.message || 'Failed to save workflow.')
         window.alert('Failed to save workflow. Please try again.')
       }
-      pendingSnapshotRef.current = null
-      handleGraphChange(latestGraphRef.current)
     } finally {
-      setIsSaving(false)
-      isSavingRef.current = false
+      setSaving(false)
     }
   }, [
     activeWorkspaceId,
-    addLog,
     canEditCurrentWorkflow,
     currentWorkflow,
-    handleGraphChange,
-    isSaving,
+    isWorkflowActionBusy,
+    workflowSaving,
     normalizeWorkflowData,
+    pushGraphToStore,
+    setError,
     setRestrictionNotice
   ])
 
@@ -1238,28 +999,146 @@ export default function Dashboard() {
       list: workflowOptions
     }
   }, [currentWorkflow, workflowOptions])
-  const [isGraphEmpty, setIsGraphEmpty] = useState<boolean>(() => {
-    try {
-      return (
-        (workflowData?.nodes?.length ?? 0) === 0 &&
-        (workflowData?.edges?.length ?? 0) === 0
-      )
-    } catch {
-      return true
-    }
-  })
+  const isGraphEmpty = useWorkflowStore(
+    useCallback(
+      (state) => state.nodes.length === 0 && state.edges.length === 0,
+      []
+    )
+  )
   const [templatesOpen, setTemplatesOpen] = useState(false)
 
+  const actionSidebarTileGroups = [
+    {
+      heading: 'Email',
+      tiles: [
+        {
+          id: 'action-email-sendgrid',
+          label: 'SendGrid Email',
+          description: 'Send emails with SendGrid',
+          dragType: 'action:actionEmailSendgrid',
+          gradient: 'from-indigo-500 to-violet-600',
+          icon: <ActionIcon />
+        },
+        {
+          id: 'action-email-mailgun',
+          label: 'Mailgun Email',
+          description: 'Deliver email through Mailgun',
+          dragType: 'action:actionEmailMailgun',
+          gradient: 'from-purple-500 to-fuchsia-600',
+          icon: <ActionIcon />
+        },
+        {
+          id: 'action-email-amazon-ses',
+          label: 'Amazon SES Email',
+          description: 'Send email via Amazon SES',
+          dragType: 'action:actionEmailAmazonSes',
+          gradient: 'from-amber-500 to-yellow-500',
+          icon: <ActionIcon />
+        },
+        {
+          id: 'action-email-smtp',
+          label: 'SMTP Email',
+          description: 'Connect with a custom SMTP server',
+          dragType: 'action:actionEmailSmtp',
+          gradient: 'from-slate-500 to-slate-700',
+          icon: <ActionIcon />
+        }
+      ]
+    },
+    {
+      heading: 'Messaging',
+      tiles: [
+        {
+          id: 'action-slack',
+          label: 'Slack',
+          description: 'Message a Slack channel',
+          dragType: 'action:actionSlack',
+          gradient: 'from-purple-500 to-fuchsia-600',
+          icon: <ActionIcon />
+        },
+        {
+          id: 'action-teams',
+          label: 'Teams',
+          description: 'Notify Microsoft Teams',
+          dragType: 'action:actionTeams',
+          gradient: 'from-blue-500 to-indigo-600',
+          icon: <ActionIcon />
+        },
+        {
+          id: 'action-google-chat',
+          label: 'Google Chat',
+          description: 'Send a Google Chat message',
+          dragType: 'action:actionGoogleChat',
+          gradient: 'from-amber-400 to-rose-500',
+          icon: <ActionIcon />
+        }
+      ]
+    },
+    {
+      heading: 'Google Sheets',
+      tiles: [
+        {
+          id: 'action-sheets',
+          label: 'Google Sheets',
+          description: 'Append a spreadsheet row',
+          dragType: 'action:actionSheets',
+          gradient: 'from-emerald-500 to-lime-500',
+          icon: <ActionIcon />
+        }
+      ]
+    },
+    {
+      heading: 'Webhooks & APIs',
+      tiles: [
+        {
+          id: 'action-webhook',
+          label: 'Webhook',
+          description: 'POST data to another service',
+          dragType: 'action:actionWebhook',
+          gradient: 'from-sky-500 to-cyan-600',
+          icon: <ActionIcon />
+        },
+        {
+          id: 'action-http',
+          label: 'HTTP Request',
+          description: 'Call an external API',
+          dragType: 'action:actionHttp',
+          gradient: 'from-amber-500 to-orange-600',
+          icon: <ActionIcon />
+        }
+      ]
+    },
+    {
+      heading: 'Custom Logic',
+      tiles: [
+        {
+          id: 'action-code',
+          label: 'Run Code',
+          description: 'Execute custom logic',
+          dragType: 'action:actionCode',
+          gradient: 'from-slate-600 to-slate-800',
+          icon: <ActionIcon />
+        }
+      ]
+    }
+  ] as const
+
   function DraggableTile({
-    type,
+    label,
+    description,
     icon,
-    gradient
+    gradient,
+    dragType,
+    disabled = false
   }: {
-    type: 'Trigger' | 'Action' | 'Condition'
+    label: string
+    description: string
     icon: JSX.Element
     gradient: string
+    dragType: string
+    disabled?: boolean
   }) {
-    const allowDrag = canEditCurrentWorkflow
+    const allowDrag = canEditCurrentWorkflow && !disabled
     return (
       <div
         draggable={allowDrag}
@@ -1268,17 +1147,18 @@ export default function Dashboard() {
             e.preventDefault()
             return
           }
-          e.dataTransfer.setData('application/reactflow', type)
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('application/reactflow', dragType)
         }}
         role="button"
-        aria-label={`Add ${type}`}
+        aria-label={`Add ${label}`}
         className={[
           `group relative overflow-hidden rounded-xl border shadow-sm select-none${
             allowDrag ? ' cursor-grab active:cursor-grabbing' : ''
           }`,
           'bg-gradient-to-br',
           gradient,
-          'p-3 mb-3 text-white',
+          'p-3 text-white',
           allowDrag
             ? 'transition-transform will-change-transform hover:translate-y-[-1px] hover:shadow-md'
             : 'opacity-60 cursor-not-allowed'
@@ -1290,12 +1170,10 @@ export default function Dashboard() {
             {icon}
           </span>
           <div className="flex flex-col leading-none">
-            <span className="text-sm font-semibold tracking-tight">{type}</span>
-            <span className="text-[11px] opacity-90">
-              {type === 'Trigger' && 'Start your flow'}
-              {type === 'Action' && 'Do something'}
-              {type === 'Condition' && 'Branch logic'}
+            <span className="text-sm font-semibold tracking-tight">
+              {label}
             </span>
+            <span className="text-[11px] opacity-90">{description}</span>
           </div>
         </div>
       </div>
@@ -1341,14 +1219,7 @@ export default function Dashboard() {
             const next = updated[0]
             setCurrentWorkflowId(next.id)
             const normalized = normalizeWorkflowData(next.data)
-            setWorkflowData(normalized)
-            latestGraphRef.current = normalized
-            lastSavedSnapshotRef.current = serializeSnapshot(
-              { name: next.name, description: next.description ?? null },
-              normalized
-            )
-            pendingSnapshotRef.current = null
-            setWorkflowDirty(false)
+            pushGraphToStore(normalized, false)
           } else {
             // No workflows left — create a fresh one
             handleNewWorkflow()
@@ -1360,10 +1231,15 @@ export default function Dashboard() {
     window.addEventListener('workflow-deleted', onWorkflowDeleted as any)
     return () =>
       window.removeEventListener('workflow-deleted', onWorkflowDeleted as any)
-  }, [currentWorkflowId, normalizeWorkflowData, handleNewWorkflow])
+  }, [
+    currentWorkflowId,
+    normalizeWorkflowData,
+    handleNewWorkflow,
+    pushGraphToStore
+  ])
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)]">
+    <div className="flex flex-col h-[calc(100vh-4rem)] min-h-0">
       {/* Header moved to DashboardLayout */}
       {(planNotice || planTier === 'solo' || restrictionNotice) && (
         <div className="px-6 pt-4 space-y-3">
@@ -1426,595 +1302,665 @@ export default function Dashboard() {
           ) : null}
         </div>
       )}
-      <div className="flex h-full">
-        <aside className="w-64 border-r border-zinc-200 dark:border-zinc-700 p-4 bg-zinc-50 dark:bg-zinc-900">
-          <h2 className="font-semibold mb-3 text-zinc-700 dark:text-zinc-200">
-            Tasks
-          </h2>
-          <DraggableTile
-            type="Trigger"
-            icon={<TriggerIcon />}
-            gradient="from-emerald-500 to-teal-600"
-          />
-          <DraggableTile
-            type="Action"
-            icon={<ActionIcon />}
-            gradient="from-indigo-500 to-violet-600"
-          />
-          <DraggableTile
-            type="Condition"
-            icon={<ConditionIcon />}
-            gradient="from-amber-500 to-orange-600"
-          />
-          <div className="mt-4">
-            <button
-              type="button"
-              onClick={() => setTemplatesOpen((v) => !v)}
-              className={`w-full text-left px-3 py-2 rounded-lg border shadow-sm flex items-center justify-between ${
-                isGraphEmpty
-                  ? 'bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700'
-                  : 'bg-zinc-100 dark:bg-zinc-800/60 text-zinc-400'
-              }`}
-              title={
-                isGraphEmpty
-                  ? 'Browse templates'
-                  : templatesOpen
-                    ? 'Hide templates'
-                    : 'Templates are disabled when the canvas is not empty'
-              }
-            >
-              <span className="text-sm font-medium">Templates</span>
-              <span className="text-xs text-zinc-500">
-                {templatesOpen ? 'Hide' : 'Show'}
-              </span>
-            </button>
-            {templatesOpen && (
-              <div
-                className={`mt-2 max-h-64 overflow-auto pr-1 space-y-2 ${isGraphEmpty ? '' : 'opacity-60'}`}
+      <div className="flex h-full min-h-0">
+        <aside className="w-64 border-r border-zinc-200 dark:border-zinc-700 p-4 bg-zinc-50 dark:bg-zinc-900 h-full overflow-hidden">
+          <div className="flex h-full flex-col">
+            <h2 className="font-semibold mb-3 text-zinc-700 dark:text-zinc-200">
+              Tasks
+            </h2>
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+              <DraggableTile
+                label="Trigger"
+                description="Start your flow"
+                icon={<TriggerIcon />}
+                gradient="from-emerald-500 to-teal-600"
+                dragType="trigger"
+              />
+              <DraggableTile
+                label="Condition"
+                description="Branch logic"
+                icon={<ConditionIcon />}
+                gradient="from-amber-500 to-orange-600"
+                dragType="condition"
+              />
+              {actionSidebarTileGroups.map((group) => (
+                <div key={group.heading} className="space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    {group.heading}
+                  </h3>
+                  <div className="space-y-2">
+                    {group.tiles.map((tile) => (
+                      <DraggableTile key={tile.id} {...tile} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => setTemplatesOpen((v) => !v)}
+                className={`w-full text-left px-3 py-2 rounded-lg border shadow-sm flex items-center justify-between ${
+                  isGraphEmpty
+                    ? 'bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700'
+                    : 'bg-zinc-100 dark:bg-zinc-800/60 text-zinc-400'
+                }`}
+                title={
+                  isGraphEmpty
+                    ? 'Browse templates'
+                    : templatesOpen
+                      ? 'Hide templates'
+                      : 'Templates are disabled when the canvas is not empty'
+                }
               >
-                <TemplateButton
-                  label="HTTP Trigger → Webhook"
-                  description="Send a webhook when triggered"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 80, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
-                        }
-                      },
-                      {
-                        id: 'action-1',
-                        type: 'action',
-                        position: { x: 320, y: 120 },
-                        data: {
-                          label: 'Webhook',
-                          expanded: true,
-                          actionType: 'http',
-                          params: {
-                            method: 'POST',
-                            url: 'https://example.com/webhook',
-                            headers: [
-                              { key: 'Content-Type', value: 'application/json' }
-                            ],
-                            bodyType: 'json',
-                            body: '{"event":"example","value":123}'
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
-                        }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'action-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-                <TemplateButton
-                  label="Email on Trigger"
-                  description="Send an email via SMTP"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 80, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
-                        }
-                      },
-                      {
-                        id: 'action-1',
-                        type: 'action',
-                        position: { x: 320, y: 120 },
-                        data: {
-                          label: 'Send Email',
-                          expanded: true,
-                          actionType: 'Send Email',
-                          params: {
-                            service: 'SMTP',
-                            from: '',
-                            to: '',
-                            subject: 'Welcome to Dsentr',
-                            body: 'This is a sample email from Dsentr.'
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
-                        }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'action-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-                <TemplateButton
-                  label="SendGrid Email"
-                  description="Send via SendGrid"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 80, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
-                        }
-                      },
-                      {
-                        id: 'action-1',
-                        type: 'action',
-                        position: { x: 320, y: 120 },
-                        data: {
-                          label: 'Send Email',
-                          expanded: true,
-                          actionType: 'Send Email',
-                          params: {
-                            service: 'SendGrid',
-                            from: '',
-                            to: '',
-                            subject: 'Welcome to Dsentr',
-                            body: 'This is a sample email from Dsentr.'
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
-                        }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'action-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-                <TemplateButton
-                  label="Amazon SES Email"
-                  description="Send via Amazon SES"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 80, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
-                        }
-                      },
-                      {
-                        id: 'action-1',
-                        type: 'action',
-                        position: { x: 320, y: 120 },
-                        data: {
-                          label: 'Send Email',
-                          expanded: true,
-                          actionType: 'Send Email',
-                          params: {
-                            service: 'Amazon SES',
-                            region: 'us-east-1',
-                            from: '',
-                            to: '',
-                            subject: 'Welcome to Dsentr',
-                            body: 'This is a sample email from Dsentr.'
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
-                        }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'action-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-                <TemplateButton
-                  label="Mailgun Email"
-                  description="Send via Mailgun"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 80, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
-                        }
-                      },
-                      {
-                        id: 'action-1',
-                        type: 'action',
-                        position: { x: 320, y: 120 },
-                        data: {
-                          label: 'Send Email',
-                          expanded: true,
-                          actionType: 'Send Email',
-                          params: {
-                            service: 'Mailgun',
-                            region: 'US (api.mailgun.net)',
-                            from: '',
-                            to: '',
-                            subject: 'Welcome to Dsentr',
-                            body: 'This is a sample email from Dsentr.'
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
-                        }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'action-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-                <TemplateButton
-                  label="Messaging"
-                  description="Send a message (SMS/Chat)"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 80, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
-                        }
-                      },
-                      {
-                        id: 'action-1',
-                        type: 'action',
-                        position: { x: 320, y: 120 },
-                        data: {
-                          label: 'Message',
-                          expanded: true,
-                          actionType: 'messaging',
-                          params: {
-                            platform: 'Slack',
-                            channel: '#general',
-                            message: 'Hello from Dsentr!',
-                            token: ''
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
-                        }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'action-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-                <TemplateButton
-                  label="Google Sheets Append"
-                  description="Append a row on trigger"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 80, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
-                        }
-                      },
-                      {
-                        id: 'action-1',
-                        type: 'action',
-                        position: { x: 320, y: 120 },
-                        data: {
-                          label: 'Google Sheets',
-                          expanded: true,
-                          actionType: 'sheets',
-                          params: {
-                            spreadsheetId: '',
-                            worksheet: 'Sheet1',
-                            columns: [
-                              { key: 'timestamp', value: '{{now}}' },
-                              { key: 'event', value: 'triggered' }
-                            ]
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
-                        }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'action-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-                <TemplateButton
-                  label="Run Code → HTTP"
-                  description="Process then call an API"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 60, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
-                        }
-                      },
-                      {
-                        id: 'action-1',
-                        type: 'action',
-                        position: { x: 280, y: 80 },
-                        data: {
-                          label: 'Run Code',
-                          expanded: true,
-                          actionType: 'code',
-                          params: {
-                            language: 'js',
-                            code: '// transform inputs here\n// inputs available in scope: context\n// return an object to pass to next node',
+                <span className="text-sm font-medium">Templates</span>
+                <span className="text-xs text-zinc-500">
+                  {templatesOpen ? 'Hide' : 'Show'}
+                </span>
+              </button>
+              {templatesOpen && (
+                <div
+                  className={`mt-2 max-h-64 overflow-auto pr-1 space-y-2 ${isGraphEmpty ? '' : 'opacity-60'}`}
+                >
+                  <TemplateButton
+                    label="HTTP Trigger → Webhook"
+                    description="Send a webhook when triggered"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 80, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
                             inputs: [],
-                            outputs: []
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'action-1',
+                          type: 'actionWebhook',
+                          position: { x: 320, y: 120 },
+                          data: {
+                            label: 'Webhook',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'webhook',
+                            params: {
+                              method: 'POST',
+                              url: 'https://example.com/webhook',
+                              headers: [
+                                {
+                                  key: 'Content-Type',
+                                  value: 'application/json'
+                                }
+                              ],
+                              queryParams: [],
+                              bodyType: 'json',
+                              body: '{"event":"example","value":123}',
+                              formBody: [],
+                              authType: 'none',
+                              authUsername: '',
+                              authPassword: '',
+                              authToken: ''
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
                         }
-                      },
-                      {
-                        id: 'action-2',
-                        type: 'action',
-                        position: { x: 500, y: 120 },
-                        data: {
-                          label: 'HTTP Request',
-                          expanded: true,
-                          actionType: 'http',
-                          params: {
-                            method: 'GET',
-                            url: 'https://api.example.com/resource',
-                            headers: [],
-                            body: ''
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'action-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
                         }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'action-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      },
-                      {
-                        id: 'e2',
-                        source: 'action-1',
-                        target: 'action-2',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-                <TemplateButton
-                  label="Branch by Condition"
-                  description="Split flow into two paths"
-                  disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                  onClick={() => {
-                    if (!saveRef.current?.loadGraph || !isGraphEmpty) return
-                    const nodes = [
-                      {
-                        id: 'trigger-1',
-                        type: 'trigger',
-                        position: { x: 40, y: 120 },
-                        data: {
-                          label: 'Trigger',
-                          expanded: true,
-                          inputs: [],
-                          triggerType: 'Manual'
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                  <TemplateButton
+                    label="Email on Trigger"
+                    description="Send an email via SMTP"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 80, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
+                            inputs: [],
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'action-1',
+                          type: 'actionEmail',
+                          position: { x: 320, y: 120 },
+                          data: {
+                            label: 'Send Email',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'email',
+                            params: {
+                              service: 'SMTP',
+                              from: '',
+                              to: '',
+                              subject: 'Welcome to Dsentr',
+                              body: 'This is a sample email from Dsentr.'
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
                         }
-                      },
-                      {
-                        id: 'cond-1',
-                        type: 'condition',
-                        position: { x: 260, y: 120 },
-                        data: {
-                          label: 'If price > 100',
-                          expanded: true,
-                          field: 'price',
-                          operator: 'greater than',
-                          value: '100'
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'action-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
                         }
-                      },
-                      {
-                        id: 'action-true',
-                        type: 'action',
-                        position: { x: 520, y: 60 },
-                        data: {
-                          label: 'Send Email (High)',
-                          expanded: true,
-                          actionType: 'Send Email',
-                          params: {
-                            service: 'SMTP',
-                            from: '',
-                            to: '',
-                            subject: 'High price detected',
-                            body: 'Price exceeded threshold.'
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                  <TemplateButton
+                    label="SendGrid Email"
+                    description="Send via SendGrid"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 80, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
+                            inputs: [],
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'action-1',
+                          type: 'actionEmail',
+                          position: { x: 320, y: 120 },
+                          data: {
+                            label: 'Send Email',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'email',
+                            params: {
+                              service: 'SendGrid',
+                              from: '',
+                              to: '',
+                              subject: 'Welcome to Dsentr',
+                              body: 'This is a sample email from Dsentr.'
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
                         }
-                      },
-                      {
-                        id: 'action-false',
-                        type: 'action',
-                        position: { x: 520, y: 180 },
-                        data: {
-                          label: 'Slack Notify (Low)',
-                          expanded: true,
-                          actionType: 'messaging',
-                          params: {
-                            platform: 'Slack',
-                            channel: '#alerts',
-                            message: 'Price within normal range',
-                            token: ''
-                          },
-                          timeout: 5000,
-                          retries: 0,
-                          stopOnError: true
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'action-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
                         }
-                      }
-                    ]
-                    const edges = [
-                      {
-                        id: 'e1',
-                        source: 'trigger-1',
-                        target: 'cond-1',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default' }
-                      },
-                      {
-                        id: 'e2',
-                        source: 'cond-1',
-                        sourceHandle: 'cond-true',
-                        target: 'action-true',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default', outcome: 'true' },
-                        label: 'True'
-                      },
-                      {
-                        id: 'e3',
-                        source: 'cond-1',
-                        sourceHandle: 'cond-false',
-                        target: 'action-false',
-                        type: 'nodeEdge',
-                        data: { edgeType: 'default', outcome: 'false' },
-                        label: 'False'
-                      }
-                    ]
-                    saveRef.current.loadGraph({ nodes, edges })
-                  }}
-                />
-              </div>
-            )}
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                  <TemplateButton
+                    label="Amazon SES Email"
+                    description="Send via Amazon SES"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 80, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
+                            inputs: [],
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'action-1',
+                          type: 'actionEmail',
+                          position: { x: 320, y: 120 },
+                          data: {
+                            label: 'Send Email',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'email',
+                            params: {
+                              service: 'Amazon SES',
+                              region: 'us-east-1',
+                              from: '',
+                              to: '',
+                              subject: 'Welcome to Dsentr',
+                              body: 'This is a sample email from Dsentr.'
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
+                        }
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'action-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
+                        }
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                  <TemplateButton
+                    label="Mailgun Email"
+                    description="Send via Mailgun"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 80, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
+                            inputs: [],
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'action-1',
+                          type: 'actionEmail',
+                          position: { x: 320, y: 120 },
+                          data: {
+                            label: 'Send Email',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'email',
+                            params: {
+                              service: 'Mailgun',
+                              region: 'US (api.mailgun.net)',
+                              from: '',
+                              to: '',
+                              subject: 'Welcome to Dsentr',
+                              body: 'This is a sample email from Dsentr.'
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
+                        }
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'action-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
+                        }
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                  <TemplateButton
+                    label="Messaging"
+                    description="Send a message (SMS/Chat)"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 80, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
+                            inputs: [],
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'action-1',
+                          type: 'actionSlack',
+                          position: { x: 320, y: 120 },
+                          data: {
+                            label: 'Message',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'slack',
+                            params: {
+                              channel: '#general',
+                              message: 'Hello from Dsentr!',
+                              token: '',
+                              connectionScope: '',
+                              connectionId: '',
+                              accountEmail: ''
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
+                        }
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'action-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
+                        }
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                  <TemplateButton
+                    label="Google Sheets Append"
+                    description="Append a row on trigger"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 80, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
+                            inputs: [],
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'action-1',
+                          type: 'actionSheets',
+                          position: { x: 320, y: 120 },
+                          data: {
+                            label: 'Google Sheets',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'sheets',
+                            params: {
+                              spreadsheetId: '',
+                              worksheet: 'Sheet1',
+                              columns: [
+                                { key: 'timestamp', value: '{{now}}' },
+                                { key: 'event', value: 'triggered' }
+                              ],
+                              accountEmail: '',
+                              oauthConnectionScope: '',
+                              oauthConnectionId: ''
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
+                        }
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'action-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
+                        }
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                  <TemplateButton
+                    label="Run Code → HTTP"
+                    description="Process then call an API"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 60, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
+                            inputs: [],
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'action-1',
+                          type: 'actionCode',
+                          position: { x: 280, y: 80 },
+                          data: {
+                            label: 'Run Code',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'code',
+                            params: {
+                              code: '// transform inputs here\n// inputs available in scope: context\n// return an object to pass to next node',
+                              inputs: [],
+                              outputs: []
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
+                        },
+                        {
+                          id: 'action-2',
+                          type: 'actionHttp',
+                          position: { x: 500, y: 120 },
+                          data: {
+                            label: 'HTTP Request',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'http',
+                            params: {
+                              method: 'GET',
+                              url: 'https://api.example.com/resource',
+                              headers: [],
+                              queryParams: [],
+                              bodyType: 'raw',
+                              body: '',
+                              formBody: [],
+                              authType: 'none',
+                              authUsername: '',
+                              authPassword: '',
+                              authToken: ''
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
+                        }
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'action-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
+                        },
+                        {
+                          id: 'e2',
+                          source: 'action-1',
+                          target: 'action-2',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
+                        }
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                  <TemplateButton
+                    label="Branch by Condition"
+                    description="Split flow into two paths"
+                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
+                    onClick={() => {
+                      if (!isGraphEmpty) return
+                      const nodes = [
+                        {
+                          id: 'trigger-1',
+                          type: 'trigger',
+                          position: { x: 40, y: 120 },
+                          data: {
+                            label: 'Trigger',
+                            expanded: true,
+                            inputs: [],
+                            triggerType: 'Manual'
+                          }
+                        },
+                        {
+                          id: 'cond-1',
+                          type: 'condition',
+                          position: { x: 260, y: 120 },
+                          data: {
+                            label: 'If price > 100',
+                            expanded: true,
+                            field: 'price',
+                            operator: 'greater than',
+                            value: '100'
+                          }
+                        },
+                        {
+                          id: 'action-true',
+                          type: 'actionEmail',
+                          position: { x: 520, y: 60 },
+                          data: {
+                            label: 'Send Email (High)',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'email',
+                            params: {
+                              service: 'SMTP',
+                              from: '',
+                              to: '',
+                              subject: 'High price detected',
+                              body: 'Price exceeded threshold.'
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
+                        },
+                        {
+                          id: 'action-false',
+                          type: 'actionSlack',
+                          position: { x: 520, y: 180 },
+                          data: {
+                            label: 'Slack Notify (Low)',
+                            expanded: true,
+                            inputs: [],
+                            labelError: null,
+                            hasLabelValidationError: false,
+                            actionType: 'slack',
+                            params: {
+                              channel: '#alerts',
+                              message: 'Price within normal range',
+                              token: '',
+                              connectionScope: '',
+                              connectionId: '',
+                              accountEmail: ''
+                            },
+                            timeout: 5000,
+                            retries: 0,
+                            stopOnError: true
+                          }
+                        }
+                      ]
+                      const edges = [
+                        {
+                          id: 'e1',
+                          source: 'trigger-1',
+                          target: 'cond-1',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default' }
+                        },
+                        {
+                          id: 'e2',
+                          source: 'cond-1',
+                          sourceHandle: 'cond-true',
+                          target: 'action-true',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default', outcome: 'true' },
+                          label: 'True'
+                        },
+                        {
+                          id: 'e3',
+                          source: 'cond-1',
+                          sourceHandle: 'cond-false',
+                          target: 'action-false',
+                          type: 'nodeEdge',
+                          data: { edgeType: 'default', outcome: 'false' },
+                          label: 'False'
+                        }
+                      ]
+                      applyGraphToCanvas({ nodes, edges })
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </aside>
 
-        <div className="flex-1 flex flex-col bg-zinc-50 dark:bg-zinc-900">
+        <div className="flex-1 min-h-0 flex flex-col bg-zinc-50 dark:bg-zinc-900">
           <WorkflowToolbar
             workflow={toolbarWorkflow}
             role={workspaceRole}
@@ -2029,8 +1975,6 @@ export default function Dashboard() {
             onNew={handleNewWorkflow}
             onSelect={selectWorkflow}
             onRename={renameWorkflow}
-            dirty={workflowDirty}
-            saving={isSaving}
             runStatus={toolbarRunStatus}
             onToggleOverlay={handleToggleRunOverlay}
           />
@@ -2075,30 +2019,30 @@ export default function Dashboard() {
           )}
 
           {activePane === 'designer' ? (
-            <ReactFlowProvider>
-              {currentWorkflow ? (
-                <FlowCanvas
-                  workflowId={currentWorkflow.id}
-                  workflowData={workflowData}
-                  canEdit={canEditCurrentWorkflow}
-                  markWorkflowDirty={markWorkflowDirty}
-                  setSaveRef={(ref) => (saveRef.current = ref)}
-                  onGraphChange={handleGraphChange}
-                  onRunWorkflow={handleRunWorkflow}
-                  runningIds={runningIds}
-                  succeededIds={succeededIds}
-                  failedIds={failedIds}
-                  planTier={planTier}
-                  onRestrictionNotice={setRestrictionNotice}
-                />
-              ) : (
-                <div className="flex-1 flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
-                  {loadingWorkflows
-                    ? 'Loading workflows...'
-                    : 'Create a workflow to get started.'}
+            <div className="flex-1 min-h-0 flex">
+              <ReactFlowProvider>
+                <div className="flex-1 min-h-0 flex">
+                  {currentWorkflow ? (
+                    <FlowCanvas
+                      workflowId={currentWorkflow.id}
+                      canEdit={canEditCurrentWorkflow}
+                      onRunWorkflow={handleRunWorkflow}
+                      runningIds={runningIds}
+                      succeededIds={succeededIds}
+                      failedIds={failedIds}
+                      planTier={planTier}
+                      onRestrictionNotice={setRestrictionNotice}
+                    />
+                  ) : (
+                    <div className="m-auto text-sm text-zinc-500 dark:text-zinc-400">
+                      {loadingWorkflows
+                        ? 'Loading workflows...'
+                        : 'Create a workflow to get started.'}
+                    </div>
+                  )}
                 </div>
-              )}
-            </ReactFlowProvider>
+              </ReactFlowProvider>
+            </div>
           ) : (
             // Runs pane
             <div className="flex-1 overflow-auto p-4">
@@ -2190,9 +2134,9 @@ export default function Dashboard() {
                   handleSave()
                 }}
                 className="px-3 py-1 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                disabled={isSaving}
+                disabled={workflowSaving || isWorkflowActionBusy}
               >
-                {isSaving ? 'Saving…' : 'Save and Switch'}
+                {workflowSaving ? 'Saving…' : 'Save and Switch'}
               </button>
               <button
                 onClick={() => {

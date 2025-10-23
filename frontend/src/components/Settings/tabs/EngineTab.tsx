@@ -57,7 +57,7 @@ export default function EngineTab() {
           return ws[0]?.id ?? null
         })
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false))
     return () => {
       alive = false
@@ -164,7 +164,7 @@ export default function EngineTab() {
   }
 
   useEffect(() => {
-    ;(async () => {
+    ; (async () => {
       if (!selectedWorkflowId) {
         setEgressText('')
         return
@@ -283,10 +283,10 @@ export default function EngineTab() {
 
       {/* Egress allowlist config */}
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
-        <h3 className="font-semibold mb-2">Egress Allowlist</h3>
+        <h3 className="font-semibold mb-2">Egress Whitelist</h3>
         <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-2">
           One host or wildcard per line (e.g., api.github.com or *.mycorp.com).
-          Global allowlist from server is also applied.
+          Global whitelist from server is also applied.
         </p>
         <textarea
           value={egressText}
@@ -314,7 +314,7 @@ export default function EngineTab() {
             title={adminOnlyTitle}
             className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {`Save Allowlist${adminOnlySuffix}`}
+            {`Save Whitelist${adminOnlySuffix}`}
           </button>
         </div>
       </div>

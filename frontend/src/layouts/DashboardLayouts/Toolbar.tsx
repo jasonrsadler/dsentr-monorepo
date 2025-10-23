@@ -1,4 +1,9 @@
 import { useEffect, useState } from 'react'
+import {
+  selectIsDirty,
+  selectIsSaving,
+  useWorkflowStore
+} from '@/stores/workflowStore'
 
 type WorkspaceRole = 'owner' | 'admin' | 'user' | 'viewer'
 
@@ -24,8 +29,6 @@ interface WorkflowToolbarProps {
   onNew?: () => void
   onSelect?: (id: string) => void
   onRename?: (id: string, name: string) => void
-  dirty?: boolean
-  saving?: boolean
   runStatus?: 'idle' | 'queued' | 'running'
   onToggleOverlay?: () => void
 }
@@ -44,8 +47,6 @@ export default function WorkflowToolbar({
   onNew,
   onSelect,
   onRename,
-  dirty = false,
-  saving = false,
   runStatus = 'idle',
   onToggleOverlay
 }: WorkflowToolbarProps) {
@@ -53,6 +54,8 @@ export default function WorkflowToolbar({
   const [name, setName] = useState(workflow?.name || '')
   const [nameError, setNameError] = useState<string | null>(null)
   const isViewer = role === 'viewer'
+  const isDirty = useWorkflowStore(selectIsDirty)
+  const isSaving = useWorkflowStore(selectIsSaving)
 
   useEffect(() => {
     setName(workflow?.name || '')
@@ -102,7 +105,7 @@ export default function WorkflowToolbar({
     onSave?.()
   }
 
-  const isSavingDisabled = !dirty || saving || !canEdit
+  const isSavingDisabled = !isDirty || isSaving || !canEdit
   const isRunActive = runStatus === 'queued' || runStatus === 'running'
   const runBtnClasses = isRunActive
     ? runStatus === 'running'
@@ -221,10 +224,10 @@ export default function WorkflowToolbar({
             : 'bg-green-500 text-white hover:bg-green-600'
         }`}
       >
-        {saving ? 'Saving...' : 'Save'}
+        {isSaving ? 'Saving...' : 'Save'}
       </button>
 
-      {dirty && !saving && canEdit && (
+      {isDirty && !isSaving && canEdit && (
         <span className="w-2 h-2 rounded-full bg-blue-500" />
       )}
 

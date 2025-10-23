@@ -16,3 +16,6 @@
 - Keep new action modules stateless—pass everything via parameters and the shared `AppState`.
 - Validate all user-provided inputs before performing network calls; return `Err(String)` with actionable error messages so UI surfaces them cleanly.
 - Prefer adding small helper structs/functions within each module rather than extending `mod.rs` unless they are shared across actions.
+
+## Change Reasons
+- Teams routing now infers Delegated OAuth when `teamId` + `channelId` are provided (and `oauthProvider` is Microsoft) even if `deliveryMethod` is omitted. This prevents silent fallback to the Incoming Webhook path and "sent" logs without posting to the intended channel after the node refactor.

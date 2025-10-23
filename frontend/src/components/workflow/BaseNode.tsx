@@ -1,81 +1,112 @@
-import { motion, AnimatePresence } from 'framer-motion'
-import { Handle, Position } from '@xyflow/react'
-import { ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
+import { useMemo, useCallback, type ReactNode } from 'react'
+import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
 
-export default function BaseNode({
+export interface BaseNodeRenderProps<
+  TData extends Record<string, unknown> = Record<string, unknown>
+> {
+  id: string
+  selected: boolean
+  label: string
+  expanded: boolean
+  dirty: boolean
+  nodeData?:
+    | (TData & {
+        label?: unknown
+        expanded?: unknown
+        dirty?: unknown
+      })
+    | null
+  updateData: (data: Partial<TData>) => void
+  toggleExpanded: () => void
+  remove: () => void
+  canEdit: boolean
+  storeCanEdit: boolean
+  effectiveCanEdit: boolean
+}
+
+export interface BaseNodeProps<
+  TData extends Record<string, unknown> = Record<string, unknown>
+> {
+  id: string
+  selected: boolean
+  canEdit?: boolean
+  fallbackLabel?: string
+  defaultExpanded?: boolean
+  defaultDirty?: boolean
+  children: (props: BaseNodeRenderProps<TData>) => ReactNode
+}
+
+type InternalNodeData<TData extends Record<string, unknown>> =
+  | (TData & { label?: unknown; expanded?: unknown; dirty?: unknown })
+  | undefined
+
+type Selector<TData extends Record<string, unknown>> = (
+  state: WorkflowState
+) => InternalNodeData<TData>
+
+export default function BaseNode<
+  TData extends Record<string, unknown> = Record<string, unknown>
+>({
   id,
   selected,
-  label,
-  dirty,
-  expanded,
-  setExpanded,
-  onRemove,
+  canEdit = true,
+  fallbackLabel = 'Node',
+  defaultExpanded = false,
+  defaultDirty = false,
   children
-}) {
-  return (
-    <motion.div
-      layout
-      className={`relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${
-        selected
-          ? 'ring-2 ring-blue-500'
-          : 'border-zinc-300 dark:border-zinc-700'
-      }`}
-      style={{
-        width: expanded ? 'auto' : 256,
-        minWidth: expanded ? 256 : undefined,
-        maxWidth: expanded ? 400 : undefined
-      }}
-    >
-      <Handle
-        type="source"
-        position={Position.Right}
-        style={{
-          width: 14,
-          height: 14,
-          backgroundColor: 'green',
-          border: '2px solid white'
-        }}
-      />
-      <div className="p-3">
-        <div className="flex justify-between items-center">
-          <h3 className="text-sm font-semibold cursor-pointer relative">
-            {label}
-            {dirty && (
-              <span className="absolute -right-3 top-1 w-2 h-2 rounded-full bg-blue-500" />
-            )}
-          </h3>
-          <div className="flex gap-1">
-            <button
-              onClick={() => setExpanded((prev) => !prev)}
-              className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"
-            >
-              {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
-            <button
-              onClick={() => onRemove?.(id)}
-              className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded"
-              title="Delete node"
-            >
-              <Trash2 size={16} className="text-red-600" />
-            </button>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {expanded && (
-            <motion.div
-              key="expanded-content"
-              layout
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
-            >
-              {children}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </motion.div>
+}: BaseNodeProps<TData>) {
+  const selectNodeData = useMemo<Selector<TData>>(
+    () => (state) =>
+      state.nodes.find((node) => node.id === id)
+        ?.data as InternalNodeData<TData>,
+    [id]
   )
+  const nodeData = useWorkflowStore(selectNodeData)
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+  const removeNode = useWorkflowStore((state) => state.removeNode)
+  const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+
+  const effectiveCanEdit = canEdit && storeCanEdit
+
+  const expanded =
+    (nodeData?.expanded as boolean | undefined) ?? defaultExpanded
+  const dirty = (nodeData?.dirty as boolean | undefined) ?? defaultDirty
+  const rawLabel = nodeData?.label
+  const label =
+    typeof rawLabel === 'string' && rawLabel.trim().length > 0
+      ? rawLabel
+      : fallbackLabel
+
+  const handleUpdateData = useCallback(
+    (data: Partial<TData>) => {
+      if (!effectiveCanEdit) return
+      updateNodeData(id, data)
+    },
+    [effectiveCanEdit, id, updateNodeData]
+  )
+
+  const handleToggleExpanded = useCallback(() => {
+    if (!effectiveCanEdit) return
+    updateNodeData(id, { expanded: !expanded } as Partial<TData>)
+  }, [effectiveCanEdit, id, expanded, updateNodeData])
+
+  const handleRemove = useCallback(() => {
+    if (!effectiveCanEdit) return
+    removeNode(id)
+  }, [effectiveCanEdit, id, removeNode])
+
+  return children({
+    id,
+    selected,
+    label,
+    expanded,
+    dirty,
+    nodeData: nodeData ?? null,
+    updateData: handleUpdateData,
+    toggleExpanded: handleToggleExpanded,
+    remove: handleRemove,
+    canEdit,
+    storeCanEdit,
+    effectiveCanEdit
+  })
 }

@@ -14,6 +14,8 @@ import {
   type ProviderConnectionSet
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
+import { useActionParams } from '@/stores/workflowSelectors'
+import { useWorkflowStore } from '@/stores/workflowStore'
 import {
   fetchMicrosoftTeams,
   fetchMicrosoftTeamChannels,
@@ -65,13 +67,33 @@ export interface TeamsActionValues {
 }
 
 interface TeamsActionProps {
-  args: TeamsActionValues
-  initialDirty?: boolean
-  onChange?: (
-    args: TeamsActionValues,
-    nodeHasErrors: boolean,
-    childDirty: boolean
-  ) => void
+  nodeId: string
+  canEdit?: boolean
+  isRestricted?: boolean
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const extractTeamsParams = (source: unknown): TeamsActionValues => {
+  if (isRecord(source)) {
+    const record = source as Record<string, unknown>
+    const teamsRecord = isRecord(record['Teams'])
+      ? (record['Teams'] as Record<string, unknown>)
+      : isRecord(record['teams'])
+        ? (record['teams'] as Record<string, unknown>)
+        : record
+
+    if (isRecord(teamsRecord)) {
+      return teamsRecord as TeamsActionValues
+    }
+  }
+
+  if (source && typeof source === 'object' && !Array.isArray(source)) {
+    return source as TeamsActionValues
+  }
+
+  return {} as TeamsActionValues
 }
 
 const DELIVERY_METHOD_INCOMING = 'Incoming Webhook'
@@ -340,16 +362,6 @@ const connectionInfoToSelection = (
   return selection
 }
 
-const connectionStateEqual = (
-  left: TeamsActionValues,
-  right: TeamsActionValues
-) =>
-  left.oauthProvider === right.oauthProvider &&
-  left.oauthConnectionScope === right.oauthConnectionScope &&
-  left.oauthConnectionId === right.oauthConnectionId &&
-  (left.oauthAccountEmail ?? '') === (right.oauthAccountEmail ?? '') &&
-  selectionsEqual(left.connection, right.connection)
-
 const normalizeParams = (incoming?: TeamsActionValues): TeamsActionValues => {
   const base: TeamsActionValues = {
     deliveryMethod: DELIVERY_METHOD_INCOMING,
@@ -495,6 +507,25 @@ const normalizeParams = (incoming?: TeamsActionValues): TeamsActionValues => {
   return next
 }
 
+const computeTeamsPatch = (
+  current: TeamsActionValues,
+  next: TeamsActionValues
+): Partial<TeamsActionValues> => {
+  const patch: Partial<TeamsActionValues> = {}
+  const keys = new Set<keyof TeamsActionValues>([
+    ...(Object.keys(current) as (keyof TeamsActionValues)[]),
+    ...(Object.keys(next) as (keyof TeamsActionValues)[])
+  ])
+
+  keys.forEach((key) => {
+    if (!deepEqual(current[key], next[key])) {
+      patch[key] = next[key] as TeamsActionValues[keyof TeamsActionValues]
+    }
+  })
+
+  return patch
+}
+
 const sanitizeForSelection = (
   current: TeamsActionValues,
   {
@@ -632,6 +663,14 @@ const sanitizeForSelection = (
       }
     }
 
+    if (!sanitized.oauthConnectionScope || !sanitized.oauthConnectionId) {
+      sanitized.teamId = ''
+      sanitized.teamName = ''
+      sanitized.channelId = ''
+      sanitized.channelName = ''
+      sanitized.mentions = []
+    }
+
     sanitized.messageType = delegatedMessageType
 
     if (delegatedMessageType === 'Card') {
@@ -694,6 +733,217 @@ const sanitizeForSelection = (
   return sanitized
 }
 
+interface TeamsParamContext {
+  isIncomingWebhook: boolean
+  isDelegated: boolean
+  isConnector: boolean
+  isWorkflow: boolean
+  workflowOption: string
+  workflowUsesHeaderSecret: boolean
+  delegatedMessageType: DelegatedMessageType
+  delegatedCardMode: DelegatedCardMode
+}
+
+const deriveParamContext = (current: TeamsActionValues): TeamsParamContext => {
+  const deliveryMethod = current.deliveryMethod || DELIVERY_METHOD_INCOMING
+  const isIncomingWebhook = deliveryMethod === DELIVERY_METHOD_INCOMING
+  const isDelegated = deliveryMethod === DELIVERY_METHOD_DELEGATED
+
+  const webhookType = current.webhookType || webhookOptions[0]
+  const isConnector = isIncomingWebhook && webhookType === webhookOptions[0]
+  const isWorkflow = isIncomingWebhook && webhookType === webhookOptions[1]
+
+  const rawWorkflowOption = current.workflowOption || workflowOptions[0]
+  const workflowOption = workflowOptions.includes(rawWorkflowOption)
+    ? rawWorkflowOption
+    : workflowOptions[0]
+  const workflowUsesHeaderSecret = workflowOption === workflowOptions[1]
+
+  const rawMessageType =
+    (current.messageType as DelegatedMessageType) ?? delegatedMessageTypes[0]
+  const delegatedMessageType = delegatedMessageTypes.includes(rawMessageType)
+    ? rawMessageType
+    : delegatedMessageTypes[0]
+
+  const rawCardMode =
+    (current.cardMode as DelegatedCardMode) ?? delegatedCardModes[0]
+  const delegatedCardMode = delegatedCardModes.includes(rawCardMode)
+    ? rawCardMode
+    : delegatedCardModes[0]
+
+  return {
+    isIncomingWebhook,
+    isDelegated,
+    isConnector,
+    isWorkflow,
+    workflowOption,
+    workflowUsesHeaderSecret,
+    delegatedMessageType,
+    delegatedCardMode
+  }
+}
+
+const validateTeamsParams = (
+  params: TeamsActionValues,
+  context: TeamsParamContext,
+  {
+    connectionsError,
+    connectionsLoading,
+    connectionChoices,
+    hasMicrosoftAccount,
+    teamsError,
+    teamsLoading,
+    channelsError,
+    channelsLoading
+  }: {
+    connectionsError: string | null
+    connectionsLoading: boolean
+    connectionChoices: (
+      | ProviderConnectionSet['personal']
+      | ProviderConnectionSet['workspace'][number]
+    )[]
+    hasMicrosoftAccount: boolean
+    teamsError: string | null
+    teamsLoading: boolean
+    channelsError: string | null
+    channelsLoading: boolean
+  }
+): Record<string, string> => {
+  const errors: Record<string, string> = {}
+
+  const deliveryMethod = params.deliveryMethod?.trim() ?? ''
+  if (!deliveryMethod) {
+    errors.deliveryMethod = 'Delivery method is required'
+  } else if (
+    deliveryMethod !== DELIVERY_METHOD_INCOMING &&
+    deliveryMethod !== DELIVERY_METHOD_DELEGATED
+  ) {
+    errors.deliveryMethod =
+      'Only incoming webhooks or delegated OAuth are supported'
+  }
+
+  if (context.isIncomingWebhook) {
+    if (!params.webhookType?.trim()) {
+      errors.webhookType = 'Webhook type is required'
+    }
+    if (!params.webhookUrl?.trim()) {
+      errors.webhookUrl = 'Webhook URL is required'
+    }
+
+    if (context.isConnector && params.themeColor?.trim()) {
+      const sanitized = params.themeColor.trim().replace(/^#/, '')
+      const hexRegex = /^[0-9a-fA-F]{6}$/
+      if (!hexRegex.test(sanitized)) {
+        errors.themeColor = 'Theme color must be a 6-digit hex value'
+      }
+    }
+
+    if (context.isConnector && !params.message?.trim()) {
+      errors.message = 'Message cannot be empty'
+    }
+
+    if (context.isWorkflow) {
+      if (!params.workflowOption?.trim()) {
+        errors.workflowOption = 'Workflow option is required'
+      }
+
+      const raw = params.workflowRawJson?.trim()
+      if (!raw) {
+        errors.workflowRawJson = 'Raw JSON payload is required'
+      } else {
+        try {
+          JSON.parse(raw)
+        } catch (error) {
+          errors.workflowRawJson = 'Raw JSON payload must be valid JSON'
+        }
+      }
+
+      if (context.workflowUsesHeaderSecret) {
+        if (!params.workflowHeaderName?.trim()) {
+          errors.workflowHeaderName = 'Header name is required'
+        }
+        if (!params.workflowHeaderSecret?.trim()) {
+          errors.workflowHeaderSecret = 'Header secret is required'
+        }
+      }
+    }
+  } else if (context.isDelegated) {
+    if (!params.oauthProvider?.trim()) {
+      errors.oauthProvider = 'Microsoft OAuth is required for delegated posts'
+    }
+
+    if (connectionsError) {
+      errors.oauthConnectionId = connectionsError
+    } else if (!connectionsLoading) {
+      const scope =
+        params.oauthConnectionScope === 'personal' ||
+        params.oauthConnectionScope === 'workspace'
+          ? (params.oauthConnectionScope as ConnectionScope)
+          : undefined
+      const id = params.oauthConnectionId?.trim()
+
+      if (!scope || !id) {
+        if (!hasMicrosoftAccount) {
+          errors.oauthConnectionId =
+            'Connect Microsoft in Settings → Integrations to post from Teams.'
+        } else {
+          errors.oauthConnectionId = 'Microsoft connection is required'
+        }
+      } else if (
+        !connectionChoices.some((choice) => {
+          if (choice.scope !== scope) return false
+          if (scope === 'personal') {
+            return id === 'microsoft' || choice.id === id
+          }
+          return choice.id === id
+        })
+      ) {
+        errors.oauthConnectionId =
+          'Selected Microsoft connection is no longer available. Refresh your integrations.'
+      }
+    }
+
+    if (teamsError) {
+      errors.teamId = teamsError
+    } else if (!teamsLoading && !params.teamId?.trim()) {
+      errors.teamId = 'Team is required'
+    }
+
+    if (channelsError) {
+      errors.channelId = channelsError
+    } else if (!channelsLoading && !params.channelId?.trim()) {
+      errors.channelId = 'Channel is required'
+    }
+
+    if (context.delegatedMessageType === 'Card') {
+      if (context.delegatedCardMode === delegatedCardModes[0]) {
+        const body = params.cardBody?.trim() ?? ''
+        if (!body) {
+          errors.cardBody = 'Card message is required'
+        }
+      } else {
+        const raw = params.cardJson?.trim()
+        if (!raw) {
+          errors.cardJson = 'Card JSON is required'
+        } else {
+          try {
+            const parsed = JSON.parse(raw)
+            if (!parsed || typeof parsed !== 'object') {
+              errors.cardJson = 'Card JSON must be an object'
+            }
+          } catch (error) {
+            errors.cardJson = 'Card JSON must be valid JSON'
+          }
+        }
+      }
+    } else if (!params.message?.trim()) {
+      errors.message = 'Message cannot be empty'
+    }
+  }
+
+  return errors
+}
+
 const buildConnectionValue = (scope: ConnectionScope, id: string) =>
   `${scope}:${id}`
 
@@ -712,90 +962,65 @@ const parseConnectionValue = (
   return null
 }
 
-const shallowEqual = (a: TeamsActionValues, b: TeamsActionValues) => {
-  const keys = new Set([
-    ...(Object.keys(a) as string[]),
-    ...(Object.keys(b) as string[])
-  ])
-
-  for (const key of keys) {
-    const left = (a as Record<string, unknown>)[key]
-    const right = (b as Record<string, unknown>)[key]
-
-    if (Array.isArray(left) || Array.isArray(right)) {
-      if (!Array.isArray(left) || !Array.isArray(right)) return false
-      if (left.length !== right.length) return false
-      for (let idx = 0; idx < left.length; idx += 1) {
-        if (JSON.stringify(left[idx]) !== JSON.stringify(right[idx])) {
-          return false
-        }
-      }
-      continue
-    }
-
-    if (left !== right) return false
-  }
-
-  return true
-}
-
-const stableSerialize = (value: TeamsActionValues) =>
-  JSON.stringify(value, (_key, val) => {
-    if (!val || typeof val !== 'object') {
-      return val
-    }
-
-    if (Array.isArray(val)) {
-      return val.map((entry) => {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-          return entry
-        }
-
-        return Object.keys(entry)
-          .sort()
-          .reduce<Record<string, unknown>>((acc, key) => {
-            acc[key] = (entry as Record<string, unknown>)[key]
-            return acc
-          }, {})
-      })
-    }
-
-    return Object.keys(val as Record<string, unknown>)
-      .sort()
-      .reduce<Record<string, unknown>>((acc, key) => {
-        acc[key] = (val as Record<string, unknown>)[key]
-        return acc
-      }, {})
-  })
-
 export default function TeamsAction({
-  args,
-  initialDirty = false,
-  onChange
+  nodeId,
+  canEdit = true,
+  isRestricted = false
 }: TeamsActionProps) {
-  // React Flow safe pattern: initialize local state from props exactly once
-  // via a ref so downstream effects don't thrash the canvas with resets.
-  const initialParamsRef = useRef<TeamsActionValues | null>(null)
-  if (!initialParamsRef.current) {
-    initialParamsRef.current = normalizeParams(args)
-  }
+  const params = useActionParams<Record<string, unknown>>(nodeId, 'teams')
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+  const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+  const effectiveCanEdit = canEdit && !isRestricted && storeCanEdit
 
-  const [params, setParams] = useState<TeamsActionValues>(
-    initialParamsRef.current!
+  const rawTeamsParams = useMemo<TeamsActionValues>(
+    () => extractTeamsParams(params),
+    [params]
   )
-  const lastNormalizedArgsRef = useRef<TeamsActionValues>(
-    initialParamsRef.current!
+
+  const currentParams = useMemo(
+    () => normalizeParams(rawTeamsParams),
+    [rawTeamsParams]
   )
-  const lastNormalizedSignatureRef = useRef<string>(
-    stableSerialize(initialParamsRef.current!)
+
+  const paramContext = useMemo(
+    () => deriveParamContext(currentParams),
+    [currentParams]
   )
-  const [dirty, setDirty] = useState(initialDirty)
+
+  const {
+    isIncomingWebhook,
+    isDelegated,
+    isConnector,
+    isWorkflow,
+    workflowOption,
+    workflowUsesHeaderSecret,
+    delegatedMessageType,
+    delegatedCardMode
+  } = paramContext
 
   const [connectionsFetched, setConnectionsFetched] = useState(false)
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [connectionsError, setConnectionsError] = useState<string | null>(null)
   const [microsoftConnections, setMicrosoftConnections] =
     useState<ProviderConnectionSet | null>(null)
+
+  useEffect(() => {
+    if (isDelegated) return
+
+    setMicrosoftConnections((prev) => (prev === null ? prev : null))
+    setConnectionsFetched((prev) => (prev ? false : prev))
+    setConnectionsLoading(false)
+    setConnectionsError((prev) => (prev === null ? prev : null))
+    setTeams((prev) => (prev.length === 0 ? prev : []))
+    setTeamsLoading(false)
+    setTeamsError((prev) => (prev === null ? prev : null))
+    setChannels((prev) => (prev.length === 0 ? prev : []))
+    setChannelsLoading(false)
+    setChannelsError((prev) => (prev === null ? prev : null))
+    setMembers((prev) => (prev.length === 0 ? prev : []))
+    setMembersLoading(false)
+    setMembersError((prev) => (prev === null ? prev : null))
+  }, [isDelegated])
 
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null) => {
@@ -850,8 +1075,6 @@ export default function TeamsAction({
   const [teamsRequestId, setTeamsRequestId] = useState(0)
   const [channelsRequestId, setChannelsRequestId] = useState(0)
   const [membersRequestId, setMembersRequestId] = useState(0)
-  const internalUpdateRef = useRef(false)
-
   const findConnectionById = useCallback(
     (scope?: ConnectionScope | null, id?: string | null) => {
       if (!microsoftConnections || !scope || !id) return null
@@ -922,18 +1145,167 @@ export default function TeamsAction({
 
   const hasMicrosoftAccount = connectionChoices.length > 0
 
+  const sanitizeState = useCallback(
+    (params: TeamsActionValues, context?: TeamsParamContext) => {
+      const normalized = normalizeParams(params)
+      const effectiveContext = context ?? deriveParamContext(normalized)
+      const sanitizedForContext = sanitizeForSelection(normalized, {
+        isIncomingWebhook: effectiveContext.isIncomingWebhook,
+        isDelegated: effectiveContext.isDelegated,
+        isConnector: effectiveContext.isConnector,
+        isWorkflow: effectiveContext.isWorkflow,
+        workflowOption: effectiveContext.workflowOption,
+        workflowUsesHeaderSecret: effectiveContext.workflowUsesHeaderSecret,
+        delegatedMessageType: effectiveContext.delegatedMessageType,
+        delegatedCardMode: effectiveContext.delegatedCardMode
+      })
+
+      const selection = sanitizedForContext.connection
+        ? cloneConnectionSelection(sanitizedForContext.connection)
+        : null
+      const sanitizedWithSelection = applyConnectionSelection(
+        sanitizedForContext,
+        selection
+      )
+
+      const mentions = (sanitizedWithSelection.mentions ?? []).map(
+        (mention) => ({
+          ...mention
+        })
+      )
+
+      const sanitized: TeamsActionValues = {
+        ...sanitizedWithSelection,
+        mentions
+      }
+
+      if (selection) {
+        sanitized.connection = selection
+      } else if ('connection' in sanitized) {
+        delete (sanitized as Record<string, unknown>).connection
+      }
+
+      return { params: sanitized, context: effectiveContext }
+    },
+    []
+  )
+
+  const sanitizedParams = useMemo(
+    () => sanitizeState(currentParams, paramContext).params,
+    [currentParams, paramContext, sanitizeState]
+  )
+
+  const validationErrors = useMemo(
+    () =>
+      validateTeamsParams(sanitizedParams, paramContext, {
+        connectionsError,
+        connectionsLoading,
+        connectionChoices,
+        hasMicrosoftAccount,
+        teamsError,
+        teamsLoading,
+        channelsError,
+        channelsLoading
+      }),
+    [
+      channelsError,
+      channelsLoading,
+      connectionChoices,
+      connectionsError,
+      connectionsLoading,
+      sanitizedParams,
+      hasMicrosoftAccount,
+      paramContext,
+      teamsError,
+      teamsLoading
+    ]
+  )
+
+  const computeValidationFor = useCallback(
+    (nextParams: TeamsActionValues) => {
+      const context = deriveParamContext(nextParams)
+      return validateTeamsParams(nextParams, context, {
+        connectionsError,
+        connectionsLoading,
+        connectionChoices,
+        hasMicrosoftAccount,
+        teamsError,
+        teamsLoading,
+        channelsError,
+        channelsLoading
+      })
+    },
+    [
+      channelsError,
+      channelsLoading,
+      connectionChoices,
+      connectionsError,
+      connectionsLoading,
+      hasMicrosoftAccount,
+      teamsError,
+      teamsLoading
+    ]
+  )
+
+  const commitTeamsParams = useCallback(
+    (
+      nextState: TeamsActionValues,
+      { markDirty = true }: { markDirty?: boolean } = {}
+    ) => {
+      if (!effectiveCanEdit) return
+
+      const { params: nextParams } = sanitizeState(nextState)
+      if (deepEqual(sanitizedParams, nextParams)) {
+        return
+      }
+
+      const nextErrors = computeValidationFor(nextParams)
+
+      updateNodeData(nodeId, {
+        params: nextParams,
+        ...(markDirty ? { dirty: true } : {}),
+        hasValidationErrors: Object.keys(nextErrors).length > 0
+      })
+    },
+    [
+      computeValidationFor,
+      effectiveCanEdit,
+      nodeId,
+      sanitizedParams,
+      sanitizeState,
+      updateNodeData
+    ]
+  )
+
+  const mergeTeamsParams = useCallback(
+    (patch: Partial<TeamsActionValues>, options?: { markDirty?: boolean }) => {
+      if (!effectiveCanEdit) return
+      commitTeamsParams({ ...sanitizedParams, ...patch }, options)
+    },
+    [commitTeamsParams, effectiveCanEdit, sanitizedParams]
+  )
+
+  const lastValidationStateRef = useRef<boolean | null>(null)
+
+  useEffect(() => {
+    const hasErrors = Object.keys(validationErrors).length > 0
+    if (lastValidationStateRef.current === hasErrors) return
+    lastValidationStateRef.current = hasErrors
+    updateNodeData(nodeId, { hasValidationErrors: hasErrors })
+  }, [nodeId, updateNodeData, validationErrors])
+
   const selectedConnection = useMemo(() => {
     const scope =
-      params.oauthConnectionScope === 'personal' ||
-      params.oauthConnectionScope === 'workspace'
-        ? (params.oauthConnectionScope as ConnectionScope)
+      currentParams.oauthConnectionScope === 'personal' ||
+      currentParams.oauthConnectionScope === 'workspace'
+        ? (currentParams.oauthConnectionScope as ConnectionScope)
         : undefined
-    const id = params.oauthConnectionId?.trim() || undefined
+    const id = currentParams.oauthConnectionId?.trim() || undefined
     return findConnectionById(scope, id)
   }, [
-    findConnectionById,
-    params.oauthConnectionId,
-    params.oauthConnectionScope
+    currentParams.oauthConnectionId,
+    currentParams.oauthConnectionScope,
+    findConnectionById
   ])
 
   const connectionRequestOptions = useMemo<
@@ -957,48 +1329,6 @@ export default function TeamsAction({
 
     return undefined
   }, [selectedConnection])
-
-  useEffect(() => {
-    const normalized = normalizeParams(args)
-    const signature = stableSerialize(normalized)
-
-    if (signature === lastNormalizedSignatureRef.current) return
-    // mark that we're syncing from props, not user input
-    internalUpdateRef.current = true
-    lastNormalizedArgsRef.current = normalized
-    lastNormalizedSignatureRef.current = signature
-    setParams(normalized)
-  }, [args])
-
-  useEffect(() => {
-    setDirty(initialDirty)
-  }, [initialDirty])
-
-  const isIncomingWebhook = params.deliveryMethod === DELIVERY_METHOD_INCOMING
-  const isDelegated = params.deliveryMethod === DELIVERY_METHOD_DELEGATED
-  const isConnector =
-    isIncomingWebhook && params.webhookType === webhookOptions[0]
-  const isWorkflow =
-    isIncomingWebhook && params.webhookType === webhookOptions[1]
-
-  const workflowOption =
-    params.workflowOption && workflowOptions.includes(params.workflowOption)
-      ? params.workflowOption
-      : workflowOptions[0]
-  const workflowUsesHeaderSecret = workflowOption === workflowOptions[1]
-
-  const delegatedMessageType: DelegatedMessageType =
-    delegatedMessageTypes.includes(
-      (params.messageType as DelegatedMessageType) ?? delegatedMessageTypes[0]
-    )
-      ? (params.messageType as DelegatedMessageType) || delegatedMessageTypes[0]
-      : delegatedMessageTypes[0]
-
-  const delegatedCardMode: DelegatedCardMode = delegatedCardModes.includes(
-    (params.cardMode as DelegatedCardMode) ?? delegatedCardModes[0]
-  )
-    ? (params.cardMode as DelegatedCardMode) || delegatedCardModes[0]
-    : delegatedCardModes[0]
 
   useEffect(() => {
     if (!isDelegated) return
@@ -1065,85 +1395,105 @@ export default function TeamsAction({
   }, [isDelegated, connectionsFetched, syncMicrosoftConnections, workspaceId])
 
   useEffect(() => {
+    if (!effectiveCanEdit) return
+
+    const baseParams = sanitizedParams
+    const existingSelection = (() => {
+      if (baseParams.connection) {
+        return cloneConnectionSelection(baseParams.connection)
+      }
+      const derived = buildConnectionSelectionFromParts(
+        baseParams.oauthConnectionScope,
+        baseParams.oauthConnectionId,
+        baseParams.oauthAccountEmail
+      )
+      return derived ?? undefined
+    })()
+
+    const commitIfChanged = (
+      nextState: TeamsActionValues,
+      options?: { markDirty?: boolean }
+    ) => {
+      const { params: normalized } = sanitizeState(nextState, paramContext)
+      if (Object.keys(computeTeamsPatch(baseParams, normalized)).length === 0) {
+        return
+      }
+      commitTeamsParams(normalized, options)
+    }
+
+    const clearSelection = () => {
+      const cleared = applyConnectionSelection(baseParams, null)
+      cleared.oauthProvider = 'microsoft'
+      commitIfChanged(cleared, { markDirty: false })
+    }
+
     if (!isDelegated) {
-      setParams((prev) => {
-        const cleared = applyConnectionSelection(prev, null)
-        if (connectionStateEqual(prev, cleared)) {
-          return prev
-        }
-        return cleared
-      })
+      clearSelection()
       return
     }
 
     if (!microsoftConnections) return
 
-    setParams((prev) => {
-      const rawScope = prev.oauthConnectionScope
-      const scope =
-        rawScope === 'personal' || rawScope === 'workspace'
-          ? (rawScope as ConnectionScope)
-          : undefined
-      const id = prev.oauthConnectionId?.trim() || undefined
-      const email = prev.oauthAccountEmail?.trim() || undefined
+    const rawScope = baseParams.oauthConnectionScope
+    const scope =
+      rawScope === 'personal' || rawScope === 'workspace'
+        ? (rawScope as ConnectionScope)
+        : undefined
+    const id = baseParams.oauthConnectionId?.trim() || undefined
+    const email = baseParams.oauthAccountEmail?.trim() || undefined
 
-      let selected = findConnectionById(scope, id)
-      if (!selected && email) {
-        selected = findConnectionByEmail(email)
-      }
-      const wasWorkspaceSelection = scope === 'workspace'
-      if (!selected && wasWorkspaceSelection) {
-        const cleared = applyConnectionSelection(prev, null)
-        cleared.oauthProvider = 'microsoft'
-        if (connectionStateEqual(prev, cleared)) {
-          return prev
-        }
-        return cleared
-      }
-      if (!selected) {
-        const personal = microsoftConnections.personal
-        if (personal.connected && personal.id) {
-          selected = personal
-        }
-      }
-      if (
-        !selected &&
-        !wasWorkspaceSelection &&
-        microsoftConnections.workspace.length === 1
-      ) {
-        selected = microsoftConnections.workspace[0]
-      }
+    let selected = findConnectionById(scope, id)
+    if (!selected && email) {
+      selected = findConnectionByEmail(email)
+    }
+    const wasWorkspaceSelection = scope === 'workspace'
 
-      if (!selected) {
-        const cleared = applyConnectionSelection(prev, null)
-        cleared.oauthProvider = 'microsoft'
-        if (connectionStateEqual(prev, cleared)) {
-          return prev
-        }
-        return cleared
+    if (!selected && wasWorkspaceSelection) {
+      clearSelection()
+      return
+    }
+    if (!selected) {
+      const personal = microsoftConnections.personal
+      if (personal.connected && personal.id) {
+        selected = personal
       }
+    }
+    if (
+      !selected &&
+      !wasWorkspaceSelection &&
+      microsoftConnections.workspace.length === 1
+    ) {
+      selected = microsoftConnections.workspace[0]
+    }
 
-      const selection = connectionInfoToSelection(selected)
-      if (!selection) {
-        const cleared = applyConnectionSelection(prev, null)
-        cleared.oauthProvider = 'microsoft'
-        if (connectionStateEqual(prev, cleared)) {
-          return prev
-        }
-        return cleared
-      }
+    if (!selected) {
+      clearSelection()
+      return
+    }
 
-      const nextParams = applyConnectionSelection(prev, selection)
-      if (connectionStateEqual(prev, nextParams)) {
-        return prev
-      }
-      return nextParams
+    const selection = connectionInfoToSelection(selected)
+    if (!selection) {
+      clearSelection()
+      return
+    }
+
+    if (selectionsEqual(existingSelection, selection)) {
+      return
+    }
+
+    commitIfChanged(applyConnectionSelection(baseParams, selection), {
+      markDirty: false
     })
   }, [
+    commitTeamsParams,
+    effectiveCanEdit,
+    findConnectionByEmail,
+    findConnectionById,
     isDelegated,
     microsoftConnections,
-    findConnectionByEmail,
-    findConnectionById
+    paramContext,
+    sanitizedParams,
+    sanitizeState
   ])
 
   useEffect(() => {
@@ -1190,7 +1540,7 @@ export default function TeamsAction({
     if (
       !isDelegated ||
       !hasMicrosoftAccount ||
-      !params.teamId ||
+      !currentParams.teamId ||
       !connectionRequestOptions
     ) {
       setChannels((prev) => (prev.length > 0 ? [] : prev))
@@ -1202,7 +1552,7 @@ export default function TeamsAction({
     setChannelsLoading(true)
     setChannelsError(null)
 
-    fetchMicrosoftTeamChannels(params.teamId, connectionRequestOptions)
+    fetchMicrosoftTeamChannels(currentParams.teamId, connectionRequestOptions)
       .then((data) => {
         if (!active) return
         setChannels(data)
@@ -1225,10 +1575,10 @@ export default function TeamsAction({
       active = false
     }
   }, [
-    isDelegated,
-    hasMicrosoftAccount,
-    params.teamId,
     connectionRequestOptions,
+    currentParams.teamId,
+    hasMicrosoftAccount,
+    isDelegated,
     channelsRequestId
   ])
 
@@ -1236,8 +1586,8 @@ export default function TeamsAction({
     if (
       !isDelegated ||
       !hasMicrosoftAccount ||
-      !params.teamId ||
-      !params.channelId ||
+      !currentParams.teamId ||
+      !currentParams.channelId ||
       !connectionRequestOptions
     ) {
       setMembers((prev) => (prev.length > 0 ? [] : prev))
@@ -1250,8 +1600,8 @@ export default function TeamsAction({
     setMembersError(null)
 
     fetchMicrosoftChannelMembers(
-      params.teamId,
-      params.channelId,
+      currentParams.teamId,
+      currentParams.channelId,
       connectionRequestOptions
     )
       .then((data) => {
@@ -1276,262 +1626,45 @@ export default function TeamsAction({
       active = false
     }
   }, [
-    isDelegated,
+    connectionRequestOptions,
+    currentParams.channelId,
+    currentParams.teamId,
     hasMicrosoftAccount,
-    params.teamId,
-    params.channelId,
-    membersRequestId,
-    connectionRequestOptions
-  ])
-
-  const validationErrors = useMemo(() => {
-    const errors: Record<string, string> = {}
-
-    const deliveryMethod = params.deliveryMethod?.trim() ?? ''
-    if (!deliveryMethod) {
-      errors.deliveryMethod = 'Delivery method is required'
-    } else if (
-      deliveryMethod !== DELIVERY_METHOD_INCOMING &&
-      deliveryMethod !== DELIVERY_METHOD_DELEGATED
-    ) {
-      errors.deliveryMethod =
-        'Only incoming webhooks or delegated OAuth are supported'
-    }
-
-    if (isIncomingWebhook) {
-      if (!params.webhookType?.trim()) {
-        errors.webhookType = 'Webhook type is required'
-      }
-      if (!params.webhookUrl?.trim()) {
-        errors.webhookUrl = 'Webhook URL is required'
-      }
-
-      if (isConnector && params.themeColor?.trim()) {
-        const sanitized = params.themeColor.trim().replace(/^#/, '')
-        const hexRegex = /^[0-9a-fA-F]{6}$/
-        if (!hexRegex.test(sanitized)) {
-          errors.themeColor = 'Theme color must be a 6-digit hex value'
-        }
-      }
-
-      if (isConnector && !params.message?.trim()) {
-        errors.message = 'Message cannot be empty'
-      }
-
-      if (isWorkflow) {
-        if (!params.workflowOption?.trim()) {
-          errors.workflowOption = 'Workflow option is required'
-        }
-
-        const raw = params.workflowRawJson?.trim()
-        if (!raw) {
-          errors.workflowRawJson = 'Raw JSON payload is required'
-        } else {
-          try {
-            JSON.parse(raw)
-          } catch (error) {
-            errors.workflowRawJson = 'Raw JSON payload must be valid JSON'
-          }
-        }
-
-        if (workflowUsesHeaderSecret) {
-          if (!params.workflowHeaderName?.trim()) {
-            errors.workflowHeaderName = 'Header name is required'
-          }
-          if (!params.workflowHeaderSecret?.trim()) {
-            errors.workflowHeaderSecret = 'Header secret is required'
-          }
-        }
-      }
-    }
-
-    if (isDelegated) {
-      if (connectionsError) {
-        errors.oauthConnectionId = connectionsError
-      } else if (!connectionsLoading) {
-        if (!hasMicrosoftAccount) {
-          errors.oauthConnectionId =
-            'Connect the Microsoft integration in Settings → Integrations.'
-        } else {
-          const scope = params.oauthConnectionScope
-          const id = params.oauthConnectionId?.trim()
-          if (scope !== 'personal' && scope !== 'workspace') {
-            errors.oauthConnectionId = 'Select a connected Microsoft account'
-          } else if (
-            !connectionChoices.some((choice) => {
-              if (choice.scope !== scope) return false
-              if (scope === 'personal') {
-                return id === 'microsoft' || choice.id === id
-              }
-              return choice.id === id
-            })
-          ) {
-            errors.oauthConnectionId =
-              'Selected Microsoft connection is no longer available. Refresh your integrations.'
-          }
-        }
-      }
-
-      if (teamsError) {
-        errors.teamId = teamsError
-      } else if (!teamsLoading && !params.teamId?.trim()) {
-        errors.teamId = 'Team is required'
-      }
-
-      if (channelsError) {
-        errors.channelId = channelsError
-      } else if (!channelsLoading && !params.channelId?.trim()) {
-        errors.channelId = 'Channel is required'
-      }
-
-      if (delegatedMessageType === 'Card') {
-        if (delegatedCardMode === delegatedCardModes[0]) {
-          const body = params.cardBody?.trim() ?? ''
-          if (!body) {
-            errors.cardBody = 'Card message is required'
-          }
-        } else {
-          const raw = params.cardJson?.trim()
-          if (!raw) {
-            errors.cardJson = 'Card JSON is required'
-          } else {
-            try {
-              const parsed = JSON.parse(raw)
-              if (!parsed || typeof parsed !== 'object') {
-                errors.cardJson = 'Card JSON must be an object'
-              }
-            } catch (error) {
-              errors.cardJson = 'Card JSON must be valid JSON'
-            }
-          }
-        }
-      } else if (!params.message?.trim()) {
-        errors.message = 'Message cannot be empty'
-      }
-    }
-
-    return errors
-  }, [
-    params,
-    isConnector,
-    isIncomingWebhook,
-    isWorkflow,
-    workflowUsesHeaderSecret,
     isDelegated,
-    delegatedMessageType,
-    delegatedCardMode,
-    connectionsError,
-    connectionsLoading,
-    connectionChoices,
-    hasMicrosoftAccount,
-    teamsError,
-    teamsLoading,
-    channelsError,
-    channelsLoading
+    membersRequestId
   ])
-
-  const sanitizedOutput = useMemo(
-    () =>
-      sanitizeForSelection(params, {
-        isIncomingWebhook,
-        isConnector,
-        isWorkflow,
-        workflowUsesHeaderSecret,
-        isDelegated,
-        delegatedMessageType,
-        delegatedCardMode
-      }),
-    [
-      params,
-      isIncomingWebhook,
-      isConnector,
-      isWorkflow,
-      workflowUsesHeaderSecret,
-      isDelegated,
-      delegatedMessageType,
-      delegatedCardMode
-    ]
-  )
-
-  const lastEmittedRef = useRef<{
-    values: TeamsActionValues
-    hasErrors: boolean
-    dirty: boolean
-  } | null>(null)
-
-  useEffect(() => {
-    if (!onChange) return
-
-    // if this update came from args sync, skip one emission
-    if (internalUpdateRef.current) {
-      internalUpdateRef.current = false
-      return
-    }
-
-    const hasErrors = Object.keys(validationErrors).length > 0
-    const last = lastEmittedRef.current
-
-    if (
-      last &&
-      last.dirty === dirty &&
-      last.hasErrors === hasErrors &&
-      shallowEqual(last.values, sanitizedOutput)
-    ) {
-      return
-    }
-
-    lastEmittedRef.current = {
-      values: {
-        ...sanitizedOutput,
-        mentions: (sanitizedOutput.mentions ?? []).map((m) => ({ ...m }))
-      },
-      hasErrors,
-      dirty
-    }
-
-    onChange(sanitizedOutput, hasErrors, dirty)
-  }, [dirty, onChange, sanitizedOutput, validationErrors])
 
   const updateField = useCallback(
     (key: keyof TeamsActionValues, value: string) => {
-      setDirty(true)
-      setParams((prev) => ({ ...prev, [key]: value }))
+      mergeTeamsParams({ [key]: value } as Partial<TeamsActionValues>)
     },
-    []
+    [mergeTeamsParams]
   )
 
   const handleTeamChange = useCallback(
     (teamId: string) => {
-      setDirty(true)
-      setParams((prev) => {
-        const selected = teams.find((team) => team.id === teamId)
-        return {
-          ...prev,
-          teamId,
-          teamName: selected?.displayName ?? '',
-          channelId: '',
-          channelName: '',
-          mentions: []
-        }
+      const selected = teams.find((team) => team.id === teamId)
+      mergeTeamsParams({
+        teamId,
+        teamName: selected?.displayName ?? '',
+        channelId: '',
+        channelName: '',
+        mentions: []
       })
     },
-    [teams]
+    [mergeTeamsParams, teams]
   )
 
   const handleChannelChange = useCallback(
     (channelId: string) => {
-      setDirty(true)
-      setParams((prev) => {
-        const selected = channels.find((channel) => channel.id === channelId)
-        return {
-          ...prev,
-          channelId,
-          channelName: selected?.displayName ?? '',
-          mentions: []
-        }
+      const selected = channels.find((channel) => channel.id === channelId)
+      mergeTeamsParams({
+        channelId,
+        channelName: selected?.displayName ?? '',
+        mentions: []
       })
     },
-    [channels]
+    [channels, mergeTeamsParams]
   )
 
   const handleMessageTypeChange = useCallback(
@@ -1542,10 +1675,9 @@ export default function TeamsAction({
         ? (value as DelegatedMessageType)
         : delegatedMessageTypes[0]
       if (nextType === delegatedMessageType) return
-      setDirty(true)
-      setParams((prev) => ({ ...prev, messageType: nextType }))
+      mergeTeamsParams({ messageType: nextType })
     },
-    [delegatedMessageType]
+    [delegatedMessageType, mergeTeamsParams]
   )
 
   const handleCardModeChange = useCallback(
@@ -1554,61 +1686,61 @@ export default function TeamsAction({
         ? (value as DelegatedCardMode)
         : delegatedCardModes[0]
       if (nextMode === delegatedCardMode) return
-      setDirty(true)
-      setParams((prev) => {
-        if (nextMode === delegatedCardModes[1]) {
-          const generated = buildSimpleAdaptiveCardJson(
-            prev.cardTitle ?? '',
-            prev.cardBody ?? ''
-          )
-          const fallback = prev.cardJson?.trim() || ''
-          return {
-            ...prev,
-            cardMode: nextMode,
-            cardJson: generated || fallback
-          }
-        }
 
-        return {
-          ...prev,
-          cardMode: nextMode
-        }
-      })
+      if (nextMode === delegatedCardModes[1]) {
+        const baseParams = sanitizedParams
+        const generated = buildSimpleAdaptiveCardJson(
+          baseParams.cardTitle ?? '',
+          baseParams.cardBody ?? ''
+        )
+        const fallback = baseParams.cardJson?.trim() || ''
+        mergeTeamsParams({
+          cardMode: nextMode,
+          cardJson: generated || fallback
+        })
+        return
+      }
+
+      mergeTeamsParams({ cardMode: nextMode })
     },
-    [delegatedCardMode]
+    [delegatedCardMode, mergeTeamsParams, sanitizedParams]
   )
 
-  const handleMentionToggle = useCallback((member: MicrosoftChannelMember) => {
-    setDirty(true)
-    setParams((prev) => {
-      const current = prev.mentions ?? []
-      const exists = current.some((mention) => mention.userId === member.userId)
+  const handleMentionToggle = useCallback(
+    (member: MicrosoftChannelMember) => {
+      const currentMentions = sanitizedParams.mentions ?? []
+      const exists = currentMentions.some(
+        (mention) => mention.userId === member.userId
+      )
+
       if (exists) {
-        return {
-          ...prev,
-          mentions: current.filter(
+        mergeTeamsParams({
+          mentions: currentMentions.filter(
             (mention) => mention.userId !== member.userId
           )
-        }
+        })
+        return
       }
 
       const displayName =
         member.displayName?.trim() || member.email?.trim() || member.userId
 
-      return {
-        ...prev,
-        mentions: [...current, { userId: member.userId, displayName }]
-      }
-    })
-  }, [])
+      mergeTeamsParams({
+        mentions: [...currentMentions, { userId: member.userId, displayName }]
+      })
+    },
+    [mergeTeamsParams, sanitizedParams]
+  )
 
   const errorClass = 'text-xs text-red-500'
   const helperClass = 'text-[10px] text-zinc-500 dark:text-zinc-400'
 
   const mentionSelections = useMemo(() => {
-    const selections = new Set((params.mentions ?? []).map((m) => m.userId))
+    const selections = new Set(
+      (currentParams.mentions ?? []).map((m) => m.userId)
+    )
     return selections
-  }, [params.mentions])
+  }, [currentParams.mentions])
 
   const connectionOptionGroups = useMemo<NodeDropdownOptionGroup[]>(() => {
     if (!microsoftConnections) return []
@@ -1654,8 +1786,8 @@ export default function TeamsAction({
   }, [microsoftConnections])
 
   const selectedConnectionValue = useMemo(() => {
-    const scope = params.oauthConnectionScope
-    let id = params.oauthConnectionId
+    const scope = currentParams.oauthConnectionScope
+    let id = currentParams.oauthConnectionId
     if (scope === 'personal' && id === 'microsoft') {
       const personalId = microsoftConnections?.personal.id
       if (personalId) {
@@ -1666,26 +1798,22 @@ export default function TeamsAction({
     if (!id) return ''
     return buildConnectionValue(scope, id)
   }, [
-    params.oauthConnectionScope,
-    params.oauthConnectionId,
+    currentParams.oauthConnectionId,
+    currentParams.oauthConnectionScope,
     microsoftConnections?.personal?.id
   ])
 
   const handleConnectionChange = useCallback(
     (value: string) => {
-      setDirty(true)
+      const baseParams = sanitizedParams
       const parsed = parseConnectionValue(value)
       if (!parsed) {
-        setParams((prev) => {
-          const cleared = applyConnectionSelection(prev, null)
-          cleared.oauthProvider = 'microsoft'
-          if (connectionStateEqual(prev, cleared)) {
-            return prev
-          }
-          return cleared
-        })
+        const cleared = applyConnectionSelection(baseParams, null)
+        cleared.oauthProvider = 'microsoft'
+        commitTeamsParams(cleared)
         return
       }
+
       const match = findConnectionById(parsed.scope, parsed.id)
       const selection =
         (match ? connectionInfoToSelection(match) : null) ??
@@ -1695,24 +1823,17 @@ export default function TeamsAction({
           match?.accountEmail
         )
 
-      setParams((prev) => {
-        if (!selection) {
-          const cleared = applyConnectionSelection(prev, null)
-          cleared.oauthProvider = 'microsoft'
-          if (connectionStateEqual(prev, cleared)) {
-            return prev
-          }
-          return cleared
-        }
+      if (!selection) {
+        const cleared = applyConnectionSelection(baseParams, null)
+        cleared.oauthProvider = 'microsoft'
+        commitTeamsParams(cleared)
+        return
+      }
 
-        const nextParams = applyConnectionSelection(prev, selection)
-        if (connectionStateEqual(prev, nextParams)) {
-          return prev
-        }
-        return nextParams
-      })
+      const nextParams = applyConnectionSelection(baseParams, selection)
+      commitTeamsParams(nextParams)
     },
-    [findConnectionById]
+    [commitTeamsParams, findConnectionById, sanitizedParams]
   )
 
   const usingWorkspaceCredential = selectedConnection?.scope === 'workspace'
@@ -1739,7 +1860,7 @@ export default function TeamsAction({
     <div className="flex flex-col gap-2">
       <NodeDropdownField
         options={deliveryOptions}
-        value={params.deliveryMethod}
+        value={currentParams.deliveryMethod}
         onChange={(val) => updateField('deliveryMethod', val)}
       />
       {validationErrors.deliveryMethod && (
@@ -1756,7 +1877,7 @@ export default function TeamsAction({
         <div className="flex flex-col gap-2">
           <NodeDropdownField
             options={webhookOptions}
-            value={params.webhookType}
+            value={currentParams.webhookType}
             onChange={(val) => updateField('webhookType', val)}
           />
           {validationErrors.webhookType && (
@@ -1766,7 +1887,7 @@ export default function TeamsAction({
           <>
             <NodeInputField
               placeholder="Webhook URL"
-              value={params.webhookUrl || ''}
+              value={currentParams.webhookUrl || ''}
               onChange={(val) => updateField('webhookUrl', val)}
             />
             {validationErrors.webhookUrl && (
@@ -1778,17 +1899,17 @@ export default function TeamsAction({
             <>
               <NodeInputField
                 placeholder="Card Title (optional)"
-                value={params.title || ''}
+                value={currentParams.title || ''}
                 onChange={(val) => updateField('title', val)}
               />
               <NodeInputField
                 placeholder="Summary (optional)"
-                value={params.summary || ''}
+                value={currentParams.summary || ''}
                 onChange={(val) => updateField('summary', val)}
               />
               <NodeInputField
                 placeholder="Theme Color (hex, optional)"
-                value={params.themeColor || ''}
+                value={currentParams.themeColor || ''}
                 onChange={(val) => updateField('themeColor', val)}
               />
               {validationErrors.themeColor && (
@@ -1801,7 +1922,7 @@ export default function TeamsAction({
 
               <NodeInputField
                 placeholder="Message"
-                value={params.message || ''}
+                value={currentParams.message || ''}
                 onChange={(val) => updateField('message', val)}
               />
               {validationErrors.message && (
@@ -1823,7 +1944,7 @@ export default function TeamsAction({
 
               <NodeTextAreaField
                 placeholder="Raw JSON payload"
-                value={params.workflowRawJson || ''}
+                value={currentParams.workflowRawJson || ''}
                 onChange={(val) => updateField('workflowRawJson', val)}
                 rows={8}
               />
@@ -1840,7 +1961,7 @@ export default function TeamsAction({
                 <>
                   <NodeInputField
                     placeholder="Header Name"
-                    value={params.workflowHeaderName || ''}
+                    value={currentParams.workflowHeaderName || ''}
                     onChange={(val) => updateField('workflowHeaderName', val)}
                   />
                   {validationErrors.workflowHeaderName && (
@@ -1851,7 +1972,7 @@ export default function TeamsAction({
                   <NodeSecretDropdown
                     group="messaging"
                     service="teams"
-                    value={params.workflowHeaderSecret || ''}
+                    value={currentParams.workflowHeaderSecret || ''}
                     onChange={(val) => updateField('workflowHeaderSecret', val)}
                     placeholder="Select header secret"
                   />
@@ -1929,7 +2050,7 @@ export default function TeamsAction({
 
           <NodeDropdownField
             options={teamsOptions}
-            value={params.teamId || ''}
+            value={currentParams.teamId || ''}
             onChange={handleTeamChange}
             placeholder={teamsLoading ? 'Loading teams…' : 'Select team'}
             loading={teamsLoading}
@@ -1953,13 +2074,13 @@ export default function TeamsAction({
 
           <NodeDropdownField
             options={channelsOptions}
-            value={params.channelId || ''}
+            value={currentParams.channelId || ''}
             onChange={handleChannelChange}
             placeholder={
               channelsLoading ? 'Loading channels…' : 'Select channel'
             }
             loading={channelsLoading}
-            disabled={!params.teamId || channelsLoading}
+            disabled={!currentParams.teamId || channelsLoading}
             emptyMessage={channelsError || 'No channels available'}
           />
           {validationErrors.channelId && (
@@ -1970,7 +2091,7 @@ export default function TeamsAction({
               type="button"
               className="self-start text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
               onClick={() => {
-                if (!params.teamId) return
+                if (!currentParams.teamId) return
                 setChannelsRequestId((prev) => prev + 1)
               }}
             >
@@ -1988,7 +2109,7 @@ export default function TeamsAction({
             <>
               <NodeTextAreaField
                 placeholder="Message"
-                value={params.message || ''}
+                value={currentParams.message || ''}
                 onChange={(val) => updateField('message', val)}
                 rows={5}
               />
@@ -2001,7 +2122,7 @@ export default function TeamsAction({
               {membersError && (
                 <>
                   <p className={errorClass}>{membersError}</p>
-                  {params.channelId && (
+                  {currentParams.channelId && (
                     <button
                       type="button"
                       className="self-start text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
@@ -2014,7 +2135,7 @@ export default function TeamsAction({
                   )}
                 </>
               )}
-              {!membersLoading && !membersError && params.channelId && (
+              {!membersLoading && !membersError && currentParams.channelId && (
                 <div className="rounded border border-zinc-200 bg-white px-2 py-2 text-xs shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
                   <p className="mb-1 text-[11px] text-zinc-600 dark:text-zinc-400">
                     Optional: select members to @mention. Mentions are appended
@@ -2061,12 +2182,12 @@ export default function TeamsAction({
                 <>
                   <NodeInputField
                     placeholder="Card title (optional)"
-                    value={params.cardTitle || ''}
+                    value={currentParams.cardTitle || ''}
                     onChange={(val) => updateField('cardTitle', val)}
                   />
                   <NodeTextAreaField
                     placeholder="Card message"
-                    value={params.cardBody || ''}
+                    value={currentParams.cardBody || ''}
                     onChange={(val) => updateField('cardBody', val)}
                     rows={5}
                   />
@@ -2082,7 +2203,7 @@ export default function TeamsAction({
                 <>
                   <NodeTextAreaField
                     placeholder="Adaptive Card or JSON payload"
-                    value={params.cardJson || ''}
+                    value={currentParams.cardJson || ''}
                     onChange={(val) => updateField('cardJson', val)}
                     rows={8}
                   />

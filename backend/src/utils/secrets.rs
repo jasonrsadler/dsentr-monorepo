@@ -237,6 +237,54 @@ fn slugify(service: &str) -> String {
     slug
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MessagingSecretKind {
+    Slack,
+    Teams,
+}
+
+fn detect_messaging_secret_kind(candidate: &str) -> Option<MessagingSecretKind> {
+    let normalized = candidate.trim().to_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.contains("slack") {
+        return Some(MessagingSecretKind::Slack);
+    }
+    if normalized.contains("teams") || normalized.contains("microsoft") {
+        return Some(MessagingSecretKind::Teams);
+    }
+    None
+}
+
+fn infer_messaging_secret_kind(
+    node: &Value,
+    data_obj: &Map<String, Value>,
+    params: &Map<String, Value>,
+) -> Option<MessagingSecretKind> {
+    let mut candidates: Vec<&str> = Vec::new();
+
+    for key in ["platform", "service", "provider"] {
+        if let Some(value) = params.get(key).and_then(Value::as_str) {
+            candidates.push(value);
+        }
+    }
+
+    for key in ["nodeType", "actionKey", "actionType", "label"] {
+        if let Some(value) = data_obj.get(key).and_then(Value::as_str) {
+            candidates.push(value);
+        }
+    }
+
+    if let Some(kind) = node.get("type").and_then(Value::as_str) {
+        candidates.push(kind);
+    }
+
+    candidates
+        .into_iter()
+        .find_map(detect_messaging_secret_kind)
+}
+
 pub fn collect_workflow_secrets(data: &Value) -> Vec<(String, String, String)> {
     let mut collected: Vec<(String, String, String)> = Vec::new();
     let Some(nodes) = data.get("nodes").and_then(Value::as_array) else {
@@ -298,35 +346,26 @@ pub fn collect_workflow_secrets(data: &Value) -> Vec<(String, String, String)> {
             }
             "messaging" => {
                 if let Some(params) = params {
-                    if let Some(platform) = params
-                        .get("platform")
-                        .and_then(Value::as_str)
-                        .map(|p| p.to_lowercase())
-                    {
-                        match platform.as_str() {
-                            "slack" => push_if_some(
-                                &mut collected,
-                                "messaging",
-                                "slack",
-                                params.get("token"),
-                            ),
-                            "teams" => {
-                                if params
-                                    .get("workflowOption")
-                                    .and_then(Value::as_str)
-                                    .map(|s| s.eq_ignore_ascii_case("Header Secret Auth"))
-                                    .unwrap_or(false)
-                                {
-                                    push_if_some(
-                                        &mut collected,
-                                        "messaging",
-                                        "teams",
-                                        params.get("workflowHeaderSecret"),
-                                    );
-                                }
-                            }
-                            _ => {}
+                    match infer_messaging_secret_kind(node, data_obj, params) {
+                        Some(MessagingSecretKind::Slack) => {
+                            push_if_some(&mut collected, "messaging", "slack", params.get("token"));
                         }
+                        Some(MessagingSecretKind::Teams) => {
+                            if params
+                                .get("workflowOption")
+                                .and_then(Value::as_str)
+                                .map(|s| s.eq_ignore_ascii_case("Header Secret Auth"))
+                                .unwrap_or(false)
+                            {
+                                push_if_some(
+                                    &mut collected,
+                                    "messaging",
+                                    "teams",
+                                    params.get("workflowHeaderSecret"),
+                                );
+                            }
+                        }
+                        None => {}
                     }
                 }
             }
@@ -510,7 +549,7 @@ mod tests {
                     "data": {
                         "actionType": "messaging",
                         "params": {
-                            "platform": "Slack",
+                            "service": "Slack",
                             "token": "slack-token"
                         }
                     }
@@ -545,6 +584,34 @@ mod tests {
             "webhook".to_string(),
             "basic_auth".to_string(),
             "secret".to_string()
+        )));
+    }
+
+    #[test]
+    fn collect_workflow_secrets_detects_messaging_service_without_platform() {
+        let workflow = serde_json::json!({
+            "nodes": [
+                {
+                    "type": "action",
+                    "data": {
+                        "actionType": "messaging",
+                        "label": "Teams alert",
+                        "params": {
+                            "service": "Microsoft Teams",
+                            "workflowOption": "Header Secret Auth",
+                            "workflowHeaderSecret": "teams-secret"
+                        }
+                    }
+                }
+            ]
+        });
+
+        let secrets = collect_workflow_secrets(&workflow);
+        assert_eq!(secrets.len(), 1);
+        assert!(secrets.contains(&(
+            "messaging".to_string(),
+            "teams".to_string(),
+            "teams-secret".to_string()
         )));
     }
 }

@@ -17,3 +17,6 @@
 - Keep new helpers deterministic and add unit tests in the same file when possible.
 - When extending plan enforcement logic, update both `assess_workflow_for_plan` and downstream callers (workflows routes) to surface new violation codes/messages.
 - Encryption helpers expect 32-byte keys; use `Config::from_env` to source them.
+
+## Change Reasons
+- Plan limit and secret collectors now infer messaging integrations from `service`/`provider` fields because the legacy `platform` parameter has been retired from workflow nodes.

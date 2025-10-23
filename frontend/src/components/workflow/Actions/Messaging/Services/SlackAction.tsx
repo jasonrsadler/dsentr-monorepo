@@ -13,6 +13,8 @@ import {
   type ProviderConnectionSet
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
+import { useActionParams } from '@/stores/workflowSelectors'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
 type SlackConnectionScope = 'workspace' | 'user'
 
@@ -33,13 +35,9 @@ export interface SlackActionValues {
 }
 
 interface SlackActionProps {
-  args: SlackActionValues
-  initialDirty?: boolean
-  onChange?: (
-    args: SlackActionValues,
-    nodeHasErrors: boolean,
-    childDirty: boolean
-  ) => void
+  nodeId: string
+  canEdit?: boolean
+  isRestricted?: boolean
 }
 
 const connectionValueKey = (scope: ConnectionScope, id: string) =>
@@ -132,86 +130,138 @@ const cloneSelection = (
   return cloned
 }
 
-const normalizeParams = (incoming?: SlackActionValues): SlackActionValues => {
-  const next: SlackActionValues = {
-    channel: typeof incoming?.channel === 'string' ? incoming.channel : '',
-    message: typeof incoming?.message === 'string' ? incoming.message : '',
-    token: typeof incoming?.token === 'string' ? incoming.token : '',
-    connectionScope: '',
-    connectionId: '',
-    accountEmail: ''
+const EMPTY_SLACK_PARAMS: SlackActionValues = {
+  channel: '',
+  message: '',
+  token: '',
+  connectionScope: '',
+  connectionId: '',
+  accountEmail: ''
+}
+
+const sanitizeSlackPayload = (params: SlackActionValues): SlackActionValues => {
+  const sanitized: SlackActionValues = {
+    channel: typeof params.channel === 'string' ? params.channel : '',
+    message: typeof params.message === 'string' ? params.message : '',
+    token: typeof params.token === 'string' ? params.token : '',
+    connectionScope:
+      typeof params.connectionScope === 'string' ? params.connectionScope : '',
+    connectionId:
+      typeof params.connectionId === 'string' ? params.connectionId : '',
+    accountEmail:
+      typeof params.accountEmail === 'string' ? params.accountEmail : ''
+  }
+
+  if (params.connection) {
+    sanitized.connection = cloneSelection(params.connection)
+  }
+
+  return sanitized
+}
+
+const extractSlackParams = (source: unknown): SlackActionValues => {
+  const base: SlackActionValues = { ...EMPTY_SLACK_PARAMS }
+  if (!isRecord(source)) {
+    return base
+  }
+
+  const record = source as Record<string, unknown>
+  const slackRecord = isRecord(record.Slack)
+    ? (record.Slack as Record<string, unknown>)
+    : isRecord(record.slack)
+      ? (record.slack as Record<string, unknown>)
+      : record
+
+  if (!isRecord(slackRecord)) {
+    return base
+  }
+
+  if (typeof slackRecord.channel === 'string') {
+    base.channel = slackRecord.channel
+  }
+  if (typeof slackRecord.message === 'string') {
+    base.message = slackRecord.message
+  }
+  if (typeof slackRecord.token === 'string') {
+    base.token = slackRecord.token
+  }
+  if (typeof slackRecord.connectionScope === 'string') {
+    base.connectionScope = slackRecord.connectionScope
+  }
+  if (typeof slackRecord.connectionId === 'string') {
+    base.connectionId = slackRecord.connectionId
+  }
+  if (typeof slackRecord.accountEmail === 'string') {
+    base.accountEmail = slackRecord.accountEmail
   }
 
   const connectionSelection =
-    buildSelectionFromValue((incoming as any)?.connection) ??
+    buildSelectionFromValue(slackRecord.connection) ??
     buildSelectionFromParts(
-      incoming?.connectionScope,
-      incoming?.connectionId,
-      incoming?.accountEmail
+      slackRecord.connectionScope as string | undefined,
+      slackRecord.connectionId as string | undefined,
+      slackRecord.accountEmail as string | undefined
     )
 
   if (connectionSelection) {
-    next.connectionScope = connectionSelection.connectionScope
-    if (connectionSelection.connectionId) {
-      next.connectionId = connectionSelection.connectionId
-    }
-    if (connectionSelection.accountEmail) {
-      next.accountEmail = connectionSelection.accountEmail
-    }
-    next.connection = cloneSelection(connectionSelection)
+    base.connectionScope = connectionSelection.connectionScope
+    base.connectionId = connectionSelection.connectionId ?? ''
+    base.accountEmail = connectionSelection.accountEmail ?? ''
+    base.connection = cloneSelection(connectionSelection)
   }
 
-  return next
+  return base
 }
 
-const applyConnectionSelection = (
-  current: SlackActionValues,
-  selection: SlackConnectionSelection | null
-): SlackActionValues => {
-  const next: SlackActionValues = {
-    ...current
-  }
-
-  if (!selection) {
-    next.connectionScope = ''
-    next.connectionId = ''
-    next.accountEmail = ''
-    if ('connection' in next) {
-      delete (next as Record<string, unknown>).connection
-    }
-    return next
-  }
-
-  next.connectionScope = selection.connectionScope
-  next.connectionId = selection.connectionId ?? ''
-  next.accountEmail = selection.accountEmail ?? ''
-  next.connection = cloneSelection(selection)
-  next.token = ''
-  return next
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-const cloneForEmit = (value: SlackActionValues): SlackActionValues => {
-  const snapshot: SlackActionValues = { ...value }
-  if (value.connection) {
-    snapshot.connection = cloneSelection(value.connection)
-  } else if ('connection' in snapshot) {
-    delete (snapshot as Record<string, unknown>).connection
+const buildActiveConnection = (
+  params: SlackActionValues
+): SlackConnectionSelection | null => {
+  return (
+    buildSelectionFromValue(params.connection) ??
+    buildSelectionFromParts(
+      params.connectionScope,
+      params.connectionId,
+      params.accountEmail
+    )
+  )
+}
+
+const validateSlackParams = (params: SlackActionValues) => {
+  const activeConnection = buildActiveConnection(params)
+  const usingConnection = Boolean(activeConnection)
+
+  const errors: Record<string, string> = {}
+  if (!params.channel?.trim()) errors.channel = 'Channel is required'
+  if (!params.message?.trim()) errors.message = 'Message cannot be empty'
+  if (!usingConnection && !params.token?.trim()) {
+    errors.token = 'Slack token is required'
   }
-  return snapshot
+  if (usingConnection && !activeConnection?.connectionId) {
+    errors.connection = 'Slack connection is required'
+  }
+
+  return {
+    errors,
+    activeConnection,
+    usingConnection,
+    hasValidationErrors: Object.keys(errors).length > 0
+  }
 }
 
 export default function SlackAction({
-  args,
-  initialDirty = false,
-  onChange
+  nodeId,
+  canEdit = true,
+  isRestricted = false
 }: SlackActionProps) {
-  const [params, setParams] = useState<SlackActionValues>(() =>
-    normalizeParams(args)
-  )
-  const [dirty, setDirty] = useState(initialDirty)
-  const lastNormalizedArgsRef = useRef<SlackActionValues>(params)
-
-  const argsConnection = (args as { connection?: unknown }).connection
+  const params = useActionParams<Record<string, unknown>>(nodeId, 'slack')
+  // Avoid returning new objects from selectors; use separate primitive selectors
+  const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+  const effectiveCanEdit = canEdit && !isRestricted && storeCanEdit
 
   const mountedRef = useRef(false)
   useEffect(() => {
@@ -221,26 +271,20 @@ export default function SlackAction({
     }
   }, [])
 
-  useEffect(() => {
-    const next = normalizeParams(args)
-    if (!deepEqual(next, lastNormalizedArgsRef.current)) {
-      lastNormalizedArgsRef.current = next
-      setParams(next)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    args?.channel,
-    args?.message,
-    args?.token,
-    args?.connectionScope,
-    args?.connectionId,
-    args?.accountEmail,
-    argsConnection
-  ])
+  const slackParams = useMemo(
+    () => sanitizeSlackPayload(extractSlackParams(params)),
+    [params]
+  )
 
-  useEffect(() => {
-    setDirty(initialDirty)
-  }, [initialDirty])
+  const validation = useMemo(
+    () => validateSlackParams(slackParams),
+    [slackParams]
+  )
+  const {
+    errors: validationErrors,
+    activeConnection,
+    usingConnection
+  } = validation
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
@@ -360,23 +404,6 @@ export default function SlackAction({
     [connectionState]
   )
 
-  const activeConnection = useMemo(() => {
-    const fromParams = buildSelectionFromValue(params.connection)
-    if (fromParams) return fromParams
-    return buildSelectionFromParts(
-      params.connectionScope,
-      params.connectionId,
-      params.accountEmail
-    )
-  }, [
-    params.accountEmail,
-    params.connection,
-    params.connectionId,
-    params.connectionScope
-  ])
-
-  const usingConnection = Boolean(activeConnection)
-
   const connectionOptions = useMemo<NodeDropdownOptionGroup[]>(() => {
     const groups: NodeDropdownOptionGroup[] = [
       {
@@ -449,76 +476,88 @@ export default function SlackAction({
     return connectionValueKey(scope, id)
   }, [activeConnection, usingConnection])
 
-  const validationErrors = useMemo(() => {
-    const errors: Record<string, string> = {}
-    if (!params.channel?.trim()) errors.channel = 'Channel is required'
-    if (!params.message?.trim()) errors.message = 'Message cannot be empty'
-    if (!usingConnection && !params.token?.trim()) {
-      errors.token = 'Slack token is required'
-    }
-    if (usingConnection && !activeConnection?.connectionId) {
-      errors.connection = 'Slack connection is required'
-    }
-    return errors
-  }, [
-    activeConnection,
-    params.channel,
-    params.message,
-    params.token,
-    usingConnection
-  ])
+  const applySlackPatch = useCallback(
+    (patch: Partial<SlackActionValues>) => {
+      if (!effectiveCanEdit) return
 
-  const lastEmittedRef = useRef<{
-    payload: SlackActionValues
-    hasErrors: boolean
-    dirty: boolean
-  } | null>(null)
+      const next = sanitizeSlackPayload({ ...slackParams, ...patch })
+      if (deepEqual(slackParams, next)) return
 
-  useEffect(() => {
-    if (!onChange) return
-    const hasErrors = Object.keys(validationErrors).length > 0
-    const snapshot = cloneForEmit(params)
-    const last = lastEmittedRef.current
-    if (
-      last &&
-      last.dirty === dirty &&
-      last.hasErrors === hasErrors &&
-      deepEqual(last.payload, snapshot)
-    ) {
-      return
-    }
+      const { hasValidationErrors } = validateSlackParams(next)
 
-    lastEmittedRef.current = {
-      payload: cloneForEmit(snapshot),
-      hasErrors,
-      dirty
-    }
-    onChange(snapshot, hasErrors, dirty)
-  }, [dirty, onChange, params, validationErrors])
+      const slackPayload: SlackActionValues = { ...next }
+      if (!slackPayload.connection) {
+        delete (slackPayload as Record<string, unknown>).connection
+      }
 
-  const updateField = (key: keyof SlackActionValues, value: string) => {
-    setDirty(true)
-    setParams((prev) => ({ ...prev, [key]: value }))
-  }
+      updateNodeData(nodeId, {
+        params: slackPayload,
+        dirty: true,
+        hasValidationErrors
+      })
+    },
+    [effectiveCanEdit, nodeId, slackParams, updateNodeData]
+  )
 
-  const handleConnectionChange = (value: string) => {
-    setDirty(true)
-    if (value === 'manual') {
-      setParams((prev) => applyConnectionSelection(prev, null))
-      return
-    }
+  const handleConnectionChange = useCallback(
+    (value: string) => {
+      if (value === 'manual') {
+        applySlackPatch({
+          connectionScope: '',
+          connectionId: '',
+          accountEmail: '',
+          connection: undefined
+        })
+        return
+      }
 
-    const parsed = parseConnectionValue(value)
-    if (!parsed) return
+      const parsed = parseConnectionValue(value)
+      if (!parsed) {
+        return
+      }
 
-    const selection = findConnectionByValue(parsed.scope, parsed.id)
-    if (!selection) {
-      setParams((prev) => applyConnectionSelection(prev, null))
-      return
-    }
+      const selection = findConnectionByValue(parsed.scope, parsed.id)
+      if (!selection) {
+        applySlackPatch({
+          connectionScope: '',
+          connectionId: '',
+          accountEmail: '',
+          connection: undefined
+        })
+        return
+      }
 
-    setParams((prev) => applyConnectionSelection(prev, selection))
-  }
+      applySlackPatch({
+        connectionScope: selection.connectionScope,
+        connectionId: selection.connectionId ?? '',
+        accountEmail: selection.accountEmail ?? '',
+        connection: selection,
+        token: ''
+      })
+    },
+    [applySlackPatch, findConnectionByValue]
+  )
+
+  const handleChannelChange = useCallback(
+    (value: string) => {
+      applySlackPatch({ channel: value })
+    },
+    [applySlackPatch]
+  )
+
+  const handleMessageChange = useCallback(
+    (value: string) => {
+      applySlackPatch({ message: value })
+    },
+    [applySlackPatch]
+  )
+
+  const handleTokenChange = useCallback(
+    (value: string) => {
+      applySlackPatch({ token: value })
+    },
+    [applySlackPatch]
+  )
 
   const errorClass = 'text-xs text-red-500'
 
@@ -526,8 +565,8 @@ export default function SlackAction({
     <div className="flex flex-col gap-2">
       <NodeInputField
         placeholder="Channel (e.g. #general)"
-        value={params.channel || ''}
-        onChange={(val) => updateField('channel', val)}
+        value={slackParams.channel || ''}
+        onChange={handleChannelChange}
       />
       {validationErrors.channel && (
         <p className={errorClass}>{validationErrors.channel}</p>
@@ -571,8 +610,8 @@ export default function SlackAction({
       <NodeSecretDropdown
         group="messaging"
         service="slack"
-        value={params.token || ''}
-        onChange={(val) => updateField('token', val)}
+        value={slackParams.token || ''}
+        onChange={handleTokenChange}
         placeholder="Select Slack token"
         disabled={usingConnection}
       />
@@ -587,8 +626,8 @@ export default function SlackAction({
 
       <NodeInputField
         placeholder="Message"
-        value={params.message || ''}
-        onChange={(val) => updateField('message', val)}
+        value={slackParams.message || ''}
+        onChange={handleMessageChange}
       />
       {validationErrors.message && (
         <p className={errorClass}>{validationErrors.message}</p>

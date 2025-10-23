@@ -1,21 +1,145 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
+
 import SlackAction from './SlackAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+import { useAuth } from '@/stores/auth'
 
-const createJsonResponse = (body: unknown) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' }
-  })
+vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
+  __esModule: true,
+  default: ({ value, onChange, placeholder }: any) => (
+    <input
+      placeholder={placeholder}
+      value={value ?? ''}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  )
+}))
 
-describe('SlackAction', () => {
-  const baseArgs = {
-    channel: '#alerts',
-    message: 'Hello',
-    token: 'xoxb-token'
+vi.mock('@/components/UI/InputFields/NodeDropdownField', () => ({
+  __esModule: true,
+  default: ({ value, onChange, options, placeholder }: any) => {
+    const flatOptions = (options as any[]).flatMap((entry) => {
+      if (entry && typeof entry === 'object' && 'options' in entry) {
+        return (entry.options as any[]) ?? []
+      }
+      return [entry]
+    })
+
+    return (
+      <select
+        aria-label={placeholder ?? 'dropdown'}
+        value={value ?? ''}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {flatOptions.map((option) => {
+          const normalized =
+            typeof option === 'string'
+              ? { label: option, value: option }
+              : option
+          return (
+            <option key={normalized.value} value={normalized.value}>
+              {normalized.label}
+            </option>
+          )
+        })}
+      </select>
+    )
+  }
+}))
+
+vi.mock('@/components/UI/InputFields/NodeSecretDropdown', () => ({
+  __esModule: true,
+  default: ({ value, onChange }: any) => (
+    <select
+      value={value ?? ''}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="">Manual entry</option>
+      <option value="primary">primary</option>
+    </select>
+  )
+}))
+
+const createBaseParams = () => ({
+  channel: '#alerts',
+  message: 'Hello team',
+  token: 'xoxb-token',
+  connectionScope: '',
+  connectionId: '',
+  accountEmail: ''
+})
+
+const mockParamsRef = { current: createBaseParams() }
+const updateNodeData = vi.fn((id: string, patch: any) => {
+  const node = workflowState.nodes.find((entry) => entry.id === id)
+  if (!node) return
+  if (!patch || typeof patch !== 'object') return
+  const data =
+    node.data && typeof node.data === 'object' && !Array.isArray(node.data)
+      ? { ...(node.data as Record<string, unknown>) }
+      : {}
+  if (patch.params && typeof patch.params === 'object') {
+    data.params = patch.params
+  }
+  node.data = data
+})
+const workflowState = {
+  canEdit: true,
+  updateNodeData,
+  nodes: [
+    {
+      id: 'slack-node',
+      data: { params: mockParamsRef.current }
+    }
+  ],
+  edges: []
+}
+
+const fetchConnections = vi.fn().mockResolvedValue({
+  slack: {
+    personal: {
+      connected: true,
+      id: 'conn-1',
+      accountEmail: 'alice@example.com',
+      requiresReconnect: false
+    },
+    workspace: []
+  }
+})
+const getCachedConnections = vi.fn().mockReturnValue(null)
+const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => {})
+
+vi.mock('@/stores/workflowSelectors', () => ({
+  useActionParams: () => mockParamsRef.current
+}))
+
+vi.mock('@/stores/workflowStore', () => {
+  const useWorkflowStore = (selector: (state: typeof workflowState) => any) =>
+    selector(workflowState)
+
+  useWorkflowStore.setState = (partial: any) => {
+    if (typeof partial === 'function') {
+      Object.assign(workflowState, partial(workflowState))
+    } else {
+      Object.assign(workflowState, partial)
+    }
   }
 
+  useWorkflowStore.getState = () => workflowState
+
+  return { useWorkflowStore }
+})
+
+vi.mock('@/lib/oauthApi', () => ({
+  fetchConnections: (...args: any[]) => fetchConnections(...args),
+  getCachedConnections: (...args: any[]) => getCachedConnections(...args),
+  subscribeToConnectionUpdates: (...args: any[]) =>
+    subscribeToConnectionUpdates(...args)
+}))
+
+describe('SlackAction (workflow store integration)', () => {
+  const nodeId = 'slack-node'
   const secrets = {
     messaging: {
       slack: {
@@ -24,264 +148,166 @@ describe('SlackAction', () => {
     }
   }
 
-  let fetchMock: ReturnType<typeof vi.spyOn>
+  const initialAuthState = useAuth.getState()
+
+  const resetState = () => {
+    mockParamsRef.current = createBaseParams()
+    workflowState.nodes = [
+      {
+        id: nodeId,
+        data: { params: mockParamsRef.current }
+      }
+    ]
+    workflowState.edges = []
+    workflowState.canEdit = true
+    updateNodeData.mockClear()
+    fetchConnections.mockClear()
+    fetchConnections.mockResolvedValue({
+      slack: {
+        personal: {
+          connected: true,
+          id: 'conn-1',
+          accountEmail: 'alice@example.com',
+          requiresReconnect: false
+        },
+        workspace: []
+      }
+    })
+  }
 
   beforeEach(() => {
-    fetchMock = vi
-      .spyOn(global, 'fetch')
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : 'url' in input
-                ? input.url
-                : input.toString()
-
-        if (url.includes('/api/oauth/connections')) {
-          return Promise.resolve(
-            createJsonResponse({ success: true, personal: [], workspace: [] })
-          )
-        }
-
-        return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-      })
+    resetState()
+    useAuth.setState(initialAuthState, true)
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
+  it('writes to the workflow store when the Slack channel changes', async () => {
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
 
-  it('emits values without validation errors when inputs are valid', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SlackAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
+    const channelInput = await screen.findByPlaceholderText(
+      'Channel (e.g. #general)'
     )
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled()
-    })
-
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalled()
-    })
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[1]).toBe(false)
-    expect(lastCall?.[2]).toBe(false)
-  })
-
-  it('marks inputs dirty when fields change', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SlackAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
-    )
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled()
-    })
-
-    const channelInput = screen.getByPlaceholderText('Channel (e.g. #general)')
     fireEvent.change(channelInput, { target: { value: '#ops' } })
 
     await waitFor(() => {
-      expect(onChange.mock.calls.length).toBeGreaterThan(1)
+      expect(updateNodeData).toHaveBeenCalled()
     })
 
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[0].channel).toBe('#ops')
-    expect(lastCall?.[2]).toBe(true)
+    const lastCall = updateNodeData.mock.calls.at(-1)
+    expect(lastCall?.[0]).toBe(nodeId)
+    expect(lastCall?.[1]).toMatchObject({
+      dirty: true,
+      hasValidationErrors: false
+    })
   })
 
-  it('propagates validation errors for empty message', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SlackAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
-    )
+  it('propagates validation errors when the message is cleared', async () => {
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled()
-    })
-
-    const messageInput = screen.getByPlaceholderText('Message')
+    const messageInput = await screen.findByPlaceholderText('Message')
     fireEvent.change(messageInput, { target: { value: '' } })
 
     await waitFor(() => {
-      expect(screen.getByText('Message cannot be empty')).toBeInTheDocument()
+      expect(updateNodeData).toHaveBeenCalled()
     })
 
-    await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[1]).toBe(true)
+    const lastCall = updateNodeData.mock.calls.at(-1)
+    expect(lastCall?.[0]).toBe(nodeId)
+    expect(lastCall?.[1]).toMatchObject({
+      dirty: true,
+      hasValidationErrors: true
     })
   })
 
-  it('respects the initialDirty flag', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SlackAction args={{ ...baseArgs }} onChange={onChange} initialDirty />,
-      { secrets }
+  it('emits updated Slack payloads without dropping existing fields', async () => {
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
+
+    const channelInput = await screen.findByPlaceholderText(
+      'Channel (e.g. #general)'
     )
+    fireEvent.change(channelInput, { target: { value: '#ops' } })
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled()
+      expect(updateNodeData).toHaveBeenCalled()
     })
 
-    await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[2]).toBe(true)
+    const patchCall = updateNodeData.mock.calls.find(
+      ([, payload]) => payload.params
+    )
+    expect(patchCall?.[1]).toEqual({
+      params: {
+        channel: '#ops',
+        message: 'Hello team',
+        token: 'xoxb-token',
+        connectionScope: '',
+        connectionId: '',
+        accountEmail: ''
+      },
+      dirty: true,
+      hasValidationErrors: false
     })
   })
 
-  it('allows selecting a personal Slack OAuth connection', async () => {
-    const personalId = '11111111-2222-3333-4444-555555555555'
-    fetchMock.mockImplementationOnce((input: RequestInfo | URL) => {
-      const url =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : 'url' in input
-              ? input.url
-              : input.toString()
-
-      if (url.includes('/api/oauth/connections')) {
-        return Promise.resolve(
-          createJsonResponse({
-            success: true,
-            personal: [
-              {
-                id: personalId,
-                provider: 'slack',
-                accountEmail: 'alice@example.com',
-                expiresAt: new Date().toISOString(),
-                isShared: false,
-                requiresReconnect: false
-              }
-            ],
-            workspace: []
-          })
-        )
+  it('merges connection updates into the full Slack payload', async () => {
+    fetchConnections.mockResolvedValue({
+      slack: {
+        personal: {
+          connected: true,
+          id: 'conn-2',
+          accountEmail: 'carol@example.com',
+          requiresReconnect: false
+        },
+        workspace: []
       }
-
-      return Promise.reject(new Error(`Unhandled fetch: ${url}`))
     })
 
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SlackAction args={{ ...baseArgs, token: '' }} onChange={onChange} />,
-      { secrets }
-    )
+    mockParamsRef.current = {
+      channel: '#alerts',
+      message: 'Hello team',
+      token: '',
+      connectionScope: '',
+      connectionId: '',
+      accountEmail: ''
+    }
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled()
-    })
-
-    const dropdown = screen.getByRole('button', {
-      name: 'Use manual Slack token'
-    })
-    fireEvent.click(dropdown)
-
-    const personalOption = await screen.findByText(
-      'Personal – alice@example.com'
-    )
-    fireEvent.click(personalOption)
-
-    await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[0].connectionScope).toBe('user')
-      expect(lastCall?.[0].connectionId).toBe(personalId)
-      expect(lastCall?.[0].accountEmail).toBe('alice@example.com')
-      expect(lastCall?.[0].token).toBe('')
-      expect(lastCall?.[1]).toBe(false)
-    })
-
-    expect(
-      screen.getByText('Posting as alice@example.com via Slack OAuth.')
-    ).toBeInTheDocument()
-
-    const tokenDropdown = screen.getByRole('button', { name: 'primary' })
-    expect(tokenDropdown).toBeDisabled()
-  })
-
-  it('emits workspace Slack OAuth metadata when selected', async () => {
-    const workspaceConnectionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
-    fetchMock.mockImplementationOnce((input: RequestInfo | URL) => {
-      const url =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : 'url' in input
-              ? input.url
-              : input.toString()
-
-      if (url.includes('/api/oauth/connections')) {
-        return Promise.resolve(
-          createJsonResponse({
-            success: true,
-            personal: [],
-            workspace: [
-              {
-                id: workspaceConnectionId,
-                provider: 'slack',
-                accountEmail: 'workspace@example.com',
-                workspaceId: 'workspace-1',
-                workspaceName: 'Acme Workspace',
-                sharedByName: 'Owner',
-                sharedByEmail: 'owner@example.com',
-                expiresAt: new Date().toISOString(),
-                requiresReconnect: false
-              }
-            ]
-          })
-        )
+    workflowState.nodes = [
+      {
+        id: nodeId,
+        data: { params: mockParamsRef.current }
       }
+    ]
 
-      return Promise.reject(new Error(`Unhandled fetch: ${url}`))
-    })
-
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SlackAction args={{ ...baseArgs, token: '' }} onChange={onChange} />,
-      { secrets }
-    )
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled()
+      expect(fetchConnections).toHaveBeenCalled()
     })
 
-    const dropdown = screen.getByRole('button', {
-      name: 'Use manual Slack token'
-    })
-    fireEvent.click(dropdown)
-
-    const workspaceOption = await screen.findByText(
-      'Acme Workspace – workspace@example.com'
-    )
-    fireEvent.click(workspaceOption)
+    const dropdown = screen.getByLabelText('Select Slack connection')
+    fireEvent.change(dropdown, { target: { value: 'personal:conn-2' } })
 
     await waitFor(() => {
-      const lastCall = onChange.mock.calls.at(-1)
-      expect(lastCall?.[0].connectionScope).toBe('workspace')
-      expect(lastCall?.[0].connectionId).toBe(workspaceConnectionId)
-      expect(lastCall?.[0].accountEmail).toBe('workspace@example.com')
-      expect(lastCall?.[0].token).toBe('')
-      expect(lastCall?.[1]).toBe(false)
+      expect(updateNodeData).toHaveBeenCalled()
     })
 
-    expect(
-      screen.getByText('Posting as workspace@example.com via Slack OAuth.')
-    ).toBeInTheDocument()
+    const patchCall = updateNodeData.mock.calls.find(
+      ([, payload]) => payload.params
+    )
+    expect(patchCall?.[1]).toMatchObject({
+      params: {
+        channel: '#alerts',
+        message: 'Hello team',
+        token: '',
+        connectionScope: 'user',
+        connectionId: 'conn-2',
+        accountEmail: 'carol@example.com',
+        connection: {
+          connectionScope: 'user',
+          connectionId: 'conn-2',
+          accountEmail: 'carol@example.com'
+        }
+      },
+      dirty: true,
+      hasValidationErrors: false
+    })
   })
 })

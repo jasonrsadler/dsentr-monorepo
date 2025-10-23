@@ -1,11 +1,34 @@
+import { useCallback, useEffect, useState } from 'react'
+
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
-import { useEffect, useMemo, useState } from 'react'
 import MailgunRegionDropdown from '../ServiceDropDowns/MailgunRegionDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import { useActionParams } from '@/stores/workflowSelectors'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
-interface MailGunActionProps {
+interface MailgunVariable {
+  key: string
+  value: string
+}
+
+interface MailgunParams {
+  service?: string
+  domain?: string
+  apiKey?: string
+  region?: string
+  from?: string
+  to?: string
+  subject?: string
+  body?: string
+  template?: string
+  variables?: MailgunVariable[]
+  dirty: boolean
+}
+
+interface NormalizedMailgunState {
+  service?: string
   domain: string
   apiKey: string
   region: string
@@ -13,160 +36,198 @@ interface MailGunActionProps {
   to: string
   subject: string
   body: string
-  template?: string
-  variables?: { key: string; value: string }[]
-  dirty: boolean
-  setParams: (params: Partial<MailGunActionProps>) => void
-  setDirty: (dirty: boolean) => void
+  template: string
+  variables: MailgunVariable[]
+}
+
+interface MailGunActionProps {
+  nodeId: string
+  canEdit?: boolean
+}
+
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function normalizeVariables(value: unknown): MailgunVariable[] {
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return { key: '', value: '' }
+    }
+    const record = entry as Record<string, unknown>
+    const key = typeof record.key === 'string' ? record.key : ''
+    const val = typeof record.value === 'string' ? record.value : ''
+    return { key, value: val }
+  })
+}
+
+function normalizeParams(
+  params: MailgunParams | undefined
+): NormalizedMailgunState {
+  const record =
+    params && typeof params === 'object' ? params : ({} as MailgunParams)
+  return {
+    service: typeof record.service === 'string' ? record.service : undefined,
+    domain: typeof record.domain === 'string' ? record.domain : '',
+    apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
+    region: typeof record.region === 'string' ? record.region : '',
+    from: typeof record.from === 'string' ? record.from : '',
+    to: typeof record.to === 'string' ? record.to : '',
+    subject: typeof record.subject === 'string' ? record.subject : '',
+    body: typeof record.body === 'string' ? record.body : '',
+    template: typeof record.template === 'string' ? record.template : '',
+    variables: normalizeVariables(record.variables)
+  }
+}
+
+type MailgunErrors = Partial<Record<keyof NormalizedMailgunState, string>>
+
+function validateMailgun(values: NormalizedMailgunState): MailgunErrors {
+  const errors: MailgunErrors = {}
+  if (!values.domain.trim()) errors.domain = 'Domain is required'
+  if (!values.apiKey.trim()) errors.apiKey = 'API key is required'
+  if (!values.region.trim()) errors.region = 'Region is required'
+  if (!values.from.trim()) errors.from = 'From email is required'
+  if (!values.to.trim()) {
+    errors.to = 'Recipient email(s) required'
+  } else {
+    const recipients = values.to
+      .split(',')
+      .map((recipient) => recipient.trim())
+      .filter(Boolean)
+    if (recipients.length === 0) {
+      errors.to = 'Recipient email(s) required'
+    } else if (recipients.some((recipient) => !EMAIL_RX.test(recipient))) {
+      errors.to = 'One or more recipient emails are invalid'
+    } else if (new Set(recipients).size !== recipients.length) {
+      errors.to = 'Duplicate recipient emails are not allowed'
+    }
+  }
+  if (!values.template.trim()) {
+    if (!values.subject.trim()) errors.subject = 'Subject is required'
+    if (!values.body.trim()) errors.body = 'Message body is required'
+  }
+  return errors
 }
 
 export default function MailGunAction({
-  args,
-  onChange
-}: {
-  args: MailGunActionProps
-  onChange?: (
-    args: Partial<MailGunActionProps>,
-    hasErrors: boolean,
-    dirty: boolean
-  ) => void
-}) {
-  const [_, setDirty] = useState(false)
-  const [params, setParams] = useState<Partial<MailGunActionProps>>({
-    ...args
-  })
+  nodeId,
+  canEdit = true
+}: MailGunActionProps) {
+  const params = useActionParams<MailgunParams>(nodeId, 'email')
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+  const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+  const effectiveCanEdit = canEdit && storeCanEdit
+  const [variableErrors, setVariableErrors] = useState(false)
+  const normalizedParams = normalizeParams(params)
+
   useEffect(() => {
-    onChange?.(params, Object.keys(hasErrors(params)).length > 0, true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params])
-
-  const hasErrors = (updatedParams: Partial<MailGunActionProps>) => {
-    const errors: Partial<MailGunActionProps> = {}
-    if (!updatedParams.domain?.trim()) errors.domain = 'Domain is required'
-    if (!updatedParams.apiKey?.trim()) errors.apiKey = 'API key is required'
-    if (!updatedParams.region?.trim()) errors.region = 'Region is required'
-    if (!updatedParams.from?.trim()) errors.from = 'From email is required'
-    if (!updatedParams.to?.trim()) {
-      errors.to = 'Recipient email(s) required'
-    } else {
-      const recipients = updatedParams.to
-        .split(',')
-        .map((r) => r.trim())
-        .filter(Boolean)
-      const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (recipients.length === 0) errors.to = 'Recipient email(s) required'
-      else if (recipients.some((r) => !emailRx.test(r)))
-        errors.to = 'One or more recipient emails are invalid'
-      else if (new Set(recipients).size !== recipients.length)
-        errors.to = 'Duplicate recipient emails are not allowed'
+    if (!normalizedParams.template.trim() && variableErrors) {
+      setVariableErrors(false)
     }
-    if (!updatedParams.template?.trim()) {
-      if (!updatedParams.subject?.trim()) errors.subject = 'Subject is required'
-      if (!updatedParams.body?.trim()) errors.body = 'Message body is required'
-    }
-    return errors
-  }
+  }, [normalizedParams.template, variableErrors])
 
-  const mailGunErrors = useMemo(() => hasErrors(params), [params])
+  const emitPatch = useCallback(
+    (patch: Partial<MailgunParams>) => {
+      if (!effectiveCanEdit) return
 
-  const updateField = (key: keyof MailGunActionProps, value: any) => {
-    setDirty(true)
-    setParams((prev) => ({ ...prev, [key]: value }))
-  }
+      const base: MailgunParams =
+        params && typeof params === 'object' ? params : ({} as MailgunParams)
+      const { dirty: _dirty, ...rest } = base
+
+      updateNodeData(nodeId, {
+        params: { ...rest, ...patch },
+        dirty: true
+      })
+    },
+    [effectiveCanEdit, nodeId, params, updateNodeData]
+  )
+
+  const errors = validateMailgun(normalizedParams)
+
+  const hasValidationErrors = (() => {
+    if (Object.keys(errors).length > 0) return true
+    if (variableErrors && normalizedParams.template.trim()) return true
+    return false
+  })()
+
+  useEffect(() => {
+    updateNodeData(nodeId, { hasValidationErrors })
+  }, [hasValidationErrors, nodeId, updateNodeData])
 
   const errorClass = 'text-xs text-red-500'
 
   return (
-    <>
-      <div className="space-y-2">
-        <NodeInputField
-          placeholder="Domain (e.g. mg.example.com)"
-          value={params.domain || ''}
-          onChange={(val) => updateField('domain', val)}
-        />
-        {mailGunErrors.domain && (
-          <p className={errorClass}>{mailGunErrors.domain}</p>
-        )}
+    <div className="space-y-2">
+      <NodeInputField
+        placeholder="Domain (e.g. mg.example.com)"
+        value={normalizedParams.domain}
+        onChange={(val) => emitPatch({ domain: val })}
+      />
+      {errors.domain && <p className={errorClass}>{errors.domain}</p>}
 
-        <NodeSecretDropdown
-          group="email"
-          service="mailgun"
-          value={params.apiKey || ''}
-          onChange={(val) => updateField('apiKey', val)}
-          placeholder="Select Mailgun API key"
-        />
-        {mailGunErrors.apiKey && (
-          <p className={errorClass}>{mailGunErrors.apiKey}</p>
-        )}
+      <NodeSecretDropdown
+        group="email"
+        service="mailgun"
+        value={normalizedParams.apiKey}
+        onChange={(val) => emitPatch({ apiKey: val })}
+        placeholder="Select Mailgun API key"
+      />
+      {errors.apiKey && <p className={errorClass}>{errors.apiKey}</p>}
 
-        <MailgunRegionDropdown
-          value={params.region || ''}
-          onChange={(val: string) => updateField('region', val)}
-        />
-        {mailGunErrors.region && (
-          <p className={errorClass}>{mailGunErrors.region}</p>
-        )}
-        <NodeInputField
-          type="email"
-          placeholder="From"
-          value={params.from || ''}
-          onChange={(val) => updateField('from', val)}
-        />
-        {mailGunErrors.from && (
-          <p className={errorClass}>{mailGunErrors.from}</p>
-        )}
+      <MailgunRegionDropdown
+        value={normalizedParams.region}
+        onChange={(val: string) => emitPatch({ region: val })}
+      />
+      {errors.region && <p className={errorClass}>{errors.region}</p>}
 
-        <NodeInputField
-          type="email"
-          placeholder="To (comma separated)"
-          value={params.to || ''}
-          onChange={(val) => updateField('to', val)}
-        />
-        {mailGunErrors.to && <p className={errorClass}>{mailGunErrors.to}</p>}
+      <NodeInputField
+        type="email"
+        placeholder="From"
+        value={normalizedParams.from}
+        onChange={(val) => emitPatch({ from: val })}
+      />
+      {errors.from && <p className={errorClass}>{errors.from}</p>}
 
-        <NodeInputField
-          placeholder="Template Name (optional)"
-          value={params.template || ''}
-          onChange={(val) => updateField('template', val)}
-        />
+      <NodeInputField
+        type="email"
+        placeholder="To (comma separated)"
+        value={normalizedParams.to}
+        onChange={(val) => emitPatch({ to: val })}
+      />
+      {errors.to && <p className={errorClass}>{errors.to}</p>}
 
-        {params.template?.trim() && (
-          <KeyValuePair
-            title="Template Variables"
-            variables={params.variables || []}
-            onChange={(updatedVars, nodeHasErrors, childDirty) => {
-              setParams((prev) => ({ ...prev, variables: updatedVars }))
-              setDirty((prev) => prev || childDirty)
-              onChange?.(
-                { ...params, variables: updatedVars },
-                nodeHasErrors,
-                childDirty
-              )
-            }}
+      <NodeInputField
+        placeholder="Template Name (optional)"
+        value={normalizedParams.template}
+        onChange={(val) => emitPatch({ template: val })}
+      />
+
+      {normalizedParams.template.trim() ? (
+        <KeyValuePair
+          title="Template Variables"
+          variables={normalizedParams.variables}
+          onChange={(updatedVars, nodeHasErrors) => {
+            setVariableErrors(nodeHasErrors)
+            emitPatch({ variables: updatedVars })
+          }}
+        />
+      ) : (
+        <>
+          <NodeInputField
+            placeholder="Subject"
+            value={normalizedParams.subject}
+            onChange={(val) => emitPatch({ subject: val })}
           />
-        )}
-        {!params.template && (
-          <>
-            <NodeInputField
-              placeholder="Subject"
-              value={params.subject || ''}
-              onChange={(val) => updateField('subject', val)}
-            />
-            {mailGunErrors.subject && (
-              <p className={errorClass}>{mailGunErrors.subject}</p>
-            )}
-            <NodeTextAreaField
-              placeholder="Body (plain text or HTML)"
-              value={params.body || ''}
-              rows={4}
-              onChange={(val) => updateField('body', val)}
-            />
-            {mailGunErrors.body && (
-              <p className={errorClass}>{mailGunErrors.body}</p>
-            )}
-          </>
-        )}
-      </div>
-    </>
+          {errors.subject && <p className={errorClass}>{errors.subject}</p>}
+          <NodeTextAreaField
+            placeholder="Body (plain text or HTML)"
+            value={normalizedParams.body}
+            rows={4}
+            onChange={(val) => emitPatch({ body: val })}
+          />
+          {errors.body && <p className={errorClass}>{errors.body}</p>}
+        </>
+      )}
+    </div>
   )
 }

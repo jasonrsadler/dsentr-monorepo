@@ -172,7 +172,7 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
         let execution = match kind {
             "trigger" => execute_trigger(node, &context_value).await,
             "condition" => execute_condition(node, &context_value).await,
-            "action" => {
+            k if k == "action" || k.starts_with("action") => {
                 execute_action(
                     node,
                     &context_value,

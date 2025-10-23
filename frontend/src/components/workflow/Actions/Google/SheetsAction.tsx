@@ -1,10 +1,10 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
 import NodeDropdownField, {
   type NodeDropdownOptionGroup
 } from '@/components/UI/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-
 import {
   fetchConnections,
   getCachedConnections,
@@ -13,6 +13,16 @@ import {
   type ProviderConnectionSet
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
+import {
+  type SheetsActionParams,
+  useSheetsActionParams
+} from '@/stores/workflowSelectors'
+import { useWorkflowStore } from '@/stores/workflowStore'
+
+interface SheetsActionProps {
+  nodeId: string
+  canEdit?: boolean
+}
 
 const MAX_SHEETS_COLUMNS = 18278
 const COLUMN_KEY_REGEX = /^[A-Za-z]+$/
@@ -72,46 +82,56 @@ const parseConnectionValue = (
   return null
 }
 
-interface SheetsActionProps {
-  spreadsheetId: string
-  worksheet: string
-  columns: { key: string; value: string }[]
-  accountEmail?: string
-  oauthConnectionScope?: ConnectionScope
-  oauthConnectionId?: string
-  dirty: boolean
-  setParams: (params: Partial<SheetsActionProps>) => void
-  setDirty: (dirty: boolean) => void
-}
-
-interface SheetsActionErrorProps extends Partial<SheetsActionProps> {
-  spreadsheetIdError?: string
-  worksheetError?: string
-  columnsError?: string
-  accountEmailError?: string
-}
-
 export default function SheetsAction({
-  args,
-  onChange
-}: {
-  args: SheetsActionProps
-  onChange?: (
-    args: Partial<SheetsActionProps>,
-    hasErrors: boolean,
-    dirty: boolean
-  ) => void
-}) {
-  const [_, setDirty] = useState(false)
-  const [params, setParams] = useState<Partial<SheetsActionProps>>({
-    ...args,
-    spreadsheetId: args.spreadsheetId || '',
-    worksheet: args.worksheet || '',
-    columns: args.columns || [],
-    accountEmail: args.accountEmail || '',
-    oauthConnectionScope: args.oauthConnectionScope || '',
-    oauthConnectionId: args.oauthConnectionId || ''
-  })
+  nodeId,
+  canEdit = true
+}: SheetsActionProps) {
+  const params = useSheetsActionParams(nodeId)
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+  const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+  const effectiveCanEdit = canEdit && storeCanEdit
+  const validationRef = useRef<boolean | null>(null)
+
+  const applySheetsParamsPatch = useCallback(
+    (patch: Partial<Omit<SheetsActionParams, 'dirty'>>) => {
+      if (!effectiveCanEdit) return
+
+      const storeState = useWorkflowStore.getState()
+      const nodes = Array.isArray(storeState.nodes) ? storeState.nodes : []
+      const node = nodes.find((candidate) => candidate.id === nodeId)
+
+      let currentParams: Partial<SheetsActionParams> = {}
+      if (node && node.data && typeof node.data === 'object') {
+        const dataRecord = node.data as Record<string, unknown>
+        const rawParams = dataRecord.params
+        if (rawParams && typeof rawParams === 'object') {
+          currentParams = rawParams as SheetsActionParams
+        }
+      }
+
+      if (!currentParams || Object.keys(currentParams).length === 0) {
+        currentParams = params ?? {}
+      }
+
+      const { dirty: _dirty, ...rest } = currentParams
+
+      updateNodeData(nodeId, {
+        params: { ...rest, ...patch },
+        dirty: true
+      })
+    },
+    [effectiveCanEdit, nodeId, params, updateNodeData]
+  )
+
+  const {
+    spreadsheetId,
+    worksheet,
+    columns = [],
+    accountEmail,
+    oauthConnectionScope,
+    oauthConnectionId
+  } = params
+
   const [connectionState, setConnectionState] =
     useState<ProviderConnectionSet | null>(null)
   const [connectionsLoading, setConnectionsLoading] = useState(true)
@@ -137,46 +157,6 @@ export default function SheetsAction({
       }
     },
     []
-  )
-
-  const findConnectionById = useCallback(
-    (scope?: ConnectionScope | null, id?: string | null) => {
-      if (!connectionState || !scope || !id) return null
-      if (scope === 'personal') {
-        const personal = connectionState.personal
-        if (!personal.connected || !personal.id) return null
-        return personal.id === id ? personal : null
-      }
-
-      return connectionState.workspace.find((entry) => entry.id === id) ?? null
-    },
-    [connectionState]
-  )
-
-  const findConnectionByEmail = useCallback(
-    (email?: string | null) => {
-      if (!connectionState) return null
-      const normalized = email?.trim().toLowerCase()
-      if (!normalized) return null
-
-      const personal = connectionState.personal
-      if (
-        personal.connected &&
-        personal.accountEmail &&
-        personal.accountEmail.trim().toLowerCase() === normalized
-      ) {
-        return personal
-      }
-
-      return (
-        connectionState.workspace.find(
-          (entry) =>
-            entry.accountEmail &&
-            entry.accountEmail.trim().toLowerCase() === normalized
-        ) ?? null
-      )
-    },
-    [connectionState]
   )
 
   useEffect(() => {
@@ -237,87 +217,126 @@ export default function SheetsAction({
     }
   }, [sanitizeConnections, workspaceId])
 
+  const findConnectionById = useCallback(
+    (scope?: ConnectionScope | null, id?: string | null) => {
+      if (!connectionState || !scope || !id) return null
+      if (scope === 'personal') {
+        const personal = connectionState.personal
+        if (!personal.connected || !personal.id) return null
+        return personal.id === id ? personal : null
+      }
+
+      return connectionState.workspace.find((entry) => entry.id === id) ?? null
+    },
+    [connectionState]
+  )
+
+  const findConnectionByEmail = useCallback(
+    (email?: string | null) => {
+      if (!connectionState) return null
+      const normalized = email?.trim().toLowerCase()
+      if (!normalized) return null
+
+      const personal = connectionState.personal
+      if (
+        personal.connected &&
+        personal.accountEmail &&
+        personal.accountEmail.trim().toLowerCase() === normalized
+      ) {
+        return personal
+      }
+
+      return (
+        connectionState.workspace.find(
+          (entry) =>
+            entry.accountEmail &&
+            entry.accountEmail.trim().toLowerCase() === normalized
+        ) ?? null
+      )
+    },
+    [connectionState]
+  )
+
   useEffect(() => {
     if (!connectionState) return
-    setParams((prev) => {
-      if (!prev) return prev
 
-      const rawScope = prev.oauthConnectionScope
-      const scope =
-        rawScope === 'personal' || rawScope === 'workspace'
-          ? (rawScope as ConnectionScope)
-          : undefined
-      const id = prev.oauthConnectionId?.trim() || undefined
-      const email = prev.accountEmail?.trim() || undefined
+    const scope =
+      oauthConnectionScope === 'personal' ||
+      oauthConnectionScope === 'workspace'
+        ? oauthConnectionScope
+        : undefined
+    const id = oauthConnectionId?.trim() || undefined
+    const email = accountEmail?.trim() || undefined
 
-      let selected = findConnectionById(scope, id)
-      if (!selected && email) {
-        selected = findConnectionByEmail(email)
-      }
-      const wasWorkspaceSelection = scope === 'workspace'
-      if (!selected && wasWorkspaceSelection) {
-        if (
-          prev.oauthConnectionScope ||
-          prev.oauthConnectionId ||
-          prev.accountEmail
-        ) {
-          return {
-            ...prev,
-            oauthConnectionScope: '',
-            oauthConnectionId: '',
-            accountEmail: ''
-          }
-        }
-        return prev
-      }
-      if (!selected) {
-        const personal = connectionState.personal
-        if (personal.connected && personal.id) {
-          selected = personal
-        }
-      }
-      if (!selected && !wasWorkspaceSelection) {
-        if (connectionState.workspace.length === 1) {
-          selected = connectionState.workspace[0]
-        }
-      }
+    let selected = findConnectionById(scope, id)
+    if (!selected && email) {
+      selected = findConnectionByEmail(email)
+    }
 
-      if (!selected) {
-        if (
-          prev.oauthConnectionScope ||
-          prev.oauthConnectionId ||
-          prev.accountEmail
-        ) {
-          return {
-            ...prev,
-            oauthConnectionScope: '',
-            oauthConnectionId: '',
-            accountEmail: ''
-          }
-        }
-        return prev
-      }
+    const wasWorkspaceSelection = scope === 'workspace'
 
-      const nextScope = selected.scope
-      const nextId = selected.id ?? ''
-      const nextEmail = selected.accountEmail ?? ''
-
-      if (
-        prev.oauthConnectionScope === nextScope &&
-        prev.oauthConnectionId === nextId &&
-        (prev.accountEmail ?? '') === nextEmail
-      ) {
-        return prev
+    if (!selected && wasWorkspaceSelection) {
+      if (oauthConnectionScope || oauthConnectionId || accountEmail) {
+        applySheetsParamsPatch({
+          oauthConnectionScope: '',
+          oauthConnectionId: '',
+          accountEmail: ''
+        })
       }
+      return
+    }
 
-      return {
-        ...prev,
-        oauthConnectionScope: nextScope,
-        oauthConnectionId: nextId,
-        accountEmail: nextEmail
+    if (!selected) {
+      const personal = connectionState.personal
+      if (personal.connected && personal.id) {
+        selected = personal
       }
-    })
-  }, [connectionState, findConnectionByEmail, findConnectionById, setParams])
+    }
+
+    if (!selected && !wasWorkspaceSelection) {
+      if (connectionState.workspace.length === 1) {
+        selected = connectionState.workspace[0]
+      }
+    }
+
+    if (!selected) {
+      if (oauthConnectionScope || oauthConnectionId || accountEmail) {
+        applySheetsParamsPatch({
+          oauthConnectionScope: '',
+          oauthConnectionId: '',
+          accountEmail: ''
+        })
+      }
+      return
+    }
+
+    const nextScope = selected.scope
+    const nextId = selected.id ?? ''
+    const nextEmail = selected.accountEmail ?? ''
+
+    const updates: Partial<SheetsActionParams> = {}
+    if (oauthConnectionScope !== nextScope) {
+      updates.oauthConnectionScope = nextScope
+    }
+    if ((oauthConnectionId ?? '') !== nextId) {
+      updates.oauthConnectionId = nextId
+    }
+    if ((accountEmail ?? '') !== nextEmail) {
+      updates.accountEmail = nextEmail
+    }
+
+    if (Object.keys(updates).length > 0) {
+      applySheetsParamsPatch(updates)
+    }
+  }, [
+    accountEmail,
+    connectionState,
+    applySheetsParamsPatch,
+    findConnectionByEmail,
+    findConnectionById,
+    oauthConnectionId,
+    oauthConnectionScope
+  ])
 
   const connectionChoices = useMemo(() => {
     if (!connectionState)
@@ -341,70 +360,6 @@ export default function SheetsAction({
     }
     return entries
   }, [connectionState])
-
-  const hasErrors = (updatedParams: Partial<SheetsActionProps>) => {
-    const errors: Partial<SheetsActionErrorProps> = {}
-    if (!updatedParams.spreadsheetId?.trim())
-      errors.spreadsheetIdError = 'Spreadsheet ID is required'
-    if (!updatedParams.worksheet?.trim())
-      errors.worksheetError = 'Worksheet name is required'
-    if (!updatedParams.columns || updatedParams.columns.length === 0) {
-      errors.columnsError = 'At least one column mapping is required'
-    } else {
-      const columnError = validateColumnMappings(updatedParams.columns)
-      if (columnError) errors.columnsError = columnError
-    }
-    const selectedScope =
-      updatedParams.oauthConnectionScope ?? params.oauthConnectionScope ?? ''
-    const selectedId =
-      updatedParams.oauthConnectionId ?? params.oauthConnectionId ?? ''
-
-    if (connectionsError) {
-      errors.accountEmailError = connectionsError
-    } else if (!connectionsLoading) {
-      if (connectionChoices.length === 0) {
-        errors.accountEmailError =
-          'Connect a Google account in Settings → Integrations'
-      } else {
-        const normalizedScope =
-          selectedScope === 'personal' || selectedScope === 'workspace'
-            ? selectedScope
-            : null
-        const normalizedId = (selectedId ?? '').toString().trim()
-
-        if (!normalizedScope || !normalizedId) {
-          errors.accountEmailError = 'Select a connected Google account'
-        } else if (
-          !connectionChoices.some(
-            (choice) =>
-              choice.scope === normalizedScope && choice.id === normalizedId
-          )
-        ) {
-          errors.accountEmailError =
-            'Selected Google connection is no longer available. Refresh your integrations.'
-        }
-      }
-    }
-    return errors
-  }
-
-  const validationErrors = useMemo(
-    () => hasErrors(params),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [params, connectionChoices, connectionsError, connectionsLoading]
-  )
-
-  useEffect(() => {
-    onChange?.(params, Object.keys(validationErrors).length > 0, true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, validationErrors])
-
-  const updateField = (key: keyof SheetsActionProps, value: any) => {
-    setDirty(true)
-    setParams((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const errorClass = 'text-xs text-red-500'
 
   const connectionOptionGroups = useMemo<NodeDropdownOptionGroup[]>(() => {
     if (!connectionState) return []
@@ -450,52 +405,140 @@ export default function SheetsAction({
   }, [connectionState])
 
   const selectedConnectionValue = useMemo(() => {
-    const scope = params.oauthConnectionScope
-    const id = params.oauthConnectionId
+    const scope = oauthConnectionScope
+    const id = oauthConnectionId
     if (scope !== 'personal' && scope !== 'workspace') return ''
     if (!id) return ''
     return connectionValueKey(scope, id)
-  }, [params.oauthConnectionScope, params.oauthConnectionId])
+  }, [oauthConnectionId, oauthConnectionScope])
 
   const selectedConnection = useMemo(() => {
     const scope =
-      params.oauthConnectionScope === 'personal' ||
-      params.oauthConnectionScope === 'workspace'
-        ? (params.oauthConnectionScope as ConnectionScope)
+      oauthConnectionScope === 'personal' ||
+      oauthConnectionScope === 'workspace'
+        ? (oauthConnectionScope as ConnectionScope)
         : undefined
-    const id = params.oauthConnectionId?.trim() || undefined
+    const id = oauthConnectionId?.trim() || undefined
     return findConnectionById(scope, id)
+  }, [findConnectionById, oauthConnectionId, oauthConnectionScope])
+
+  const validationErrors = useMemo(() => {
+    const errors: {
+      spreadsheetId?: string
+      worksheet?: string
+      columns?: string
+      accountEmail?: string
+    } = {}
+
+    if (!spreadsheetId?.trim()) {
+      errors.spreadsheetId = 'Spreadsheet ID is required'
+    }
+    if (!worksheet?.trim()) {
+      errors.worksheet = 'Worksheet name is required'
+    }
+
+    if (!columns || columns.length === 0) {
+      errors.columns = 'At least one column mapping is required'
+    } else {
+      const columnError = validateColumnMappings(columns)
+      if (columnError) errors.columns = columnError
+    }
+
+    if (connectionsError) {
+      errors.accountEmail = connectionsError
+    } else if (!connectionsLoading) {
+      if (connectionChoices.length === 0) {
+        errors.accountEmail =
+          'Connect a Google account in Settings → Integrations'
+      } else {
+        const scope =
+          oauthConnectionScope === 'personal' ||
+          oauthConnectionScope === 'workspace'
+            ? oauthConnectionScope
+            : null
+        const id = oauthConnectionId?.toString().trim() || ''
+
+        if (!scope || !id) {
+          errors.accountEmail = 'Select a connected Google account'
+        } else if (
+          !connectionChoices.some(
+            (choice) => choice.scope === scope && (choice.id ?? '') === id
+          )
+        ) {
+          errors.accountEmail =
+            'Selected Google connection is no longer available. Refresh your integrations.'
+        }
+      }
+    }
+
+    return errors
   }, [
-    findConnectionById,
-    params.oauthConnectionId,
-    params.oauthConnectionScope
+    connectionChoices,
+    connectionsError,
+    connectionsLoading,
+    columns,
+    oauthConnectionId,
+    oauthConnectionScope,
+    spreadsheetId,
+    worksheet
   ])
+
+  const hasValidationErrors = useMemo(
+    () => Object.keys(validationErrors).length > 0,
+    [validationErrors]
+  )
+
+  useEffect(() => {
+    if (validationRef.current === hasValidationErrors) return
+    validationRef.current = hasValidationErrors
+    updateNodeData(nodeId, { hasValidationErrors })
+  }, [hasValidationErrors, nodeId, updateNodeData])
 
   const handleConnectionChange = useCallback(
     (value: string) => {
-      setDirty(true)
       const parsed = parseConnectionValue(value)
       if (!parsed) {
-        setParams((prev) => ({
-          ...prev,
+        applySheetsParamsPatch({
           oauthConnectionScope: '',
           oauthConnectionId: '',
           accountEmail: ''
-        }))
+        })
         return
       }
+
       const match = findConnectionById(parsed.scope, parsed.id)
-      setParams((prev) => ({
-        ...prev,
+      applySheetsParamsPatch({
         oauthConnectionScope: parsed.scope,
         oauthConnectionId: parsed.id,
         accountEmail: match?.accountEmail ?? ''
-      }))
+      })
     },
-    [findConnectionById, setParams]
+    [applySheetsParamsPatch, findConnectionById]
+  )
+
+  const handleSpreadsheetChange = useCallback(
+    (value: string) => {
+      applySheetsParamsPatch({ spreadsheetId: value })
+    },
+    [applySheetsParamsPatch]
+  )
+
+  const handleWorksheetChange = useCallback(
+    (value: string) => {
+      applySheetsParamsPatch({ worksheet: value })
+    },
+    [applySheetsParamsPatch]
+  )
+
+  const handleColumnsChange = useCallback(
+    (updatedVars: { key: string; value: string }[]) => {
+      applySheetsParamsPatch({ columns: updatedVars })
+    },
+    [applySheetsParamsPatch]
   )
 
   const usingWorkspaceCredential = selectedConnection?.scope === 'workspace'
+  const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="flex flex-col gap-2">
@@ -510,15 +553,19 @@ export default function SheetsAction({
               ? 'Select Google connection'
               : 'No Google connections available'
         }
-        disabled={connectionsLoading || connectionOptionGroups.length === 0}
+        disabled={
+          !effectiveCanEdit ||
+          connectionsLoading ||
+          connectionOptionGroups.length === 0
+        }
         loading={connectionsLoading}
         emptyMessage={connectionsError || 'No Google connections available'}
       />
       {connectionsError && (
         <p className="text-xs text-red-500">{connectionsError}</p>
       )}
-      {!connectionsError && validationErrors.accountEmailError && (
-        <p className={errorClass}>{validationErrors.accountEmailError}</p>
+      {!connectionsError && validationErrors.accountEmail && (
+        <p className={errorClass}>{validationErrors.accountEmail}</p>
       )}
       {usingWorkspaceCredential &&
         selectedConnection?.scope === 'workspace' && (
@@ -533,39 +580,31 @@ export default function SheetsAction({
 
       <NodeInputField
         placeholder="Spreadsheet ID"
-        value={params.spreadsheetId || ''}
-        onChange={(val) => updateField('spreadsheetId', val)}
+        value={spreadsheetId || ''}
+        onChange={handleSpreadsheetChange}
       />
-      {validationErrors.spreadsheetIdError && (
-        <p className={errorClass}>{validationErrors.spreadsheetIdError}</p>
+      {validationErrors.spreadsheetId && (
+        <p className={errorClass}>{validationErrors.spreadsheetId}</p>
       )}
 
       <NodeInputField
         placeholder="Worksheet Name"
-        value={params.worksheet || ''}
-        onChange={(val) => updateField('worksheet', val)}
+        value={worksheet || ''}
+        onChange={handleWorksheetChange}
       />
-      {validationErrors.worksheetError && (
-        <p className={errorClass}>{validationErrors.worksheetError}</p>
+      {validationErrors.worksheet && (
+        <p className={errorClass}>{validationErrors.worksheet}</p>
       )}
 
       <KeyValuePair
         title="Column Mappings"
-        variables={params.columns || []}
+        variables={columns || []}
         placeholderKey="Column"
         placeholderValue="Value"
-        onChange={(updatedVars, nodeHasErrors, childDirty) => {
-          setParams((prev) => ({ ...prev, columns: updatedVars }))
-          setDirty((prev) => prev || childDirty)
-          onChange?.(
-            { ...params, columns: updatedVars },
-            nodeHasErrors,
-            childDirty
-          )
-        }}
+        onChange={(updatedVars) => handleColumnsChange(updatedVars)}
       />
-      {validationErrors.columnsError && (
-        <p className={errorClass}>{validationErrors.columnsError}</p>
+      {validationErrors.columns && (
+        <p className={errorClass}>{validationErrors.columns}</p>
       )}
     </div>
   )

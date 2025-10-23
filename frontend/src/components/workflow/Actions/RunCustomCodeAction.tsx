@@ -1,201 +1,142 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import deepEqual from 'fast-deep-equal'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import {
+  type RunCustomCodeActionParams,
+  useActionParams
+} from '@/stores/workflowSelectors'
+import { useWorkflowStore } from '@/stores/workflowStore'
+
 type KeyValueEntry = { key: string; value: string }
 
-type RunCustomCodeArgs = {
-  code?: string
-  inputs?: KeyValueEntry[]
-  outputs?: KeyValueEntry[]
-  dirty?: boolean
-}
-
-type NormalizedParams = {
-  code: string
-  inputs: KeyValueEntry[]
-  outputs: KeyValueEntry[]
-}
-
-const normalizePairs = (entries?: KeyValueEntry[]): KeyValueEntry[] => {
-  if (!Array.isArray(entries)) return []
-  return entries
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null
-      const key = typeof entry.key === 'string' ? entry.key : ''
-      const value = typeof entry.value === 'string' ? entry.value : ''
-      return { key, value }
-    })
-    .filter((entry): entry is KeyValueEntry => Boolean(entry))
-}
-
-const normalizeParams = (incoming?: RunCustomCodeArgs): NormalizedParams => ({
-  code: typeof incoming?.code === 'string' ? incoming.code : '',
-  inputs: normalizePairs(incoming?.inputs),
-  outputs: normalizePairs(incoming?.outputs)
-})
-
-const cloneParams = (params: NormalizedParams): NormalizedParams => ({
-  code: params.code,
-  inputs: params.inputs.map((entry) => ({ ...entry })),
-  outputs: params.outputs.map((entry) => ({ ...entry }))
-})
-
-const serializeParams = (params: NormalizedParams) =>
-  JSON.stringify({
-    code: params.code,
-    inputs: params.inputs.map((entry) => ({ ...entry })),
-    outputs: params.outputs.map((entry) => ({ ...entry }))
-  })
-
 interface RunCustomCodeActionProps {
-  args: RunCustomCodeArgs
-  onChange?: (
-    args: RunCustomCodeArgs,
-    hasErrors: boolean,
-    childDirty: boolean
-  ) => void
+  nodeId: string
+  canEdit?: boolean
+}
+
+const checkKeyValuePairs = (entries: KeyValueEntry[]): boolean => {
+  const normalized = entries.map((entry) => ({
+    key: entry?.key?.toString() ?? '',
+    value: entry?.value?.toString() ?? ''
+  }))
+  const keys = normalized.map((entry) => entry.key.trim()).filter(Boolean)
+  const anyBlank = normalized.some(
+    (entry) => !entry.key.trim() || !entry.value.trim()
+  )
+  const hasDuplicateKeys = new Set(keys).size !== keys.length
+  return anyBlank || hasDuplicateKeys
 }
 
 export default function RunCustomCodeAction({
-  args,
-  onChange
+  nodeId,
+  canEdit = true
 }: RunCustomCodeActionProps) {
-  const initialParamsRef = useRef<NormalizedParams>(normalizeParams(args))
-  const [params, setParams] = useState<NormalizedParams>(
-    initialParamsRef.current
+  const params = useActionParams<RunCustomCodeActionParams>(nodeId, 'code')
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+  const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+  const effectiveCanEdit = canEdit && storeCanEdit
+  const validationRef = useRef<boolean | null>(null)
+
+  const applyParamsPatch = useCallback(
+    (patch: Partial<Omit<RunCustomCodeActionParams, 'dirty'>>) => {
+      if (!effectiveCanEdit) return
+
+      const storeState = useWorkflowStore.getState()
+      const nodeList = Array.isArray(storeState?.nodes) ? storeState.nodes : []
+      const targetNode = nodeList.find((node) => node.id === nodeId)
+
+      let currentParams: RunCustomCodeActionParams | undefined
+      if (targetNode?.data && typeof targetNode.data === 'object') {
+        const dataRecord = targetNode.data as Record<string, unknown>
+        const rawParams = dataRecord.params
+        if (rawParams && typeof rawParams === 'object') {
+          currentParams = rawParams as RunCustomCodeActionParams
+        }
+      }
+
+      const sourceParams = currentParams ?? params
+      const { dirty: _dirty, ...rest } =
+        sourceParams ?? ({} as RunCustomCodeActionParams)
+
+      updateNodeData(nodeId, {
+        params: { ...rest, ...patch },
+        dirty: true
+      })
+    },
+    [effectiveCanEdit, nodeId, params, updateNodeData]
   )
-  const [dirty, setDirty] = useState<boolean>(Boolean(args?.dirty))
-  const [childDirty, setChildDirty] = useState(false)
-  const [childHasErrors, setChildHasErrors] = useState(false)
 
-  const lastArgsSignatureRef = useRef<string>(
-    serializeParams(initialParamsRef.current)
+  const handleCodeChange = useCallback(
+    (value: string) => {
+      applyParamsPatch({ code: value })
+    },
+    [applyParamsPatch]
   )
-  const lastArgsDirtyRef = useRef<boolean>(Boolean(args?.dirty))
-  const internalUpdateRef = useRef(false)
-  const lastEmittedRef = useRef<{
-    params: NormalizedParams
-    hasErrors: boolean
-    dirty: boolean
-  } | null>(null)
 
-  useEffect(() => {
-    const normalized = normalizeParams(args)
-    const signature = serializeParams(normalized)
-    const incomingDirty = Boolean(args?.dirty)
+  const handleInputsChange = useCallback(
+    (value: KeyValueEntry[]) => {
+      applyParamsPatch({ inputs: value })
+    },
+    [applyParamsPatch]
+  )
 
-    if (
-      signature === lastArgsSignatureRef.current &&
-      incomingDirty === lastArgsDirtyRef.current
-    ) {
-      return
-    }
-
-    lastArgsSignatureRef.current = signature
-    lastArgsDirtyRef.current = incomingDirty
-    internalUpdateRef.current = true
-    initialParamsRef.current = normalized
-    setParams(normalized)
-    setDirty(incomingDirty)
-    setChildDirty(false)
-    setChildHasErrors(false)
-  }, [args])
+  const handleOutputsChange = useCallback(
+    (value: KeyValueEntry[]) => {
+      applyParamsPatch({ outputs: value })
+    },
+    [applyParamsPatch]
+  )
 
   const codeHasErrors = useMemo(() => {
+    const trimmed = params.code?.trim()
+    if (!trimmed) return false
     try {
-      if (params.code.trim()) {
-        new Function(params.code)
-      }
+      new Function(trimmed)
       return false
     } catch {
       return true
     }
   }, [params.code])
 
-  const combinedDirty = dirty || childDirty
-  const combinedHasErrors = codeHasErrors || childHasErrors
+  const inputsInvalid = useMemo(
+    () => checkKeyValuePairs(params.inputs ?? []),
+    [params.inputs]
+  )
+  const outputsInvalid = useMemo(
+    () => checkKeyValuePairs(params.outputs ?? []),
+    [params.outputs]
+  )
+
+  const hasValidationErrors = codeHasErrors || inputsInvalid || outputsInvalid
 
   useEffect(() => {
-    if (!onChange) return
-
-    if (internalUpdateRef.current) {
-      internalUpdateRef.current = false
-      return
-    }
-
-    const payload = cloneParams(params)
-    const last = lastEmittedRef.current
-
-    if (
-      last &&
-      last.dirty === combinedDirty &&
-      last.hasErrors === combinedHasErrors &&
-      deepEqual(last.params, payload)
-    ) {
-      return
-    }
-
-    lastEmittedRef.current = {
-      params: payload,
-      hasErrors: combinedHasErrors,
-      dirty: combinedDirty
-    }
-
-    onChange(payload, combinedHasErrors, combinedDirty)
-  }, [combinedDirty, combinedHasErrors, onChange, params])
+    if (validationRef.current === hasValidationErrors) return
+    validationRef.current = hasValidationErrors
+    updateNodeData(nodeId, { hasValidationErrors })
+  }, [hasValidationErrors, nodeId, updateNodeData])
 
   return (
     <div className="flex flex-col gap-2">
       <NodeTextAreaField
-        value={params.code}
+        value={params.code || ''}
         placeholder="Enter custom JavaScript code"
         rows={6}
-        onChange={(val) => {
-          setParams((prev) => {
-            if (prev.code === val) {
-              return prev
-            }
-            setDirty(true)
-            return { ...prev, code: val }
-          })
-        }}
-      />
-      <KeyValuePair
-        title="Inputs"
-        variables={params.inputs}
-        onChange={(updated, nodeHasErrors, childDirtyState) => {
-          const normalized = normalizePairs(updated)
-          setParams((prev) => {
-            if (deepEqual(prev.inputs, normalized)) {
-              return prev
-            }
-            setDirty(true)
-            return { ...prev, inputs: normalized }
-          })
-          setChildDirty((prev) => prev || childDirtyState)
-          setChildHasErrors(nodeHasErrors)
-        }}
-      />
-      <KeyValuePair
-        title="Outputs"
-        variables={params.outputs}
-        onChange={(updated, nodeHasErrors, childDirtyState) => {
-          const normalized = normalizePairs(updated)
-          setParams((prev) => {
-            if (deepEqual(prev.outputs, normalized)) {
-              return prev
-            }
-            setDirty(true)
-            return { ...prev, outputs: normalized }
-          })
-          setChildDirty((prev) => prev || childDirtyState)
-          setChildHasErrors(nodeHasErrors)
-        }}
+        onChange={handleCodeChange}
       />
       {codeHasErrors && (
         <p className="text-xs text-red-500">Syntax error in code</p>
       )}
+      <KeyValuePair
+        title="Inputs"
+        variables={params.inputs || []}
+        onChange={handleInputsChange}
+      />
+      <KeyValuePair
+        title="Outputs"
+        variables={params.outputs || []}
+        onChange={handleOutputsChange}
+      />
     </div>
   )
 }

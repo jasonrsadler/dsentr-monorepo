@@ -4,163 +4,435 @@ import {
   Background,
   MiniMap,
   addEdge,
-  useEdgesState,
-  useNodesState,
+  applyEdgeChanges,
+  applyNodeChanges,
   useReactFlow
 } from '@xyflow/react'
 import TriggerNode from '@/components/Workflow/TriggerNode'
-import ActionNode from '@/components/Workflow/ActionNode'
+import {
+  SendGridActionNode,
+  MailgunActionNode,
+  AmazonSesActionNode,
+  SmtpActionNode,
+  WebhookActionNode,
+  SlackActionNode,
+  TeamsActionNode,
+  GoogleChatActionNode,
+  GoogleSheetsActionNode,
+  HttpRequestActionNode,
+  RunCustomCodeActionNode
+} from '@/components/workflow/nodes'
 import NodeEdge from '@/components/Workflow/NodeEdge'
 import CustomControls from '@/components/UI/ReactFlow/CustomControl'
 import ConditionNode from '@/components/Workflow/ConditionNode'
 import { normalizePlanTier } from '@/lib/planTiers'
+import { generateUniqueLabel } from '@/lib/workflowGraph'
+import {
+  useWorkflowStore,
+  selectNodes,
+  selectEdges
+} from '@/stores/workflowStore'
+import {
+  normalizeEdgesForState,
+  normalizeNodesForState
+} from './FlowCanvas.helpers'
 
-function normalizeNode(n: any) {
-  return {
-    id: n.id,
-    type: n.type,
-    position: n.position,
-    data: sanitizeData(n.data)
+type ActionDropSubtype =
+  | 'actionEmailSendgrid'
+  | 'actionEmailMailgun'
+  | 'actionEmailAmazonSes'
+  | 'actionEmailSmtp'
+  | 'actionWebhook'
+  | 'actionSlack'
+  | 'actionTeams'
+  | 'actionGoogleChat'
+  | 'actionSheets'
+  | 'actionHttp'
+  | 'actionCode'
+
+interface DropDescriptor {
+  nodeType: string
+  labelBase: string
+  idPrefix: string
+  expanded: boolean
+  data: Record<string, unknown>
+}
+
+type ActionDropConfig = {
+  nodeType: ActionDropSubtype
+  labelBase: string
+  idPrefix: string
+  expanded: boolean
+  createData: () => Record<string, unknown>
+}
+
+const ACTION_NODE_DROP_CONFIG: Record<ActionDropSubtype, ActionDropConfig> = {
+  actionEmailSendgrid: {
+    nodeType: 'actionEmailSendgrid',
+    labelBase: 'SendGrid email',
+    idPrefix: 'action-email-sendgrid',
+    expanded: true,
+    createData: () => ({
+      actionType: 'email',
+      emailProvider: 'sendgrid',
+      params: {
+        apiKey: '',
+        from: '',
+        to: '',
+        templateId: '',
+        substitutions: [],
+        subject: '',
+        body: ''
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionEmailMailgun: {
+    nodeType: 'actionEmailMailgun',
+    labelBase: 'Mailgun email',
+    idPrefix: 'action-email-mailgun',
+    expanded: true,
+    createData: () => ({
+      actionType: 'email',
+      emailProvider: 'mailgun',
+      params: {
+        domain: '',
+        apiKey: '',
+        region: 'US (api.mailgun.net)',
+        from: '',
+        to: '',
+        subject: '',
+        body: '',
+        template: '',
+        variables: []
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionEmailAmazonSes: {
+    nodeType: 'actionEmailAmazonSes',
+    labelBase: 'Amazon SES email',
+    idPrefix: 'action-email-amazon-ses',
+    expanded: true,
+    createData: () => ({
+      actionType: 'email',
+      emailProvider: 'amazon_ses',
+      params: {
+        awsAccessKey: '',
+        awsSecretKey: '',
+        awsRegion: 'us-east-1',
+        sesVersion: 'v2',
+        fromEmail: '',
+        toEmail: '',
+        subject: '',
+        body: '',
+        template: '',
+        templateVariables: []
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionEmailSmtp: {
+    nodeType: 'actionEmailSmtp',
+    labelBase: 'SMTP email',
+    idPrefix: 'action-email-smtp',
+    expanded: true,
+    createData: () => ({
+      actionType: 'email',
+      emailProvider: 'smtp',
+      params: {
+        smtpHost: '',
+        smtpPort: 587,
+        smtpUser: '',
+        smtpPassword: '',
+        smtpTlsMode: 'starttls',
+        smtpTls: true,
+        from: '',
+        to: '',
+        subject: '',
+        body: ''
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionWebhook: {
+    nodeType: 'actionWebhook',
+    labelBase: 'Webhook call',
+    idPrefix: 'action-webhook',
+    expanded: true,
+    createData: () => ({
+      actionType: 'webhook',
+      params: {
+        method: 'POST',
+        url: '',
+        headers: [],
+        queryParams: [],
+        bodyType: 'raw',
+        body: '',
+        formBody: [],
+        authType: 'none',
+        authUsername: '',
+        authPassword: '',
+        authToken: ''
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionSlack: {
+    nodeType: 'actionSlack',
+    labelBase: 'Slack message',
+    idPrefix: 'action-slack',
+    expanded: true,
+    createData: () => ({
+      actionType: 'slack',
+      params: {
+        channel: '',
+        message: '',
+        token: '',
+        connectionScope: '',
+        connectionId: '',
+        accountEmail: ''
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionTeams: {
+    nodeType: 'actionTeams',
+    labelBase: 'Teams message',
+    idPrefix: 'action-teams',
+    expanded: true,
+    createData: () => ({
+      actionType: 'teams',
+      params: {
+        deliveryMethod: 'Incoming Webhook',
+        webhookType: 'Connector',
+        webhookUrl: '',
+        message: '',
+        summary: '',
+        title: '',
+        themeColor: '',
+        oauthProvider: '',
+        oauthConnectionScope: '',
+        oauthConnectionId: '',
+        oauthAccountEmail: '',
+        cardJson: '',
+        cardMode: 'Simple card builder',
+        cardTitle: '',
+        cardBody: '',
+        workflowOption: 'Basic (Raw JSON)',
+        workflowRawJson: '',
+        workflowHeaderName: '',
+        workflowHeaderSecret: '',
+        teamId: '',
+        teamName: '',
+        channelId: '',
+        channelName: '',
+        messageType: 'Text',
+        mentions: []
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionGoogleChat: {
+    nodeType: 'actionGoogleChat',
+    labelBase: 'Google Chat message',
+    idPrefix: 'action-google-chat',
+    expanded: true,
+    createData: () => ({
+      actionType: 'googlechat',
+      params: {
+        webhookUrl: '',
+        message: '',
+        cardJson: ''
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionSheets: {
+    nodeType: 'actionSheets',
+    labelBase: 'Google Sheets row',
+    idPrefix: 'action-sheets',
+    expanded: true,
+    createData: () => ({
+      actionType: 'sheets',
+      params: {
+        spreadsheetId: '',
+        worksheet: '',
+        columns: [],
+        accountEmail: '',
+        oauthConnectionScope: '',
+        oauthConnectionId: ''
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionHttp: {
+    nodeType: 'actionHttp',
+    labelBase: 'HTTP request',
+    idPrefix: 'action-http',
+    expanded: true,
+    createData: () => ({
+      actionType: 'http',
+      params: {
+        method: 'GET',
+        url: '',
+        headers: [],
+        queryParams: [],
+        bodyType: 'raw',
+        body: '',
+        formBody: [],
+        authType: 'none',
+        authUsername: '',
+        authPassword: '',
+        authToken: ''
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
+  actionCode: {
+    nodeType: 'actionCode',
+    labelBase: 'Code step',
+    idPrefix: 'action-code',
+    expanded: true,
+    createData: () => ({
+      actionType: 'code',
+      params: {
+        code: '',
+        inputs: [],
+        outputs: []
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
   }
-}
-function normalizeEdge(e: any) {
-  const label = (e as any).label ?? null
-  const animated = Boolean((e as any).animated)
-  return {
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    sourceHandle: e.sourceHandle,
-    targetHandle: e.targetHandle,
-    type: e.type,
-    data: e.data,
-    label,
-    animated
-  }
-}
-function sortById<T extends { id: string }>(arr: T[]): T[] {
-  return [...arr].sort((a, b) => a.id.localeCompare(b.id))
-}
-
-function sanitizeData(data: any) {
-  if (!data || typeof data !== 'object') return data
-  const { dirty, wfEpoch, ...rest } = data as any
-  return rest
-}
-
-const LABEL_MESSAGES = {
-  spaces: 'Node names cannot contain spaces.',
-  duplicate: 'Node name must be unique.'
 } as const
 
-type FlowNode = {
-  id: string
-  data?: Record<string, any>
-  [key: string]: any
-}
-
-function sanitizeLabelInput(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function countExistingLabels(nodes: FlowNode[]): Map<string, number> {
-  const counts = new Map<string, number>()
-  nodes.forEach((node) => {
-    const label = sanitizeLabelInput(node?.data?.label)
-    if (!label) return
-    const key = label.toLowerCase()
-    counts.set(key, (counts.get(key) ?? 0) + 1)
-  })
-  return counts
-}
-
-function generateUniqueLabel(baseLabel: string, nodes: FlowNode[]): string {
-  const trimmed = sanitizeLabelInput(baseLabel)
-  const normalizedBase = trimmed.replace(/\s+/g, '') || 'Node'
-  const counts = countExistingLabels(nodes)
-  if ((counts.get(normalizedBase.toLowerCase()) ?? 0) === 0) {
-    return normalizedBase
+function normalizeActionDropSubtype(
+  rawSubtype?: string | null
+): ActionDropSubtype {
+  if (!rawSubtype) return 'actionEmailSendgrid'
+  const lowered = rawSubtype.trim().toLowerCase()
+  switch (lowered) {
+    case 'actionemailsendgrid':
+    case 'actionemail':
+    case 'send email':
+    case 'email':
+    case 'sendgrid':
+      return 'actionEmailSendgrid'
+    case 'actionemailmailgun':
+    case 'mailgun':
+      return 'actionEmailMailgun'
+    case 'actionemailamazonses':
+    case 'amazon ses':
+    case 'amazon_ses':
+    case 'amazonses':
+      return 'actionEmailAmazonSes'
+    case 'actionemailsmtp':
+    case 'smtp':
+      return 'actionEmailSmtp'
+    case 'actionwebhook':
+    case 'post webhook':
+    case 'webhook':
+      return 'actionWebhook'
+    case 'actionslack':
+    case 'slack':
+      return 'actionSlack'
+    case 'actionteams':
+    case 'teams':
+      return 'actionTeams'
+    case 'actiongooglechat':
+    case 'googlechat':
+    case 'google chat':
+      return 'actionGoogleChat'
+    case 'actionsheets':
+    case 'sheets':
+    case 'create google sheet row':
+      return 'actionSheets'
+    case 'actionhttp':
+    case 'http':
+    case 'http request':
+      return 'actionHttp'
+    case 'actioncode':
+    case 'code':
+    case 'run custom code':
+      return 'actionCode'
+    case 'messaging':
+      return 'actionSlack'
+    default:
+      return 'actionEmailSendgrid'
   }
-  let suffix = 2
-  let candidate = `${normalizedBase}${suffix}`
-  while ((counts.get(candidate.toLowerCase()) ?? 0) > 0) {
-    suffix += 1
-    candidate = `${normalizedBase}${suffix}`
-  }
-  return candidate
 }
 
-function shallowEqualData(
-  a: Record<string, any> | undefined,
-  b: Record<string, any>
-): boolean {
-  if (!a) return Object.keys(b).length === 0
-  const keysA = Object.keys(a)
-  const keysB = Object.keys(b)
-  if (keysA.length !== keysB.length) return false
-  for (const key of keysA) {
-    if (a[key] !== b[key]) return false
-  }
-  return true
-}
+function normalizeDropType(rawType: string): DropDescriptor {
+  const [categoryRaw, subtypeRaw] = rawType.split(':')
+  const category = categoryRaw?.trim().toLowerCase()
 
-function reconcileNodeLabels(nodes: FlowNode[]): FlowNode[] {
-  const metadata = nodes.map((node) => {
-    const trimmed = sanitizeLabelInput(node?.data?.label)
+  if (category === 'trigger') {
     return {
-      trimmed,
-      hasSpaces: /\s/.test(trimmed),
-      normalized: trimmed.toLowerCase()
+      nodeType: 'trigger',
+      labelBase: 'Trigger',
+      idPrefix: 'trigger',
+      expanded: true,
+      data: {}
     }
-  })
-  const counts = new Map<string, number>()
-  metadata.forEach(({ trimmed, normalized }) => {
-    if (!trimmed) return
-    counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
-  })
-  let hasChanges = false
-  const nextNodes = nodes.map((node, index) => {
-    const prevData = node.data ?? {}
-    const { trimmed, hasSpaces, normalized } = metadata[index]
-    let labelError: string | null = null
-    if (trimmed && hasSpaces) {
-      labelError = LABEL_MESSAGES.spaces
-    } else if (trimmed && (counts.get(normalized) ?? 0) > 1) {
-      labelError = LABEL_MESSAGES.duplicate
-    }
-    const hasLabelValidationError = Boolean(labelError)
-    const nextDataShouldChange =
-      prevData.label !== trimmed ||
-      (prevData.labelError ?? null) !== labelError ||
-      Boolean(prevData.hasLabelValidationError) !== hasLabelValidationError
+  }
 
-    if (!nextDataShouldChange) return node
-    hasChanges = true
+  if (category === 'condition') {
     return {
-      ...node,
-      data: {
-        ...prevData,
-        label: trimmed,
-        labelError,
-        hasLabelValidationError
-      }
+      nodeType: 'condition',
+      labelBase: 'Condition',
+      idPrefix: 'condition',
+      expanded: true,
+      data: {}
     }
-  })
-  return hasChanges ? nextNodes : nodes
+  }
+
+  if (category === 'action') {
+    const subtype = normalizeActionDropSubtype(subtypeRaw ?? null)
+    const config = ACTION_NODE_DROP_CONFIG[subtype]
+    return {
+      nodeType: config.nodeType,
+      labelBase: config.labelBase,
+      idPrefix: config.idPrefix,
+      expanded: config.expanded,
+      data: config.createData()
+    }
+  }
+
+  const fallback = ACTION_NODE_DROP_CONFIG.actionEmailSendgrid
+  return {
+    nodeType: fallback.nodeType,
+    labelBase: fallback.labelBase,
+    idPrefix: fallback.idPrefix,
+    expanded: fallback.expanded,
+    data: fallback.createData()
+  }
 }
 
 interface FlowCanvasProps {
   isDark?: boolean
-  markWorkflowDirty: () => void
-  setSaveRef?: (ref: {
-    saveAllNodes: () => any[]
-    getEdges: () => any[]
-    setNodesFromToolbar: (updatedNodes: any[]) => void
-    loadGraph: (graph: { nodes: any[]; edges: any[] }) => void
-  }) => void
   workflowId?: string | null
-  workflowData?: { nodes: any[]; edges: any[] }
-  onGraphChange?: (graph: { nodes: any[]; edges: any[] }) => void
   onRunWorkflow?: () => void
   runningIds?: Set<string>
   succeededIds?: Set<string>
@@ -172,11 +444,7 @@ interface FlowCanvasProps {
 
 export default function FlowCanvas({
   isDark,
-  markWorkflowDirty,
-  setSaveRef,
   workflowId,
-  workflowData,
-  onGraphChange,
   onRunWorkflow,
   runningIds = new Set(),
   succeededIds = new Set(),
@@ -185,20 +453,21 @@ export default function FlowCanvas({
   onRestrictionNotice,
   canEdit = true
 }: FlowCanvasProps) {
-  const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
-  const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
+  const nodes = useWorkflowStore(selectNodes)
+  const edges = useWorkflowStore(selectEdges)
   const reactFlow = useReactFlow()
   const normalizedPlanTier = useMemo(
     () => normalizePlanTier(planTier),
     [planTier]
   )
   const isSoloPlan = normalizedPlanTier === 'solo'
-  const rafRef = useRef<number | null>(null)
   const canEditRef = useRef<boolean>(canEdit)
+  const setCanEditState = useWorkflowStore((state) => state.setCanEdit)
 
   useEffect(() => {
     canEditRef.current = canEdit
-  }, [canEdit])
+    setCanEditState(canEdit)
+  }, [canEdit, setCanEditState])
 
   const onRunWorkflowRef = useRef(onRunWorkflow)
   useEffect(() => {
@@ -209,51 +478,13 @@ export default function FlowCanvas({
     onRunWorkflowRef.current?.()
   }, [])
 
-  // Keep markWorkflowDirty stable via ref
-  const markWorkflowDirtyRef = useRef(markWorkflowDirty)
-  useEffect(() => {
-    markWorkflowDirtyRef.current = markWorkflowDirty
-  }, [markWorkflowDirty])
-
-  useEffect(() => {
-    if (!workflowId) {
-      setNodes([])
-      setEdges([])
-      return
+  const { setNodes, setEdges } = useMemo(() => {
+    const state = useWorkflowStore.getState()
+    return {
+      setNodes: state.setNodes,
+      setEdges: state.setEdges
     }
-    const epoch = Date.now()
-    const incomingNodes = (workflowData?.nodes ?? []).map((node: any) => ({
-      id: node.id,
-      type: node.type,
-      position: node.position,
-      data: {
-        ...(node?.data ? JSON.parse(JSON.stringify(node.data)) : {}),
-        dirty: Boolean(node?.data?.dirty),
-        wfEpoch: epoch
-      }
-    }))
-    const incomingEdges = (workflowData?.edges ?? []).map((e: any) => ({
-      ...e
-    }))
-    setNodes(reconcileNodeLabels(incomingNodes))
-    setEdges(incomingEdges)
-  }, [workflowId, workflowData, setNodes, setEdges])
-
-  useEffect(() => {
-    if (!onGraphChange) return
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    const nodesSnap = nodes
-    const edgesSnap = edges
-    rafRef.current = requestAnimationFrame(() => {
-      const cleanNodes = sortById(nodesSnap.map(normalizeNode))
-      const cleanEdges = sortById(edgesSnap.map(normalizeEdge))
-      onGraphChange({ nodes: cleanNodes, edges: cleanEdges })
-    })
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
-    }
-  }, [nodes, edges, onGraphChange])
+  }, [])
 
   const runningIdsRef = useRef(runningIds)
   const succeededIdsRef = useRef(succeededIds)
@@ -268,94 +499,250 @@ export default function FlowCanvas({
     failedIdsRef.current = failedIds
   }, [failedIds])
 
-  const updateNodeData = useCallback(
-    (id: string, newData: any, suppressDirty = false) => {
-      if (!canEditRef.current) return
-      setNodes((nds) => {
-        let didChange = false
-        const updated = nds.map((n) => {
-          if (n.id !== id) return n
-          const prevData = n.data ?? {}
-          const mergedData = { ...prevData, ...newData }
-          if (shallowEqualData(prevData, mergedData)) return n
-          didChange = true
-          return { ...n, data: mergedData }
-        })
-        const reconciled = reconcileNodeLabels(updated)
-        if (!didChange && reconciled === updated) return nds
-        return reconciled
-      })
-      if (!suppressDirty && canEditRef.current) markWorkflowDirtyRef.current()
-    },
-    [setNodes]
-  )
-
-  const saveAllNodes = useCallback(() => {
-    if (!canEditRef.current) {
-      return nodes
-    }
-    const clearedNodes = nodes.map((n) => {
-      const keys = n.data?.inputs?.map((i) => i.key.trim()) || []
-      const values = n.data?.inputs?.map((i) => i.value.trim()) || []
-      const hasDuplicateKeys =
-        new Set(keys.filter((k) => k)).size !== keys.filter((k) => k).length
-      const hasInvalidInputs = keys.some((k) => !k) || values.some((v) => !v)
-      const newDirty = hasDuplicateKeys || hasInvalidInputs
-      return { ...n, data: { ...n.data, dirty: newDirty } }
-    })
-    setNodes(reconcileNodeLabels(clearedNodes))
-    return clearedNodes
-  }, [nodes, setNodes])
-
-  useEffect(() => {
-    if (!setSaveRef) return
-    setSaveRef({
-      saveAllNodes,
-      getEdges: () => edges,
-      setNodesFromToolbar: (updatedNodes) =>
-        setNodes((nds) => {
-          if (!canEditRef.current) return nds
-          let changed = false
-          const mapped = nds.map((n) => {
-            const updated = updatedNodes.find((u) => u.id === n.id)
-            if (!updated) return n
-            const prevData = n.data ?? {}
-            const nextData = { ...prevData, ...updated.data }
-            if (shallowEqualData(prevData, nextData)) return n
-            changed = true
-            return { ...n, data: nextData }
-          })
-          const reconciled = reconcileNodeLabels(mapped)
-          if (!changed && reconciled === mapped) return nds
-          return reconciled
-        }),
-      loadGraph: (graph) => {
-        const epoch = Date.now()
-        const safeNodes = (graph?.nodes ?? []).map((n: any) => ({
-          ...n,
-          data: {
-            ...(n.data ?? {}),
-            dirty: n.data?.dirty ?? false,
-            wfEpoch: epoch
-          }
-        }))
-        setNodes(reconcileNodeLabels(safeNodes))
-        setEdges(graph?.edges ?? [])
-        if (canEditRef.current) {
-          markWorkflowDirtyRef.current()
-        }
+  const determineActionSubtype = useCallback((data: any): ActionDropSubtype => {
+    const rawActionType =
+      typeof data?.actionType === 'string' ? data.actionType : null
+    const normalizedActionType = (() => {
+      if (!rawActionType) return 'email'
+      const lowered = rawActionType.trim().toLowerCase()
+      switch (lowered) {
+        case 'send email':
+          return 'email'
+        case 'post webhook':
+          return 'webhook'
+        case 'create google sheet row':
+          return 'sheets'
+        case 'http request':
+          return 'http'
+        case 'run custom code':
+          return 'code'
+        default:
+          return lowered || 'email'
       }
-    })
-  }, [edges, saveAllNodes, setSaveRef, setNodes, setEdges])
+    })()
 
-  const removeNode = useCallback(
-    (id) => {
-      if (!canEditRef.current) return
-      setNodes((nds) => nds.filter((n) => n.id !== id))
-      setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
-      markWorkflowDirtyRef.current()
+    if (normalizedActionType === 'messaging') {
+      const platform =
+        typeof data?.params?.platform === 'string'
+          ? data.params.platform.trim().toLowerCase()
+          : ''
+      if (platform === 'google chat' || platform === 'googlechat') {
+        return 'actionGoogleChat'
+      }
+      if (platform === 'teams') return 'actionTeams'
+      return 'actionSlack'
+    }
+
+    switch (normalizedActionType) {
+      case 'email': {
+        const providerSource = (() => {
+          if (typeof data?.emailProvider === 'string') {
+            return data.emailProvider
+          }
+          if (typeof data?.params?.provider === 'string') {
+            return data.params.provider
+          }
+          if (typeof data?.params?.service === 'string') {
+            return data.params.service
+          }
+          return ''
+        })()
+
+        const normalizedProvider = providerSource.trim().toLowerCase()
+        if (normalizedProvider.includes('mailgun')) {
+          return 'actionEmailMailgun'
+        }
+        if (
+          normalizedProvider === 'amazon ses' ||
+          normalizedProvider === 'amazon_ses' ||
+          normalizedProvider === 'amazonses'
+        ) {
+          return 'actionEmailAmazonSes'
+        }
+        if (normalizedProvider === 'smtp') {
+          return 'actionEmailSmtp'
+        }
+        if (normalizedProvider.includes('sendgrid')) {
+          return 'actionEmailSendgrid'
+        }
+
+        const paramsRecord =
+          data?.params && typeof data.params === 'object'
+            ? (data.params as Record<string, unknown>)
+            : ({} as Record<string, unknown>)
+
+        if ('smtpHost' in paramsRecord || 'smtpUser' in paramsRecord) {
+          return 'actionEmailSmtp'
+        }
+        if (
+          'awsAccessKey' in paramsRecord ||
+          'awsSecretKey' in paramsRecord ||
+          'sesVersion' in paramsRecord ||
+          'awsRegion' in paramsRecord
+        ) {
+          return 'actionEmailAmazonSes'
+        }
+        if ('domain' in paramsRecord || 'region' in paramsRecord) {
+          return 'actionEmailMailgun'
+        }
+        return 'actionEmailSendgrid'
+      }
+      case 'webhook':
+        return 'actionWebhook'
+      case 'slack':
+        return 'actionSlack'
+      case 'teams':
+        return 'actionTeams'
+      case 'googlechat':
+        return 'actionGoogleChat'
+      case 'sheets':
+        return 'actionSheets'
+      case 'http':
+        return 'actionHttp'
+      case 'code':
+        return 'actionCode'
+      default:
+        return 'actionEmailSendgrid'
+    }
+  }, [])
+
+  const actionRenderers = useMemo(() => {
+    const sharedRunProps = {
+      onRun: () => invokeRunWorkflow(),
+      canEdit
+    }
+
+    return {
+      actionEmailSendgrid: (props) => (
+        <SendGridActionNode
+          key={`action-email-sendgrid-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionEmailMailgun: (props) => (
+        <MailgunActionNode
+          key={`action-email-mailgun-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionEmailAmazonSes: (props) => (
+        <AmazonSesActionNode
+          key={`action-email-amazon-ses-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionEmailSmtp: (props) => (
+        <SmtpActionNode
+          key={`action-email-smtp-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionWebhook: (props) => (
+        <WebhookActionNode
+          key={`action-webhook-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          planTier={normalizedPlanTier}
+          onRestrictionNotice={onRestrictionNotice}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionSlack: (props) => (
+        <SlackActionNode
+          key={`action-slack-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          planTier={normalizedPlanTier}
+          onRestrictionNotice={onRestrictionNotice}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionTeams: (props) => (
+        <TeamsActionNode
+          key={`action-teams-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          planTier={normalizedPlanTier}
+          onRestrictionNotice={onRestrictionNotice}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionGoogleChat: (props) => (
+        <GoogleChatActionNode
+          key={`action-google-chat-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          planTier={normalizedPlanTier}
+          onRestrictionNotice={onRestrictionNotice}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionSheets: (props) => (
+        <GoogleSheetsActionNode
+          key={`action-sheets-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          planTier={normalizedPlanTier}
+          onRestrictionNotice={onRestrictionNotice}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionHttp: (props) => (
+        <HttpRequestActionNode
+          key={`action-http-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
+      actionCode: (props) => (
+        <RunCustomCodeActionNode
+          key={`action-code-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...sharedRunProps}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      )
+    }
+  }, [invokeRunWorkflow, canEdit, normalizedPlanTier, onRestrictionNotice])
+
+  const renderActionNode = useCallback(
+    (subtype: keyof typeof actionRenderers, props: any) => {
+      const renderer =
+        actionRenderers[subtype] ?? actionRenderers.actionEmailSendgrid
+      return renderer(props)
     },
-    [setNodes, setEdges]
+    [actionRenderers]
   )
 
   const nodeTypes = useMemo(
@@ -367,27 +754,10 @@ export default function FlowCanvas({
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
-          onRemove={removeNode}
-          onDirtyChange={markWorkflowDirtyRef.current}
-          onUpdateNode={updateNodeData}
           onRun={() => invokeRunWorkflow()}
           planTier={normalizedPlanTier}
           onRestrictionNotice={onRestrictionNotice}
-        />
-      ),
-      action: (props) => (
-        <ActionNode
-          key={`action-${props.id}-${props?.data?.wfEpoch ?? ''}`}
-          {...props}
-          isRunning={runningIdsRef.current.has(props.id)}
-          isSucceeded={succeededIdsRef.current.has(props.id)}
-          isFailed={failedIdsRef.current.has(props.id)}
-          onRemove={removeNode}
-          onDirtyChange={markWorkflowDirtyRef.current}
-          onUpdateNode={updateNodeData}
-          onRun={() => invokeRunWorkflow()}
-          planTier={normalizedPlanTier}
-          onRestrictionNotice={onRestrictionNotice}
+          canEdit={canEdit}
         />
       ),
       condition: (props) => (
@@ -397,38 +767,64 @@ export default function FlowCanvas({
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
-          onRemove={removeNode}
-          onDirtyChange={markWorkflowDirtyRef.current}
-          onUpdateNode={updateNodeData}
-          onRun={() => console.log('Run Condition', props.id)}
+          canEdit={canEdit}
         />
-      )
+      ),
+      actionEmailSendgrid: (props) =>
+        renderActionNode('actionEmailSendgrid', props),
+      actionEmailMailgun: (props) =>
+        renderActionNode('actionEmailMailgun', props),
+      actionEmailAmazonSes: (props) =>
+        renderActionNode('actionEmailAmazonSes', props),
+      actionEmailSmtp: (props) => renderActionNode('actionEmailSmtp', props),
+      actionEmail: (props) => {
+        const subtype = determineActionSubtype(props?.data)
+        return renderActionNode(subtype as keyof typeof actionRenderers, props)
+      },
+      actionWebhook: (props) => renderActionNode('actionWebhook', props),
+      actionSlack: (props) => renderActionNode('actionSlack', props),
+      actionTeams: (props) => renderActionNode('actionTeams', props),
+      actionGoogleChat: (props) => renderActionNode('actionGoogleChat', props),
+      actionSheets: (props) => renderActionNode('actionSheets', props),
+      actionHttp: (props) => renderActionNode('actionHttp', props),
+      actionCode: (props) => renderActionNode('actionCode', props),
+      action: (props) => {
+        const subtype = determineActionSubtype(props?.data)
+        return renderActionNode(subtype as keyof typeof actionRenderers, props)
+      }
     }),
     [
-      removeNode,
-      updateNodeData,
+      canEdit,
+      determineActionSubtype,
       invokeRunWorkflow,
       normalizedPlanTier,
-      onRestrictionNotice
+      onRestrictionNotice,
+      renderActionNode
     ]
   )
 
   const onNodesChange = useCallback(
     (changes) => {
       if (!canEditRef.current) return
-      markWorkflowDirtyRef.current()
-      onNodesChangeInternal(changes)
+      const currentNodes = useWorkflowStore.getState().nodes
+      const nextNodes = applyNodeChanges(changes, currentNodes)
+      if (nextNodes === currentNodes) return
+      const normalizedNodes = normalizeNodesForState(nextNodes)
+      setNodes(normalizedNodes)
     },
-    [onNodesChangeInternal]
+    [setNodes]
   )
 
   const onEdgesChange = useCallback(
     (changes) => {
       if (!canEditRef.current) return
-      markWorkflowDirtyRef.current()
-      onEdgesChangeInternal(changes)
+      const currentEdges = useWorkflowStore.getState().edges
+      const nextEdges = applyEdgeChanges(changes, currentEdges)
+      if (nextEdges === currentEdges) return
+      const normalizedEdges = normalizeEdgesForState(nextEdges)
+      setEdges(normalizedEdges)
     },
-    [onEdgesChangeInternal]
+    [setEdges]
   )
 
   const onConnect = useCallback(
@@ -440,20 +836,21 @@ export default function FlowCanvas({
           : params?.sourceHandle === 'cond-false'
             ? 'False'
             : null
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...params,
-            type: 'nodeEdge',
-            label: outcomeLabel,
-            data: {
-              edgeType: 'default',
-              outcome: outcomeLabel?.toLowerCase?.()
-            }
-          },
-          eds
-        )
+      const currentEdges = useWorkflowStore.getState().edges
+      const withNewEdge = addEdge(
+        {
+          ...params,
+          type: 'nodeEdge',
+          label: outcomeLabel,
+          data: {
+            edgeType: 'default',
+            outcome: outcomeLabel?.toLowerCase?.()
+          }
+        },
+        currentEdges
       )
+      const normalizedEdges = normalizeEdgesForState(withNewEdge)
+      setEdges(normalizedEdges)
     },
     [setEdges]
   )
@@ -462,39 +859,39 @@ export default function FlowCanvas({
     (event) => {
       event.preventDefault()
       if (!canEditRef.current) return
-      const type = event.dataTransfer.getData('application/reactflow')
-      if (!type) return
+      const rawType = event.dataTransfer.getData('application/reactflow')
+      if (!rawType) return
       const position = reactFlow.screenToFlowPosition({
         x: event.clientX,
         y: event.clientY
       })
-      setNodes((nds) => {
-        if (isSoloPlan && nds.length >= 10) {
-          onRestrictionNotice?.(
-            'Solo plan workflows support up to 10 nodes. Upgrade in Settings → Plan to add more steps.'
-          )
-          return nds
+      const currentNodes = useWorkflowStore.getState().nodes
+      if (isSoloPlan && currentNodes.length >= 10) {
+        onRestrictionNotice?.(
+          'Solo plan workflows support up to 10 nodes. Upgrade in Settings → Plan to add more steps.'
+        )
+        return
+      }
+      const dropDescriptor = normalizeDropType(rawType)
+      const label = generateUniqueLabel(dropDescriptor.labelBase, currentNodes)
+      const nodeIdPrefix = dropDescriptor.idPrefix.replace(/[^a-z0-9]+/gi, '-')
+      const newNodeId = `${nodeIdPrefix}-${Date.now()}`
+      const newNode = {
+        id: newNodeId,
+        type: dropDescriptor.nodeType,
+        position,
+        data: {
+          label,
+          expanded: dropDescriptor.expanded,
+          dirty: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          ...dropDescriptor.data
         }
-        const label = generateUniqueLabel(type, nds)
-        const newNode = {
-          id: `${type}-${+new Date()}`,
-          type: type.toLowerCase(),
-          position,
-          data: {
-            label,
-            expanded: ['trigger', 'action', 'condition'].includes(
-              type.toLowerCase()
-            ),
-            dirty: true,
-            inputs: [],
-            labelError: null,
-            hasLabelValidationError: false
-          }
-        }
-        const withNewNode = [...nds, newNode]
-        return reconcileNodeLabels(withNewNode)
-      })
-      markWorkflowDirtyRef.current()
+      }
+      const normalizedNodes = normalizeNodesForState([...currentNodes, newNode])
+      setNodes(normalizedNodes)
     },
     [setNodes, isSoloPlan, onRestrictionNotice, reactFlow]
   )
@@ -507,11 +904,18 @@ export default function FlowCanvas({
   const handleEdgeTypeChange = useCallback(
     (edgeId, newType) => {
       if (!canEditRef.current) return
-      setEdges((eds) =>
-        eds.map((e) =>
-          e.id === edgeId ? { ...e, data: { ...e.data, edgeType: newType } } : e
-        )
+      const currentEdges = useWorkflowStore.getState().edges
+      const nextEdges = currentEdges.map((edge) =>
+        edge.id === edgeId
+          ? {
+              ...edge,
+              data: { ...edge.data, edgeType: newType }
+            }
+          : edge
       )
+      if (nextEdges === currentEdges) return
+      const normalizedEdges = normalizeEdgesForState(nextEdges)
+      setEdges(normalizedEdges)
     },
     [setEdges]
   )
@@ -519,7 +923,12 @@ export default function FlowCanvas({
   const handleEdgeDelete = useCallback(
     (edgeId) => {
       if (!canEditRef.current) return
-      setEdges((eds) => eds.filter((e) => e.id !== edgeId))
+      const currentEdges = useWorkflowStore.getState().edges
+      const nextEdges = currentEdges.filter((e) => e.id !== edgeId)
+      if (nextEdges.length !== currentEdges.length) {
+        const normalizedEdges = normalizeEdgesForState(nextEdges)
+        setEdges(normalizedEdges)
+      }
     },
     [setEdges]
   )

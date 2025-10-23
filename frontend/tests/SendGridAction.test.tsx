@@ -1,7 +1,9 @@
-import { screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
 import SendGridAction from '../src/components/workflow/Actions/Email/Services/SendGridAction'
-import { vi } from 'vitest'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
 const secrets = {
   email: {
@@ -11,50 +13,78 @@ const secrets = {
   }
 }
 
-describe('SendGridAction', () => {
-  const baseArgs = {
-    apiKey: 'key-123',
-    from: 'from@example.com',
-    to: 'user@example.com',
-    subject: 'Hello',
-    body: 'Body',
-    dirty: false
-  }
+const nodeId = 'sendgrid-node'
 
+const baseParams = {
+  service: 'SendGrid',
+  apiKey: 'key-123',
+  from: 'from@example.com',
+  to: 'user@example.com',
+  subject: 'Hello',
+  body: 'Body'
+}
+
+const resetStore = () => {
+  act(() => {
+    useWorkflowStore.setState({
+      nodes: [],
+      edges: [],
+      isDirty: false,
+      isSaving: false,
+      canEdit: true
+    })
+  })
+}
+
+const initializeStore = (paramsOverride: Record<string, unknown> = {}) => {
+  act(() => {
+    useWorkflowStore.setState((state) => ({
+      ...state,
+      nodes: [
+        {
+          id: nodeId,
+          type: 'email',
+          position: { x: 0, y: 0 },
+          data: {
+            actionType: 'email',
+            params: { ...baseParams, ...paramsOverride },
+            dirty: false,
+            hasValidationErrors: false
+          }
+        }
+      ],
+      edges: []
+    }))
+  })
+}
+
+describe('SendGridAction', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
+    initializeStore()
   })
 
   afterEach(() => {
-    vi.runOnlyPendingTimers()
-    vi.useRealTimers()
+    resetStore()
   })
 
-  it('emits updates without validation errors for valid inputs', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SendGridAction args={{ ...baseArgs }} onChange={onChange} />,
-      { secrets }
-    )
+  const getNodeData = () =>
+    useWorkflowStore.getState().nodes.find((node) => node.id === nodeId)
+      ?.data as Record<string, any>
+
+  it('writes validation state to the workflow store when inputs are valid', async () => {
+    renderWithSecrets(<SendGridAction nodeId={nodeId} />, { secrets })
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenCalled()
+      const data = getNodeData()
+      expect(data?.hasValidationErrors).toBe(false)
     })
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[1]).toBe(false)
   })
 
   it('surfaces validation errors for invalid recipient emails', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SendGridAction args={{ ...baseArgs }} onChange={onChange} />,
-      { secrets }
-    )
+    renderWithSecrets(<SendGridAction nodeId={nodeId} />, { secrets })
 
-    const input = screen.getByPlaceholderText('Recipient Email(s)')
+    const input = screen.getByPlaceholderText('To (comma separated)')
     fireEvent.change(input, { target: { value: 'invalid-email' } })
-    vi.advanceTimersByTime(300)
 
     await waitFor(() => {
       expect(
@@ -62,21 +92,18 @@ describe('SendGridAction', () => {
       ).toBeInTheDocument()
     })
 
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[1]).toBe(true)
+    const data = getNodeData()
+    expect(data?.hasValidationErrors).toBe(true)
   })
 
   it('hides subject and body inputs when using a template', () => {
-    renderWithSecrets(
-      <SendGridAction
-        args={{ ...baseArgs, templateId: 'tmpl-1', subject: '', body: '' }}
-      />,
-      { secrets }
-    )
+    initializeStore({ templateId: 'tmpl-1', subject: '', body: '' })
+
+    renderWithSecrets(<SendGridAction nodeId={nodeId} />, { secrets })
 
     expect(screen.queryByPlaceholderText('Subject')).not.toBeInTheDocument()
     expect(
-      screen.queryByPlaceholderText('Message Body')
+      screen.queryByPlaceholderText('Body (plain text or HTML)')
     ).not.toBeInTheDocument()
   })
 })

@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import deepEqual from 'fast-deep-equal'
+import { useCallback, useEffect, useState } from 'react'
+
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import { useActionParams } from '@/stores/workflowSelectors'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
 type SendGridSubstitution = { key: string; value: string }
 
-type SendGridActionValues = {
+interface SendGridParams {
+  service?: string
   apiKey?: string
   from?: string
   to?: string
@@ -15,9 +18,11 @@ type SendGridActionValues = {
   substitutions?: SendGridSubstitution[]
   subject?: string
   body?: string
+  dirty: boolean
 }
 
-type NormalizedSendGridParams = {
+interface NormalizedSendGridState {
+  service?: string
   apiKey: string
   from: string
   to: string
@@ -27,72 +32,46 @@ type NormalizedSendGridParams = {
   body: string
 }
 
-type SendGridStringKey = Exclude<
-  keyof NormalizedSendGridParams,
-  'substitutions'
->
-
 interface SendGridActionProps {
-  args: SendGridActionValues
-  onChange?: (
-    args: SendGridActionValues,
-    hasErrors: boolean,
-    dirty: boolean
-  ) => void
+  nodeId: string
+  canEdit?: boolean
 }
 
-const normalizeSubstitutions = (
-  entries: SendGridSubstitution[] | undefined
-): SendGridSubstitution[] => {
-  if (!Array.isArray(entries)) return []
-  return entries
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null
-      const key = typeof entry.key === 'string' ? entry.key : ''
-      const value = typeof entry.value === 'string' ? entry.value : ''
-      return { key, value }
-    })
-    .filter((entry): entry is SendGridSubstitution => Boolean(entry))
-}
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-const normalizeParams = (
-  incoming?: SendGridActionValues
-): NormalizedSendGridParams => {
-  const base: NormalizedSendGridParams = {
-    apiKey: '',
-    from: '',
-    to: '',
-    templateId: '',
-    substitutions: [],
-    subject: '',
-    body: ''
-  }
-
-  if (!incoming || typeof incoming !== 'object') {
-    return base
-  }
-
-  return {
-    apiKey: typeof incoming.apiKey === 'string' ? incoming.apiKey : '',
-    from: typeof incoming.from === 'string' ? incoming.from : '',
-    to: typeof incoming.to === 'string' ? incoming.to : '',
-    templateId:
-      typeof incoming.templateId === 'string' ? incoming.templateId : '',
-    substitutions: normalizeSubstitutions(incoming.substitutions),
-    subject: typeof incoming.subject === 'string' ? incoming.subject : '',
-    body: typeof incoming.body === 'string' ? incoming.body : ''
-  }
-}
-
-const serializeParams = (params: NormalizedSendGridParams) =>
-  JSON.stringify({
-    ...params,
-    substitutions: params.substitutions.map((entry) => ({ ...entry }))
+function normalizeSubstitutions(value: unknown): SendGridSubstitution[] {
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return { key: '', value: '' }
+    }
+    const record = entry as Record<string, unknown>
+    const key = typeof record.key === 'string' ? record.key : ''
+    const valueStr = typeof record.value === 'string' ? record.value : ''
+    return { key, value: valueStr }
   })
+}
 
-type SendGridErrors = Partial<Record<keyof NormalizedSendGridParams, string>>
+function normalizeParams(
+  params: SendGridParams | undefined
+): NormalizedSendGridState {
+  const record =
+    params && typeof params === 'object' ? params : ({} as SendGridParams)
+  return {
+    service: typeof record.service === 'string' ? record.service : undefined,
+    apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
+    from: typeof record.from === 'string' ? record.from : '',
+    to: typeof record.to === 'string' ? record.to : '',
+    templateId: typeof record.templateId === 'string' ? record.templateId : '',
+    substitutions: normalizeSubstitutions(record.substitutions),
+    subject: typeof record.subject === 'string' ? record.subject : '',
+    body: typeof record.body === 'string' ? record.body : ''
+  }
+}
 
-const validate = (values: NormalizedSendGridParams): SendGridErrors => {
+type SendGridErrors = Partial<Record<keyof NormalizedSendGridState, string>>
+
+function validate(values: NormalizedSendGridState): SendGridErrors {
   const errors: SendGridErrors = {}
   if (!values.apiKey.trim()) errors.apiKey = 'API key is required'
   if (!values.from.trim()) errors.from = 'From email is required'
@@ -101,10 +80,9 @@ const validate = (values: NormalizedSendGridParams): SendGridErrors => {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean)
-  const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   if (recipients.length === 0) {
     errors.to = 'Recipient email(s) required'
-  } else if (recipients.some((recipient) => !emailRx.test(recipient))) {
+  } else if (recipients.some((recipient) => !EMAIL_RX.test(recipient))) {
     errors.to = 'One or more recipient emails are invalid'
   } else if (new Set(recipients).size !== recipients.length) {
     errors.to = 'Duplicate recipient emails are not allowed'
@@ -118,180 +96,110 @@ const validate = (values: NormalizedSendGridParams): SendGridErrors => {
   return errors
 }
 
-const cloneParams = (params: NormalizedSendGridParams) => ({
-  ...params,
-  substitutions: params.substitutions.map((entry) => ({ ...entry }))
-})
-
 export default function SendGridAction({
-  args,
-  onChange
+  nodeId,
+  canEdit = true
 }: SendGridActionProps) {
-  const initialParamsRef = useRef<NormalizedSendGridParams | null>(null)
-  if (!initialParamsRef.current) {
-    initialParamsRef.current = normalizeParams(args)
-  }
+  const params = useActionParams<SendGridParams>(nodeId, 'email')
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+  const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+  const effectiveCanEdit = canEdit && storeCanEdit
+  const [substitutionErrors, setSubstitutionErrors] = useState(false)
+  const normalizedParams = normalizeParams(params)
 
-  const [params, setParams] = useState<NormalizedSendGridParams>(
-    initialParamsRef.current!
+  useEffect(() => {
+    if (!normalizedParams.templateId.trim() && substitutionErrors) {
+      setSubstitutionErrors(false)
+    }
+  }, [normalizedParams.templateId, substitutionErrors])
+
+  const emitPatch = useCallback(
+    (patch: Partial<SendGridParams>) => {
+      if (!effectiveCanEdit) return
+
+      const base: SendGridParams =
+        params && typeof params === 'object' ? params : ({} as SendGridParams)
+      const { dirty: _dirty, ...rest } = base
+
+      updateNodeData(nodeId, {
+        params: { ...rest, ...patch },
+        dirty: true
+      })
+    },
+    [effectiveCanEdit, nodeId, params, updateNodeData]
   )
-  const [dirty, setDirty] = useState(false)
-  const [childDirty, setChildDirty] = useState(false)
-  const [childHasErrors, setChildHasErrors] = useState(false)
 
-  const lastArgsSignatureRef = useRef<string>(
-    serializeParams(initialParamsRef.current!)
-  )
-  const internalUpdateRef = useRef(false)
-  const lastEmittedRef = useRef<{
-    params: NormalizedSendGridParams
-    hasErrors: boolean
-    dirty: boolean
-  } | null>(null)
+  const errors = validate(normalizedParams)
+
+  const hasValidationErrors = (() => {
+    if (Object.keys(errors).length > 0) return true
+    if (substitutionErrors && normalizedParams.templateId.trim()) return true
+    return false
+  })()
 
   useEffect(() => {
-    const normalized = normalizeParams(args)
-    const signature = serializeParams(normalized)
-    if (signature === lastArgsSignatureRef.current) {
-      return
-    }
-
-    lastArgsSignatureRef.current = signature
-    internalUpdateRef.current = true
-    initialParamsRef.current = normalized
-    setParams(normalized)
-    setDirty(false)
-    setChildDirty(false)
-    setChildHasErrors(false)
-  }, [args])
-
-  const validationErrors = useMemo(() => validate(params), [params])
-  const combinedDirty = dirty || childDirty
-
-  useEffect(() => {
-    if (params.templateId) return
-    setChildHasErrors(false)
-    setChildDirty(false)
-  }, [params.templateId])
-
-  useEffect(() => {
-    if (!onChange) return
-
-    if (internalUpdateRef.current) {
-      internalUpdateRef.current = false
-      return
-    }
-    const hasErrors = childHasErrors || Object.keys(validationErrors).length > 0
-    const payload = cloneParams(params)
-    const last = lastEmittedRef.current
-
-    if (
-      last &&
-      last.dirty === combinedDirty &&
-      last.hasErrors === hasErrors &&
-      deepEqual(last.params, payload)
-    ) {
-      return
-    }
-
-    lastEmittedRef.current = {
-      params: payload,
-      hasErrors,
-      dirty: combinedDirty
-    }
-
-    onChange(payload, hasErrors, combinedDirty)
-  }, [childHasErrors, combinedDirty, onChange, params, validationErrors])
-
-  const updateField = (key: SendGridStringKey, value: string) => {
-    setParams((prev) => {
-      if ((prev[key] as string) === value) {
-        return prev
-      }
-      setDirty(true)
-      return { ...prev, [key]: value }
-    })
-  }
+    updateNodeData(nodeId, { hasValidationErrors })
+  }, [hasValidationErrors, nodeId, updateNodeData])
 
   return (
     <div className="flex flex-col gap-2">
       <NodeSecretDropdown
         group="email"
         service="sendgrid"
-        value={params.apiKey}
-        onChange={(val) => updateField('apiKey', val)}
+        value={normalizedParams.apiKey}
+        onChange={(val) => emitPatch({ apiKey: val })}
         placeholder="Select SendGrid API key"
       />
-      {validationErrors.apiKey && (
-        <p className="text-xs text-red-500">{validationErrors.apiKey}</p>
-      )}
+      {errors.apiKey && <p className="text-xs text-red-500">{errors.apiKey}</p>}
 
       <NodeInputField
         type="email"
         placeholder="From Email"
-        value={params.from}
-        onChange={(val) => updateField('from', val)}
+        value={normalizedParams.from}
+        onChange={(val) => emitPatch({ from: val })}
       />
-      {validationErrors.from && (
-        <p className="text-xs text-red-500">{validationErrors.from}</p>
-      )}
+      {errors.from && <p className="text-xs text-red-500">{errors.from}</p>}
 
       <NodeInputField
         type="text"
+        placeholder="To (comma separated)"
+        value={normalizedParams.to}
+        onChange={(val) => emitPatch({ to: val })}
+      />
+      {errors.to && <p className="text-xs text-red-500">{errors.to}</p>}
+
+      <NodeInputField
         placeholder="Template ID (optional)"
-        value={params.templateId}
-        onChange={(val) => updateField('templateId', val)}
+        value={normalizedParams.templateId}
+        onChange={(val) => emitPatch({ templateId: val })}
       />
 
-      {params.templateId && (
+      {normalizedParams.templateId.trim() ? (
         <KeyValuePair
-          title="Substitution Variables"
-          variables={params.substitutions}
-          onChange={(updatedVars, nodeHasErrors, childDirtyState) => {
-            const normalizedSubs = normalizeSubstitutions(updatedVars)
-            setParams((prev) => {
-              if (deepEqual(prev.substitutions, normalizedSubs)) {
-                return prev
-              }
-              setDirty(true)
-              return { ...prev, substitutions: normalizedSubs }
-            })
-            setChildDirty((prev) => prev || childDirtyState)
-            setChildHasErrors(nodeHasErrors)
+          title="Template Substitutions"
+          variables={normalizedParams.substitutions}
+          onChange={(updatedVars, nodeHasErrors) => {
+            setSubstitutionErrors(nodeHasErrors)
+            emitPatch({ substitutions: updatedVars })
           }}
         />
-      )}
-
-      <NodeInputField
-        type="text"
-        placeholder="Recipient Email(s)"
-        value={params.to}
-        onChange={(val) => updateField('to', val)}
-      />
-      {validationErrors.to && (
-        <p className="text-xs text-red-500">{validationErrors.to}</p>
-      )}
-
-      {!params.templateId && (
+      ) : (
         <>
           <NodeInputField
             placeholder="Subject"
-            value={params.subject}
-            onChange={(val) => updateField('subject', val)}
+            value={normalizedParams.subject}
+            onChange={(val) => emitPatch({ subject: val })}
           />
-          {validationErrors.subject && (
-            <p className="text-xs text-red-500">{validationErrors.subject}</p>
+          {errors.subject && (
+            <p className="text-xs text-red-500">{errors.subject}</p>
           )}
-
           <NodeTextAreaField
-            placeholder="Message Body"
-            value={params.body}
+            placeholder="Body (plain text or HTML)"
+            value={normalizedParams.body}
             rows={4}
-            onChange={(val) => updateField('body', val)}
+            onChange={(val) => emitPatch({ body: val })}
           />
-          {validationErrors.body && (
-            <p className="text-xs text-red-500">{validationErrors.body}</p>
-          )}
+          {errors.body && <p className="text-xs text-red-500">{errors.body}</p>}
         </>
       )}
     </div>

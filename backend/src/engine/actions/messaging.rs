@@ -28,25 +28,81 @@ pub(crate) async fn execute_messaging(
     run: &WorkflowRun,
 ) -> Result<(Value, Option<String>), String> {
     let params = node.data.get("params").cloned().unwrap_or(Value::Null);
-    let platform_raw = params
+    match infer_messaging_platform(&params, node)? {
+        MessagingPlatform::Slack => send_slack(&params, context, state, run).await,
+        MessagingPlatform::Teams => send_teams(node, &params, context, state, run).await,
+        MessagingPlatform::GoogleChat => send_google_chat(&params, context).await,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MessagingPlatform {
+    Slack,
+    Teams,
+    GoogleChat,
+}
+
+fn infer_messaging_platform(params: &Value, node: &Node) -> Result<MessagingPlatform, String> {
+    if let Some(platform) = params
         .get("platform")
         .and_then(|v| v.as_str())
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "Platform is required".to_string())?;
-
-    let normalized = platform_raw
-        .to_lowercase()
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != '_')
-        .collect::<String>();
-
-    match normalized.as_str() {
-        "slack" => send_slack(&params, context, state, run).await,
-        "teams" => send_teams(node, &params, context, state, run).await,
-        "googlechat" | "google" | "googlechatapp" => send_google_chat(&params, context).await,
-        other => Err(format!("Unsupported messaging platform: {}", other)),
+        .and_then(detect_platform)
+    {
+        return Ok(platform);
     }
+
+    let mut fallbacks: Vec<&str> = Vec::new();
+
+    if let Some(value) = params.get("service").and_then(|v| v.as_str()) {
+        fallbacks.push(value);
+    }
+    if let Some(value) = params.get("provider").and_then(|v| v.as_str()) {
+        fallbacks.push(value);
+    }
+    if let Some(value) = node.data.get("nodeType").and_then(|v| v.as_str()) {
+        fallbacks.push(value);
+    }
+    if let Some(value) = node.data.get("actionKey").and_then(|v| v.as_str()) {
+        fallbacks.push(value);
+    }
+    if let Some(value) = node.data.get("actionType").and_then(|v| v.as_str()) {
+        fallbacks.push(value);
+    }
+    if let Some(value) = node.data.get("label").and_then(|v| v.as_str()) {
+        fallbacks.push(value);
+    }
+    fallbacks.push(node.kind.as_str());
+
+    for candidate in fallbacks {
+        if let Some(platform) = detect_platform(candidate) {
+            return Ok(platform);
+        }
+    }
+
+    params
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .map(|raw| raw.trim())
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| format!("Unsupported messaging platform: {}", raw))
+        .map(Err)
+        .unwrap_or_else(|| Err("Platform is required".to_string()))
+}
+
+fn detect_platform(raw: &str) -> Option<MessagingPlatform> {
+    let normalized = raw.to_lowercase();
+    if normalized.contains("slack") {
+        return Some(MessagingPlatform::Slack);
+    }
+    if normalized.contains("teams") || normalized.contains("microsoft") {
+        return Some(MessagingPlatform::Teams);
+    }
+    if normalized.contains("googlechat")
+        || (normalized.contains("google") && normalized.contains("chat"))
+    {
+        return Some(MessagingPlatform::GoogleChat);
+    }
+    None
 }
 
 fn extract_required_str<'a>(params: &'a Value, key: &str, field: &str) -> Result<&'a str, String> {
@@ -349,15 +405,58 @@ async fn send_teams(
     state: &AppState,
     run: &WorkflowRun,
 ) -> Result<(Value, Option<String>), String> {
-    let sanitized = sanitize_teams_params(params);
-
-    let delivery_method = sanitized
+    // Robustly infer delivery method. If it's missing but the payload clearly
+    // contains delegated fields (teamId, channelId, oauthProvider=microsoft),
+    // coerce to Delegated OAuth to avoid silently falling back to webhooks.
+    let explicit_method = params
         .get("deliveryMethod")
         .and_then(|v| v.as_str())
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "Incoming Webhook".to_string());
+        .map(|s| s.to_string());
+
+    let is_delegated_hint = {
+        let team_ok = params
+            .get("teamId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .is_some();
+        let channel_ok = params
+            .get("channelId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .is_some();
+        let provider_ok = params
+            .get("oauthProvider")
+            .and_then(|v| v.as_str())
+            .map(|s| normalize_identifier(s).eq("microsoft"))
+            .unwrap_or(true); // default provider is microsoft in UI/backend
+        team_ok && channel_ok && provider_ok
+    };
+
+    let (effective_params, delivery_method) = match explicit_method {
+        Some(method) => (params.clone(), method),
+        None => {
+            if is_delegated_hint {
+                // Insert inferred delivery method so sanitizer preserves delegated fields
+                let mut map = match params.clone() {
+                    Value::Object(map) => map,
+                    _ => Map::new(),
+                };
+                map.insert(
+                    "deliveryMethod".to_string(),
+                    Value::String("Delegated OAuth (Post as user)".to_string()),
+                );
+                (Value::Object(map), "Delegated OAuth (Post as user)".to_string())
+            } else {
+                (params.clone(), "Incoming Webhook".to_string())
+            }
+        }
+    };
+
+    let sanitized = sanitize_teams_params(&effective_params);
 
     match normalize_identifier(&delivery_method).as_str() {
         "incomingwebhook" => send_teams_incoming_webhook(&sanitized, context).await,
@@ -2127,6 +2226,69 @@ mod tests {
             .await
             .expect_err("missing token should fail");
         assert!(err.contains("Slack token"));
+    }
+
+    #[test]
+    fn infer_platform_uses_node_type_when_platform_absent() {
+        let node = Node {
+            id: "action-legacy".into(),
+            kind: "actionSlack".into(),
+            data: json!({
+                "nodeType": "actionSlack",
+                "label": "Slack",
+                "params": {
+                    "channel": "#alerts",
+                    "message": "Hi"
+                }
+            }),
+        };
+
+        let params = node.data.get("params").cloned().unwrap_or(Value::Null);
+        let platform = infer_messaging_platform(&params, &node)
+            .expect("platform should be inferred from node type");
+
+        assert_eq!(platform, MessagingPlatform::Slack);
+    }
+
+    #[test]
+    fn infer_platform_considers_params_service() {
+        let node = Node {
+            id: "action-legacy".into(),
+            kind: "action".into(),
+            data: json!({
+                "actionType": "Messaging",
+                "params": {
+                    "service": "Microsoft Teams",
+                    "message": "Hi"
+                }
+            }),
+        };
+
+        let params = node.data.get("params").cloned().unwrap_or(Value::Null);
+        let platform = infer_messaging_platform(&params, &node)
+            .expect("platform should be inferred from params service");
+
+        assert_eq!(platform, MessagingPlatform::Teams);
+    }
+
+    #[test]
+    fn infer_platform_errors_when_unknown() {
+        let node = Node {
+            id: "action-legacy".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "Unknown",
+                    "message": "Hi"
+                }
+            }),
+        };
+
+        let params = node.data.get("params").cloned().unwrap_or(Value::Null);
+        let err =
+            infer_messaging_platform(&params, &node).expect_err("unknown platform should error");
+
+        assert_eq!(err, "Platform is required");
     }
 
     #[tokio::test]

@@ -1,7 +1,9 @@
-import { screen, fireEvent, waitFor } from '@testing-library/react'
-import { vi } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
 import SMTPAction from '../src/components/workflow/Actions/Email/Services/SMTPAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
 const secrets = {
   email: {
@@ -11,72 +13,98 @@ const secrets = {
   }
 }
 
-describe('SMTPAction', () => {
-  const baseArgs = {
-    smtpHost: 'smtp.example.com',
-    smtpPort: 2525,
-    smtpUser: 'user@example.com',
-    smtpPassword: 'secret',
-    smtpTls: true,
-    smtpTlsMode: 'starttls' as const,
-    from: 'sender@example.com',
-    to: 'alice@example.com',
-    subject: 'Hello',
-    body: 'Body',
-    dirty: false,
-    setParams: vi.fn(),
-    setDirty: vi.fn()
-  }
+const nodeId = 'smtp-node'
 
+const baseParams = {
+  service: 'SMTP',
+  smtpHost: 'smtp.example.com',
+  smtpPort: 2525,
+  smtpUser: 'user@example.com',
+  smtpPassword: 'secret',
+  smtpTls: true,
+  smtpTlsMode: 'starttls' as const,
+  from: 'sender@example.com',
+  to: 'alice@example.com',
+  subject: 'Hello',
+  body: 'Body'
+}
+
+const resetStore = () => {
+  act(() => {
+    useWorkflowStore.setState({
+      nodes: [],
+      edges: [],
+      isDirty: false,
+      isSaving: false,
+      canEdit: true
+    })
+  })
+}
+
+const initializeStore = (paramsOverride: Record<string, unknown> = {}) => {
+  act(() => {
+    useWorkflowStore.setState((state) => ({
+      ...state,
+      nodes: [
+        {
+          id: nodeId,
+          type: 'email',
+          position: { x: 0, y: 0 },
+          data: {
+            actionType: 'email',
+            params: { ...baseParams, ...paramsOverride },
+            dirty: false,
+            hasValidationErrors: false
+          }
+        }
+      ],
+      edges: []
+    }))
+  })
+}
+
+describe('SMTPAction', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
+    initializeStore()
   })
 
   afterEach(() => {
-    vi.runOnlyPendingTimers()
-    vi.useRealTimers()
+    resetStore()
   })
 
-  it('emits updates without validation errors for valid inputs', async () => {
-    const onChange = vi.fn()
-    renderWithSecrets(
-      <SMTPAction args={{ ...baseArgs }} onChange={onChange} />,
-      {
-        secrets
-      }
-    )
+  const getNodeData = () =>
+    useWorkflowStore.getState().nodes.find((node) => node.id === nodeId)
+      ?.data as Record<string, any>
+
+  it('writes validation state to the workflow store when inputs are valid', async () => {
+    renderWithSecrets(<SMTPAction nodeId={nodeId} />, { secrets })
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenCalled()
+      const data = getNodeData()
+      expect(data?.hasValidationErrors).toBe(false)
     })
-
-    const lastCall = onChange.mock.calls.at(-1)
-    expect(lastCall?.[1]).toBe(false)
-    expect(lastCall?.[0].smtpPort).toBe(2525)
-    expect(lastCall?.[0].smtpTlsMode).toBe('starttls')
   })
 
   it('surfaces validation errors for invalid recipients', async () => {
-    renderWithSecrets(<SMTPAction args={{ ...baseArgs }} />, { secrets })
+    renderWithSecrets(<SMTPAction nodeId={nodeId} />, { secrets })
 
     const recipientField = screen.getByPlaceholderText('Recipient Email(s)')
     fireEvent.change(recipientField, { target: { value: 'invalid-email' } })
-    vi.advanceTimersByTime(300)
 
     await waitFor(() => {
       expect(
         screen.getByText('One or more recipient emails are invalid')
       ).toBeInTheDocument()
     })
+
+    const data = getNodeData()
+    expect(data?.hasValidationErrors).toBe(true)
   })
 
   it('switches encryption modes and updates default ports when unchanged', async () => {
-    renderWithSecrets(
-      <SMTPAction
-        args={{ ...baseArgs, smtpPort: 587, smtpTlsMode: 'starttls' }}
-      />,
-      { secrets }
-    )
+    initializeStore({ smtpPort: 587, smtpTlsMode: 'starttls' })
+
+    renderWithSecrets(<SMTPAction nodeId={nodeId} />, { secrets })
 
     const portField = screen.getByPlaceholderText(
       'SMTP Port'

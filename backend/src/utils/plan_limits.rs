@@ -89,13 +89,58 @@ fn action_type(node: &Value) -> Option<Cow<'_, str>> {
         .map(|value| Cow::Owned(value.to_lowercase()))
 }
 
-fn messaging_platform(node: &Value) -> Option<String> {
-    node.get("data")
-        .and_then(|data| data.get("params"))
-        .and_then(|params| params.get("platform"))
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MessagingIntegration {
+    Slack,
+    Teams,
+}
+
+fn detect_messaging_integration(candidate: &str) -> Option<MessagingIntegration> {
+    let normalized = candidate.trim().to_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    if normalized.contains("slack") {
+        return Some(MessagingIntegration::Slack);
+    }
+    if normalized.contains("teams") || normalized.contains("microsoft") {
+        return Some(MessagingIntegration::Teams);
+    }
+
+    None
+}
+
+fn messaging_integration(node: &Value) -> Option<MessagingIntegration> {
+    let data = node.get("data")?;
+
+    let mut candidates: Vec<&str> = Vec::new();
+    if let Some(params) = data.get("params") {
+        if let Some(value) = params.get("service").and_then(|v| v.as_str()) {
+            candidates.push(value);
+        }
+        if let Some(value) = params.get("provider").and_then(|v| v.as_str()) {
+            candidates.push(value);
+        }
+        // Legacy field retained for backward compatibility; check after service/provider
+        if let Some(value) = params.get("platform").and_then(|v| v.as_str()) {
+            candidates.push(value);
+        }
+    }
+
+    for key in ["nodeType", "actionKey", "actionType", "label"] {
+        if let Some(value) = data.get(key).and_then(|v| v.as_str()) {
+            candidates.push(value);
+        }
+    }
+
+    if let Some(kind) = node.get("type").and_then(|v| v.as_str()) {
+        candidates.push(kind);
+    }
+
+    candidates
+        .into_iter()
+        .find_map(detect_messaging_integration)
 }
 
 fn trigger_type(node: &Value) -> Option<Cow<'_, str>> {
@@ -124,36 +169,34 @@ pub fn assess_workflow_for_plan(graph: &Value) -> WorkflowAssessment {
             .unwrap_or_default()
             .to_lowercase();
 
-        match node_type.as_str() {
-            "action" => {
-                if let Some(action) = action_type(node) {
-                    match action.as_ref() {
-                        "sheets" => premium_nodes.push((node_label(node), "Google Sheets")),
-                        "messaging" => {
-                            let platform =
-                                messaging_platform(node).unwrap_or_else(|| "Messaging".to_string());
-                            let platform_lower = platform.to_lowercase();
-                            if platform_lower == "slack" || platform_lower == "teams" {
-                                let pretty = if platform_lower == "slack" {
-                                    "Slack"
-                                } else {
-                                    "Microsoft Teams"
-                                };
-                                premium_nodes.push((node_label(node), pretty));
+        if node_type == "action" || node_type.starts_with("action") {
+            if let Some(action) = action_type(node) {
+                match action.as_ref() {
+                    "sheets" => premium_nodes.push((node_label(node), "Google Sheets")),
+                    "messaging" | "teams" | "slack" | "googlechat" | "microsoftteams" => {
+                        match messaging_integration(node) {
+                            Some(MessagingIntegration::Slack) => {
+                                premium_nodes.push((node_label(node), "Slack"));
                             }
+                            Some(MessagingIntegration::Teams) => {
+                                premium_nodes.push((node_label(node), "Microsoft Teams"));
+                            }
+                            None => {}
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
-            "trigger" => {
-                if let Some(trigger) = trigger_type(node) {
-                    if trigger == "schedule" {
-                        schedule_nodes.push(node_label(node));
-                    }
+            continue;
+        }
+
+        if node_type == "trigger" {
+            if let Some(trigger) = trigger_type(node) {
+                if trigger == "schedule" {
+                    schedule_nodes.push(node_label(node));
                 }
             }
-            _ => {}
+            continue;
         }
     }
 
@@ -259,7 +302,7 @@ mod tests {
                     "data": {
                         "label": "Notify",
                         "actionType": "messaging",
-                        "params": {"platform": "Slack"}
+                        "params": {"service": "Slack"}
                     }
                 },
                 {
@@ -296,5 +339,30 @@ mod tests {
         let assessment = assess_workflow_for_plan(&graph);
         assert!(assessment.node_count > 10);
         assert!(assessment.violations.iter().any(|v| v.code == "node-limit"));
+    }
+
+    #[test]
+    fn detects_messaging_integration_from_service_and_label() {
+        let graph = json!({
+            "nodes": [
+                {
+                    "id": "action-1",
+                    "type": "action",
+                    "data": {
+                        "label": "Teams Alert",
+                        "actionType": "messaging",
+                        "params": {"service": "Microsoft Teams"}
+                    }
+                }
+            ]
+        });
+
+        let assessment = assess_workflow_for_plan(&graph);
+        assert_eq!(assessment.node_count, 1);
+        assert_eq!(assessment.violations.len(), 1);
+        assert_eq!(
+            assessment.violations[0].message,
+            "Microsoft Teams actions are available on workspace plans and above. Upgrade in Settings → Plan to run this step."
+        );
     }
 }

@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+
 import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import { useActionParams } from '@/stores/workflowSelectors'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
 export interface GoogleChatActionValues {
   webhookUrl?: string
@@ -30,132 +33,227 @@ const normalizeParams = (
   return next
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const computeValidationErrors = (
+  params: GoogleChatActionValues,
+  mode: 'text' | 'card'
+) => {
+  const errors: Record<string, string> = {}
+  if (!params.webhookUrl?.trim()) errors.webhookUrl = 'Webhook URL is required'
+  if (mode === 'card') {
+    const raw = params.cardJson ?? ''
+    if (!raw.trim()) {
+      errors.cardJson = 'Card JSON is required'
+    } else {
+      try {
+        const parsed = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object') {
+          errors.cardJson = 'Card JSON must be an object'
+        } else if (
+          !Object.prototype.hasOwnProperty.call(parsed, 'cards') &&
+          !Object.prototype.hasOwnProperty.call(parsed, 'cardsV2')
+        ) {
+          errors.cardJson = "Card JSON must include 'cards' or 'cardsV2'"
+        }
+      } catch {
+        errors.cardJson = 'Card JSON must be valid JSON'
+      }
+    }
+  } else if (!params.message?.trim()) {
+    errors.message = 'Message cannot be empty'
+  }
+  return errors
+}
+
+const payloadOptions = ['Text message', 'Card JSON (cardsV2)'] as const
+
+const shallowEqualParams = (
+  a: GoogleChatActionValues,
+  b: GoogleChatActionValues
+) =>
+  a.webhookUrl === b.webhookUrl &&
+  a.message === b.message &&
+  a.cardJson === b.cardJson
+
+const prepareNextParams = (
+  current: GoogleChatActionValues,
+  patch: Partial<GoogleChatActionValues>,
+  forceMode?: 'text' | 'card'
+) => {
+  const merged = normalizeParams({
+    ...current,
+    ...patch
+  })
+
+  const trimmedCard = merged.cardJson?.trim() ?? ''
+  const nextMode: 'text' | 'card' = forceMode ?? (trimmedCard ? 'card' : 'text')
+
+  const params: GoogleChatActionValues = {
+    ...merged,
+    cardJson: nextMode === 'card' ? trimmedCard : ''
+  }
+
+  const hasValidationErrors =
+    Object.keys(computeValidationErrors(params, nextMode)).length > 0
+
+  return { params, nextMode, hasValidationErrors }
+}
+
+const normalizeStoreParams = (
+  params: Record<string, unknown>
+): GoogleChatActionValues => {
+  const googleChatPayload =
+    (params['Google Chat'] as GoogleChatActionValues | undefined) ??
+    (params.GoogleChat as GoogleChatActionValues | undefined) ??
+    (params.googleChat as GoogleChatActionValues | undefined)
+
+  if (googleChatPayload && typeof googleChatPayload === 'object') {
+    return normalizeParams(googleChatPayload)
+  }
+
+  return normalizeParams(params as GoogleChatActionValues)
+}
+
 interface GoogleChatActionProps {
-  args: GoogleChatActionValues
-  initialDirty?: boolean
-  onChange?: (
-    args: GoogleChatActionValues,
-    nodeHasErrors: boolean,
-    childDirty: boolean
-  ) => void
+  nodeId: string
+  canEdit?: boolean
 }
 
 export default function GoogleChatAction({
-  args,
-  initialDirty = false,
-  onChange
+  nodeId,
+  canEdit = true
 }: GoogleChatActionProps) {
-  const normalizedArgs = useMemo(() => normalizeParams(args), [args])
-  const [params, setParams] = useState<GoogleChatActionValues>(normalizedArgs)
-  const [dirty, setDirty] = useState(initialDirty)
-  const [cardDraft, setCardDraft] = useState(normalizedArgs.cardJson || '')
-  const [mode, setMode] = useState<'text' | 'card'>(
-    normalizedArgs.cardJson?.trim() ? 'card' : 'text'
+  const actionParams = useActionParams<Record<string, unknown>>(
+    nodeId,
+    'googleChat'
   )
-  const dirtyRef = useRef(dirty)
+  const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+  const effectiveCanEdit = canEdit && storeCanEdit
 
-  useEffect(() => {
-    dirtyRef.current = dirty
-  }, [dirty])
-
-  useEffect(() => {
-    const next = normalizedArgs
-    setParams((prev) => {
-      const same =
-        (prev.webhookUrl ?? '') === (next.webhookUrl ?? '') &&
-        (prev.message ?? '') === (next.message ?? '') &&
-        (prev.cardJson ?? '') === (next.cardJson ?? '')
-      return same ? prev : next
-    })
-
-    if (next.cardJson?.trim()) {
-      setCardDraft(next.cardJson)
+  const currentParams = useMemo(() => {
+    if (isRecord(actionParams)) {
+      return normalizeStoreParams(actionParams)
     }
+    return normalizeParams(actionParams as GoogleChatActionValues)
+  }, [actionParams])
 
-    if (!dirtyRef.current && !initialDirty) {
-      setMode(next.cardJson?.trim() ? 'card' : 'text')
-    }
-  }, [normalizedArgs, initialDirty])
+  const mode = useMemo<'text' | 'card'>(() => {
+    return currentParams.cardJson?.trim() ? 'card' : 'text'
+  }, [currentParams.cardJson])
 
+  const validationErrors = useMemo(
+    () => computeValidationErrors(currentParams, mode),
+    [currentParams, mode]
+  )
+
+  const hasValidationErrors = useMemo(
+    () => Object.keys(validationErrors).length > 0,
+    [validationErrors]
+  )
+
+  const cardDraftRef = useRef(currentParams.cardJson ?? '')
   useEffect(() => {
-    setDirty(initialDirty)
-  }, [initialDirty])
+    if (mode === 'card' && currentParams.cardJson?.trim()) {
+      cardDraftRef.current = currentParams.cardJson
+    }
+  }, [currentParams.cardJson, mode])
 
-  const validationErrors = useMemo(() => {
-    const errors: Record<string, string> = {}
-    if (!params.webhookUrl?.trim())
-      errors.webhookUrl = 'Webhook URL is required'
-    if (mode === 'card') {
-      const raw = params.cardJson ?? ''
-      if (!raw.trim()) {
-        errors.cardJson = 'Card JSON is required'
-      } else {
-        try {
-          const parsed = JSON.parse(raw)
-          if (!parsed || typeof parsed !== 'object') {
-            errors.cardJson = 'Card JSON must be an object'
-          } else if (
-            !Object.prototype.hasOwnProperty.call(parsed, 'cards') &&
-            !Object.prototype.hasOwnProperty.call(parsed, 'cardsV2')
-          ) {
-            errors.cardJson = "Card JSON must include 'cards' or 'cardsV2'"
-          }
-        } catch {
-          errors.cardJson = 'Card JSON must be valid JSON'
-        }
+  const commitParams = useCallback(
+    (
+      params: GoogleChatActionValues,
+      nextHasErrors: boolean,
+      markDirty: boolean
+    ) => {
+      if (!effectiveCanEdit) return
+      useWorkflowStore.getState().updateNodeData(nodeId, {
+        params,
+        ...(markDirty ? { dirty: true } : {}),
+        hasValidationErrors: nextHasErrors
+      })
+    },
+    [effectiveCanEdit, nodeId]
+  )
+
+  const handleFieldChange = useCallback(
+    (key: keyof GoogleChatActionValues, value: string) => {
+      if (!effectiveCanEdit) return
+      const {
+        params: nextParams,
+        nextMode,
+        hasValidationErrors: nextHasErrors
+      } = prepareNextParams(currentParams, { [key]: value })
+
+      if (
+        shallowEqualParams(currentParams, nextParams) &&
+        nextHasErrors === hasValidationErrors
+      ) {
+        return
       }
-    } else if (!params.message?.trim()) {
-      errors.message = 'Message cannot be empty'
-    }
-    return errors
-  }, [params, mode])
 
-  useEffect(() => {
-    const effectiveParams: GoogleChatActionValues =
-      mode === 'card'
-        ? params
-        : {
-            ...params,
-            cardJson: ''
-          }
-    onChange?.(effectiveParams, Object.keys(validationErrors).length > 0, dirty)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, validationErrors, dirty, mode])
+      if (nextMode === 'card' && nextParams.cardJson?.trim()) {
+        cardDraftRef.current = nextParams.cardJson
+      }
 
-  const updateField = (key: keyof GoogleChatActionValues, value: string) => {
-    setDirty(true)
-    setParams((prev) => ({ ...prev, [key]: value }))
-    if (key === 'cardJson') {
-      setCardDraft(value)
-    }
-  }
+      commitParams(nextParams, nextHasErrors, true)
+    },
+    [currentParams, effectiveCanEdit, hasValidationErrors, commitParams]
+  )
 
+  const handleModeChange = useCallback(
+    (value: string) => {
+      if (!effectiveCanEdit) return
+      const nextMode = value === payloadOptions[1] ? 'card' : 'text'
+      if (nextMode === mode) return
+
+      if (nextMode === 'card') {
+        const draft = currentParams.cardJson?.trim()
+          ? currentParams.cardJson
+          : cardDraftRef.current
+
+        const { params: nextParams, hasValidationErrors: nextHasErrors } =
+          prepareNextParams(currentParams, { cardJson: draft || '' }, 'card')
+
+        if (
+          shallowEqualParams(currentParams, nextParams) &&
+          nextHasErrors === hasValidationErrors
+        ) {
+          return
+        }
+
+        if (nextParams.cardJson?.trim()) {
+          cardDraftRef.current = nextParams.cardJson
+        }
+
+        commitParams(nextParams, nextHasErrors, true)
+        return
+      }
+
+      const currentCard = currentParams.cardJson ?? ''
+      if (currentCard.trim()) {
+        cardDraftRef.current = currentCard
+      }
+
+      const { params: nextParams, hasValidationErrors: nextHasErrors } =
+        prepareNextParams(currentParams, { cardJson: '' }, 'text')
+
+      if (
+        shallowEqualParams(currentParams, nextParams) &&
+        nextHasErrors === hasValidationErrors
+      ) {
+        return
+      }
+
+      commitParams(nextParams, nextHasErrors, true)
+    },
+    [currentParams, effectiveCanEdit, hasValidationErrors, commitParams, mode]
+  )
+
+  const dropdownOptions = useMemo(() => [...payloadOptions], [])
   const errorClass = 'text-xs text-red-500'
   const helperClass = 'text-xs text-zinc-500 dark:text-zinc-400'
-  const payloadOptions = ['Text message', 'Card JSON (cardsV2)'] as const
   const selectedLabel = mode === 'card' ? payloadOptions[1] : payloadOptions[0]
-
-  const handleModeChange = (value: string) => {
-    const nextMode = value === payloadOptions[1] ? 'card' : 'text'
-    if (nextMode === mode) return
-    setDirty(true)
-    setMode(nextMode)
-
-    if (nextMode === 'card') {
-      setParams((prev) => ({
-        ...prev,
-        cardJson: prev.cardJson?.trim() ? prev.cardJson : cardDraft
-      }))
-    } else {
-      setParams((prev) => {
-        const current = prev.cardJson ?? ''
-        if (current.trim()) {
-          setCardDraft(current)
-        }
-        return { ...prev, cardJson: '' }
-      })
-    }
-  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -165,14 +263,14 @@ export default function GoogleChatAction({
       </p>
       <NodeInputField
         placeholder="Webhook URL"
-        value={params.webhookUrl || ''}
-        onChange={(val) => updateField('webhookUrl', val)}
+        value={currentParams.webhookUrl || ''}
+        onChange={(val) => handleFieldChange('webhookUrl', val)}
       />
       {validationErrors.webhookUrl && (
         <p className={errorClass}>{validationErrors.webhookUrl}</p>
       )}
       <NodeDropdownField
-        options={[...payloadOptions]}
+        options={dropdownOptions}
         value={selectedLabel}
         onChange={handleModeChange}
       />
@@ -180,8 +278,8 @@ export default function GoogleChatAction({
         <>
           <NodeTextAreaField
             placeholder="Message"
-            value={params.message || ''}
-            onChange={(val) => updateField('message', val)}
+            value={currentParams.message || ''}
+            onChange={(val) => handleFieldChange('message', val)}
             rows={4}
           />
           {validationErrors.message && (
@@ -192,8 +290,8 @@ export default function GoogleChatAction({
         <>
           <NodeTextAreaField
             placeholder="cardsV2 JSON"
-            value={params.cardJson || ''}
-            onChange={(val) => updateField('cardJson', val)}
+            value={currentParams.cardJson || ''}
+            onChange={(val) => handleFieldChange('cardJson', val)}
             rows={6}
           />
           {validationErrors.cardJson && (
