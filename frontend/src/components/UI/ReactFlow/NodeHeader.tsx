@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
-import NodeTitleInputField from '../input-fields/NodeTitleInputField'
+import NodeTitleInputField from '../InputFields/NodeTitleInputField'
 
 interface NodeHeaderProps {
   label: string

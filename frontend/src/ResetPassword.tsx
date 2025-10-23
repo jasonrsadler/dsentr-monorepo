@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { FormButton } from './components/ui/buttons/FormButton'
+import { FormButton } from './components/UI/Buttons/FormButton'
 import LockIcon from '@/assets/svg-components/LockIcon'
 import HidePasswordIcon from './assets/svg-components/HidePasswordIcon'
 import ShowPasswordIcon from './assets/svg-components/ShowPasswordIcon'

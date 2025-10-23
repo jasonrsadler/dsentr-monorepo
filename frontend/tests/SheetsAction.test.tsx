@@ -2,11 +2,8 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 
-import SheetsAction from '@/components/workflow/Actions/Google/SheetsAction'
-import {
-  updateCachedConnections,
-  type ProviderConnectionSet
-} from '@/lib/oauthApi'
+import SheetsAction from '../src/components/workflow/Actions/Google/SheetsAction'
+import { updateCachedConnections } from '@/lib/oauthApi'
 import { useAuth } from '@/stores/auth'
 
 const createJsonResponse = (body: unknown) =>
@@ -38,11 +35,9 @@ const googleWorkspacePayload = {
   requiresReconnect: false
 }
 
-const buildGoogleConnections = (
-  includeWorkspace: boolean
-): ProviderConnectionSet => ({
+const buildGoogleConnections = (includeWorkspace: boolean) => ({
   personal: {
-    scope: 'personal',
+    scope: 'personal' as const,
     id: 'google-personal',
     connected: true,
     accountEmail: 'owner@example.com',
@@ -53,27 +48,25 @@ const buildGoogleConnections = (
   },
   workspace: includeWorkspace
     ? [
-        {
-          scope: 'workspace',
-          provider: 'google',
-          id: 'google-workspace',
-          connected: true,
-          accountEmail: 'ops@example.com',
-          expiresAt: '2025-01-01T00:00:00.000Z',
-          workspaceId: 'ws-1',
-          workspaceName: 'Operations',
-          sharedByName: 'Team Admin',
-          sharedByEmail: 'admin@example.com',
-          lastRefreshedAt: undefined,
-          requiresReconnect: false
-        }
-      ]
+      {
+        scope: 'workspace' as const,
+        id: 'google-workspace',
+        connected: true,
+        accountEmail: 'ops@example.com',
+        expiresAt: '2025-01-01T00:00:00.000Z',
+        workspaceId: 'ws-1',
+        workspaceName: 'Operations',
+        sharedByName: 'Team Admin',
+        sharedByEmail: 'admin@example.com',
+        requiresReconnect: false
+      }
+    ]
     : []
 })
 
-const buildEmptyConnections = (): ProviderConnectionSet => ({
+const buildEmptyConnections = () => ({
   personal: {
-    scope: 'personal',
+    scope: 'personal' as const,
     id: null,
     connected: false,
     accountEmail: undefined,
@@ -82,12 +75,10 @@ const buildEmptyConnections = (): ProviderConnectionSet => ({
     requiresReconnect: false,
     isShared: false
   },
-  workspace: []
+  workspace: [] as never[]
 })
 
-const buildConnectionMap = (
-  includeWorkspace: boolean
-): Record<'google' | 'microsoft' | 'slack', ProviderConnectionSet> => ({
+const buildConnectionMap = (includeWorkspace: boolean) => ({
   google: (() => {
     const google = buildGoogleConnections(includeWorkspace)
     return {
@@ -100,13 +91,6 @@ const buildConnectionMap = (
     return {
       personal: { ...microsoft.personal },
       workspace: microsoft.workspace.map((entry) => ({ ...entry }))
-    }
-  })(),
-  slack: (() => {
-    const slack = buildEmptyConnections()
-    return {
-      personal: { ...slack.personal },
-      workspace: slack.workspace.map((entry) => ({ ...entry }))
     }
   })()
 })
@@ -131,9 +115,9 @@ describe('SheetsAction', () => {
   const baseArgs = {
     spreadsheetId: '',
     worksheet: '',
-    columns: [] as { key: string; value: string }[],
+    columns: [],
     accountEmail: '',
-    oauthConnectionScope: undefined,
+    oauthConnectionScope: '',
     oauthConnectionId: '',
     dirty: false,
     setParams: vi.fn(),

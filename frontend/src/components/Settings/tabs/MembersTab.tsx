@@ -286,6 +286,9 @@ export default function MembersTab() {
             if (m.role === 'owner') {
               return { ...m, role: 'admin' }
             }
+            if (user && m.user_id === user.id && m.role === 'owner') {
+              return { ...m, role: 'admin' }
+            }
             return m
           })
         }

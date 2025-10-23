@@ -10,8 +10,7 @@ const mockUser = {
   id: '123',
   role: 'user',
   plan: 'free',
-  companyName: 'Acme Corp',
-  oauthProvider: 'email' as const
+  companyName: 'Acme Corp'
 }
 
 describe('auth.ts', () => {
@@ -21,7 +20,6 @@ describe('auth.ts', () => {
       user: null,
       isLoading: true,
       memberships: [],
-      currentWorkspaceId: null,
       requiresOnboarding: false
     })
 

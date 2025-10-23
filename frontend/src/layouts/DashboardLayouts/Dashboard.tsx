@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactElement
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE_URL } from '@/lib/config'
 import '@xyflow/react/dist/style.css'
 import WorkflowToolbar from './Toolbar'
@@ -15,11 +8,6 @@ import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
 import { useWorkflowLogs } from '@/stores/workflowLogs'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
-import {
-  useWorkflowStore,
-  type FlowNode,
-  type FlowEdge
-} from '@/stores/workflowStore'
 import {
   listWorkflows,
   getWorkflow,
@@ -80,39 +68,6 @@ function normalizeEdgeForPayload(e: any) {
     label,
     animated
   }
-}
-
-function canonicalizeGraph(
-  graph: { nodes?: any[]; edges?: any[] } | null | undefined
-): { nodes: any[]; edges: any[] } {
-  const rawNodes = Array.isArray(graph?.nodes) ? graph!.nodes : []
-  const rawEdges = Array.isArray(graph?.edges) ? graph!.edges : []
-
-  const nodes = sortById(
-    rawNodes.map((node) => ({
-      id: node.id,
-      type: node.type,
-      position: node.position,
-      data: sanitizeData(node.data)
-    }))
-  )
-
-  const edges = sortById(rawEdges.map((edge) => normalizeEdgeForPayload(edge)))
-
-  return { nodes, edges }
-}
-
-function logError(error: unknown) {
-  if (error instanceof Error) {
-    console.error(error.message)
-    return
-  }
-  if (error && typeof error === 'object' && 'message' in error) {
-    const { message } = error as { message?: unknown }
-    console.error(message)
-    return
-  }
-  console.error(error)
 }
 
 function flatten(obj: any, prefix = ''): Record<string, any> {
@@ -197,11 +152,7 @@ export default function Dashboard() {
     null
   )
   const [workflowData, setWorkflowData] = useState(createEmptyGraph)
-  const [graphDirty, setGraphDirty] = useState(false)
-  const [storeDirty, setStoreDirty] = useState(
-    () => useWorkflowStore.getState().isDirty
-  )
-  const workflowDirty = storeDirty || graphDirty
+  const [workflowDirty, setWorkflowDirty] = useState(false)
   const [loadingWorkflows, setLoadingWorkflows] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -211,10 +162,7 @@ export default function Dashboard() {
   const saveRef = useRef<{
     saveAllNodes?: () => any[]
     getEdges?: () => any[]
-    setNodesFromToolbar?: (
-      updatedNodes: any[],
-      options?: { markDirty?: boolean }
-    ) => void
+    setNodesFromToolbar?: (updatedNodes: any[]) => void
     loadGraph?: (graph: { nodes: any[]; edges: any[] }) => void
   } | null>(null)
   const lastSavedSnapshotRef = useRef<string>(
@@ -224,41 +172,6 @@ export default function Dashboard() {
   const latestGraphRef = useRef<{ nodes: any[]; edges: any[] }>(
     createEmptyGraph()
   )
-  const suppressGraphDirtyRef = useRef(false)
-  const previousSavingRef = useRef(isSaving)
-  const previousWorkflowDirtyRef = useRef(workflowDirty)
-
-  useEffect(() => {
-    const unsubscribe = useWorkflowStore.subscribe(
-      (state) => state.isDirty,
-      (nextDirty) => {
-        setStoreDirty(nextDirty)
-      }
-    )
-    return unsubscribe
-  }, [])
-
-  useEffect(() => {
-    if (!import.meta.env.DEV) {
-      previousWorkflowDirtyRef.current = workflowDirty
-      return
-    }
-
-    const wasDirty = previousWorkflowDirtyRef.current
-    if (!wasDirty && workflowDirty) {
-      console.log('[Dashboard.tsx:228] toolbarDirty:enabled', {
-        storeDirty,
-        graphDirty
-      })
-    } else if (wasDirty && !workflowDirty) {
-      console.log('[Dashboard.tsx:233] toolbarDirty:disabled', {
-        storeDirty,
-        graphDirty
-      })
-    }
-
-    previousWorkflowDirtyRef.current = workflowDirty
-  }, [workflowDirty, storeDirty, graphDirty])
 
   // Run state
   const [runOverlayOpen, setRunOverlayOpen] = useState(false)
@@ -317,10 +230,12 @@ export default function Dashboard() {
   const [globalRunStatus, setGlobalRunStatus] = useState<
     'idle' | 'queued' | 'running'
   >('idle')
+  const globalRunsTimerRef = useRef<any>(null)
   // Runs tab state
   const [activePane, setActivePane] = useState<'designer' | 'runs'>('designer')
   const [runsScope, setRunsScope] = useState<'current' | 'all'>('current')
   const [runQueue, setRunQueue] = useState<WorkflowRunRecord[]>([])
+  const runQueueTimerRef = useRef<any>(null)
   // Stable execution state identities to avoid unnecessary re-renders
   const runningIds = useMemo(
     () =>
@@ -466,46 +381,40 @@ export default function Dashboard() {
         if (visible.length > 0) {
           const [first] = visible
           const normalized = normalizeWorkflowData(first.data)
-          const canonical = canonicalizeGraph(normalized)
           setCurrentWorkflowId(first.id)
-          suppressGraphDirtyRef.current = true
           setWorkflowData(normalized)
-          latestGraphRef.current = canonical
+          latestGraphRef.current = normalized
           lastSavedSnapshotRef.current = serializeSnapshot(
             { name: first.name, description: first.description ?? null },
-            canonical
+            normalized
           )
         } else {
           const empty = createEmptyGraph()
-          const canonicalEmpty = canonicalizeGraph(empty)
           setCurrentWorkflowId(null)
-          suppressGraphDirtyRef.current = true
           setWorkflowData(empty)
-          latestGraphRef.current = canonicalEmpty
+          latestGraphRef.current = empty
           lastSavedSnapshotRef.current = serializeSnapshot(
             { name: '', description: null },
-            canonicalEmpty
+            empty
           )
         }
 
         pendingSnapshotRef.current = null
-        setGraphDirty(false)
+        setWorkflowDirty(false)
       } catch (err) {
         console.error('Failed to load workflows', err)
         setError('Failed to load workflows.')
         setWorkflows([])
         setCurrentWorkflowId(null)
         const empty = createEmptyGraph()
-        const canonicalEmpty = canonicalizeGraph(empty)
-        suppressGraphDirtyRef.current = true
         setWorkflowData(empty)
-        latestGraphRef.current = canonicalEmpty
+        latestGraphRef.current = empty
         lastSavedSnapshotRef.current = serializeSnapshot(
           { name: '', description: null },
-          canonicalEmpty
+          empty
         )
         pendingSnapshotRef.current = null
-        setGraphDirty(false)
+        setWorkflowDirty(false)
       } finally {
         setLoadingWorkflows(false)
       }
@@ -519,7 +428,7 @@ export default function Dashboard() {
     (id: string) => {
       const nextWorkflow = workflows.find((workflow) => workflow.id === id)
       setCurrentWorkflowId(id)
-      setGraphDirty(false)
+      setWorkflowDirty(false)
       setError(null)
 
       // Always try to fetch fresh data for the selected workflow to avoid shared references/stale state
@@ -531,38 +440,32 @@ export default function Dashboard() {
             prev.map((w) => (w.id === fresh.id ? fresh : w))
           )
           const normalized = normalizeWorkflowData(fresh.data)
-          const canonical = canonicalizeGraph(normalized)
-          suppressGraphDirtyRef.current = true
           setWorkflowData(normalized)
-          latestGraphRef.current = canonical
+          latestGraphRef.current = normalized
           lastSavedSnapshotRef.current = serializeSnapshot(
             { name: fresh.name, description: fresh.description ?? null },
-            canonical
+            normalized
           )
         } catch (e) {
           // Fallback to local cache if fetch fails
           if (nextWorkflow) {
             const normalized = normalizeWorkflowData(nextWorkflow.data)
-            const canonical = canonicalizeGraph(normalized)
-            suppressGraphDirtyRef.current = true
             setWorkflowData(normalized)
-            latestGraphRef.current = canonical
+            latestGraphRef.current = normalized
             lastSavedSnapshotRef.current = serializeSnapshot(
               {
                 name: nextWorkflow.name,
                 description: nextWorkflow.description ?? null
               },
-              canonical
+              normalized
             )
           } else {
             const empty = createEmptyGraph()
-            const canonicalEmpty = canonicalizeGraph(empty)
-            suppressGraphDirtyRef.current = true
             setWorkflowData(empty)
-            latestGraphRef.current = canonicalEmpty
+            latestGraphRef.current = empty
             lastSavedSnapshotRef.current = serializeSnapshot(
               { name: '', description: null },
-              canonicalEmpty
+              empty
             )
           }
         } finally {
@@ -575,7 +478,6 @@ export default function Dashboard() {
 
   const markWorkflowDirty = useCallback(() => {
     setError(null)
-    setGraphDirty((prev) => (prev ? prev : true))
   }, [])
 
   const selectWorkflow = useCallback(
@@ -638,7 +540,7 @@ export default function Dashboard() {
         )
       )
       if (id === currentWorkflowId) {
-        setGraphDirty(true)
+        setWorkflowDirty(true)
       }
     },
     [canEditCurrentWorkflow, currentWorkflowId]
@@ -681,19 +583,17 @@ export default function Dashboard() {
       setCurrentWorkflowId(created.id)
 
       const normalized = normalizeWorkflowData(created.data ?? payload.data)
-      const canonical = canonicalizeGraph(normalized)
-      suppressGraphDirtyRef.current = true
       setWorkflowData(normalized)
-      latestGraphRef.current = canonical
+      latestGraphRef.current = normalized
       lastSavedSnapshotRef.current = serializeSnapshot(
         {
           name: created.name ?? payload.name,
           description: created.description ?? null
         },
-        canonical
+        normalized
       )
       pendingSnapshotRef.current = null
-      setGraphDirty(false)
+      setWorkflowDirty(false)
       await refreshPlanUsage()
     } catch (err) {
       console.error('Failed to create workflow', err)
@@ -716,129 +616,33 @@ export default function Dashboard() {
   const handleGraphChange = useCallback(
     (graph: { nodes: any[]; edges: any[] }) => {
       latestGraphRef.current = graph
-
-      const { locked, isDirty: storeDirty } = useWorkflowStore.getState()
-      if (locked || isSavingRef.current) {
+      if (isSavingRef.current) {
         return
       }
-
       const emptyGraph =
         (graph?.nodes?.length ?? 0) === 0 && (graph?.edges?.length ?? 0) === 0
       setIsGraphEmpty(emptyGraph)
       if (!canEditRef.current) {
         return
       }
-
-      if (suppressGraphDirtyRef.current) {
-        suppressGraphDirtyRef.current = false
-        if (import.meta.env.DEV) {
-          console.log('[Dashboard.tsx:684] handleGraphChange:suppressed', {
-            storeDirty,
-            emptyGraph
-          })
-        }
-        setGraphDirty(false)
-        return
-      }
-
-      if (storeDirty) {
-        return
-      }
-
       const snapshot = serializeSnapshot(currentMeta, graph)
       const baseline =
         pendingSnapshotRef.current ?? lastSavedSnapshotRef.current
-
-      let nextGraphDirty = false
+      let dirty = true
       try {
         const baselineObj = JSON.parse(baseline)
         const currentObj = JSON.parse(snapshot)
-        nextGraphDirty = !deepEqual(baselineObj, currentObj)
+        dirty = !deepEqual(baselineObj, currentObj)
       } catch {
-        nextGraphDirty = snapshot !== baseline
+        dirty = snapshot !== baseline
       }
-
-      if (nextGraphDirty) {
+      if (dirty) {
         logSnapshotDiff('graphChange', baseline, snapshot)
-        if (import.meta.env.DEV) {
-          console.trace('[Dashboard.tsx:705] handleGraphChange:enable', {
-            storeDirty,
-            emptyGraph,
-            baselineLength: baseline.length,
-            snapshotLength: snapshot.length
-          })
-        }
       }
-
-      setGraphDirty(nextGraphDirty)
+      setWorkflowDirty(dirty)
     },
     [currentMeta]
   )
-
-  useEffect(() => {
-    let rafId: number | null = null
-
-    const emitGraphSnapshot = (
-      nodesSnap: FlowNode[],
-      edgesSnap: FlowEdge[]
-    ) => {
-      const cleanNodes = sortById(
-        nodesSnap.map((node) => ({
-          id: node.id,
-          type: node.type,
-          position: node.position,
-          data: sanitizeData(node.data)
-        }))
-      )
-      const cleanEdges = sortById(
-        edgesSnap.map((edge) => ({
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          sourceHandle: edge.sourceHandle,
-          targetHandle: edge.targetHandle,
-          type: edge.type,
-          data: edge.data,
-          label: edge.label ?? null,
-          animated: Boolean(edge.animated)
-        }))
-      )
-      handleGraphChange({ nodes: cleanNodes, edges: cleanEdges })
-    }
-
-    const { nodes: initialNodes, edges: initialEdges } =
-      useWorkflowStore.getState()
-    emitGraphSnapshot(initialNodes, initialEdges)
-
-    const unsubscribe = useWorkflowStore.subscribe(
-      (state) => ({ nodes: state.nodes, edges: state.edges }),
-      (snapshot, previous) => {
-        if (
-          snapshot.nodes === previous?.nodes &&
-          snapshot.edges === previous?.edges
-        ) {
-          return
-        }
-
-        if (rafId !== null) {
-          cancelAnimationFrame(rafId)
-        }
-
-        const { nodes: nextNodes, edges: nextEdges } = snapshot
-        rafId = requestAnimationFrame(() => {
-          emitGraphSnapshot(nextNodes, nextEdges)
-          rafId = null
-        })
-      }
-    )
-
-    return () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId)
-      }
-      unsubscribe()
-    }
-  }, [handleGraphChange])
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -895,7 +699,7 @@ export default function Dashboard() {
                   return
                 }
               } catch (e) {
-                logError(e)
+                console.error(e.message)
               }
               if (
                 runOverlayOpen &&
@@ -968,7 +772,7 @@ export default function Dashboard() {
     try {
       window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
     } catch (e) {
-      logError(e)
+      console.error(e.message)
     }
     // Kick off selection of the appropriate run for this workflow
     ensureOverlayRunForSelected()
@@ -994,7 +798,7 @@ export default function Dashboard() {
         try {
           es?.close()
         } catch (e) {
-          logError(e)
+          console.error(e.message)
         }
         if (fallbackTimer) {
           clearTimeout(fallbackTimer)
@@ -1011,7 +815,7 @@ export default function Dashboard() {
           const runs = await listActiveRuns(currentWorkflowIdValue)
           if (pickFrom(runs)) return
         } catch (e) {
-          logError(e)
+          console.error(e.message)
         }
         // schedule next attempt with capped backoff
         backoff = Math.min(5000, backoff * 2)
@@ -1035,14 +839,14 @@ export default function Dashboard() {
         const runs = JSON.parse(e.data)
         pickFrom(runs)
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
     const onError = () => {
       try {
         es?.close()
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
       if (!fallbackTimer) startFallback()
     }
@@ -1053,7 +857,7 @@ export default function Dashboard() {
       try {
         es?.close()
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
       if (fallbackTimer) {
         clearTimeout(fallbackTimer)
@@ -1080,7 +884,7 @@ export default function Dashboard() {
         else if (s.has_queued) setGlobalRunStatus('queued')
         else setGlobalRunStatus('idle')
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
     es.addEventListener('status', onStatus as any)
@@ -1088,24 +892,23 @@ export default function Dashboard() {
       try {
         es?.close()
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
     return () => {
       try {
         es?.close()
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
   }, [])
   const toolbarRunStatus = useMemo(() => {
-    if (activeRun?.status === 'running' || globalRunStatus === 'running') {
-      return 'running'
-    }
-    if (activeRun?.status === 'queued' || globalRunStatus === 'queued') {
+    if (activeRun?.status === 'running') return 'running'
+    if (globalRunStatus === 'running') return 'running'
+    if (globalRunStatus === 'queued') return 'queued'
+    if (activeRun?.status === 'queued' && globalRunStatus !== 'running')
       return 'queued'
-    }
     return 'idle'
   }, [activeRun?.status, globalRunStatus])
 
@@ -1125,7 +928,7 @@ export default function Dashboard() {
       try {
         setRunQueue(JSON.parse(e.data))
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
     es.addEventListener('runs', onRuns as any)
@@ -1133,14 +936,14 @@ export default function Dashboard() {
       try {
         es?.close()
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
     return () => {
       try {
         es?.close()
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
   }, [activePane, currentWorkflowIdValue])
@@ -1162,34 +965,14 @@ export default function Dashboard() {
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
-    } catch (error) {
-      console.error('Failed to start run', error)
-      if (
-        error &&
-        typeof error === 'object' &&
-        Array.isArray(
-          (error as { violations?: Array<{ message?: string }> }).violations
-        ) &&
-        (error as { violations: Array<{ message?: string }> }).violations
-          .length > 0
-      ) {
-        const violation = (error as { violations: Array<{ message?: string }> })
-          .violations[0]
-        const violationMessage =
-          violation?.message ||
-          (error instanceof Error
-            ? error.message
-            : (error as { message?: string }).message) ||
-          null
-        setRestrictionNotice(violationMessage)
+    } catch (e: any) {
+      console.error('Failed to start run', e)
+      if (Array.isArray(e?.violations) && e.violations.length > 0) {
+        setRestrictionNotice(e.violations[0]?.message || e?.message || null)
       } else {
-        const message =
-          error instanceof Error
-            ? error.message
-            : ((error as { message?: string }).message ?? 'Failed to start run')
-        setError(message)
+        setError(e?.message || 'Failed to start run')
       }
     }
   }, [currentWorkflow, workflowDirty, pollRun, refreshPlanUsage])
@@ -1218,14 +1001,14 @@ export default function Dashboard() {
           es?.close()
         }
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
     const onNodes = (e: MessageEvent) => {
       try {
         setNodeRuns(JSON.parse(e.data))
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
     const onError = () => {
@@ -1233,7 +1016,7 @@ export default function Dashboard() {
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
       es?.close()
     }
@@ -1246,7 +1029,7 @@ export default function Dashboard() {
       try {
         es?.close()
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
     }
   }, [runOverlayOpen, currentWorkflowIdValue, activeRunId, stopPolling])
@@ -1258,14 +1041,6 @@ export default function Dashboard() {
     handleGraphChange(latestGraphRef.current)
   }, [currentMeta, handleGraphChange, activePane])
 
-  useEffect(() => {
-    const wasSaving = previousSavingRef.current
-    previousSavingRef.current = isSaving
-    if (wasSaving && !isSaving) {
-      handleGraphChange(latestGraphRef.current)
-    }
-  }, [handleGraphChange, isSaving])
-
   const handleSave = useCallback(async () => {
     if (
       !saveRef.current ||
@@ -1276,70 +1051,39 @@ export default function Dashboard() {
       return
     }
 
-    const storeApi = useWorkflowStore.getState()
-    if (import.meta.env.DEV) {
-      console.log('[Dashboard.tsx:1203] handleSave:start', {
-        workflowId: currentWorkflow.id,
-        dirtyFlags: {
-          store: storeApi.isDirty,
-          graph: graphDirty
-        }
-      })
-    }
-    storeApi.lock()
-    if (import.meta.env.DEV) {
-      console.log('[Dashboard.tsx:1213] handleSave:locked')
+    const nodesData = saveRef.current.saveAllNodes?.() || []
+    const edgesData = saveRef.current.getEdges?.() || []
+
+    const cleanNodes = sortById(
+      nodesData.map((n: any) => ({
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data: sanitizeData(n.data)
+      }))
+    )
+    const cleanEdges = sortById(edgesData.map(normalizeEdgeForPayload))
+    const payloadGraph = {
+      nodes: cleanNodes,
+      edges: cleanEdges
     }
 
+    const pendingSnapshot = serializeSnapshot(
+      {
+        name: currentWorkflow.name,
+        description: currentWorkflow.description ?? null
+      },
+      payloadGraph
+    )
+
+    pendingSnapshotRef.current = pendingSnapshot
+    setWorkflowDirty(false)
     isSavingRef.current = true
     setIsSaving(true)
     setError(null)
 
-    let saveError: unknown = null
-    let violationMessage: string | null = null
-    let fallbackErrorMessage: string | null = null
-
+    saveRef.current.setNodesFromToolbar?.(nodesData)
     try {
-      const nodesData = saveRef.current.saveAllNodes?.() || []
-      const edgesData = saveRef.current.getEdges?.() || []
-      if (import.meta.env.DEV) {
-        console.log('[Dashboard.tsx:1228] handleSave:graphSnapshot', {
-          nodeCount: nodesData.length,
-          edgeCount: edgesData.length
-        })
-      }
-
-      const cleanNodes = sortById(
-        nodesData.map((n: any) => ({
-          id: n.id,
-          type: n.type,
-          position: n.position,
-          data: sanitizeData(n.data)
-        }))
-      )
-      const cleanEdges = sortById(edgesData.map(normalizeEdgeForPayload))
-      const payloadGraph = {
-        nodes: cleanNodes,
-        edges: cleanEdges
-      }
-
-      const pendingSnapshot = serializeSnapshot(
-        {
-          name: currentWorkflow.name,
-          description: currentWorkflow.description ?? null
-        },
-        payloadGraph
-      )
-
-      pendingSnapshotRef.current = pendingSnapshot
-      setGraphDirty(false)
-      storeApi.clearDirty()
-      if (import.meta.env.DEV) {
-        console.log('[Dashboard.tsx:1260] handleSave:snapshotPrepared')
-      }
-
-      saveRef.current.setNodesFromToolbar?.(nodesData, { markDirty: false })
-
       const updated = await updateWorkflowApi(
         currentWorkflow.id,
         {
@@ -1349,11 +1093,6 @@ export default function Dashboard() {
         },
         activeWorkspaceId
       )
-      if (import.meta.env.DEV) {
-        console.log('[Dashboard.tsx:1275] handleSave:apiSuccess', {
-          workflowId: updated.id
-        })
-      }
 
       setWorkflows((prev) =>
         prev.map((workflow) =>
@@ -1362,10 +1101,8 @@ export default function Dashboard() {
       )
 
       const normalized = normalizeWorkflowData(updated.data ?? payloadGraph)
-      const canonical = canonicalizeGraph(normalized)
-      suppressGraphDirtyRef.current = true
       setWorkflowData(normalized)
-      latestGraphRef.current = canonical
+      latestGraphRef.current = normalized
 
       const savedSnapshot = serializeSnapshot(
         {
@@ -1373,9 +1110,10 @@ export default function Dashboard() {
           description:
             updated.description ?? currentWorkflow.description ?? null
         },
-        canonical
+        normalized
       )
 
+      // Prepare diffs for logs from previous saved snapshot to new saved snapshot (user data only)
       try {
         const prevSaved = JSON.parse(lastSavedSnapshotRef.current)
         const currSaved = JSON.parse(savedSnapshot)
@@ -1408,62 +1146,32 @@ export default function Dashboard() {
           })
         }
       } catch (e) {
-        logError(e)
+        console.error(e.message)
       }
 
       lastSavedSnapshotRef.current = savedSnapshot
       pendingSnapshotRef.current = null
-      setGraphDirty(false)
-      storeApi.clearDirty()
-      if (import.meta.env.DEV) {
-        console.log('[Dashboard.tsx:1339] handleSave:storeCleared', {
-          dirtyFlags: {
-            store: useWorkflowStore.getState().isDirty,
-            graph: false
-          }
-        })
-      }
+      setWorkflowDirty(false)
     } catch (err) {
       console.error('Failed to save workflow', err)
-      saveError = err
-      if (import.meta.env.DEV) {
-        console.log('[Dashboard.tsx:1350] handleSave:error', err)
-      }
       if (
         Array.isArray((err as any)?.violations) &&
         (err as any).violations.length > 0
       ) {
-        violationMessage =
+        const violationMessage =
           (err as any).violations[0]?.message ||
           (err as any).message ||
           'This workflow uses a premium feature that is locked on the solo plan.'
-      } else {
-        fallbackErrorMessage =
-          (err as any)?.message || 'Failed to save workflow.'
-      }
-      pendingSnapshotRef.current = null
-    } finally {
-      storeApi.unlock()
-      if (import.meta.env.DEV) {
-        console.log('[Dashboard.tsx:1368] handleSave:unlock', {
-          dirtyFlags: {
-            store: useWorkflowStore.getState().isDirty,
-            graph: graphDirty
-          }
-        })
-      }
-      setIsSaving(false)
-      isSavingRef.current = false
-    }
-
-    if (saveError) {
-      if (violationMessage) {
         setRestrictionNotice(violationMessage)
-      } else if (fallbackErrorMessage) {
-        setError(fallbackErrorMessage)
+      } else {
+        setError((err as any)?.message || 'Failed to save workflow.')
         window.alert('Failed to save workflow. Please try again.')
       }
+      pendingSnapshotRef.current = null
       handleGraphChange(latestGraphRef.current)
+    } finally {
+      setIsSaving(false)
+      isSavingRef.current = false
     }
   }, [
     activeWorkspaceId,
@@ -1471,7 +1179,6 @@ export default function Dashboard() {
     canEditCurrentWorkflow,
     currentWorkflow,
     handleGraphChange,
-    graphDirty,
     isSaving,
     normalizeWorkflowData,
     setRestrictionNotice
@@ -1549,7 +1256,7 @@ export default function Dashboard() {
     gradient
   }: {
     type: 'Trigger' | 'Action' | 'Condition'
-    icon: ReactElement
+    icon: JSX.Element
     gradient: string
   }) {
     const allowDrag = canEditCurrentWorkflow
@@ -1634,16 +1341,14 @@ export default function Dashboard() {
             const next = updated[0]
             setCurrentWorkflowId(next.id)
             const normalized = normalizeWorkflowData(next.data)
-            const canonical = canonicalizeGraph(normalized)
-            suppressGraphDirtyRef.current = true
             setWorkflowData(normalized)
-            latestGraphRef.current = canonical
+            latestGraphRef.current = normalized
             lastSavedSnapshotRef.current = serializeSnapshot(
               { name: next.name, description: next.description ?? null },
-              canonical
+              normalized
             )
             pendingSnapshotRef.current = null
-            setGraphDirty(false)
+            setWorkflowDirty(false)
           } else {
             // No workflows left — create a fresh one
             handleNewWorkflow()

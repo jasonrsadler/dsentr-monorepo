@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { NavigateButton } from '@/components/ui/buttons/NavigateButton'
+import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
 
 test('renders a link styled as a button', () => {
   render(

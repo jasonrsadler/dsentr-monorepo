@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import deepEqual from 'fast-deep-equal'
 import NodeDropdownField, {
   type NodeDropdownOptionGroup
-} from '@/components/ui/input-fields/NodeDropdownField'
-import NodeInputField from '@/components/ui/input-fields/NodeInputField'
-import NodeSecretDropdown from '@/components/ui/input-fields/NodeSecretDropdown'
-import NodeTextAreaField from '@/components/ui/input-fields/NodeTextAreaField'
+} from '@/components/UI/InputFields/NodeDropdownField'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
+import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import {
   fetchConnections,
   getCachedConnections,
@@ -53,7 +53,7 @@ export interface TeamsActionValues {
   workflowHeaderSecret?: string
   oauthProvider?: string
   oauthConnectionId?: string
-  oauthConnectionScope?: ConnectionScope | ''
+  oauthConnectionScope?: ConnectionScope
   oauthAccountEmail?: string
   teamId?: string
   teamName?: string
@@ -129,7 +129,7 @@ const buildSimpleAdaptiveCardJson = (title: string, body: string) => {
   return JSON.stringify(payload, null, 2)
 }
 
-const STRING_KEYS = [
+const STRING_KEYS: (keyof TeamsActionValues)[] = [
   'deliveryMethod',
   'webhookType',
   'webhookUrl',
@@ -154,9 +154,7 @@ const STRING_KEYS = [
   'channelId',
   'channelName',
   'messageType'
-] as const satisfies readonly (keyof TeamsActionValues)[]
-
-type StringKey = (typeof STRING_KEYS)[number]
+]
 
 const sanitizeMentions = (mentions?: TeamsMention[]): TeamsMention[] => {
   if (!Array.isArray(mentions)) return []
@@ -388,8 +386,7 @@ const normalizeParams = (incoming?: TeamsActionValues): TeamsActionValues => {
   STRING_KEYS.forEach((key) => {
     const value = incoming[key]
     if (typeof value === 'string') {
-      ;(next as Record<StringKey, TeamsActionValues[StringKey]>)[key] =
-        value as TeamsActionValues[StringKey]
+      next[key] = value
     }
   })
 
@@ -1741,7 +1738,7 @@ export default function TeamsAction({
   return (
     <div className="flex flex-col gap-2">
       <NodeDropdownField
-        options={[...deliveryOptions]}
+        options={deliveryOptions}
         value={params.deliveryMethod}
         onChange={(val) => updateField('deliveryMethod', val)}
       />
@@ -1758,7 +1755,7 @@ export default function TeamsAction({
       {isIncomingWebhook && (
         <div className="flex flex-col gap-2">
           <NodeDropdownField
-            options={[...webhookOptions]}
+            options={webhookOptions}
             value={params.webhookType}
             onChange={(val) => updateField('webhookType', val)}
           />
@@ -1982,7 +1979,7 @@ export default function TeamsAction({
           )}
 
           <NodeDropdownField
-            options={[...delegatedMessageTypes]}
+            options={delegatedMessageTypes}
             value={delegatedMessageType}
             onChange={handleMessageTypeChange}
           />
@@ -2056,7 +2053,7 @@ export default function TeamsAction({
           ) : (
             <>
               <NodeDropdownField
-                options={[...delegatedCardModes]}
+                options={delegatedCardModes}
                 value={delegatedCardMode}
                 onChange={handleCardModeChange}
               />

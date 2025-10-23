@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 
-import IntegrationsTab from '@/components/settings/tabs/IntegrationsTab'
+import IntegrationsTab from '../IntegrationsTab'
 
 const mockWorkspace = {
   workspace: { id: 'ws-1', name: 'Acme Workspace', plan: 'workspace' },

@@ -58,7 +58,8 @@ describe('<Login />', () => {
   })
 
   afterEach(() => {
-    window.location = originalLocation as typeof window.location
+    // @ts-expect-error: Restoring original location
+    window.location = originalLocation
   })
 
   it('renders login form', () => {

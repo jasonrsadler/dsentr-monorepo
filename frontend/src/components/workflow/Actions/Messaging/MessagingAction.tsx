@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import deepEqual from 'fast-deep-equal'
-import NodeDropdownField from '@/components/ui/input-fields/NodeDropdownField'
+import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
 import SlackAction from './Services/SlackAction'
 import TeamsAction from './Services/TeamsAction'
 import GoogleChatAction from './Services/GoogleChatAction'

@@ -1,8 +1,8 @@
-import NodeDropdownField from '@/components/ui/input-fields/NodeDropdownField'
-import NodeInputField from '@/components/ui/input-fields/NodeInputField'
-import NodeTextAreaField from '@/components/ui/input-fields/NodeTextAreaField'
-import NodeSecretDropdown from '@/components/ui/input-fields/NodeSecretDropdown'
-import KeyValuePair from '@/components/ui/react-flow/KeyValuePair'
+import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
+import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
 import { useEffect, useMemo, useState } from 'react'
 
 type AuthType = 'none' | 'basic' | 'bearer'

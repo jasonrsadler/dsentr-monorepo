@@ -98,7 +98,7 @@ export default function PlanTab() {
                 }
               })
               .filter(
-                (option: PlanOption): option is PlanOption =>
+                (option): option is PlanOption =>
                   option.tier === 'solo' || option.tier === 'workspace'
               )
           : FALLBACK_PLAN_OPTIONS

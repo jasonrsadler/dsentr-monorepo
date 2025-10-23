@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
-import GoogleChatAction from '../src/components/workflow/Actions/Messaging/Services/GoogleChatAction'
+import GoogleChatAction from './GoogleChatAction'
 
 describe('GoogleChatAction', () => {
   const baseArgs = {

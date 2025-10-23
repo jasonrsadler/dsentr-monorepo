@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import deepEqual from 'fast-deep-equal'
-import NodeTextAreaField from '@/components/ui/input-fields/NodeTextAreaField'
-import KeyValuePair from '@/components/ui/react-flow/KeyValuePair'
+import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
 type KeyValueEntry = { key: string; value: string }
 
 type RunCustomCodeArgs = {

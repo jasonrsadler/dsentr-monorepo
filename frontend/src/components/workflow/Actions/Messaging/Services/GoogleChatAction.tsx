@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import NodeDropdownField from '@/components/ui/input-fields/NodeDropdownField'
-import NodeInputField from '@/components/ui/input-fields/NodeInputField'
-import NodeTextAreaField from '@/components/ui/input-fields/NodeTextAreaField'
+import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 
 export interface GoogleChatActionValues {
   webhookUrl?: string

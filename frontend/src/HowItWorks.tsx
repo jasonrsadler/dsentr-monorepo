@@ -1,5 +1,5 @@
 // src/pages/HowItWorks.tsx
-import { NavigateButton } from './components/ui/buttons/NavigateButton'
+import { NavigateButton } from './components/UI/Buttons/NavigateButton'
 
 export default function HowItWorks() {
   return (

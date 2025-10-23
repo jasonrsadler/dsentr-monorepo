@@ -1,16 +1,12 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
-import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunAction'
+import MailGunAction from '../src/components/workflow/Actions/Email/Services/MailGunAction'
 import { vi } from 'vitest'
-import { renderWithSecrets } from 'tests/test-utils/renderWithSecrets'
-import type { SecretStore } from '@/lib/optionsApi'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 
-const secrets: SecretStore = {
+const secrets = {
   email: {
     mailgun: {
-      primary: {
-        value: 'key-123',
-        ownerId: ''
-      }
+      primary: 'key-123'
     }
   }
 }
@@ -24,9 +20,7 @@ describe('MailGunAction', () => {
     to: 'user@example.com',
     subject: 'Hello',
     body: 'Body',
-    dirty: false,
-    setParams: vi.fn(),
-    setDirty: vi.fn()
+    dirty: false
   }
 
   beforeEach(() => {

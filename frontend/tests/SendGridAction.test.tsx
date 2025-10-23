@@ -1,16 +1,12 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
 import SendGridAction from '../src/components/workflow/Actions/Email/Services/SendGridAction'
 import { vi } from 'vitest'
-import { renderWithSecrets } from 'tests/test-utils/renderWithSecrets'
-import type { SecretStore } from '@/lib/optionsApi'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 
-const secrets: SecretStore = {
+const secrets = {
   email: {
     sendgrid: {
-      primary: {
-        value: 'key-123',
-        ownerId: ''
-      }
+      primary: 'key-123'
     }
   }
 }

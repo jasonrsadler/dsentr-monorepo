@@ -1,32 +1,16 @@
 {
-    "extends": "./tsconfig.app.json",
+    "extends": "./tsconfig.json",
     "compilerOptions": {
         "types": [
             "vitest",
             "jsdom",
             "vitest/globals"
         ],
-        "typeRoots": [
-            "./types",
-            "./node_modules/@types",
-            "./node_modules"
-        ],
-        "baseUrl": ".",
-        "paths": {
-            "@/*": [
-                "src/*"
-            ],
-            "jsdom": [
-                "types/jsdom/index.d.ts"
-            ]
-        }
     },
     "include": [
         "tests",
         "src",
         "vite.config.ts",
-        "src/test/setup.ts",
-        "types"
+        "src/test/setup.ts"
     ]
 }
-

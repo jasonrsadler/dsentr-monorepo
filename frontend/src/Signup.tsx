@@ -5,7 +5,7 @@ import ClockIcon from '@/assets/svg-components/ClockIcon'
 import ShieldIcon from '@/assets/svg-components/ShieldIcon'
 import { WorkflowIllustration } from '@/assets/svg-components/WorkflowIllustration'
 import { API_BASE_URL, parseInviteQuery, signupUser } from '@/lib'
-import { FormButton } from './components/ui/buttons/FormButton'
+import { FormButton } from './components/UI/Buttons/FormButton'
 import GoogleSignupButton from './components/GoogleSignupButton'
 import GithubLoginButton from './components/GithubLoginButton'
 
@@ -33,46 +33,6 @@ type InvitePreviewResponse = {
 }
 
 type SignupRequest = Parameters<typeof signupUser>[0]
-
-type SignupFormState = {
-  first_name: string
-  last_name: string
-  email: string
-  password: string
-  confirmPassword: string
-  company_name: string
-  country: string
-  tax_id: string
-  settings: Record<string, unknown>
-}
-
-type SignupField = {
-  name: Exclude<keyof SignupFormState, 'settings'>
-  label: string
-  required?: boolean
-  type?: 'text' | 'password'
-}
-
-const SIGNUP_FIELDS: ReadonlyArray<SignupField> = [
-  { name: 'first_name', label: 'First Name', required: true },
-  { name: 'last_name', label: 'Last Name', required: true },
-  { name: 'email', label: 'Email', required: true },
-  { name: 'company_name', label: 'Company' },
-  {
-    name: 'password',
-    label: 'Password',
-    required: true,
-    type: 'password'
-  },
-  {
-    name: 'confirmPassword',
-    label: 'Verify Password',
-    required: true,
-    type: 'password'
-  },
-  { name: 'country', label: 'Country' },
-  { name: 'tax_id', label: 'Tax ID' }
-]
 
 type InviteStatus = 'none' | 'loading' | 'valid' | 'invalid'
 
@@ -109,7 +69,7 @@ function formatRole(role: string | null | undefined) {
 export default function SignupPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [form, setForm] = useState<SignupFormState>({
+  const [form, setForm] = useState({
     first_name: '',
     last_name: '',
     email: '',
@@ -118,7 +78,7 @@ export default function SignupPage() {
     company_name: '',
     country: '',
     tax_id: '',
-    settings: {}
+    settings: {} as Record<string, any>
   })
   const [message, setMessage] = useState<string | null>(null)
   const [errors, setErrors] = useState<string[]>([])
@@ -424,11 +384,27 @@ export default function SignupPage() {
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4 text-center">
-                {SIGNUP_FIELDS.map((field) => {
-                  const { name, label } = field
-                  const required = field.required ?? false
-                  const inputType = field.type ?? 'text'
-                  const value = form[name] ?? ''
+                {[
+                  { name: 'first_name', label: 'First Name', required: true },
+                  { name: 'last_name', label: 'Last Name', required: true },
+                  { name: 'email', label: 'Email', required: true },
+                  { name: 'company_name', label: 'Company' },
+                  {
+                    name: 'password',
+                    label: 'Password',
+                    required: true,
+                    type: 'password'
+                  },
+                  {
+                    name: 'confirmPassword',
+                    label: 'Verify Password',
+                    required: true,
+                    type: 'password'
+                  },
+                  { name: 'country', label: 'Country' },
+                  { name: 'tax_id', label: 'Tax ID' }
+                ].map(({ name, label, required, type }) => {
+                  const value = (form as Record<string, string>)[name] ?? ''
                   return (
                     <div key={name}>
                       <label
@@ -442,7 +418,7 @@ export default function SignupPage() {
                       </label>
                       <input
                         id={name}
-                        type={inputType}
+                        type={type || 'text'}
                         name={name}
                         value={value}
                         onChange={handleChange}

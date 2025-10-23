@@ -1,21 +1,13 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
-import { vi, type MockInstance } from 'vitest'
-import SlackAction from '../src/components/workflow/Actions/Messaging/Services/SlackAction'
-import { renderWithSecrets } from 'tests/test-utils/renderWithSecrets'
-import type { SecretStore } from '@/lib/optionsApi'
+import { vi } from 'vitest'
+import SlackAction from './SlackAction'
+import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 
 const createJsonResponse = (body: unknown) =>
   new Response(JSON.stringify(body), {
     status: 200,
     headers: { 'Content-Type': 'application/json' }
   })
-
-const requestInfoToUrl = (input: RequestInfo | URL): string => {
-  if (typeof input === 'string') return input
-  if (input instanceof URL) return input.toString()
-  if (input instanceof Request) return input.url
-  return String(input)
-}
 
 describe('SlackAction', () => {
   const baseArgs = {
@@ -24,24 +16,28 @@ describe('SlackAction', () => {
     token: 'xoxb-token'
   }
 
-  const secrets: SecretStore = {
+  const secrets = {
     messaging: {
       slack: {
-        primary: {
-          value: 'xoxb-token',
-          ownerId: ''
-        }
+        primary: 'xoxb-token'
       }
     }
   }
 
-  let fetchMock: MockInstance<typeof fetch>
+  let fetchMock: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     fetchMock = vi
       .spyOn(global, 'fetch')
       .mockImplementation((input: RequestInfo | URL) => {
-        const url = requestInfoToUrl(input)
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : 'url' in input
+                ? input.url
+                : input.toString()
 
         if (url.includes('/api/oauth/connections')) {
           return Promise.resolve(
@@ -150,7 +146,14 @@ describe('SlackAction', () => {
   it('allows selecting a personal Slack OAuth connection', async () => {
     const personalId = '11111111-2222-3333-4444-555555555555'
     fetchMock.mockImplementationOnce((input: RequestInfo | URL) => {
-      const url = requestInfoToUrl(input)
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : 'url' in input
+              ? input.url
+              : input.toString()
 
       if (url.includes('/api/oauth/connections')) {
         return Promise.resolve(
@@ -214,7 +217,14 @@ describe('SlackAction', () => {
   it('emits workspace Slack OAuth metadata when selected', async () => {
     const workspaceConnectionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     fetchMock.mockImplementationOnce((input: RequestInfo | URL) => {
-      const url = requestInfoToUrl(input)
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : 'url' in input
+              ? input.url
+              : input.toString()
 
       if (url.includes('/api/oauth/connections')) {
         return Promise.resolve(

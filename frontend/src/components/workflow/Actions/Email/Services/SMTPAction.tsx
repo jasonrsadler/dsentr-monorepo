@@ -1,6 +1,6 @@
-import NodeInputField from '@/components/ui/input-fields/NodeInputField'
-import NodeSecretDropdown from '@/components/ui/input-fields/NodeSecretDropdown'
-import NodeTextAreaField from '@/components/ui/input-fields/NodeTextAreaField'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
+import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
 import { useEffect, useMemo, useState } from 'react'
 
 type TlsMode = 'starttls' | 'implicit_tls' | 'none'

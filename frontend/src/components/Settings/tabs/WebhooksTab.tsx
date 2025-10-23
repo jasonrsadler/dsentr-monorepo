@@ -10,14 +10,6 @@ import {
 import { API_BASE_URL } from '@/lib/config'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
-const logError = (error: unknown) => {
-  if (error instanceof Error) {
-    console.error(error.message)
-    return
-  }
-  console.error(error)
-}
-
 export default function WebhooksTab() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
   const [workflowId, setWorkflowId] = useState<string>('')
@@ -158,8 +150,8 @@ export default function WebhooksTab() {
                   }
                   setCopied(true)
                   setTimeout(() => setCopied(false), 1500)
-                } catch (error) {
-                  logError(error)
+                } catch (e) {
+                  console.error(e.message)
                 }
               }}
             >
@@ -251,8 +243,8 @@ export default function WebhooksTab() {
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(curlCopy)
-                  } catch (error) {
-                    logError(error)
+                  } catch (e) {
+                    console.error(e.message)
                   }
                   setCopiedCurl(true)
                   setTimeout(() => setCopiedCurl(false), 1500)
@@ -276,8 +268,8 @@ export default function WebhooksTab() {
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(psCopy)
-                  } catch (error) {
-                    logError(error)
+                  } catch (e) {
+                    console.error(e.message)
                   }
                   setCopiedPS(true)
                   setTimeout(() => setCopiedPS(false), 1500)
@@ -301,8 +293,8 @@ export default function WebhooksTab() {
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(jsCopy)
-                  } catch (error) {
-                    logError(error)
+                  } catch (e) {
+                    console.error(e.message)
                   }
                   setCopiedJS(true)
                   setTimeout(() => setCopiedJS(false), 1500)
@@ -362,8 +354,8 @@ export default function WebhooksTab() {
                   require_hmac: requireHmac,
                   replay_window_sec: replayWindow
                 })
-              } catch (error) {
-                logError(error)
+              } catch (e) {
+                console.error(e.message)
               }
             }}
           >
@@ -383,8 +375,8 @@ export default function WebhooksTab() {
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(signingKey)
-                } catch (error) {
-                  logError(error)
+                } catch (e) {
+                  console.error(e.message)
                 }
               }}
             >

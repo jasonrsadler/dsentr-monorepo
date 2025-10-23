@@ -1,15 +1,14 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import deepEqual from 'fast-deep-equal'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
-import NodeInputField from '@/components/ui/input-fields/NodeInputField'
-import NodeDropdownField from '@/components/ui/input-fields/NodeDropdownField'
-import NodeHeader from '@/components/ui/react-flow/NodeHeader'
+import NodeInputField from '@/components/UI/InputFields/NodeInputField'
+import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
+import NodeHeader from '@/components/UI/ReactFlow/NodeHeader'
 
 interface ConditionNodeProps {
   id: string
   data: {
-    id?: string
     field?: string
     operator?: string
     value?: string
@@ -23,268 +22,133 @@ interface ConditionNodeProps {
   }
   selected: boolean
   onRemove?: (id: string) => void
-  onChange?: (id: string, data: any, suppressDirty?: boolean) => void
-  markDirty?: () => void
-  onRun?: (id: string) => void
-}
-
-type ConditionNodeStoreData = {
-  id?: string
-  field?: string
-  operator?: string
-  value?: string
-  expression?: string
-  dirty?: boolean
-  expanded?: boolean
-  hasValidationErrors?: boolean
-  label?: string
-  labelError?: string | null
-  hasLabelValidationError?: boolean
-  nodeStatus?: {
-    isRunning?: boolean
-    isSucceeded?: boolean
-    isFailed?: boolean
-    running?: boolean
-    succeeded?: boolean
-    failed?: boolean
-  }
-  status?: {
-    isRunning?: boolean
-    isSucceeded?: boolean
-    isFailed?: boolean
-    running?: boolean
-    succeeded?: boolean
-    failed?: boolean
-  }
+  onUpdateNode?: (id: string, data: any, suppressDirty?: boolean) => void
+  onDirtyChange?: (dirty: boolean, data: any) => void
   isRunning?: boolean
   isSucceeded?: boolean
   isFailed?: boolean
 }
 
-type ConditionNodeUpdatePayload = {
-  label: string
-  field: string
-  operator: string
-  value: string
-  expression: string
-  dirty: boolean
-  expanded: boolean
-  hasValidationErrors: boolean
-  labelError: string | null
-  hasLabelValidationError: boolean
-}
-
-type ConditionEvaluation = {
-  expression: string
-  fieldError: boolean
-  operatorError: boolean
-  valueError: boolean
-  hasValidationErrors: boolean
-}
-
-type NodeStatusSnapshot = {
-  isRunning: boolean
-  isSucceeded: boolean
-  isFailed: boolean
-}
-
-function deriveNodeStatus(data?: ConditionNodeStoreData): NodeStatusSnapshot {
-  if (!data) {
-    return { isRunning: false, isSucceeded: false, isFailed: false }
-  }
-
-  const nested =
-    (typeof data.nodeStatus === 'object' && data.nodeStatus) ||
-    (typeof data.status === 'object' && data.status) ||
-    {}
-  const nestedRecord = nested as Record<string, unknown>
-
-  const resolve = (value: unknown): boolean => {
-    if (typeof value === 'boolean') return value
-    return Boolean(value)
-  }
-
-  const isRunning = resolve(
-    data.isRunning ?? nestedRecord.isRunning ?? nestedRecord.running
-  )
-  const isSucceeded = resolve(
-    data.isSucceeded ?? nestedRecord.isSucceeded ?? nestedRecord.succeeded
-  )
-  const isFailed = resolve(
-    data.isFailed ?? nestedRecord.isFailed ?? nestedRecord.failed
-  )
-
-  return { isRunning, isSucceeded, isFailed }
-}
-
-function evaluateConditionInputs(
-  field: string,
-  operator: string,
-  value: string
-): ConditionEvaluation {
-  const trimmedField = field.trim()
-  const trimmedOperator = operator.trim()
-  const trimmedValue = value.trim()
-  const expression = buildExpression(
-    trimmedField,
-    trimmedOperator,
-    trimmedValue
-  )
-  const fieldError = trimmedField.length === 0
-  const operatorError = trimmedOperator.length === 0
-  const valueError = trimmedValue.length === 0
-  return {
-    expression,
-    fieldError,
-    operatorError,
-    valueError,
-    hasValidationErrors: fieldError || operatorError || valueError
-  }
-}
-
-function ConditionNode({
+export default function ConditionNode({
   id,
   data,
   selected,
   onRemove,
-  onChange,
-  markDirty
+  onUpdateNode,
+  onDirtyChange,
+  isRunning,
+  isSucceeded,
+  isFailed
 }: ConditionNodeProps) {
-  const nodeData = useMemo(() => (data ?? {}) as ConditionNodeStoreData, [data])
+  const isNewNode = useMemo(() => !data?.id, [data?.id])
+  const dataExpanded = data?.expanded ?? true
+  const dataDirty = data?.dirty
+  const dataField = data?.field || ''
+  const dataOperator = data?.operator || 'equals'
+  const dataValue = data?.value || ''
+  const dataLabel = data?.label || 'Condition'
+  const dataLabelError = data?.labelError ?? null
 
-  const derivedState = useMemo(() => {
-    const storedId = nodeData?.id
-    const label = nodeData?.label ?? 'Condition'
-    const field = nodeData?.field ?? ''
-    const operator = nodeData?.operator ?? 'equals'
-    const value = nodeData?.value ?? ''
-    const expanded = nodeData?.expanded ?? true
-    const isNewNode = !storedId
-    const dirty =
-      typeof nodeData?.dirty === 'boolean' ? nodeData.dirty : isNewNode
-    const rawLabelError = nodeData?.labelError ?? null
-    const hasLabelValidationError =
-      nodeData?.hasLabelValidationError ?? Boolean(rawLabelError)
+  const [expanded, setExpanded] = useState(dataExpanded)
+  const [dirty, setDirty] = useState(dataDirty ?? isNewNode)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [hasValidationErrors, setHasValidationErrors] = useState(false)
+  const [labelError, setLabelError] = useState<string | null>(
+    data?.labelError ?? null
+  )
+  const combinedHasValidationErrors = hasValidationErrors || Boolean(labelError)
 
-    return {
+  const [field, setField] = useState(dataField)
+  const [operator, setOperator] = useState(dataOperator)
+  const [value, setValue] = useState(dataValue)
+  const [label, setLabel] = useState(dataLabel)
+
+  useEffect(() => {
+    setLabelError(dataLabelError)
+  }, [dataLabelError])
+
+  // Sync validation
+  useEffect(() => {
+    setHasValidationErrors(!field || !operator || !value)
+  }, [field, operator, value])
+
+  const expression = useMemo(
+    () => buildExpression(field, operator, value),
+    [field, operator, value]
+  )
+
+  const currentNodeState = useMemo(
+    () => ({
       label,
       field,
       operator,
       value,
-      expanded,
+      expression,
       dirty,
-      rawLabelError,
-      hasLabelValidationError
-    }
-  }, [nodeData])
-
-  const {
-    label,
-    field,
-    operator,
-    value,
-    expanded,
-    dirty,
-    rawLabelError,
-    hasLabelValidationError
-  } = derivedState
-  const { isRunning, isSucceeded, isFailed } = useMemo(
-    () => deriveNodeStatus(nodeData),
-    [nodeData]
-  )
-
-  const evaluation = useMemo(
-    () => evaluateConditionInputs(field, operator, value),
-    [field, operator, value]
-  )
-
-  const combinedHasValidationErrors = useMemo(
-    () => evaluation.hasValidationErrors || Boolean(rawLabelError),
-    [evaluation.hasValidationErrors, rawLabelError]
-  )
-  const showFieldError = evaluation.hasValidationErrors && evaluation.fieldError
-  const showValueError = evaluation.hasValidationErrors && evaluation.valueError
-
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const lastEmissionRef = useRef<{
-    id: string
-    payload: ConditionNodeUpdatePayload
-  } | null>(null)
-  const handleChange = useCallback(
-    (
-      partial: Partial<ConditionNodeUpdatePayload>,
-      options?: { suppressDirty?: boolean }
-    ) => {
-      const nextField = partial.field ?? field
-      const nextOperator = partial.operator ?? operator
-      const nextValue = partial.value ?? value
-      const nextLabel = 'label' in partial ? (partial.label ?? '') : label
-      const nextExpanded =
-        'expanded' in partial ? Boolean(partial.expanded) : expanded
-      const nextDirty = 'dirty' in partial ? Boolean(partial.dirty) : dirty
-      const nextLabelError =
-        'labelError' in partial ? (partial.labelError ?? null) : rawLabelError
-      const nextHasLabelValidationError =
-        'hasLabelValidationError' in partial
-          ? Boolean(partial.hasLabelValidationError)
-          : hasLabelValidationError || Boolean(nextLabelError)
-
-      const evaluated = evaluateConditionInputs(
-        nextField,
-        nextOperator,
-        nextValue
-      )
-
-      const nextHasValidationErrors =
-        'hasValidationErrors' in partial &&
-        partial.hasValidationErrors !== undefined
-          ? Boolean(partial.hasValidationErrors)
-          : evaluated.hasValidationErrors
-
-      const payload: ConditionNodeUpdatePayload = {
-        label: nextLabel,
-        field: nextField,
-        operator: nextOperator,
-        value: nextValue,
-        expression: evaluated.expression,
-        dirty: nextDirty,
-        expanded: nextExpanded,
-        hasValidationErrors: nextHasValidationErrors,
-        labelError: nextLabelError,
-        hasLabelValidationError: nextHasLabelValidationError
-      }
-
-      const previous = lastEmissionRef.current
-      if (
-        previous &&
-        previous.id === id &&
-        deepEqual(previous.payload, payload)
-      ) {
-        return
-      }
-
-      lastEmissionRef.current = { id, payload }
-
-      onChange?.(id, payload, options?.suppressDirty ?? false)
-
-      if (!options?.suppressDirty && payload.dirty !== dirty) {
-        markDirty?.()
-      }
-    },
+      expanded,
+      hasValidationErrors: combinedHasValidationErrors
+    }),
     [
+      combinedHasValidationErrors,
       dirty,
       expanded,
+      expression,
       field,
-      hasLabelValidationError,
-      id,
       label,
-      markDirty,
-      onChange,
       operator,
-      rawLabelError,
       value
     ]
   )
+
+  const lastSyncedStateRef = useRef<typeof currentNodeState | null>(null)
+  const lastDirtyStatusRef = useRef<boolean | null>(null)
+
+  // Sync node data to parent when payload meaningfully changes
+  useEffect(() => {
+    const previousState = lastSyncedStateRef.current
+    const stateChanged =
+      !previousState || !deepEqual(previousState, currentNodeState)
+
+    if (stateChanged) {
+      lastSyncedStateRef.current = currentNodeState
+      onUpdateNode?.(id, currentNodeState, true)
+    }
+
+    if (dirty !== lastDirtyStatusRef.current) {
+      lastDirtyStatusRef.current = dirty
+      onDirtyChange?.(dirty, currentNodeState)
+    }
+  }, [currentNodeState, dirty, id, onDirtyChange, onUpdateNode])
+
+  // Sync dirty from parent
+  useEffect(() => {
+    if (dataDirty !== undefined && dataDirty !== dirty) {
+      setDirty(dataDirty)
+    }
+  }, [dataDirty, dirty])
+
+  // Reset local state when node id changes (e.g., new node or remount on workflow switch)
+  useEffect(() => {
+    // React Flow safe pattern: keep local node state synchronized with the
+    // latest canvas data while guarding against render loops.
+    setLabel(dataLabel)
+    setExpanded(dataExpanded)
+    setField(dataField)
+    setOperator(dataOperator)
+    setValue(dataValue)
+    setDirty(dataDirty ?? isNewNode)
+    setLabelError(dataLabelError)
+  }, [
+    id,
+    dataLabel,
+    dataExpanded,
+    dataField,
+    dataOperator,
+    dataValue,
+    dataDirty,
+    dataLabelError,
+    isNewNode
+  ])
 
   const ringClass = isFailed
     ? 'ring-2 ring-red-500'
@@ -293,7 +157,6 @@ function ConditionNode({
       : isRunning
         ? 'ring-2 ring-sky-500'
         : ''
-
   return (
     <motion.div
       className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
@@ -349,14 +212,15 @@ function ConditionNode({
           dirty={dirty}
           hasValidationErrors={combinedHasValidationErrors}
           expanded={expanded}
-          onLabelChange={(val) => handleChange({ label: val, dirty: true })}
-          onExpanded={() =>
-            handleChange({ expanded: !expanded }, { suppressDirty: true })
-          }
+          onLabelChange={(val) => {
+            setLabel(val)
+            setDirty(true)
+          }}
+          onExpanded={() => setExpanded((prev) => !prev)}
           onConfirmingDelete={() => setConfirmingDelete(true)}
         />
-        {rawLabelError && (
-          <p className="mt-2 text-xs text-red-500">{rawLabelError}</p>
+        {labelError && (
+          <p className="mt-2 text-xs text-red-500">{labelError}</p>
         )}
 
         <AnimatePresence>
@@ -371,9 +235,12 @@ function ConditionNode({
               <NodeInputField
                 placeholder="Field name"
                 value={field}
-                onChange={(val) => handleChange({ field: val, dirty: true })}
+                onChange={(val) => {
+                  setField(val)
+                  setDirty(true)
+                }}
               />
-              {showFieldError && (
+              {hasValidationErrors && !field && (
                 <p className="text-red-500 text-xs mt-1">Field is required</p>
               )}
               <NodeDropdownField
@@ -385,15 +252,21 @@ function ConditionNode({
                   'contains'
                 ]}
                 value={operator}
-                onChange={(val) => handleChange({ operator: val, dirty: true })}
+                onChange={(val) => {
+                  setOperator(val)
+                  setDirty(true)
+                }}
               />
 
               <NodeInputField
                 placeholder="Comparison value"
                 value={value}
-                onChange={(val) => handleChange({ value: val, dirty: true })}
+                onChange={(val) => {
+                  setValue(val)
+                  setDirty(true)
+                }}
               />
-              {showValueError && (
+              {hasValidationErrors && !value && (
                 <p className="text-red-500 text-xs mt-1">Value is required</p>
               )}
             </motion.div>
@@ -486,5 +359,3 @@ function formatExpressionValue(raw: string) {
 
   return JSON.stringify(trimmed)
 }
-
-export default memo(ConditionNode)

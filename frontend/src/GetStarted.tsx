@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { joinWaitlist } from '@/lib/waitlistApi' // adjust path if needed
-import { FormButton } from './components/ui/buttons/FormButton'
+import { FormButton } from './components/UI/Buttons/FormButton'
 
 export default function GetStarted() {
   const [submitted, setSubmitted] = useState(false)

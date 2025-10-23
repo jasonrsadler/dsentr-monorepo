@@ -191,11 +191,7 @@ export async function fetchWorkspaceSecretOwnership(
     | { success: false; message?: string }
 
   if (!res.ok || !data.success) {
-    const message =
-      'message' in data && typeof data.message === 'string'
-        ? data.message
-        : undefined
-    throw new Error(message ?? 'Failed to load workspace secrets')
+    throw new Error(data?.message || 'Failed to load workspace secrets')
   }
 
   return data.ownership ?? {}

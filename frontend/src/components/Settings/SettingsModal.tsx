@@ -1,10 +1,10 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 
 type Props = {
   open: boolean
   onClose: () => void
   tabs: Array<{ key: string; label: string }>
-  renderTab: (key: string) => ReactNode
+  renderTab: (key: string) => JSX.Element
   initialTab?: string
 }
 
