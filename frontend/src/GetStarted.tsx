@@ -1,6 +1,10 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+
 import { joinWaitlist } from '@/lib/waitlistApi' // adjust path if needed
 import { FormButton } from './components/UI/Buttons/FormButton'
+import { MetaTags } from '@/components/MetaTags'
+import { MarketingShell } from '@/components/marketing/MarketingShell'
+import { BrandHero } from '@/components/marketing/BrandHero'
 
 export default function GetStarted() {
   const [submitted, setSubmitted] = useState(false)
@@ -19,57 +23,84 @@ export default function GetStarted() {
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-6 py-20 text-center">
-      <h1 className="text-4xl font-bold mb-4 tracking-tight">
-        Be First to Build Without Boundaries
-      </h1>
+    <>
+      <MetaTags
+        title="Get started – Dsentr"
+        description="Join the Dsentr waitlist to receive early access and launch updates."
+      />
+      <MarketingShell maxWidthClassName="max-w-4xl">
+        <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] lg:items-start">
+          <div className="space-y-10">
+            <BrandHero
+              title="Be first to build without boundaries"
+              description="Join the waitlist for product updates, launch invites, and opportunities to help shape the future of Dsentr."
+              kicker="Early access"
+              align="left"
+            />
 
-      <p className="text-zinc-600 dark:text-zinc-400 mb-8 text-lg flex items-center justify-center gap-2">
-        <SparkIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-        Dsentr is your control center for automation - no scripts, no
-        integrations, just powerful modular logic.
-      </p>
-
-      <div className="bg-zinc-100 dark:bg-zinc-800/50 rounded-lg p-6 shadow-md">
-        {!submitted ? (
-          <>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-3 flex items-center justify-center gap-1">
-              <BellIcon className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
-              Get early access + sneak peeks.
-            </p>
-            <form
-              className="flex flex-col sm:flex-row gap-4 justify-center"
-              onSubmit={handleSubmit}
-            >
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded dark:bg-zinc-800 dark:text-white"
+            <div className="grid gap-6 rounded-2xl border border-zinc-200/60 bg-white/70 p-6 text-left shadow-sm dark:border-white/10 dark:bg-zinc-900/70">
+              <FeatureRow
+                icon={<SparkIcon className="h-5 w-5" />}
+                title="Modular automation without the overhead"
+                description="Design workflows visually, connect data sources in minutes, and deploy them confidently."
               />
-              <FormButton>Join Waitlist</FormButton>
-            </form>
-            {error && (
-              <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-                {error}
-              </p>
-            )}
-          </>
-        ) : (
-          <p className="text-green-600 font-medium text-lg flex items-center justify-center gap-2">
-            <CheckIcon className="w-5 h-5" />
-            You're in! We'll be in touch soon.
-          </p>
-        )}
-      </div>
+              <FeatureRow
+                icon={<BellIcon className="h-5 w-5" />}
+                title="Priority product updates"
+                description="Be the first to hear about new modules, integration launches, and roadmap milestones."
+              />
+              <FeatureRow
+                icon={<ShieldIcon className="h-5 w-5" />}
+                title="Privacy-first communication"
+                description="We only send high-signal updates. No spam, just actionable insights from the team."
+              />
+            </div>
+          </div>
 
-      <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-6 flex items-center justify-center gap-1">
-        <ShieldIcon className="w-4 h-4" />
-        We'll never spam. Just occasional updates.
-      </p>
-    </main>
+          <div className="rounded-2xl border border-zinc-200/60 bg-white/80 p-8 shadow-lg shadow-indigo-500/5 dark:border-white/10 dark:bg-zinc-900/80">
+            {!submitted ? (
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="space-y-2 text-left">
+                  <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                    Work email
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full rounded-xl border border-zinc-300/70 bg-white px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                  />
+                </div>
+
+                {error && (
+                  <p className="rounded-lg border border-red-200/60 bg-red-50/80 px-3 py-2 text-sm text-red-600 dark:border-red-400/30 dark:bg-red-950/20 dark:text-red-200">
+                    {error}
+                  </p>
+                )}
+
+                <FormButton className="w-full justify-center">
+                  Join waitlist
+                </FormButton>
+              </form>
+            ) : (
+              <div className="flex flex-col items-center gap-3 text-center text-emerald-600 dark:text-emerald-300">
+                <CheckIcon className="h-6 w-6" />
+                <p className="text-base font-medium">
+                  You&apos;re in! We&apos;ll be in touch with launch updates.
+                </p>
+              </div>
+            )}
+
+            <p className="mt-8 text-center text-xs text-zinc-500 dark:text-zinc-400">
+              By joining the waitlist you agree to receive occasional emails
+              about Dsentr. You can unsubscribe at any time.
+            </p>
+          </div>
+        </div>
+      </MarketingShell>
+    </>
   )
 }
 
@@ -138,5 +169,31 @@ function ShieldIcon({ className }: { className?: string }) {
         fill="currentColor"
       />
     </svg>
+  )
+}
+
+function FeatureRow({
+  icon,
+  title,
+  description
+}: {
+  icon: ReactNode
+  title: string
+  description: string
+}) {
+  return (
+    <div className="flex items-start gap-4">
+      <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+        {icon}
+      </span>
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          {title}
+        </h3>
+        <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+          {description}
+        </p>
+      </div>
+    </div>
   )
 }

@@ -597,10 +597,9 @@ export default function SlackAction({
       <p className="text-xs text-slate-500">
         Slack OAuth connections require the following scopes:{' '}
         <code>chat:write</code>, <code>channels:read</code>,{' '}
-        <code>groups:read</code>, <code>users:read</code>,{' '}
-        and <code>users:read.email</code>. Messages
-        are sent as the connected Slack user and must target channels they can
-        access.
+        <code>groups:read</code>, <code>users:read</code>, and{' '}
+        <code>users:read.email</code>. Messages are sent as the connected Slack
+        user and must target channels they can access.
       </p>
     </div>
   )

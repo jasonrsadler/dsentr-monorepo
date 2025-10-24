@@ -7,6 +7,9 @@ import { FormButton } from '@/components/UI/Buttons/FormButton'
 import LoginIcon from '@/assets/svg-components/LoginIcon'
 import GoogleLoginButton from './components/GoogleLoginButton'
 import GithubLoginButton from './components/GithubLoginButton'
+import { MarketingShell } from '@/components/marketing/MarketingShell'
+import { BrandHero } from '@/components/marketing/BrandHero'
+import { MetaTags } from '@/components/MetaTags'
 
 type InvitePreviewResponse = {
   success: boolean
@@ -267,6 +270,10 @@ export default function Login() {
 
   return (
     <>
+      <MetaTags
+        title="Log in – Dsentr"
+        description="Sign in to Dsentr to build, launch, and manage your automated workflows."
+      />
       {showInviteModal && invitation && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
           <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
@@ -332,97 +339,144 @@ export default function Login() {
       )}
 
       {!user && (
-        <div className="min-h-screen flex items-center justify-center bg-white dark:bg-zinc-900 px-4">
-          <div className="max-w-md w-full space-y-8 text-center">
-            <LoginIcon />
-            <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-              Login to Dsentr
-            </h1>
+        <MarketingShell maxWidthClassName="max-w-6xl">
+          <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start">
+            <div className="space-y-8">
+              <BrandHero
+                title="Welcome back"
+                description="Sign in to continue orchestrating your workflows, monitoring run history, and collaborating with your team."
+                kicker="Sign in"
+                align="left"
+              />
 
-            <form onSubmit={handleSubmit} className="space-y-4 text-left">
-              <div>
-                <label
-                  htmlFor="emailField"
-                  className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-                >
-                  Email
-                </label>
-                <input
-                  id="emailField"
-                  type="email"
-                  className="w-full mt-1 px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
+              <div className="grid gap-4 rounded-2xl border border-zinc-200/60 bg-white/70 p-6 text-left text-sm leading-relaxed text-zinc-600 shadow-sm dark:border-white/10 dark:bg-zinc-900/70 dark:text-zinc-300">
+                <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                  Inside Dsentr you can:
+                </p>
+                <ul className="grid gap-3">
+                  <li className="flex items-start gap-3">
+                    <span className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                      1
+                    </span>
+                    Design visual workflows with modular nodes and live
+                    previews.
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                      2
+                    </span>
+                    Manage workspace roles, credentials, and audit trails in one
+                    place.
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                      3
+                    </span>
+                    Monitor execution with real-time logs and alerting.
+                  </li>
+                </ul>
               </div>
-              <div>
-                <label
-                  htmlFor="passwordField"
-                  className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-                >
-                  Password
-                </label>
-                <input
-                  id="passwordField"
-                  type="password"
-                  className="w-full mt-1 px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(e) => setRemember(e.target.checked)}
-                    className="accent-indigo-500"
-                  />
-                  Remember me
-                </label>
-                <a
-                  href="/forgot-password"
-                  className="text-sm text-indigo-500 hover:underline"
-                >
-                  Forgot password?
-                </a>
-              </div>
-
-              {error && (
-                <div
-                  className="text-red-500 text-sm text-center"
-                  data-testid="loginError"
-                >
-                  {error}
-                </div>
-              )}
-
-              <FormButton>Login</FormButton>
-            </form>
-
-            <div className="text-sm text-zinc-500 dark:text-zinc-400 mt-6">
-              Or continue with
             </div>
-            <div className="flex flex-col gap-3">
-              <GoogleLoginButton
-                className="w-full h-full"
-                onClick={() => {
-                  window.location.href = `${API_BASE_URL}/api/auth/google-login`
-                }}
-              />
-              <GithubLoginButton
-                className="w-full h-full"
-                onClick={() => {
-                  window.location.href = `${API_BASE_URL}/api/auth/github-login`
-                }}
-                text="Login with GitHub"
-              />
+
+            <div className="rounded-2xl border border-zinc-200/60 bg-white/80 p-8 shadow-lg shadow-indigo-500/5 dark:border-white/10 dark:bg-zinc-900/80">
+              <div className="mb-6 flex flex-col items-center gap-3 text-center">
+                <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                  <LoginIcon />
+                </span>
+                <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+                  Log in to Dsentr
+                </h1>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-5 text-left">
+                <div>
+                  <label
+                    htmlFor="emailField"
+                    className="block text-sm font-medium text-zinc-700 dark:text-zinc-200"
+                  >
+                    Email
+                  </label>
+                  <input
+                    id="emailField"
+                    type="email"
+                    className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="passwordField"
+                    className="block text-sm font-medium text-zinc-700 dark:text-zinc-200"
+                  >
+                    Password
+                  </label>
+                  <input
+                    id="passwordField"
+                    type="password"
+                    className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-sm">
+                  <label className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={remember}
+                      onChange={(e) => setRemember(e.target.checked)}
+                      className="accent-indigo-500"
+                    />
+                    Remember me
+                  </label>
+                  <a
+                    href="/forgot-password"
+                    className="font-medium text-indigo-600 transition hover:text-indigo-500 dark:text-indigo-400"
+                  >
+                    Forgot password?
+                  </a>
+                </div>
+
+                {error && (
+                  <div
+                    className="rounded-lg border border-red-200/60 bg-red-50/80 px-3 py-2 text-sm text-red-600 dark:border-red-400/30 dark:bg-red-950/20 dark:text-red-200"
+                    data-testid="loginError"
+                  >
+                    {error}
+                  </div>
+                )}
+
+                <FormButton className="w-full justify-center">
+                  Log in
+                </FormButton>
+              </form>
+
+              <div className="mt-6 space-y-3">
+                <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+                  Or continue with
+                </p>
+                <div className="flex flex-col gap-3">
+                  <GoogleLoginButton
+                    className="w-full"
+                    onClick={() => {
+                      window.location.href = `${API_BASE_URL}/api/auth/google-login`
+                    }}
+                  />
+                  <GithubLoginButton
+                    className="w-full"
+                    onClick={() => {
+                      window.location.href = `${API_BASE_URL}/api/auth/github-login`
+                    }}
+                    text="Login with GitHub"
+                  />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        </MarketingShell>
       )}
     </>
   )

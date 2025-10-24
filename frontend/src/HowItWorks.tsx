@@ -1,107 +1,120 @@
-// src/pages/HowItWorks.tsx
 import { NavigateButton } from './components/UI/Buttons/NavigateButton'
+import { MarketingShell } from '@/components/marketing/MarketingShell'
+import { BrandHero } from '@/components/marketing/BrandHero'
+import { MetaTags } from '@/components/MetaTags'
+
+const steps = [
+  {
+    title: 'Modular plugin system',
+    description:
+      'Every capability in Dsentr is a composable module. Triggers, actions, and enrichers snap together with predictable inputs and outputs.',
+    icon: (
+      <svg
+        className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        viewBox="0 0 24 24"
+      >
+        <path d="M5 3h3a1 1 0 011 1v1a2 2 0 104 0V4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H5a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H5a1 1 0 01-1-1V4a1 1 0 011-1z" />
+      </svg>
+    )
+  },
+  {
+    title: 'Visual workflow builder',
+    description:
+      'Design flows on an infinite canvas. Configure parameters, test data paths, and collaborate in real time before deploying.',
+    icon: (
+      <svg
+        className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        viewBox="0 0 24 24"
+      >
+        <path d="M6 3h12M6 3v6m12-6v6M6 9h12M9 9v6m6-6v6M9 15H6m9 0h3M12 15v6" />
+      </svg>
+    )
+  },
+  {
+    title: 'Deterministic execution engine',
+    description:
+      'A Rust-powered runtime executes steps sequentially or in parallel, manages retries, and keeps state in sync across branches.',
+    icon: (
+      <svg
+        className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        viewBox="0 0 24 24"
+      >
+        <path d="M13 3L4 14h7v7l9-11h-7z" />
+      </svg>
+    )
+  },
+  {
+    title: 'Insights & control',
+    description:
+      'Track run history, surface metrics, and govern access with workspace-level controls so teams stay aligned as they scale.',
+    icon: (
+      <svg
+        className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        viewBox="0 0 24 24"
+      >
+        <path d="M3 6h18M3 12h18M3 18h18" />
+      </svg>
+    )
+  }
+]
 
 export default function HowItWorks() {
   return (
-    <div className="min-h-screen flex flex-col">
-      <main className="flex-grow px-6 py-20 max-w-5xl mx-auto">
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-center mb-12">
-          How Dsentr Works
-        </h1>
+    <>
+      <MetaTags
+        title="How Dsentr works"
+        description="Understand the Dsentr workflow engine from modular plugins to visual orchestration."
+      />
+      <MarketingShell>
+        <div className="space-y-16">
+          <BrandHero
+            title="How Dsentr works"
+            description="A modular platform that brings structure to automation. Here’s how each layer comes together to power your workflows."
+            kicker="Platform overview"
+          />
 
-        <div className="grid md:grid-cols-2 gap-12 mb-20">
-          <div className="flex flex-col items-start">
-            <div className="mb-4">
-              {/* Puzzle icon */}
-              <svg
-                className="w-10 h-10 text-indigo-600 dark:text-indigo-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
+          <div className="grid gap-10 md:grid-cols-2">
+            {steps.map((step) => (
+              <article
+                key={step.title}
+                className="group h-full rounded-2xl border border-zinc-200/60 bg-white/70 p-6 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-lg hover:shadow-indigo-500/10 dark:border-white/10 dark:bg-zinc-900/70"
               >
-                <path d="M5 3h3a1 1 0 011 1v1a2 2 0 104 0V4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H5a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H5a1 1 0 01-1-1V4a1 1 0 011-1z" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-semibold mb-2">
-              Modular Plugin System
-            </h2>
-            <p className="text-zinc-700 dark:text-zinc-300">
-              Dsentr is powered by a dynamic plugin architecture. Each plugin is
-              a self-contained module with defined inputs, outputs, and
-              capabilities. These plugins can be triggers, actions, or data
-              processors.
-            </p>
+                <div className="mb-4 inline-flex items-center justify-center rounded-xl bg-indigo-500/10 p-3 text-indigo-600 transition group-hover:bg-indigo-500/15 dark:text-indigo-400">
+                  {step.icon}
+                </div>
+                <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+                  {step.title}
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+                  {step.description}
+                </p>
+              </article>
+            ))}
           </div>
 
-          <div className="flex flex-col items-start">
-            <div className="mb-4">
-              {/* Flowchart icon */}
-              <svg
-                className="w-10 h-10 text-indigo-600 dark:text-indigo-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
-              >
-                <path d="M6 3h12M6 3v6m12-6v6M6 9h12M9 9v6m6-6v6M9 15H6m9 0h3M12 15v6" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-semibold mb-2">Workflow Builder</h2>
-            <p className="text-zinc-700 dark:text-zinc-300">
-              Build powerful automations by chaining plugins together. Our
-              visual builder lets you define inputs, outputs, and parameters,
-              creating a logical flow that runs exactly how you need.
+          <div className="flex flex-col items-center gap-4 rounded-2xl border border-indigo-200/40 bg-indigo-500/5 p-8 text-center shadow-inner dark:border-indigo-400/30 dark:bg-indigo-500/10">
+            <p className="max-w-2xl text-base text-zinc-700 dark:text-zinc-200">
+              Ready to orchestrate your next workflow? Join the waitlist to
+              access Dsentr as soon as it opens to early teams.
             </p>
-          </div>
-
-          <div className="flex flex-col items-start">
-            <div className="mb-4">
-              {/* Lightning bolt icon */}
-              <svg
-                className="w-10 h-10 text-indigo-600 dark:text-indigo-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
-              >
-                <path d="M13 3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-semibold mb-2">Execution Engine</h2>
-            <p className="text-zinc-700 dark:text-zinc-300">
-              Whether triggered manually, on schedule, or by external events,
-              our engine runs workflows step-by-step or in parallel - managing
-              state, errors, and dependencies automatically.
-            </p>
-          </div>
-
-          <div className="flex flex-col items-start">
-            <div className="mb-4">
-              {/* Layout icon */}
-              <svg
-                className="w-10 h-10 text-indigo-600 dark:text-indigo-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
-              >
-                <path d="M3 6h18M3 12h18M3 18h18" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-semibold mb-2">Web UI</h2>
-            <p className="text-zinc-700 dark:text-zinc-300">
-              Our clean interface makes it easy to build, manage, and monitor
-              workflows. From configuring modules to inspecting run history -
-              you stay in control with zero code.
-            </p>
+            <NavigateButton to="/get-started" className="px-6 py-3 text-base">
+              Get started
+            </NavigateButton>
           </div>
         </div>
-
-        <div className="text-center mt-10">
-          <NavigateButton to="/get-started">Try Now</NavigateButton>
-        </div>
-      </main>
-    </div>
+      </MarketingShell>
+    </>
   )
 }
