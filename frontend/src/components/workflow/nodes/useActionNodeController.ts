@@ -4,6 +4,7 @@ import { normalizePlanTier } from '@/lib/planTiers'
 import type { BaseActionNodeRunState } from './BaseActionNode'
 import { useActionMeta, useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { useWorkflowFlyout } from '@/components/workflow/useWorkflowFlyout'
 
 export const PLAN_RESTRICTION_MESSAGES = {
   sheets:
@@ -95,10 +96,12 @@ export function useActionNodeController({
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
 
+  const { isFlyoutRender } = useWorkflowFlyout()
+
   const labelError = nodeData?.labelError ?? null
 
   const label = meta.label
-  const expanded = meta.expanded
+  const expanded = meta.expanded || isFlyoutRender
   const dirty = dirtyOverride ?? meta.dirty
   const actionType = meta.actionType
   const timeout = meta.timeout
@@ -200,8 +203,9 @@ export function useActionNodeController({
 
   const handleToggleExpanded = useCallback(() => {
     if (!effectiveCanEdit) return
+    if (isFlyoutRender) return
     toggleExpanded()
-  }, [effectiveCanEdit, toggleExpanded])
+  }, [effectiveCanEdit, isFlyoutRender, toggleExpanded])
 
   const requestDelete = useCallback(() => {
     if (!effectiveCanEdit) return

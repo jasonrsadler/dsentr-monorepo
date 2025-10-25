@@ -28,6 +28,7 @@ export default function NodeHeader({
   const { openFlyout, activeNodeId, isFlyoutRender } = useWorkflowFlyout()
   const isActive = activeNodeId === nodeId
   const showFlyoutButton = !isFlyoutRender
+  const showExpandButton = !isFlyoutRender
 
   return (
     <div className="flex justify-between items-center">
@@ -54,13 +55,15 @@ export default function NodeHeader({
             <ArrowUpRight size={16} />
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={onExpanded}
-          className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"
-        >
-          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </button>
+        {showExpandButton ? (
+          <button
+            type="button"
+            onClick={onExpanded}
+            className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"
+          >
+            {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onConfirmingDelete}

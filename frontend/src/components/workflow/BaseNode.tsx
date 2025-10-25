@@ -1,5 +1,6 @@
 import { useMemo, useCallback, type ReactNode } from 'react'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
+import { useWorkflowFlyout } from '@/components/workflow/useWorkflowFlyout'
 
 export interface BaseNodeRenderProps<
   TData extends Record<string, unknown> = Record<string, unknown>
@@ -8,6 +9,12 @@ export interface BaseNodeRenderProps<
   selected: boolean
   label: string
   expanded: boolean
+  /**
+   * Indicates whether this render is occurring inside the workflow flyout.
+   * Consumers can use this to adjust UI affordances that only make sense on
+   * the canvas (e.g. collapse toggles).
+   */
+  isFlyoutRender: boolean
   dirty: boolean
   nodeData?:
     | (TData & {
@@ -65,11 +72,13 @@ export default function BaseNode<
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
   const removeNode = useWorkflowStore((state) => state.removeNode)
   const storeCanEdit = useWorkflowStore((state) => state.canEdit)
+  const { isFlyoutRender } = useWorkflowFlyout()
 
   const effectiveCanEdit = canEdit && storeCanEdit
 
-  const expanded =
+  const storedExpanded =
     (nodeData?.expanded as boolean | undefined) ?? defaultExpanded
+  const displayExpanded = storedExpanded || isFlyoutRender
   const dirty = (nodeData?.dirty as boolean | undefined) ?? defaultDirty
   const rawLabel = nodeData?.label
   const label =
@@ -87,8 +96,9 @@ export default function BaseNode<
 
   const handleToggleExpanded = useCallback(() => {
     if (!effectiveCanEdit) return
-    updateNodeData(id, { expanded: !expanded } as Partial<TData>)
-  }, [effectiveCanEdit, id, expanded, updateNodeData])
+    if (isFlyoutRender) return
+    updateNodeData(id, { expanded: !storedExpanded } as Partial<TData>)
+  }, [effectiveCanEdit, id, isFlyoutRender, storedExpanded, updateNodeData])
 
   const handleRemove = useCallback(() => {
     if (!effectiveCanEdit) return
@@ -99,7 +109,8 @@ export default function BaseNode<
     id,
     selected,
     label,
-    expanded,
+    expanded: displayExpanded,
+    isFlyoutRender,
     dirty,
     nodeData: nodeData ?? null,
     updateData: handleUpdateData,
