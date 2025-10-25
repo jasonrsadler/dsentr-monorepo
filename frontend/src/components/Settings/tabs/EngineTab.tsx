@@ -57,7 +57,7 @@ export default function EngineTab() {
           return ws[0]?.id ?? null
         })
       })
-      .catch(() => { })
+      .catch(() => {})
       .finally(() => setLoading(false))
     return () => {
       alive = false
@@ -164,7 +164,7 @@ export default function EngineTab() {
   }
 
   useEffect(() => {
-    ; (async () => {
+    ;(async () => {
       if (!selectedWorkflowId) {
         setEgressText('')
         return

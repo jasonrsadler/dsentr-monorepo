@@ -54,8 +54,12 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       const nextSanitized = [...nodes]
         .map(sanitizeNodeData)
         .sort((a, b) => a.id.localeCompare(b.id))
-      const changed = JSON.stringify(prevSanitized) !== JSON.stringify(nextSanitized)
-      return { nodes: [...nodes], isDirty: state.isDirty || changed }
+      const changed =
+        JSON.stringify(prevSanitized) !== JSON.stringify(nextSanitized)
+      return {
+        nodes: [...nodes],
+        isDirty: state.isDirty || changed
+      }
     }),
   setEdges: (edges) =>
     set((state) => {
@@ -66,7 +70,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         .map(normalizeEdgeForPayload)
         .sort((a, b) => a.id.localeCompare(b.id))
       const changed = JSON.stringify(prevNorm) !== JSON.stringify(nextNorm)
-      return { edges: [...edges], isDirty: state.isDirty || changed }
+      return {
+        edges: [...edges],
+        isDirty: state.isDirty || changed
+      }
     }),
   setGraph: (nodes, edges, markDirty) =>
     set(() => ({ nodes: [...nodes], edges: [...edges], isDirty: !!markDirty })),
@@ -118,7 +125,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       const nextSanitized = [...(reconciledNodes as any[])]
         .map(sanitizeNodeData)
         .sort((a, b) => a.id.localeCompare(b.id))
-      const changed = JSON.stringify(prevSanitized) !== JSON.stringify(nextSanitized)
+      const changed =
+        JSON.stringify(prevSanitized) !== JSON.stringify(nextSanitized)
       return changed
         ? {
             nodes: reconciledNodes,

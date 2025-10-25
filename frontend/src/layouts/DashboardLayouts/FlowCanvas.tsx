@@ -1,12 +1,15 @@
-import { useCallback, useMemo, useEffect, useRef } from 'react'
+import { useCallback, useMemo, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
   MiniMap,
+  ReactFlowProvider,
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
-  useReactFlow
+  useReactFlow,
+  type Node,
+  type OnSelectionChangeParams
 } from '@xyflow/react'
 import TriggerNode from '@/components/Workflow/TriggerNode'
 import {
@@ -36,6 +39,7 @@ import {
   normalizeEdgesForState,
   normalizeNodesForState
 } from './FlowCanvas.helpers'
+import { WorkflowFlyoutProvider } from '@/components/workflow/useWorkflowFlyout'
 
 type ActionDropSubtype =
   | 'actionEmailSendgrid'
@@ -456,6 +460,39 @@ export default function FlowCanvas({
   const nodes = useWorkflowStore(selectNodes)
   const edges = useWorkflowStore(selectEdges)
   const reactFlow = useReactFlow()
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const syncSelectionToStore = useCallback((nextSelectedId: string | null) => {
+    const state = useWorkflowStore.getState()
+    const currentNodes = state.nodes
+    let nodeChanged = false
+    const nextNodes = currentNodes.map((node) => {
+      const shouldSelect = nextSelectedId !== null && node.id === nextSelectedId
+      if (Boolean(node.selected) === shouldSelect) {
+        return node
+      }
+      nodeChanged = true
+      return {
+        ...node,
+        selected: shouldSelect
+      }
+    })
+    if (nodeChanged) {
+      state.setNodes(nextNodes)
+    }
+
+    const currentEdges = state.edges
+    let edgeChanged = false
+    const nextEdges = currentEdges.map((edge) => {
+      if (!edge.selected) {
+        return edge
+      }
+      edgeChanged = true
+      return { ...edge, selected: false }
+    })
+    if (edgeChanged) {
+      state.setEdges(nextEdges)
+    }
+  }, [])
   const normalizedPlanTier = useMemo(
     () => normalizePlanTier(planTier),
     [planTier]
@@ -498,6 +535,23 @@ export default function FlowCanvas({
   useEffect(() => {
     failedIdsRef.current = failedIds
   }, [failedIds])
+
+  const selectedNode = useWorkflowStore(
+    useCallback(
+      (state) =>
+        selectedNodeId
+          ? (state.nodes.find((node) => node.id === selectedNodeId) ?? null)
+          : null,
+      [selectedNodeId]
+    )
+  )
+
+  useEffect(() => {
+    if (selectedNodeId && !selectedNode) {
+      syncSelectionToStore(null)
+      setSelectedNodeId(null)
+    }
+  }, [selectedNodeId, selectedNode, syncSelectionToStore])
 
   const determineActionSubtype = useCallback((data: any): ActionDropSubtype => {
     const rawActionType =
@@ -901,6 +955,103 @@ export default function FlowCanvas({
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
+  const handleSelectionChange = useCallback(
+    ({ nodes: selectedNodes }: OnSelectionChangeParams) => {
+      const lastSelected =
+        selectedNodes && selectedNodes.length > 0
+          ? selectedNodes[selectedNodes.length - 1]
+          : null
+      const nextId = lastSelected?.id ?? null
+      syncSelectionToStore(nextId)
+      setSelectedNodeId((prev) => (prev === nextId ? prev : nextId))
+    },
+    [syncSelectionToStore]
+  )
+
+  const handleFlyoutOpen = useCallback(
+    (nodeId: string | null) => {
+      if (!nodeId) {
+        syncSelectionToStore(null)
+        setSelectedNodeId((prev) => (prev === null ? prev : null))
+        return
+      }
+
+      syncSelectionToStore(nodeId)
+      setSelectedNodeId((prev) => (prev === nodeId ? prev : nodeId))
+    },
+    [syncSelectionToStore]
+  )
+
+  const noopFlyout = useCallback(() => undefined, [])
+
+  const flyoutContextValue = useMemo(
+    () => ({
+      openFlyout: handleFlyoutOpen,
+      activeNodeId: selectedNodeId,
+      isFlyoutRender: false
+    }),
+    [handleFlyoutOpen, selectedNodeId]
+  )
+
+  const flyoutPreviewContextValue = useMemo(
+    () => ({
+      openFlyout: noopFlyout,
+      activeNodeId: selectedNodeId,
+      isFlyoutRender: true
+    }),
+    [noopFlyout, selectedNodeId]
+  )
+
+  const flyoutNodes = useMemo<Node[]>(() => {
+    if (!selectedNode) {
+      return []
+    }
+
+    return [
+      {
+        id: selectedNode.id,
+        type: selectedNode.type,
+        position: { x: 0, y: 0 },
+        data: selectedNode.data,
+        selected: true,
+        draggable: false,
+        connectable: false,
+        dragging: false,
+        selectable: false,
+        focusable: false
+      } as Node
+    ]
+  }, [selectedNode])
+
+  const flyoutKey = useMemo(() => {
+    if (!selectedNode) {
+      return 'flyout-empty'
+    }
+
+    const epoch =
+      (selectedNode.data as { wfEpoch?: string | number } | undefined)
+        ?.wfEpoch ?? ''
+
+    return `flyout-${selectedNode.id}-${epoch}`
+  }, [selectedNode])
+
+  const selectedNodeLabel = useMemo(() => {
+    if (!selectedNode) return null
+    const rawLabel = (selectedNode.data as { label?: unknown } | undefined)
+      ?.label
+    if (typeof rawLabel === 'string' && rawLabel.trim().length > 0) {
+      return rawLabel
+    }
+    switch (selectedNode.type) {
+      case 'trigger':
+        return 'Trigger'
+      case 'condition':
+        return 'Condition'
+      default:
+        return 'Action'
+    }
+  }, [selectedNode])
+
   const handleEdgeTypeChange = useCallback(
     (edgeId, newType) => {
       if (!canEditRef.current) return
@@ -947,33 +1098,86 @@ export default function FlowCanvas({
   )
 
   return (
-    <ReactFlow
-      key={workflowId || 'no-workflow'}
-      nodes={nodes}
-      edges={edges}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onConnect={onConnect}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      onDrop={onDrop}
-      onDragOver={onDragOver}
-      fitView
-      proOptions={{ hideAttribution: true }}
-      nodesDraggable={canEdit}
-      nodesConnectable={canEdit}
-      className="flex-1"
-    >
-      <Background gap={16} size={1} />
-      <div className={isDark ? 'text-white' : 'text-black'}>
-        <CustomControls />
-        <MiniMap
-          nodeColor={(node) =>
-            node.type === 'trigger' ? '#10B981' : '#6366F1'
-          }
-          style={{ background: 'transparent' }}
-        />
+    <WorkflowFlyoutProvider value={flyoutContextValue}>
+      <div className="flex flex-1 min-h-0 flex-col md:flex-row">
+        <ReactFlow
+          key={workflowId || 'no-workflow'}
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          fitView
+          proOptions={{ hideAttribution: true }}
+          nodesDraggable={canEdit}
+          nodesConnectable={canEdit}
+          className="flex-1"
+          onSelectionChange={handleSelectionChange}
+        >
+          <Background gap={16} size={1} />
+          <div className={isDark ? 'text-white' : 'text-black'}>
+            <CustomControls />
+            <MiniMap
+              nodeColor={(node) =>
+                node.type === 'trigger' ? '#10B981' : '#6366F1'
+              }
+              style={{ background: 'transparent' }}
+            />
+          </div>
+        </ReactFlow>
+
+        {selectedNode ? (
+          <WorkflowFlyoutProvider value={flyoutPreviewContextValue}>
+            <aside className="flex w-full md:w-[360px] xl:w-[420px] shrink-0 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur flex-col">
+              <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Node details
+                </div>
+                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                  {selectedNodeLabel}
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
+                <ReactFlowProvider>
+                  <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm">
+                    <div className="h-full min-h-[400px]">
+                      <ReactFlow
+                        key={flyoutKey}
+                        nodes={flyoutNodes}
+                        edges={[]}
+                        nodeTypes={nodeTypes}
+                        edgeTypes={edgeTypes}
+                        fitView
+                        fitViewOptions={{
+                          padding: 0.2,
+                          includeHiddenNodes: true
+                        }}
+                        nodesDraggable={false}
+                        nodesConnectable={false}
+                        panOnDrag={false}
+                        panOnScroll={false}
+                        zoomOnScroll={false}
+                        zoomOnPinch={false}
+                        zoomOnDoubleClick={false}
+                        elementsSelectable={false}
+                        selectionOnDrag={false}
+                        proOptions={{ hideAttribution: true }}
+                        minZoom={1}
+                        maxZoom={1}
+                        className="h-full pointer-events-auto"
+                      />
+                    </div>
+                  </div>
+                </ReactFlowProvider>
+              </div>
+            </aside>
+          </WorkflowFlyoutProvider>
+        ) : null}
       </div>
-    </ReactFlow>
+    </WorkflowFlyoutProvider>
   )
 }

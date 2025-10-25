@@ -90,7 +90,7 @@ function HttpRequestActionNodeContent({
 
   return (
     <motion.div
-      className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
+      className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       style={{
         width: controller.expanded ? 'auto' : 256,
         minWidth: controller.expanded ? 256 : undefined,
@@ -119,6 +119,7 @@ function HttpRequestActionNodeContent({
       />
       <div className="p-3">
         <NodeHeader
+          nodeId={id}
           label={controller.label}
           dirty={controller.dirty}
           hasValidationErrors={controller.combinedHasValidationErrors}

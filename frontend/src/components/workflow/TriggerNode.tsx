@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import {
+  ArrowUpRight,
   ChevronUp,
   ChevronDown,
   Trash2,
@@ -26,6 +27,7 @@ import { ScheduleTimezonePicker } from '../ui/schedule/ScheduleTimezonePicker'
 import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
 import { normalizePlanTier } from '@/lib/planTiers'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
+import { useWorkflowFlyout } from '@/components/workflow/useWorkflowFlyout'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
   'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'
@@ -217,6 +219,9 @@ function TriggerNodeContent({
   const [timePickerOpen, setTimePickerOpen] = useState(false)
   const [timezonePickerOpen, setTimezonePickerOpen] = useState(false)
   const [timezoneSearch, setTimezoneSearch] = useState('')
+  const { openFlyout, activeNodeId, isFlyoutRender } = useWorkflowFlyout()
+  const flyoutActive = activeNodeId === id
+  const showFlyoutShortcut = !isFlyoutRender
 
   const rawInputs = nodeData?.inputs
   const inputs = useMemo<TriggerInput[]>(
@@ -495,7 +500,7 @@ function TriggerNodeContent({
 
   return (
     <motion.div
-      className={`wf-node relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
+      className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       style={{
         width: expanded ? 'auto' : 256,
         minWidth: expanded ? 256 : undefined,
@@ -541,14 +546,32 @@ function TriggerNodeContent({
               )}
             </h3>
           )}
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
+            {showFlyoutShortcut ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  openFlyout(id)
+                }}
+                className={`p-1 rounded transition text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 ${flyoutActive ? 'opacity-100 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-100' : ''}`}
+                title="Open in detail flyout"
+                aria-label="Open in detail flyout"
+                aria-pressed={flyoutActive}
+              >
+                <ArrowUpRight size={16} />
+              </button>
+            ) : null}
             <button
+              type="button"
               onClick={() => toggleExpanded()}
               className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"
             >
               {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
             <button
+              type="button"
               onClick={() => {
                 if (!effectiveCanEdit) return
                 setConfirmingDelete(true)
