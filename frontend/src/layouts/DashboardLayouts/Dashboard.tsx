@@ -51,6 +51,122 @@ const TriggerIcon = () => (
   </svg>
 )
 
+const ACTION_SIDEBAR_TILE_GROUPS = [
+  {
+    heading: 'Email',
+    tiles: [
+      {
+        id: 'action-email-sendgrid',
+        label: 'SendGrid Email',
+        description: 'Send emails with SendGrid',
+        dragType: 'action:actionEmailSendgrid',
+        gradient: 'from-indigo-500 to-violet-600',
+        icon: <ActionIcon />
+      },
+      {
+        id: 'action-email-mailgun',
+        label: 'Mailgun Email',
+        description: 'Deliver email through Mailgun',
+        dragType: 'action:actionEmailMailgun',
+        gradient: 'from-purple-500 to-fuchsia-600',
+        icon: <ActionIcon />
+      },
+      {
+        id: 'action-email-amazon-ses',
+        label: 'Amazon SES Email',
+        description: 'Send email via Amazon SES',
+        dragType: 'action:actionEmailAmazonSes',
+        gradient: 'from-amber-500 to-yellow-500',
+        icon: <ActionIcon />
+      },
+      {
+        id: 'action-email-smtp',
+        label: 'SMTP Email',
+        description: 'Connect with a custom SMTP server',
+        dragType: 'action:actionEmailSmtp',
+        gradient: 'from-slate-500 to-slate-700',
+        icon: <ActionIcon />
+      }
+    ]
+  },
+  {
+    heading: 'Messaging',
+    tiles: [
+      {
+        id: 'action-slack',
+        label: 'Slack',
+        description: 'Message a Slack channel',
+        dragType: 'action:actionSlack',
+        gradient: 'from-purple-500 to-fuchsia-600',
+        icon: <ActionIcon />
+      },
+      {
+        id: 'action-teams',
+        label: 'Teams',
+        description: 'Notify Microsoft Teams',
+        dragType: 'action:actionTeams',
+        gradient: 'from-blue-500 to-indigo-600',
+        icon: <ActionIcon />
+      },
+      {
+        id: 'action-google-chat',
+        label: 'Google Chat',
+        description: 'Send a Google Chat message',
+        dragType: 'action:actionGoogleChat',
+        gradient: 'from-amber-400 to-rose-500',
+        icon: <ActionIcon />
+      }
+    ]
+  },
+  {
+    heading: 'Google Sheets',
+    tiles: [
+      {
+        id: 'action-sheets',
+        label: 'Google Sheets',
+        description: 'Append a spreadsheet row',
+        dragType: 'action:actionSheets',
+        gradient: 'from-emerald-500 to-lime-500',
+        icon: <ActionIcon />
+      }
+    ]
+  },
+  {
+    heading: 'Webhooks & APIs',
+    tiles: [
+      {
+        id: 'action-webhook',
+        label: 'Webhook',
+        description: 'POST data to another service',
+        dragType: 'action:actionWebhook',
+        gradient: 'from-sky-500 to-cyan-600',
+        icon: <ActionIcon />
+      },
+      {
+        id: 'action-http',
+        label: 'HTTP Request',
+        description: 'Call an external API',
+        dragType: 'action:actionHttp',
+        gradient: 'from-amber-500 to-orange-600',
+        icon: <ActionIcon />
+      }
+    ]
+  },
+  {
+    heading: 'Custom Logic',
+    tiles: [
+      {
+        id: 'action-code',
+        label: 'Run Code',
+        description: 'Execute custom logic',
+        dragType: 'action:actionCode',
+        gradient: 'from-slate-600 to-slate-800',
+        icon: <ActionIcon />
+      }
+    ]
+  }
+] as const
+
 export default function Dashboard() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
   const [hiddenWorkflowCount, setHiddenWorkflowCount] = useState(0)
@@ -999,142 +1115,24 @@ export default function Dashboard() {
   )
   const [templatesOpen, setTemplatesOpen] = useState(false)
 
-  const actionSidebarTileGroups = [
-    {
-      heading: 'Email',
-      tiles: [
-        {
-          id: 'action-email-sendgrid',
-          label: 'SendGrid Email',
-          description: 'Send emails with SendGrid',
-          dragType: 'action:actionEmailSendgrid',
-          gradient: 'from-indigo-500 to-violet-600',
-          icon: <ActionIcon />
-        },
-        {
-          id: 'action-email-mailgun',
-          label: 'Mailgun Email',
-          description: 'Deliver email through Mailgun',
-          dragType: 'action:actionEmailMailgun',
-          gradient: 'from-purple-500 to-fuchsia-600',
-          icon: <ActionIcon />
-        },
-        {
-          id: 'action-email-amazon-ses',
-          label: 'Amazon SES Email',
-          description: 'Send email via Amazon SES',
-          dragType: 'action:actionEmailAmazonSes',
-          gradient: 'from-amber-500 to-yellow-500',
-          icon: <ActionIcon />
-        },
-        {
-          id: 'action-email-smtp',
-          label: 'SMTP Email',
-          description: 'Connect with a custom SMTP server',
-          dragType: 'action:actionEmailSmtp',
-          gradient: 'from-slate-500 to-slate-700',
-          icon: <ActionIcon />
-        }
-      ]
-    },
-    {
-      heading: 'Messaging',
-      tiles: [
-        {
-          id: 'action-slack',
-          label: 'Slack',
-          description: 'Message a Slack channel',
-          dragType: 'action:actionSlack',
-          gradient: 'from-purple-500 to-fuchsia-600',
-          icon: <ActionIcon />
-        },
-        {
-          id: 'action-teams',
-          label: 'Teams',
-          description: 'Notify Microsoft Teams',
-          dragType: 'action:actionTeams',
-          gradient: 'from-blue-500 to-indigo-600',
-          icon: <ActionIcon />
-        },
-        {
-          id: 'action-google-chat',
-          label: 'Google Chat',
-          description: 'Send a Google Chat message',
-          dragType: 'action:actionGoogleChat',
-          gradient: 'from-amber-400 to-rose-500',
-          icon: <ActionIcon />
-        }
-      ]
-    },
-    {
-      heading: 'Google Sheets',
-      tiles: [
-        {
-          id: 'action-sheets',
-          label: 'Google Sheets',
-          description: 'Append a spreadsheet row',
-          dragType: 'action:actionSheets',
-          gradient: 'from-emerald-500 to-lime-500',
-          icon: <ActionIcon />
-        }
-      ]
-    },
-    {
-      heading: 'Webhooks & APIs',
-      tiles: [
-        {
-          id: 'action-webhook',
-          label: 'Webhook',
-          description: 'POST data to another service',
-          dragType: 'action:actionWebhook',
-          gradient: 'from-sky-500 to-cyan-600',
-          icon: <ActionIcon />
-        },
-        {
-          id: 'action-http',
-          label: 'HTTP Request',
-          description: 'Call an external API',
-          dragType: 'action:actionHttp',
-          gradient: 'from-amber-500 to-orange-600',
-          icon: <ActionIcon />
-        }
-      ]
-    },
-    {
-      heading: 'Custom Logic',
-      tiles: [
-        {
-          id: 'action-code',
-          label: 'Run Code',
-          description: 'Execute custom logic',
-          dragType: 'action:actionCode',
-          gradient: 'from-slate-600 to-slate-800',
-          icon: <ActionIcon />
-        }
-      ]
-    }
-  ] as const
-
   // Collapsible state for action categories; initialized expanded
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(actionSidebarTileGroups.map((g) => [g.heading, true]))
+    Object.fromEntries(ACTION_SIDEBAR_TILE_GROUPS.map((g) => [g.heading, true]))
   )
 
   // Search state for actions
   const [actionSearch, setActionSearch] = useState('')
   const trimmedQuery = actionSearch.trim().toLowerCase()
   const filteredGroups = useMemo(() => {
-    if (!trimmedQuery) return actionSidebarTileGroups
-    return actionSidebarTileGroups
-      .map((group) => ({
-        heading: group.heading,
-        tiles: group.tiles.filter((tile) => {
-          const label = tile.label.toLowerCase()
-          const desc = (tile.description || '').toLowerCase()
-          return label.includes(trimmedQuery) || desc.includes(trimmedQuery)
-        })
-      }))
-      .filter((g) => g.tiles.length > 0)
+    if (!trimmedQuery) return ACTION_SIDEBAR_TILE_GROUPS
+    return ACTION_SIDEBAR_TILE_GROUPS.map((group) => ({
+      heading: group.heading,
+      tiles: group.tiles.filter((tile) => {
+        const label = tile.label.toLowerCase()
+        const desc = (tile.description || '').toLowerCase()
+        return label.includes(trimmedQuery) || desc.includes(trimmedQuery)
+      })
+    })).filter((g) => g.tiles.length > 0)
   }, [trimmedQuery])
 
   function DraggableTile({

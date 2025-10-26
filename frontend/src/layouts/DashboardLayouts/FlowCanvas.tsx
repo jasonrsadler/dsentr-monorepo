@@ -522,6 +522,10 @@ export default function FlowCanvas({
     () => normalizePlanTier(planTier),
     [planTier]
   )
+  const normalizedPlanTierRef = useRef(normalizedPlanTier)
+  useEffect(() => {
+    normalizedPlanTierRef.current = normalizedPlanTier
+  }, [normalizedPlanTier])
   const isSoloPlan = normalizedPlanTier === 'solo'
   const canEditRef = useRef<boolean>(canEdit)
   const setCanEditState = useWorkflowStore((state) => state.setCanEdit)
@@ -539,6 +543,14 @@ export default function FlowCanvas({
   const invokeRunWorkflow = useCallback(() => {
     onRunWorkflowRef.current?.()
   }, [])
+  const invokeRunWorkflowRef = useRef(invokeRunWorkflow)
+  useEffect(() => {
+    invokeRunWorkflowRef.current = invokeRunWorkflow
+  }, [invokeRunWorkflow])
+  const onRestrictionNoticeRef = useRef(onRestrictionNotice)
+  useEffect(() => {
+    onRestrictionNoticeRef.current = onRestrictionNotice
+  }, [onRestrictionNotice])
 
   const { setNodes, setEdges } = useMemo(() => {
     const state = useWorkflowStore.getState()
@@ -686,17 +698,17 @@ export default function FlowCanvas({
   }, [])
 
   const actionRenderers = useMemo(() => {
-    const sharedRunProps = {
-      onRun: () => invokeRunWorkflow(),
-      canEdit
-    }
+    const createSharedRunProps = () => ({
+      onRun: () => invokeRunWorkflowRef.current?.(),
+      canEdit: canEditRef.current
+    })
 
     return {
       actionEmailSendgrid: (props) => (
         <SendGridActionNode
           key={`action-email-sendgrid-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
+          {...createSharedRunProps()}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -706,7 +718,7 @@ export default function FlowCanvas({
         <MailgunActionNode
           key={`action-email-mailgun-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
+          {...createSharedRunProps()}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -716,7 +728,7 @@ export default function FlowCanvas({
         <AmazonSesActionNode
           key={`action-email-amazon-ses-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
+          {...createSharedRunProps()}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -726,7 +738,7 @@ export default function FlowCanvas({
         <SmtpActionNode
           key={`action-email-smtp-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
+          {...createSharedRunProps()}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -736,9 +748,9 @@ export default function FlowCanvas({
         <WebhookActionNode
           key={`action-webhook-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
-          planTier={normalizedPlanTier}
-          onRestrictionNotice={onRestrictionNotice}
+          {...createSharedRunProps()}
+          planTier={normalizedPlanTierRef.current}
+          onRestrictionNotice={onRestrictionNoticeRef.current}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -748,9 +760,9 @@ export default function FlowCanvas({
         <SlackActionNode
           key={`action-slack-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
-          planTier={normalizedPlanTier}
-          onRestrictionNotice={onRestrictionNotice}
+          {...createSharedRunProps()}
+          planTier={normalizedPlanTierRef.current}
+          onRestrictionNotice={onRestrictionNoticeRef.current}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -760,9 +772,9 @@ export default function FlowCanvas({
         <TeamsActionNode
           key={`action-teams-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
-          planTier={normalizedPlanTier}
-          onRestrictionNotice={onRestrictionNotice}
+          {...createSharedRunProps()}
+          planTier={normalizedPlanTierRef.current}
+          onRestrictionNotice={onRestrictionNoticeRef.current}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -772,9 +784,9 @@ export default function FlowCanvas({
         <GoogleChatActionNode
           key={`action-google-chat-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
-          planTier={normalizedPlanTier}
-          onRestrictionNotice={onRestrictionNotice}
+          {...createSharedRunProps()}
+          planTier={normalizedPlanTierRef.current}
+          onRestrictionNotice={onRestrictionNoticeRef.current}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -784,9 +796,9 @@ export default function FlowCanvas({
         <GoogleSheetsActionNode
           key={`action-sheets-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
-          planTier={normalizedPlanTier}
-          onRestrictionNotice={onRestrictionNotice}
+          {...createSharedRunProps()}
+          planTier={normalizedPlanTierRef.current}
+          onRestrictionNotice={onRestrictionNoticeRef.current}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -796,7 +808,7 @@ export default function FlowCanvas({
         <HttpRequestActionNode
           key={`action-http-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
+          {...createSharedRunProps()}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -806,14 +818,14 @@ export default function FlowCanvas({
         <RunCustomCodeActionNode
           key={`action-code-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
-          {...sharedRunProps}
+          {...createSharedRunProps()}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
         />
       )
     }
-  }, [invokeRunWorkflow, canEdit, normalizedPlanTier, onRestrictionNotice])
+  }, [])
 
   const renderActionNode = useCallback(
     (subtype: keyof typeof actionRenderers, props: any) => {
@@ -833,10 +845,10 @@ export default function FlowCanvas({
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
-          onRun={() => invokeRunWorkflow()}
-          planTier={normalizedPlanTier}
-          onRestrictionNotice={onRestrictionNotice}
-          canEdit={canEdit}
+          onRun={() => invokeRunWorkflowRef.current?.()}
+          planTier={normalizedPlanTierRef.current}
+          onRestrictionNotice={onRestrictionNoticeRef.current}
+          canEdit={canEditRef.current}
         />
       ),
       condition: (props) => (
@@ -846,7 +858,7 @@ export default function FlowCanvas({
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
-          canEdit={canEdit}
+          canEdit={canEditRef.current}
         />
       ),
       actionEmailSendgrid: (props) =>
@@ -872,14 +884,7 @@ export default function FlowCanvas({
         return renderActionNode(subtype as keyof typeof actionRenderers, props)
       }
     }),
-    [
-      canEdit,
-      determineActionSubtype,
-      invokeRunWorkflow,
-      normalizedPlanTier,
-      onRestrictionNotice,
-      renderActionNode
-    ]
+    [determineActionSubtype, renderActionNode]
   )
 
   const onNodesChange = useCallback(
@@ -1027,784 +1032,7 @@ export default function FlowCanvas({
     [noopFlyout, flyoutNodeId]
   )
 
-  // Fields-only flyout renderer for action nodes
-  const FlyoutActionFields = useCallback(
-    ({ nodeId, subtype }: { nodeId: string; subtype: ActionDropSubtype }) => {
-      const allNodes = useWorkflowStore(selectNodes)
-      const allEdges = useWorkflowStore(selectEdges)
-      const getNodeLabel = useCallback((n: Node) => {
-        const rawLabel = (n.data as any)?.label
-        if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
-        switch (n.type) {
-          case 'trigger':
-            return 'Trigger'
-          case 'condition':
-            return 'Condition'
-          default:
-            return 'Action'
-        }
-      }, [])
-      const inputNodeOptions = useMemo(
-        () =>
-          allNodes
-            .filter((n) => n.id !== nodeId)
-            .map((n) => ({ label: getNodeLabel(n), value: n.id })),
-        [allNodes, getNodeLabel, nodeId]
-      )
-      const outputNodeOptions = useMemo(
-        () =>
-          allNodes
-            .filter((n) => n.id !== nodeId && n.type !== 'trigger')
-            .map((n) => ({ label: getNodeLabel(n), value: n.id })),
-        [allNodes, getNodeLabel, nodeId]
-      )
-
-      const currentInputId = useMemo(() => {
-        const incoming = allEdges.filter((e) => e.target === nodeId)
-        return incoming[0]?.source ?? ''
-      }, [allEdges, nodeId])
-      const currentOutputId = useMemo(() => {
-        const outgoing = allEdges.filter(
-          (e) => e.source === nodeId && !e.sourceHandle
-        )
-        return outgoing[0]?.target ?? ''
-      }, [allEdges, nodeId])
-
-      const handleChangeInput = useCallback(
-        (nextSourceId: string) => {
-          if (!nextSourceId || nextSourceId === currentInputId) return
-          const state = useWorkflowStore.getState()
-          const base = state.edges.filter((e) => e.target !== nodeId)
-          const newEdge = {
-            id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
-            source: nextSourceId,
-            target: nodeId,
-            type: 'nodeEdge',
-            data: { edgeType: 'default' }
-          } as any
-          setEdges(normalizeEdgesForState([...base, newEdge]))
-        },
-        [currentInputId, nodeId, setEdges]
-      )
-
-      const handleChangeOutput = useCallback(
-        (nextTargetId: string) => {
-          if (!nextTargetId || nextTargetId === currentOutputId) return
-          // Prevent routing outputs to a trigger (triggers don't accept inputs)
-          const targetNode = allNodes.find((n) => n.id === nextTargetId)
-          if (targetNode?.type === 'trigger') return
-          const state = useWorkflowStore.getState()
-          const base = state.edges.filter(
-            (e) => !(e.source === nodeId && !e.sourceHandle)
-          )
-          const newEdge = {
-            id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
-            source: nodeId,
-            target: nextTargetId,
-            type: 'nodeEdge',
-            data: { edgeType: 'default' }
-          } as any
-          setEdges(normalizeEdgesForState([...base, newEdge]))
-        },
-        [allNodes, currentOutputId, nodeId, setEdges]
-      )
-      const nodeData = useWorkflowStore(
-        useCallback(
-          (state) =>
-            (state.nodes.find((n) => n.id === nodeId)?.data as
-              | ActionNodeData
-              | undefined) ?? null,
-          [nodeId]
-        )
-      )
-
-      const controller = useActionNodeController({
-        id: nodeId,
-        nodeData: nodeData ?? null,
-        planTier: normalizedPlanTier,
-        effectiveCanEdit: canEdit,
-        onRestrictionNotice,
-        toggleExpanded: () => undefined,
-        remove: () => useWorkflowStore.getState().removeNode(nodeId)
-      })
-
-      const handleDeleteClick = useCallback(() => {
-        const ok = window.confirm(
-          'Delete this node? This action cannot be undone.'
-        )
-        if (ok) controller.confirmDelete()
-      }, [controller])
-
-      // Compute plan gating for actions that have restrictions.
-      // Only enable the provider matching the current subtype to avoid emitting notices for unrelated actions.
-      const slackRestriction = useMessagingActionRestriction({
-        provider: 'slack',
-        isSoloPlan: controller.isSoloPlan,
-        onRestrictionNotice,
-        enabled: subtype === 'actionSlack'
-      })
-      const teamsRestriction = useMessagingActionRestriction({
-        provider: 'teams',
-        isSoloPlan: controller.isSoloPlan,
-        onRestrictionNotice,
-        enabled: subtype === 'actionTeams'
-      })
-      const messagingRestriction =
-        subtype === 'actionSlack'
-          ? slackRestriction
-          : subtype === 'actionTeams'
-            ? teamsRestriction
-            : { planRestrictionMessage: null, isRestricted: false }
-
-      const combinedRestrictionMessage =
-        messagingRestriction.planRestrictionMessage ??
-        controller.planRestrictionMessage
-
-      const renderFields = () => {
-        switch (subtype) {
-          case 'actionEmailSendgrid':
-            return (
-              <SendGridAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          case 'actionEmailMailgun':
-            return (
-              <MailGunAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          case 'actionEmailAmazonSes':
-            return (
-              <AmazonSESAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          case 'actionEmailSmtp':
-            return (
-              <SMTPAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          case 'actionWebhook':
-            return (
-              <WebhookAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          case 'actionSlack':
-            return (
-              <SlackAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-                isRestricted={messagingRestriction.isRestricted}
-              />
-            )
-          case 'actionTeams':
-            return (
-              <TeamsAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-                isRestricted={messagingRestriction.isRestricted}
-              />
-            )
-          case 'actionGoogleChat':
-            return (
-              <GoogleChatAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          case 'actionSheets':
-            // Match node behavior: show gate message instead of fields when restricted
-            return controller.planRestrictionMessage ? null : (
-              <SheetsAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          case 'actionHttp':
-            return (
-              <HttpRequestAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          case 'actionCode':
-            return (
-              <RunCustomCodeAction
-                nodeId={nodeId}
-                canEdit={controller.effectiveCanEdit}
-              />
-            )
-          default:
-            return null
-        }
-      }
-
-      return (
-        <div className="flex flex-col gap-3">
-          {/* Connections selectors */}
-          <div className="space-y-2">
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Input Node
-              </label>
-              <NodeDropdownField
-                options={[{ label: 'Nodes', options: inputNodeOptions }]}
-                value={currentInputId}
-                onChange={handleChangeInput}
-                placeholder="Select input node"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Output Node
-              </label>
-              <NodeDropdownField
-                options={[{ label: 'Nodes', options: outputNodeOptions }]}
-                value={currentOutputId}
-                onChange={handleChangeOutput}
-                placeholder="Select output node"
-              />
-            </div>
-          </div>
-
-          <NodeHeader
-            nodeId={nodeId}
-            label={controller.label}
-            dirty={controller.dirty}
-            hasValidationErrors={controller.combinedHasValidationErrors}
-            expanded={true}
-            onLabelChange={controller.handleLabelChange}
-            onExpanded={() => undefined}
-            onConfirmingDelete={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              handleDeleteClick()
-            }}
-          />
-          {controller.labelError ? (
-            <p className="text-xs text-red-500">{controller.labelError}</p>
-          ) : null}
-          {/* Plan restriction banner (mirrors node UIs) */}
-          {combinedRestrictionMessage ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
-              <div className="flex items-start justify-between gap-2">
-                <span>{combinedRestrictionMessage}</span>
-                <button
-                  type="button"
-                  onClick={controller.handlePlanUpgradeClick}
-                  className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
-                >
-                  Upgrade
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="mt-2 space-y-3">{renderFields()}</div>
-          <div className="mt-4">
-            <p className="text-xs text-zinc-500">Execution Options</p>
-            <div className="mt-2 flex flex-wrap gap-2 items-center">
-              <NodeInputField
-                type="number"
-                value={controller.timeout}
-                onChange={(value) =>
-                  controller.handleTimeoutChange(Number(value))
-                }
-                className="w-24 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
-              />
-              <span className="text-xs">ms timeout</span>
-              <NodeInputField
-                type="number"
-                value={controller.retries}
-                onChange={(value) =>
-                  controller.handleRetriesChange(Number(value))
-                }
-                className="w-16 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
-              />
-              <span className="text-xs">retries</span>
-              <NodeCheckBoxField
-                checked={controller.stopOnError}
-                onChange={(value) =>
-                  controller.handleStopOnErrorChange(Boolean(value))
-                }
-              >
-                Stop on error
-              </NodeCheckBoxField>
-            </div>
-          </div>
-        </div>
-      )
-    },
-    [canEdit, normalizedPlanTier, onRestrictionNotice]
-  )
-
-  // Fields-only flyout renderer for trigger nodes
-  const FlyoutTriggerFields = useCallback(({ nodeId }: { nodeId: string }) => {
-    const allNodes = useWorkflowStore(selectNodes)
-    const allEdges = useWorkflowStore(selectEdges)
-    const nodeData = useWorkflowStore(
-      useCallback(
-        (state) =>
-          (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
-        [nodeId]
-      )
-    )
-    const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
-    const getNodeLabel = useCallback((n: Node) => {
-      const rawLabel = (n.data as any)?.label
-      if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
-      switch (n.type) {
-        case 'trigger':
-          return 'Trigger'
-        case 'condition':
-          return 'Condition'
-        default:
-          return 'Action'
-      }
-    }, [])
-    const nodeOptions = useMemo(
-      () =>
-        allNodes
-          .filter((n) => n.id !== nodeId && n.type !== 'trigger')
-          .map((n) => ({ label: getNodeLabel(n), value: n.id })),
-      [allNodes, getNodeLabel, nodeId]
-    )
-    const currentOutputId = useMemo(() => {
-      const outgoing = allEdges.filter((e) => e.source === nodeId)
-      return outgoing[0]?.target ?? ''
-    }, [allEdges, nodeId])
-    const handleChangeOutput = useCallback(
-      (nextTargetId: string) => {
-        if (!nextTargetId || nextTargetId === currentOutputId) return
-        const targetNode = allNodes.find((n) => n.id === nextTargetId)
-        if (targetNode?.type === 'trigger') return
-        const state = useWorkflowStore.getState()
-        const base = state.edges.filter((e) => e.source !== nodeId)
-        const newEdge = {
-          id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
-          source: nodeId,
-          target: nextTargetId,
-          type: 'nodeEdge',
-          data: { edgeType: 'default' }
-        } as any
-        setEdges(normalizeEdgesForState([...base, newEdge]))
-      },
-      [allNodes, currentOutputId, nodeId, setEdges]
-    )
-
-    const labelError: string | null = nodeData?.labelError ?? null
-    const triggerType: string =
-      typeof nodeData?.triggerType === 'string'
-        ? nodeData.triggerType
-        : 'Manual'
-
-    const handleLabelChange = useCallback(
-      (value: string) => updateNodeData(nodeId, { label: value, dirty: true }),
-      [nodeId, updateNodeData]
-    )
-    const handleDeleteClick = useCallback(() => {
-      const ok = window.confirm(
-        'Delete this node? This action cannot be undone.'
-      )
-      if (ok) useWorkflowStore.getState().removeNode(nodeId)
-    }, [nodeId])
-    const handleTriggerTypeChange = useCallback(
-      (value: string) =>
-        updateNodeData(nodeId, { triggerType: value, dirty: true }),
-      [nodeId, updateNodeData]
-    )
-
-    const inputs = Array.isArray(nodeData?.inputs) ? nodeData.inputs : []
-    const handleInputsChange = useCallback(
-      (vars: { key: string; value: string }[]) =>
-        updateNodeData(nodeId, { inputs: vars, dirty: true }),
-      [nodeId, updateNodeData]
-    )
-
-    const scheduleConfig = (nodeData?.scheduleConfig as any) || {}
-    const handleSchedulePatch = useCallback(
-      (patch: Record<string, any>) =>
-        updateNodeData(nodeId, {
-          scheduleConfig: { ...scheduleConfig, ...patch },
-          dirty: true
-        }),
-      [nodeId, scheduleConfig, updateNodeData]
-    )
-
-    return (
-      <div className="flex flex-col gap-3">
-        {/* Connections selectors (Trigger has only output) */}
-        <div className="space-y-2">
-          <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Input Node
-            </label>
-            <NodeDropdownField
-              options={[
-                {
-                  label: 'Nodes',
-                  options: [{ label: 'N/A', value: 'na', disabled: true }]
-                }
-              ]}
-              value={'N/A'}
-              onChange={() => undefined}
-              placeholder="N/A"
-              disabled
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Output Node
-            </label>
-            <NodeDropdownField
-              options={[{ label: 'Nodes', options: nodeOptions }]}
-              value={currentOutputId}
-              onChange={handleChangeOutput}
-              placeholder="Select output node"
-            />
-          </div>
-        </div>
-
-        <NodeHeader
-          nodeId={nodeId}
-          label={(nodeData?.label as string) || 'Trigger'}
-          dirty={Boolean(nodeData?.dirty)}
-          hasValidationErrors={Boolean(labelError)}
-          expanded={true}
-          onLabelChange={handleLabelChange}
-          onExpanded={() => undefined}
-          onConfirmingDelete={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            handleDeleteClick()
-          }}
-        />
-        {labelError ? (
-          <p className="text-xs text-red-500">{labelError}</p>
-        ) : null}
-
-        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Trigger Type
-          </label>
-          <div className="mt-2">
-            <TriggerTypeDropdown
-              value={triggerType}
-              onChange={handleTriggerTypeChange}
-              disabledOptions={
-                isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
-              }
-            />
-          </div>
-        </div>
-
-        {triggerType === 'Schedule' ? (
-          <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40 space-y-2">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Start Date (YYYY-MM-DD)
-              </label>
-              <NodeInputField
-                placeholder="2025-01-31"
-                value={scheduleConfig.startDate || ''}
-                onChange={(v) => handleSchedulePatch({ startDate: v })}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Start Time (HH:MM)
-              </label>
-              <NodeInputField
-                placeholder="09:00"
-                value={scheduleConfig.startTime || ''}
-                onChange={(v) => handleSchedulePatch({ startTime: v })}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Timezone
-              </label>
-              <NodeInputField
-                placeholder="UTC"
-                value={scheduleConfig.timezone || ''}
-                onChange={(v) => handleSchedulePatch({ timezone: v })}
-              />
-            </div>
-          </div>
-        ) : null}
-
-        <KeyValuePair
-          title="Input Variables"
-          variables={inputs}
-          onChange={(vars) => handleInputsChange(vars)}
-        />
-      </div>
-    )
-  }, [])
-
-  // Fields-only flyout renderer for condition nodes
-  const FlyoutConditionFields = useCallback(
-    ({ nodeId }: { nodeId: string }) => {
-      const allNodes = useWorkflowStore(selectNodes)
-      const allEdges = useWorkflowStore(selectEdges)
-      const nodeData = useWorkflowStore(
-        useCallback(
-          (state) =>
-            (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
-          [nodeId]
-        )
-      )
-      const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
-      const getNodeLabel = useCallback((n: Node) => {
-        const rawLabel = (n.data as any)?.label
-        if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
-        switch (n.type) {
-          case 'trigger':
-            return 'Trigger'
-          case 'condition':
-            return 'Condition'
-          default:
-            return 'Action'
-        }
-      }, [])
-      const nodeOptions = useMemo(
-        () =>
-          allNodes
-            .filter((n) => n.id !== nodeId && n.type !== 'trigger')
-            .map((n) => ({ label: getNodeLabel(n), value: n.id })),
-        [allNodes, getNodeLabel, nodeId]
-      )
-      const trueOutputId = useMemo(() => {
-        const t = allEdges.find(
-          (e) => e.source === nodeId && e.sourceHandle === 'cond-true'
-        )
-        return t?.target ?? ''
-      }, [allEdges, nodeId])
-      const falseOutputId = useMemo(() => {
-        const f = allEdges.find(
-          (e) => e.source === nodeId && e.sourceHandle === 'cond-false'
-        )
-        return f?.target ?? ''
-      }, [allEdges, nodeId])
-      const changeCondOutput = useCallback(
-        (handle: 'cond-true' | 'cond-false', nextTargetId: string) => {
-          const currId = handle === 'cond-true' ? trueOutputId : falseOutputId
-          if (!nextTargetId || nextTargetId === currId) return
-          // Prevent routing condition outputs to a trigger
-          const targetNode = allNodes.find((n) => n.id === nextTargetId)
-          if (targetNode?.type === 'trigger') return
-          const state = useWorkflowStore.getState()
-          const base = state.edges.filter(
-            (e) => !(e.source === nodeId && e.sourceHandle === handle)
-          )
-          const label = handle === 'cond-true' ? 'True' : 'False'
-          const outcome = handle === 'cond-true' ? 'true' : 'false'
-          const newEdge = {
-            id: `e-${nodeId}-${handle}-${nextTargetId}-${Date.now()}`,
-            source: nodeId,
-            sourceHandle: handle,
-            target: nextTargetId,
-            type: 'nodeEdge',
-            label,
-            data: { edgeType: 'default', outcome }
-          } as any
-          setEdges(normalizeEdgesForState([...base, newEdge]))
-        },
-        [allNodes, falseOutputId, nodeId, setEdges, trueOutputId]
-      )
-
-      const labelError: string | null = nodeData?.labelError ?? null
-      const field = typeof nodeData?.field === 'string' ? nodeData.field : ''
-      const operator =
-        typeof nodeData?.operator === 'string' ? nodeData.operator : 'equals'
-      const value = typeof nodeData?.value === 'string' ? nodeData.value : ''
-
-      const buildExpression = useCallback(
-        (f: string, op: string, v: string) => {
-          const left = (f || '').trim()
-          if (!left) return ''
-          const OP: Record<string, string> = {
-            equals: '==',
-            'not equals': '!=',
-            'greater than': '>',
-            'less than': '<',
-            contains: 'contains'
-          }
-          const opSym = OP[(op || 'equals').toLowerCase()] ?? '=='
-          const formattedLeft = left.startsWith('{{') ? left : `{{${left}}}`
-          const formattedRight = (() => {
-            const t = (v || '').trim()
-            if (!t) return '""'
-            if (t.startsWith('{{') && t.endsWith('}}')) return t
-            if (/^(true|false|null)$/i.test(t)) return t.toLowerCase()
-            if (!Number.isNaN(Number(t))) return t
-            if (
-              (t.startsWith('"') && t.endsWith('"')) ||
-              (t.startsWith("'") && t.endsWith("'"))
-            ) {
-              try {
-                return JSON.stringify(JSON.parse(t))
-              } catch {
-                return JSON.stringify(t.slice(1, -1))
-              }
-            }
-            return JSON.stringify(t)
-          })()
-          return `${formattedLeft} ${opSym} ${formattedRight}`.trim()
-        },
-        []
-      )
-
-      const hasValidationErrors = !field.trim() || !value.trim()
-      useEffect(() => {
-        const expression = buildExpression(field, operator, value)
-        updateNodeData(nodeId, { expression, hasValidationErrors })
-      }, [
-        buildExpression,
-        field,
-        operator,
-        value,
-        nodeId,
-        updateNodeData,
-        hasValidationErrors
-      ])
-
-      const handleLabelChange = useCallback(
-        (v: string) => updateNodeData(nodeId, { label: v, dirty: true }),
-        [nodeId, updateNodeData]
-      )
-      const handleDeleteClick = useCallback(() => {
-        const ok = window.confirm(
-          'Delete this node? This action cannot be undone.'
-        )
-        if (ok) useWorkflowStore.getState().removeNode(nodeId)
-      }, [nodeId])
-      const handleField = useCallback(
-        (v: string) =>
-          updateNodeData(nodeId, {
-            field: v,
-            dirty: true
-          }),
-        [nodeId, updateNodeData]
-      )
-      const handleOperator = useCallback(
-        (v: string) => updateNodeData(nodeId, { operator: v, dirty: true }),
-        [nodeId, updateNodeData]
-      )
-      const handleValue = useCallback(
-        (v: string) => updateNodeData(nodeId, { value: v, dirty: true }),
-        [nodeId, updateNodeData]
-      )
-
-      return (
-        <div className="flex flex-col gap-3">
-          {/* Connections selectors (Condition has True/False outputs) */}
-          <div className="space-y-2">
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Input Node
-              </label>
-              <NodeDropdownField
-                options={[
-                  {
-                    label: 'Nodes',
-                    options: allNodes
-                      .filter((n) => n.id !== nodeId)
-                      .map((n) => ({ label: getNodeLabel(n), value: n.id }))
-                  }
-                ]}
-                value={allEdges.find((e) => e.target === nodeId)?.source ?? ''}
-                onChange={(nextSourceId) => {
-                  const state = useWorkflowStore.getState()
-                  const base = state.edges.filter((e) => e.target !== nodeId)
-                  const newEdge = {
-                    id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
-                    source: nextSourceId,
-                    target: nodeId,
-                    type: 'nodeEdge',
-                    data: { edgeType: 'default' }
-                  } as any
-                  setEdges(normalizeEdgesForState([...base, newEdge]))
-                }}
-                placeholder="Select input node"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                True Output
-              </label>
-              <NodeDropdownField
-                options={[{ label: 'Nodes', options: nodeOptions }]}
-                value={trueOutputId}
-                onChange={(v) => changeCondOutput('cond-true', v)}
-                placeholder="Select true output"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                False Output
-              </label>
-              <NodeDropdownField
-                options={[{ label: 'Nodes', options: nodeOptions }]}
-                value={falseOutputId}
-                onChange={(v) => changeCondOutput('cond-false', v)}
-                placeholder="Select false output"
-              />
-            </div>
-          </div>
-
-          <NodeHeader
-            nodeId={nodeId}
-            label={(nodeData?.label as string) || 'Condition'}
-            dirty={Boolean(nodeData?.dirty)}
-            hasValidationErrors={Boolean(labelError) || hasValidationErrors}
-            expanded={true}
-            onLabelChange={handleLabelChange}
-            onExpanded={() => undefined}
-            onConfirmingDelete={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              handleDeleteClick()
-            }}
-          />
-          {labelError ? (
-            <p className="text-xs text-red-500">{labelError}</p>
-          ) : null}
-
-          <NodeInputField
-            placeholder="Field name"
-            value={field}
-            onChange={handleField}
-          />
-          <NodeDropdownField
-            options={[
-              'equals',
-              'not equals',
-              'greater than',
-              'less than',
-              'contains'
-            ]}
-            value={operator}
-            onChange={handleOperator}
-          />
-          <NodeInputField
-            placeholder="Comparison value"
-            value={value}
-            onChange={handleValue}
-          />
-        </div>
-      )
-    },
-    []
-  )
+  // Flyout field renderers are implemented as standalone components below.
 
   const flyoutSubtype = useMemo<ActionDropSubtype | null>(() => {
     if (!flyoutNode) return null
@@ -1948,13 +1176,19 @@ export default function FlowCanvas({
               <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
                 <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-4">
                   {flyoutNode.type === 'trigger' ? (
-                    <FlyoutTriggerFields nodeId={flyoutNode.id} />
+                    <FlyoutTriggerFields
+                      nodeId={flyoutNode.id}
+                      isSoloPlan={isSoloPlan}
+                    />
                   ) : flyoutNode.type === 'condition' ? (
                     <FlyoutConditionFields nodeId={flyoutNode.id} />
                   ) : flyoutSubtype ? (
                     <FlyoutActionFields
                       nodeId={flyoutNode.id}
                       subtype={flyoutSubtype}
+                      normalizedPlanTier={normalizedPlanTier}
+                      canEdit={canEditRef.current}
+                      onRestrictionNotice={onRestrictionNoticeRef.current}
                     />
                   ) : (
                     <p className="text-xs text-zinc-500">
@@ -1969,5 +1203,765 @@ export default function FlowCanvas({
         ) : null}
       </div>
     </WorkflowFlyoutProvider>
+  )
+}
+
+interface FlyoutActionFieldsProps {
+  nodeId: string
+  subtype: ActionDropSubtype
+  normalizedPlanTier: ReturnType<typeof normalizePlanTier>
+  canEdit: boolean
+  onRestrictionNotice?: (message: string) => void
+}
+
+function FlyoutActionFields({
+  nodeId,
+  subtype,
+  normalizedPlanTier,
+  canEdit,
+  onRestrictionNotice
+}: FlyoutActionFieldsProps) {
+  const allNodes = useWorkflowStore(selectNodes)
+  const allEdges = useWorkflowStore(selectEdges)
+  const setEdges = useWorkflowStore((state) => state.setEdges)
+  const getNodeLabel = useCallback((n: Node) => {
+    const rawLabel = (n.data as any)?.label
+    if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
+    switch (n.type) {
+      case 'trigger':
+        return 'Trigger'
+      case 'condition':
+        return 'Condition'
+      default:
+        return 'Action'
+    }
+  }, [])
+  const inputNodeOptions = useMemo(
+    () =>
+      allNodes
+        .filter((n) => n.id !== nodeId)
+        .map((n) => ({ label: getNodeLabel(n), value: n.id })),
+    [allNodes, getNodeLabel, nodeId]
+  )
+  const outputNodeOptions = useMemo(
+    () =>
+      allNodes
+        .filter((n) => n.id !== nodeId && n.type !== 'trigger')
+        .map((n) => ({ label: getNodeLabel(n), value: n.id })),
+    [allNodes, getNodeLabel, nodeId]
+  )
+
+  const currentInputId = useMemo(() => {
+    const incoming = allEdges.filter((e) => e.target === nodeId)
+    return incoming[0]?.source ?? ''
+  }, [allEdges, nodeId])
+  const currentOutputId = useMemo(() => {
+    const outgoing = allEdges.filter(
+      (e) => e.source === nodeId && !e.sourceHandle
+    )
+    return outgoing[0]?.target ?? ''
+  }, [allEdges, nodeId])
+
+  const handleChangeInput = useCallback(
+    (nextSourceId: string) => {
+      if (!nextSourceId || nextSourceId === currentInputId) return
+      const state = useWorkflowStore.getState()
+      const base = state.edges.filter((e) => e.target !== nodeId)
+      const newEdge = {
+        id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
+        source: nextSourceId,
+        target: nodeId,
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      } as any
+      setEdges(normalizeEdgesForState([...base, newEdge]))
+    },
+    [currentInputId, nodeId, setEdges]
+  )
+
+  const handleChangeOutput = useCallback(
+    (nextTargetId: string) => {
+      if (!nextTargetId || nextTargetId === currentOutputId) return
+      const targetNode = allNodes.find((n) => n.id === nextTargetId)
+      if (targetNode?.type === 'trigger') return
+      const state = useWorkflowStore.getState()
+      const base = state.edges.filter(
+        (e) => !(e.source === nodeId && !e.sourceHandle)
+      )
+      const newEdge = {
+        id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
+        source: nodeId,
+        target: nextTargetId,
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      } as any
+      setEdges(normalizeEdgesForState([...base, newEdge]))
+    },
+    [allNodes, currentOutputId, nodeId, setEdges]
+  )
+
+  const nodeData = useWorkflowStore(
+    useCallback(
+      (state) =>
+        (state.nodes.find((n) => n.id === nodeId)?.data as
+          | ActionNodeData
+          | undefined) ?? null,
+      [nodeId]
+    )
+  )
+
+  const controller = useActionNodeController({
+    id: nodeId,
+    nodeData: nodeData ?? null,
+    planTier: normalizedPlanTier,
+    effectiveCanEdit: canEdit,
+    onRestrictionNotice,
+    toggleExpanded: () => undefined,
+    remove: () => useWorkflowStore.getState().removeNode(nodeId)
+  })
+
+  const handleDeleteClick = useCallback(() => {
+    const ok = window.confirm('Delete this node? This action cannot be undone.')
+    if (ok) controller.confirmDelete()
+  }, [controller])
+
+  const slackRestriction = useMessagingActionRestriction({
+    provider: 'slack',
+    isSoloPlan: controller.isSoloPlan,
+    onRestrictionNotice,
+    enabled: subtype === 'actionSlack'
+  })
+  const teamsRestriction = useMessagingActionRestriction({
+    provider: 'teams',
+    isSoloPlan: controller.isSoloPlan,
+    onRestrictionNotice,
+    enabled: subtype === 'actionTeams'
+  })
+  const messagingRestriction =
+    subtype === 'actionSlack'
+      ? slackRestriction
+      : subtype === 'actionTeams'
+        ? teamsRestriction
+        : { planRestrictionMessage: null, isRestricted: false }
+
+  const combinedRestrictionMessage =
+    messagingRestriction.planRestrictionMessage ??
+    controller.planRestrictionMessage
+
+  const renderFields = () => {
+    switch (subtype) {
+      case 'actionEmailSendgrid':
+        return (
+          <SendGridAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+          />
+        )
+      case 'actionEmailMailgun':
+        return (
+          <MailGunAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+          />
+        )
+      case 'actionEmailAmazonSes':
+        return (
+          <AmazonSESAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+          />
+        )
+      case 'actionEmailSmtp':
+        return (
+          <SMTPAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+        )
+      case 'actionWebhook':
+        return (
+          <WebhookAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+          />
+        )
+      case 'actionSlack':
+        return (
+          <SlackAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+            isRestricted={messagingRestriction.isRestricted}
+          />
+        )
+      case 'actionTeams':
+        return (
+          <TeamsAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+            isRestricted={messagingRestriction.isRestricted}
+          />
+        )
+      case 'actionGoogleChat':
+        return (
+          <GoogleChatAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+          />
+        )
+      case 'actionSheets':
+        return controller.planRestrictionMessage ? null : (
+          <SheetsAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+        )
+      case 'actionHttp':
+        return (
+          <HttpRequestAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+          />
+        )
+      case 'actionCode':
+        return (
+          <RunCustomCodeAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+          />
+        )
+      default:
+        return null
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="space-y-2">
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Input Node
+          </label>
+          <NodeDropdownField
+            options={[{ label: 'Nodes', options: inputNodeOptions }]}
+            value={currentInputId}
+            onChange={handleChangeInput}
+            placeholder="Select input node"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Output Node
+          </label>
+          <NodeDropdownField
+            options={[{ label: 'Nodes', options: outputNodeOptions }]}
+            value={currentOutputId}
+            onChange={handleChangeOutput}
+            placeholder="Select output node"
+          />
+        </div>
+      </div>
+
+      <NodeHeader
+        nodeId={nodeId}
+        label={controller.label}
+        dirty={controller.dirty}
+        hasValidationErrors={controller.combinedHasValidationErrors}
+        expanded={true}
+        onLabelChange={controller.handleLabelChange}
+        onExpanded={() => undefined}
+        onConfirmingDelete={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          handleDeleteClick()
+        }}
+      />
+      {controller.labelError ? (
+        <p className="text-xs text-red-500">{controller.labelError}</p>
+      ) : null}
+      {combinedRestrictionMessage ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+          <div className="flex items-start justify-between gap-2">
+            <span>{combinedRestrictionMessage}</span>
+            <button
+              type="button"
+              onClick={controller.handlePlanUpgradeClick}
+              className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+            >
+              Upgrade
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-2 space-y-3">{renderFields()}</div>
+      <div className="mt-4">
+        <p className="text-xs text-zinc-500">Execution Options</p>
+        <div className="mt-2 flex flex-wrap gap-2 items-center">
+          <NodeInputField
+            type="number"
+            value={controller.timeout}
+            onChange={(value) => controller.handleTimeoutChange(Number(value))}
+            className="w-24 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
+          />
+          <span className="text-xs">ms timeout</span>
+          <NodeInputField
+            type="number"
+            value={controller.retries}
+            onChange={(value) => controller.handleRetriesChange(Number(value))}
+            className="w-16 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
+          />
+          <span className="text-xs">retries</span>
+          <NodeCheckBoxField
+            checked={controller.stopOnError}
+            onChange={(value) =>
+              controller.handleStopOnErrorChange(Boolean(value))
+            }
+          >
+            Stop on error
+          </NodeCheckBoxField>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface FlyoutTriggerFieldsProps {
+  nodeId: string
+  isSoloPlan: boolean
+}
+
+function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
+  const allNodes = useWorkflowStore(selectNodes)
+  const allEdges = useWorkflowStore(selectEdges)
+  const setEdges = useWorkflowStore((state) => state.setEdges)
+  const nodeData = useWorkflowStore(
+    useCallback(
+      (state) => (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
+      [nodeId]
+    )
+  )
+  const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
+  const getNodeLabel = useCallback((n: Node) => {
+    const rawLabel = (n.data as any)?.label
+    if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
+    switch (n.type) {
+      case 'trigger':
+        return 'Trigger'
+      case 'condition':
+        return 'Condition'
+      default:
+        return 'Action'
+    }
+  }, [])
+  const nodeOptions = useMemo(
+    () =>
+      allNodes
+        .filter((n) => n.id !== nodeId && n.type !== 'trigger')
+        .map((n) => ({ label: getNodeLabel(n), value: n.id })),
+    [allNodes, getNodeLabel, nodeId]
+  )
+  const currentOutputId = useMemo(() => {
+    const outgoing = allEdges.filter((e) => e.source === nodeId)
+    return outgoing[0]?.target ?? ''
+  }, [allEdges, nodeId])
+  const handleChangeOutput = useCallback(
+    (nextTargetId: string) => {
+      if (!nextTargetId || nextTargetId === currentOutputId) return
+      const targetNode = allNodes.find((n) => n.id === nextTargetId)
+      if (targetNode?.type === 'trigger') return
+      const state = useWorkflowStore.getState()
+      const base = state.edges.filter((e) => e.source !== nodeId)
+      const newEdge = {
+        id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
+        source: nodeId,
+        target: nextTargetId,
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      } as any
+      setEdges(normalizeEdgesForState([...base, newEdge]))
+    },
+    [allNodes, currentOutputId, nodeId, setEdges]
+  )
+
+  const labelError: string | null = nodeData?.labelError ?? null
+  const triggerType: string =
+    typeof nodeData?.triggerType === 'string' ? nodeData.triggerType : 'Manual'
+
+  const handleLabelChange = useCallback(
+    (value: string) => updateNodeData(nodeId, { label: value, dirty: true }),
+    [nodeId, updateNodeData]
+  )
+  const handleDeleteClick = useCallback(() => {
+    const ok = window.confirm('Delete this node? This action cannot be undone.')
+    if (ok) useWorkflowStore.getState().removeNode(nodeId)
+  }, [nodeId])
+  const handleTriggerTypeChange = useCallback(
+    (value: string) =>
+      updateNodeData(nodeId, { triggerType: value, dirty: true }),
+    [nodeId, updateNodeData]
+  )
+
+  const inputs = Array.isArray(nodeData?.inputs) ? nodeData.inputs : []
+  const handleInputsChange = useCallback(
+    (vars: { key: string; value: string }[]) =>
+      updateNodeData(nodeId, { inputs: vars, dirty: true }),
+    [nodeId, updateNodeData]
+  )
+
+  const scheduleConfig = useMemo(
+    () => (nodeData?.scheduleConfig as any) || {},
+    [nodeData]
+  )
+  const handleSchedulePatch = useCallback(
+    (patch: Record<string, any>) =>
+      updateNodeData(nodeId, {
+        scheduleConfig: { ...scheduleConfig, ...patch },
+        dirty: true
+      }),
+    [nodeId, scheduleConfig, updateNodeData]
+  )
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="space-y-2">
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Input Node
+          </label>
+          <NodeDropdownField
+            options={[
+              {
+                label: 'Nodes',
+                options: [{ label: 'N/A', value: 'na', disabled: true }]
+              }
+            ]}
+            value="N/A"
+            onChange={() => undefined}
+            placeholder="N/A"
+            disabled
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Output Node
+          </label>
+          <NodeDropdownField
+            options={[{ label: 'Nodes', options: nodeOptions }]}
+            value={currentOutputId}
+            onChange={handleChangeOutput}
+            placeholder="Select output node"
+          />
+        </div>
+      </div>
+
+      <NodeHeader
+        nodeId={nodeId}
+        label={(nodeData?.label as string) || 'Trigger'}
+        dirty={Boolean(nodeData?.dirty)}
+        hasValidationErrors={Boolean(labelError)}
+        expanded={true}
+        onLabelChange={handleLabelChange}
+        onExpanded={() => undefined}
+        onConfirmingDelete={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          handleDeleteClick()
+        }}
+      />
+      {labelError ? <p className="text-xs text-red-500">{labelError}</p> : null}
+
+      <div>
+        <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Trigger Type
+        </label>
+        <div className="mt-2">
+          <TriggerTypeDropdown
+            value={triggerType}
+            onChange={handleTriggerTypeChange}
+            disabledOptions={
+              isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
+            }
+          />
+        </div>
+      </div>
+
+      {triggerType === 'Schedule' ? (
+        <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40 space-y-2">
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Start Date (YYYY-MM-DD)
+            </label>
+            <NodeInputField
+              placeholder="2025-01-31"
+              value={scheduleConfig.startDate || ''}
+              onChange={(v) => handleSchedulePatch({ startDate: v })}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Start Time (HH:MM)
+            </label>
+            <NodeInputField
+              placeholder="09:00"
+              value={scheduleConfig.startTime || ''}
+              onChange={(v) => handleSchedulePatch({ startTime: v })}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Timezone
+            </label>
+            <NodeInputField
+              placeholder="UTC"
+              value={scheduleConfig.timezone || ''}
+              onChange={(v) => handleSchedulePatch({ timezone: v })}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <KeyValuePair
+        title="Input Variables"
+        variables={inputs}
+        onChange={(vars) => handleInputsChange(vars)}
+      />
+    </div>
+  )
+}
+
+interface FlyoutConditionFieldsProps {
+  nodeId: string
+}
+
+function FlyoutConditionFields({ nodeId }: FlyoutConditionFieldsProps) {
+  const allNodes = useWorkflowStore(selectNodes)
+  const allEdges = useWorkflowStore(selectEdges)
+  const setEdges = useWorkflowStore((state) => state.setEdges)
+  const nodeData = useWorkflowStore(
+    useCallback(
+      (state) => (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
+      [nodeId]
+    )
+  )
+  const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
+  const getNodeLabel = useCallback((n: Node) => {
+    const rawLabel = (n.data as any)?.label
+    if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
+    switch (n.type) {
+      case 'trigger':
+        return 'Trigger'
+      case 'condition':
+        return 'Condition'
+      default:
+        return 'Action'
+    }
+  }, [])
+  const nodeOptions = useMemo(
+    () =>
+      allNodes
+        .filter((n) => n.id !== nodeId && n.type !== 'trigger')
+        .map((n) => ({ label: getNodeLabel(n), value: n.id })),
+    [allNodes, getNodeLabel, nodeId]
+  )
+  const trueOutputId = useMemo(() => {
+    const t = allEdges.find(
+      (e) => e.source === nodeId && e.sourceHandle === 'cond-true'
+    )
+    return t?.target ?? ''
+  }, [allEdges, nodeId])
+  const falseOutputId = useMemo(() => {
+    const f = allEdges.find(
+      (e) => e.source === nodeId && e.sourceHandle === 'cond-false'
+    )
+    return f?.target ?? ''
+  }, [allEdges, nodeId])
+  const changeCondOutput = useCallback(
+    (handle: 'cond-true' | 'cond-false', nextTargetId: string) => {
+      const currId = handle === 'cond-true' ? trueOutputId : falseOutputId
+      if (!nextTargetId || nextTargetId === currId) return
+      const targetNode = allNodes.find((n) => n.id === nextTargetId)
+      if (targetNode?.type === 'trigger') return
+      const state = useWorkflowStore.getState()
+      const base = state.edges.filter(
+        (e) => !(e.source === nodeId && e.sourceHandle === handle)
+      )
+      const label = handle === 'cond-true' ? 'True' : 'False'
+      const outcome = handle === 'cond-true' ? 'true' : 'false'
+      const newEdge = {
+        id: `e-${nodeId}-${handle}-${nextTargetId}-${Date.now()}`,
+        source: nodeId,
+        sourceHandle: handle,
+        target: nextTargetId,
+        type: 'nodeEdge',
+        label,
+        data: { edgeType: 'default', outcome }
+      } as any
+      setEdges(normalizeEdgesForState([...base, newEdge]))
+    },
+    [allNodes, falseOutputId, nodeId, setEdges, trueOutputId]
+  )
+
+  const labelError: string | null = nodeData?.labelError ?? null
+  const field = typeof nodeData?.field === 'string' ? nodeData.field : ''
+  const operator =
+    typeof nodeData?.operator === 'string' ? nodeData.operator : 'equals'
+  const value = typeof nodeData?.value === 'string' ? nodeData.value : ''
+
+  const buildExpression = useCallback((f: string, op: string, v: string) => {
+    const left = (f || '').trim()
+    if (!left) return ''
+    const OP: Record<string, string> = {
+      equals: '==',
+      'not equals': '!=',
+      'greater than': '>',
+      'less than': '<',
+      contains: 'contains'
+    }
+    const opSym = OP[(op || 'equals').toLowerCase()] ?? '=='
+    const formattedLeft = left.startsWith('{{') ? left : `{{${left}}}`
+    const formattedRight = (() => {
+      const t = (v || '').trim()
+      if (!t) return '""'
+      if (t.startsWith('{{') && t.endsWith('}}')) return t
+      if (/^(true|false|null)$/i.test(t)) return t.toLowerCase()
+      if (!Number.isNaN(Number(t))) return t
+      if (
+        (t.startsWith('"') && t.endsWith('"')) ||
+        (t.startsWith("'") && t.endsWith("'"))
+      ) {
+        try {
+          return JSON.stringify(JSON.parse(t))
+        } catch {
+          return JSON.stringify(t.slice(1, -1))
+        }
+      }
+      return JSON.stringify(t)
+    })()
+    return `${formattedLeft} ${opSym} ${formattedRight}`.trim()
+  }, [])
+
+  const hasValidationErrors = !field.trim() || !value.trim()
+  useEffect(() => {
+    const expression = buildExpression(field, operator, value)
+    updateNodeData(nodeId, { expression, hasValidationErrors })
+  }, [
+    buildExpression,
+    field,
+    hasValidationErrors,
+    nodeId,
+    operator,
+    updateNodeData,
+    value
+  ])
+
+  const handleLabelChange = useCallback(
+    (v: string) => updateNodeData(nodeId, { label: v, dirty: true }),
+    [nodeId, updateNodeData]
+  )
+  const handleDeleteClick = useCallback(() => {
+    const ok = window.confirm('Delete this node? This action cannot be undone.')
+    if (ok) useWorkflowStore.getState().removeNode(nodeId)
+  }, [nodeId])
+  const handleField = useCallback(
+    (v: string) => updateNodeData(nodeId, { field: v, dirty: true }),
+    [nodeId, updateNodeData]
+  )
+  const handleOperator = useCallback(
+    (v: string) => updateNodeData(nodeId, { operator: v, dirty: true }),
+    [nodeId, updateNodeData]
+  )
+  const handleValue = useCallback(
+    (v: string) => updateNodeData(nodeId, { value: v, dirty: true }),
+    [nodeId, updateNodeData]
+  )
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="space-y-2">
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Input Node
+          </label>
+          <NodeDropdownField
+            options={[
+              {
+                label: 'Nodes',
+                options: allNodes
+                  .filter((n) => n.id !== nodeId)
+                  .map((n) => ({ label: getNodeLabel(n), value: n.id }))
+              }
+            ]}
+            value={allEdges.find((e) => e.target === nodeId)?.source ?? ''}
+            onChange={(nextSourceId) => {
+              const state = useWorkflowStore.getState()
+              const base = state.edges.filter((e) => e.target !== nodeId)
+              const newEdge = {
+                id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
+                source: nextSourceId,
+                target: nodeId,
+                type: 'nodeEdge',
+                data: { edgeType: 'default' }
+              } as any
+              setEdges(normalizeEdgesForState([...base, newEdge]))
+            }}
+            placeholder="Select input node"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            True Output
+          </label>
+          <NodeDropdownField
+            options={[{ label: 'Nodes', options: nodeOptions }]}
+            value={trueOutputId}
+            onChange={(v) => changeCondOutput('cond-true', v)}
+            placeholder="Select true output"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            False Output
+          </label>
+          <NodeDropdownField
+            options={[{ label: 'Nodes', options: nodeOptions }]}
+            value={falseOutputId}
+            onChange={(v) => changeCondOutput('cond-false', v)}
+            placeholder="Select false output"
+          />
+        </div>
+      </div>
+
+      <NodeHeader
+        nodeId={nodeId}
+        label={(nodeData?.label as string) || 'Condition'}
+        dirty={Boolean(nodeData?.dirty)}
+        hasValidationErrors={Boolean(labelError) || hasValidationErrors}
+        expanded={true}
+        onLabelChange={handleLabelChange}
+        onExpanded={() => undefined}
+        onConfirmingDelete={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          handleDeleteClick()
+        }}
+      />
+      {labelError ? <p className="text-xs text-red-500">{labelError}</p> : null}
+
+      <NodeInputField
+        placeholder="Field name"
+        value={field}
+        onChange={handleField}
+      />
+      <NodeDropdownField
+        options={[
+          'equals',
+          'not equals',
+          'greater than',
+          'less than',
+          'contains'
+        ]}
+        value={operator}
+        onChange={handleOperator}
+      />
+      <NodeInputField
+        placeholder="Comparison value"
+        value={value}
+        onChange={handleValue}
+      />
+    </div>
   )
 }

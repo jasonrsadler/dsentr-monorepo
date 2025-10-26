@@ -1,8 +1,8 @@
-import { NavLink, useLocation } from "react-router-dom";
-import { navItems } from "../content/navigation";
+import { NavLink, useLocation } from 'react-router-dom'
+import { navItems } from '../content/navigation'
 
 export function SidebarNav() {
-  const location = useLocation();
+  const location = useLocation()
 
   return (
     <aside className="sidebar" aria-label="Documentation navigation">
@@ -15,16 +15,16 @@ export function SidebarNav() {
                 to={item.to}
                 className={({ isActive }) =>
                   [
-                    "nav-link",
-                    isActive || (item.to === "/" && location.pathname === "/")
-                      ? "active"
-                      : ""
+                    'nav-link',
+                    isActive || (item.to === '/' && location.pathname === '/')
+                      ? 'active'
+                      : ''
                   ]
-                    .join(" ")
+                    .join(' ')
                     .trim()
                 }
                 aria-label={`${item.label} — ${item.description}`}
-                end={item.to === "/"}
+                end={item.to === '/'}
               >
                 <span>{item.label}</span>
               </NavLink>
@@ -33,5 +33,5 @@ export function SidebarNav() {
         </ul>
       </nav>
     </aside>
-  );
+  )
 }

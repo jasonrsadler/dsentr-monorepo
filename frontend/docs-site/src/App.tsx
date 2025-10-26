@@ -1,11 +1,11 @@
-import { Route, Routes } from "react-router-dom";
-import { DocumentationLayout } from "./layout/DocumentationLayout";
-import { HomePage } from "./pages/HomePage";
-import { GettingStartedPage } from "./pages/GettingStartedPage";
-import { DashboardPage } from "./pages/DashboardPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { WorkflowDesignerPage } from "./pages/WorkflowDesignerPage";
-import { NotFoundPage } from "./pages/NotFoundPage";
+import { Route, Routes } from 'react-router-dom'
+import { DocumentationLayout } from './layout/DocumentationLayout'
+import { HomePage } from './pages/HomePage'
+import { GettingStartedPage } from './pages/GettingStartedPage'
+import { DashboardPage } from './pages/DashboardPage'
+import { SettingsPage } from './pages/SettingsPage'
+import { WorkflowDesignerPage } from './pages/WorkflowDesignerPage'
+import { NotFoundPage } from './pages/NotFoundPage'
 
 export default function App() {
   return (
@@ -19,5 +19,5 @@ export default function App() {
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
-  );
+  )
 }

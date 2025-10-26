@@ -1,5 +1,5 @@
-import { Outlet } from "react-router-dom";
-import { SidebarNav } from "../components/SidebarNav";
+import { Outlet } from 'react-router-dom'
+import { SidebarNav } from '../components/SidebarNav'
 
 export function DocumentationLayout() {
   return (
@@ -9,5 +9,5 @@ export function DocumentationLayout() {
         <Outlet />
       </main>
     </div>
-  );
+  )
 }
