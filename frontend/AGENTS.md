@@ -7,6 +7,7 @@ utomation canvas.
 loops, especially in the React Flow canvas.
 
 ## Required Practices
+- All tests go in /tests directory. No tests go anywhere under /src
 - Always run `npm run lint` and `npm test` before submitting frontend changes. Keep in mind that linting and tests take quite a
 few moments so patience is required for them to finish
 - When altering canvas nodes, edges, or shared hooks, audit for dependency cycles and ensure state setters are wrapped (e.g., `u

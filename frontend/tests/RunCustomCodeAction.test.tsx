@@ -8,7 +8,7 @@ import {
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import RunCustomCodeAction from '../RunCustomCodeAction'
+import RunCustomCodeAction from '../src/components/workflow/Actions/RunCustomCodeAction'
 import type { RunCustomCodeActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
@@ -140,9 +140,9 @@ describe('RunCustomCodeAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: RunCustomCodeActionParams }).params
-                  .code === 'return foo - bar'
+              'params' in payload &&
+              (payload as { params: RunCustomCodeActionParams }).params
+                .code === 'return foo - bar'
             )
         )
       ).toBe(true)
@@ -193,9 +193,9 @@ describe('RunCustomCodeAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: RunCustomCodeActionParams }).params
-                  .inputs?.[0]?.key === 'id'
+              'params' in payload &&
+              (payload as { params: RunCustomCodeActionParams }).params
+                .inputs?.[0]?.key === 'id'
             )
         )
       ).toBe(true)
@@ -248,9 +248,9 @@ describe('RunCustomCodeAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: RunCustomCodeActionParams }).params
-                  .outputs?.[0]?.value === 'result'
+              'params' in payload &&
+              (payload as { params: RunCustomCodeActionParams }).params
+                .outputs?.[0]?.value === 'result'
             )
         )
       ).toBe(true)

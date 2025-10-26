@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 
-import GoogleChatAction from './GoogleChatAction'
+import GoogleChatAction from '@/components/workflow/Actions/Messaging/Services/GoogleChatAction'
 
 vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
   __esModule: true,

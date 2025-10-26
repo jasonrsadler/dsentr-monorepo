@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
-import GoogleChatAction from '../Messaging/Services/GoogleChatAction'
+import GoogleChatAction from '../src/components/workflow/Actions/Messaging/Services/GoogleChatAction'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
 vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
@@ -136,8 +136,8 @@ describe('GoogleChatAction messaging persistence', () => {
       .find((call) =>
         Boolean(
           call?.[0] === nodeId &&
-            call?.[1] &&
-            'params' in (call?.[1] as Record<string, unknown>)
+          call?.[1] &&
+          'params' in (call?.[1] as Record<string, unknown>)
         )
       )
 

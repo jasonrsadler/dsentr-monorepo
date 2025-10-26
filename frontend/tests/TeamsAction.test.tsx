@@ -1,7 +1,7 @@
 import { screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { vi } from 'vitest'
 
-import TeamsAction from './TeamsAction'
+import TeamsAction from '../src/components/workflow/Actions/Messaging/Services/TeamsAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 import { useAuth } from '@/stores/auth'
 import {
@@ -153,7 +153,7 @@ const workflowState = {
 vi.mock('@/lib/oauthApi', () => ({
   fetchConnections: vi.fn(),
   getCachedConnections: vi.fn(),
-  subscribeToConnectionUpdates: vi.fn().mockReturnValue(() => {}),
+  subscribeToConnectionUpdates: vi.fn().mockReturnValue(() => { }),
   updateCachedConnections: vi.fn()
 }))
 
@@ -208,7 +208,7 @@ describe('TeamsAction (workflow store integration)', () => {
     vi.mocked(getCachedConnections).mockReset()
     vi.mocked(getCachedConnections).mockReturnValue(null)
     vi.mocked(subscribeToConnectionUpdates).mockReset()
-    vi.mocked(subscribeToConnectionUpdates).mockReturnValue(() => {})
+    vi.mocked(subscribeToConnectionUpdates).mockReturnValue(() => { })
     vi.mocked(fetchMicrosoftTeams).mockReset()
     vi.mocked(fetchMicrosoftTeams).mockResolvedValue([])
     vi.mocked(fetchMicrosoftTeamChannels).mockReset()

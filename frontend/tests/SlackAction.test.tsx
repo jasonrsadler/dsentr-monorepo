@@ -1,7 +1,7 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 
-import SlackAction from './SlackAction'
+import SlackAction from '../src/components/workflow/Actions/Messaging/Services/SlackAction'
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 import { useAuth } from '@/stores/auth'
 
@@ -108,7 +108,7 @@ const fetchConnections = vi.fn().mockResolvedValue({
   }
 })
 const getCachedConnections = vi.fn().mockReturnValue(null)
-const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => {})
+const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => { })
 
 vi.mock('@/stores/workflowSelectors', () => ({
   useActionParams: () => mockParamsRef.current

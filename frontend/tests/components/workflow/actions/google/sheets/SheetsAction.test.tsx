@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 
-import SheetsAction from '../SheetsAction'
+import SheetsAction from '../../../../../../src/components/workflow/Actions/Google/SheetsAction'
 import type { SheetsActionParams } from '@/stores/workflowSelectors'
 
 const createBaseParams = (): SheetsActionParams => ({
@@ -75,7 +75,7 @@ vi.mock('@/stores/auth', () => {
 
 const fetchConnections = vi.fn().mockResolvedValue({})
 const getCachedConnections = vi.fn().mockReturnValue(null)
-const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => {})
+const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => { })
 
 vi.mock('@/lib/oauthApi', () => ({
   fetchConnections: (...args: any[]) => fetchConnections(...args),

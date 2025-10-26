@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 
-import AmazonSESAction from '../AmazonSESAction'
-import MailGunAction from '../MailGunAction'
-import SendGridAction from '../SendGridAction'
-import SMTPAction from '../SMTPAction'
+import AmazonSESAction from '@/components/workflow/Actions/Email/Services/AmazonSESAction'
+import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunAction'
+import SendGridAction from '@/components/workflow/Actions/Email/Services/SendGridAction'
+import SMTPAction from '@/components/workflow/Actions/Email/Services/SMTPAction'
 
 vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
   __esModule: true,

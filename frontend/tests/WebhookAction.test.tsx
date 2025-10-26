@@ -1,15 +1,15 @@
 import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
-import HttpRequestAction from '../HttpRequestAction'
-import type { HttpRequestActionParams } from '@/stores/workflowSelectors'
+import WebhookAction from '../src/components/workflow/Actions/Webhook/Webhook'
+import type { WebhookActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
-const nodeId = 'http-node'
+const nodeId = 'webhook-node'
 
 const createBaseParams = (
-  overrides: Partial<HttpRequestActionParams> = {}
-): HttpRequestActionParams => ({
+  overrides: Partial<WebhookActionParams> = {}
+): WebhookActionParams => ({
   url: '',
   method: 'GET',
   headers: [],
@@ -17,17 +17,15 @@ const createBaseParams = (
   bodyType: 'raw',
   body: '',
   formBody: [],
-  timeout: 0,
-  followRedirects: true,
   authType: 'none',
-  username: '',
-  password: '',
-  token: '',
+  authUsername: '',
+  authPassword: '',
+  authToken: '',
   dirty: false,
   ...overrides
 })
 
-const seedHttpNode = (params: HttpRequestActionParams) => {
+const seedWebhookNode = (params: WebhookActionParams) => {
   useWorkflowStore.setState((state) => ({
     ...state,
     nodes: [
@@ -36,7 +34,7 @@ const seedHttpNode = (params: HttpRequestActionParams) => {
         type: 'action',
         position: { x: 0, y: 0 },
         data: {
-          label: 'HTTP Request',
+          label: 'Webhook',
           params,
           dirty: false,
           hasValidationErrors: false
@@ -84,7 +82,7 @@ const findParamsCall = (mock: ReturnType<typeof vi.fn>) =>
       )
     )
 
-describe('HttpRequestAction', () => {
+describe('WebhookAction', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     useWorkflowStore.setState((state) => ({
@@ -109,16 +107,12 @@ describe('HttpRequestAction', () => {
     vi.restoreAllMocks()
   })
 
-  it('updates the url param while preserving other fields and marking the node dirty', async () => {
-    const initial = createBaseParams({
-      method: 'POST',
-      headers: [{ key: 'Authorization', value: 'Bearer 123' }],
-      queryParams: [{ key: 'page', value: '1' }],
-      followRedirects: false
-    })
-    const updateNodeData = seedHttpNode(initial)
+  it('emits a merged payload when switching HTTP methods', async () => {
+    const updateNodeData = seedWebhookNode(
+      createBaseParams({ bodyType: 'json', body: '{"id":1}' })
+    )
 
-    render(<HttpRequestAction nodeId={nodeId} />)
+    render(<WebhookAction nodeId={nodeId} />)
 
     await waitFor(() => {
       expect(updateNodeData).toHaveBeenCalledWith(nodeId, {
@@ -126,14 +120,11 @@ describe('HttpRequestAction', () => {
       })
     })
 
-    const urlInput = screen.getByPlaceholderText('Request URL')
+    const methodButton = screen.getByRole('button', { name: 'GET' })
+    fireEvent.click(methodButton)
 
-    act(() => {
-      fireEvent.change(urlInput, {
-        target: { value: 'https://example.com/posts' }
-      })
-      vi.advanceTimersByTime(250)
-    })
+    const postOption = await screen.findByText('POST')
+    fireEvent.click(postOption)
 
     await waitFor(() => {
       expect(
@@ -142,9 +133,9 @@ describe('HttpRequestAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: HttpRequestActionParams }).params.url ===
-                  'https://example.com/posts'
+              'params' in payload &&
+              (payload as { params: WebhookActionParams }).params.method ===
+              'POST'
             )
         )
       ).toBe(true)
@@ -153,32 +144,30 @@ describe('HttpRequestAction', () => {
     const paramsCall = findParamsCall(updateNodeData)
     expect(paramsCall?.[1]).toMatchObject({
       params: {
-        url: 'https://example.com/posts',
         method: 'POST',
-        headers: initial.headers,
-        queryParams: initial.queryParams,
-        followRedirects: false
+        bodyType: 'json',
+        body: '{"id":1}'
       },
       dirty: true
     })
   })
 
-  it('preserves existing request data when header key is edited', async () => {
-    const initial = createBaseParams({
-      url: 'https://api.example.com/data',
-      headers: [{ key: 'X-Request-ID', value: '123' }],
-      queryParams: [{ key: 'include', value: 'meta' }]
-    })
-    const updateNodeData = seedHttpNode(initial)
+  it('retains existing auth params when updating the username', async () => {
+    const updateNodeData = seedWebhookNode(
+      createBaseParams({
+        authType: 'basic',
+        authUsername: 'initial',
+        authPassword: 'secret',
+        url: 'https://hooks.example.com'
+      })
+    )
 
-    render(<HttpRequestAction nodeId={nodeId} />)
+    render(<WebhookAction nodeId={nodeId} />)
 
-    await screen.findByText('Headers')
-
-    const headerKeyInput = screen.getAllByPlaceholderText('key')[0]
+    const usernameInput = await screen.findByPlaceholderText('Username')
 
     act(() => {
-      fireEvent.change(headerKeyInput, { target: { value: 'X-Trace-ID' } })
+      fireEvent.change(usernameInput, { target: { value: 'alice' } })
       vi.advanceTimersByTime(250)
     })
 
@@ -189,9 +178,9 @@ describe('HttpRequestAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: HttpRequestActionParams }).params
-                  .headers?.[0]?.key === 'X-Trace-ID'
+              'params' in payload &&
+              (payload as { params: WebhookActionParams }).params
+                .authUsername === 'alice'
             )
         )
       ).toBe(true)
@@ -200,19 +189,19 @@ describe('HttpRequestAction', () => {
     const paramsCall = findParamsCall(updateNodeData)
     expect(paramsCall?.[1]).toMatchObject({
       params: {
-        url: 'https://api.example.com/data',
-        method: 'GET',
-        headers: [{ key: 'X-Trace-ID', value: '123' }],
-        queryParams: initial.queryParams
+        url: 'https://hooks.example.com',
+        authType: 'basic',
+        authUsername: 'alice',
+        authPassword: 'secret'
       },
       dirty: true
     })
   })
 
-  it('clears validation errors once the request becomes valid', async () => {
-    const updateNodeData = seedHttpNode(createBaseParams())
+  it('resolves validation errors when required fields are filled', async () => {
+    const updateNodeData = seedWebhookNode(createBaseParams())
 
-    render(<HttpRequestAction nodeId={nodeId} />)
+    render(<WebhookAction nodeId={nodeId} />)
 
     await waitFor(() => {
       expect(updateNodeData).toHaveBeenCalledWith(nodeId, {
@@ -221,12 +210,24 @@ describe('HttpRequestAction', () => {
     })
 
     const urlInput = screen.getByPlaceholderText('Request URL')
+    const methodButton = screen.getByRole('button', { name: 'GET' })
 
     act(() => {
       fireEvent.change(urlInput, {
-        target: { value: 'https://valid.example.com' }
+        target: { value: 'https://hooks.example.com/submit' }
       })
       vi.advanceTimersByTime(250)
+    })
+
+    fireEvent.click(methodButton)
+    const postOption = await screen.findByText('POST')
+    fireEvent.click(postOption)
+
+    const bodyField = await screen.findByPlaceholderText('Request Body')
+
+    act(() => {
+      fireEvent.change(bodyField, { target: { value: '{"ok":true}' } })
+      vi.advanceTimersByTime(750)
     })
 
     await waitFor(() => {
@@ -236,9 +237,9 @@ describe('HttpRequestAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: HttpRequestActionParams }).params.url ===
-                  'https://valid.example.com'
+              'params' in payload &&
+              (payload as { params: WebhookActionParams }).params.body ===
+              '{"ok":true}'
             )
         )
       ).toBe(true)
