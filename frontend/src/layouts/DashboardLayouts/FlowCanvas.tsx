@@ -39,6 +39,7 @@ import {
   normalizeNodesForState
 } from './FlowCanvas.helpers'
 import { WorkflowFlyoutProvider } from '@/components/workflow/useWorkflowFlyout'
+import { X } from 'lucide-react'
 import NodeHeader from '@/components/UI/ReactFlow/NodeHeader'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeCheckBoxField from '@/components/UI/InputFields/NodeCheckboxField'
@@ -481,7 +482,8 @@ export default function FlowCanvas({
   const nodes = useWorkflowStore(selectNodes)
   const edges = useWorkflowStore(selectEdges)
   const reactFlow = useReactFlow()
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  // Track which node's details flyout is open for (independent of selection)
+  const [flyoutNodeId, setFlyoutNodeId] = useState<string | null>(null)
   const syncSelectionToStore = useCallback((nextSelectedId: string | null) => {
     const state = useWorkflowStore.getState()
     const currentNodes = state.nodes
@@ -557,22 +559,22 @@ export default function FlowCanvas({
     failedIdsRef.current = failedIds
   }, [failedIds])
 
-  const selectedNode = useWorkflowStore(
+  const flyoutNode = useWorkflowStore(
     useCallback(
       (state) =>
-        selectedNodeId
-          ? (state.nodes.find((node) => node.id === selectedNodeId) ?? null)
+        flyoutNodeId
+          ? (state.nodes.find((node) => node.id === flyoutNodeId) ?? null)
           : null,
-      [selectedNodeId]
+      [flyoutNodeId]
     )
   )
 
   useEffect(() => {
-    if (selectedNodeId && !selectedNode) {
+    if (flyoutNodeId && !flyoutNode) {
       syncSelectionToStore(null)
-      setSelectedNodeId(null)
+      setFlyoutNodeId(null)
     }
-  }, [selectedNodeId, selectedNode, syncSelectionToStore])
+  }, [flyoutNodeId, flyoutNode, syncSelectionToStore])
 
   const determineActionSubtype = useCallback((data: any): ActionDropSubtype => {
     const rawActionType =
@@ -984,7 +986,7 @@ export default function FlowCanvas({
           : null
       const nextId = lastSelected?.id ?? null
       syncSelectionToStore(nextId)
-      setSelectedNodeId((prev) => (prev === nextId ? prev : nextId))
+      // Do NOT open the flyout on selection; only the arrow button should open it.
     },
     [syncSelectionToStore]
   )
@@ -993,12 +995,12 @@ export default function FlowCanvas({
     (nodeId: string | null) => {
       if (!nodeId) {
         syncSelectionToStore(null)
-        setSelectedNodeId((prev) => (prev === null ? prev : null))
+        setFlyoutNodeId((prev) => (prev === null ? prev : null))
         return
       }
 
       syncSelectionToStore(nodeId)
-      setSelectedNodeId((prev) => (prev === nodeId ? prev : nodeId))
+      setFlyoutNodeId((prev) => (prev === nodeId ? prev : nodeId))
     },
     [syncSelectionToStore]
   )
@@ -1008,24 +1010,100 @@ export default function FlowCanvas({
   const flyoutContextValue = useMemo(
     () => ({
       openFlyout: handleFlyoutOpen,
-      activeNodeId: selectedNodeId,
+      activeNodeId: flyoutNodeId,
       isFlyoutRender: false
     }),
-    [handleFlyoutOpen, selectedNodeId]
+    [handleFlyoutOpen, flyoutNodeId]
   )
 
   const flyoutPreviewContextValue = useMemo(
     () => ({
       openFlyout: noopFlyout,
-      activeNodeId: selectedNodeId,
+      activeNodeId: flyoutNodeId,
       isFlyoutRender: true
     }),
-    [noopFlyout, selectedNodeId]
+    [noopFlyout, flyoutNodeId]
   )
 
   // Fields-only flyout renderer for action nodes
   const FlyoutActionFields = useCallback(
     ({ nodeId, subtype }: { nodeId: string; subtype: ActionDropSubtype }) => {
+      const allNodes = useWorkflowStore(selectNodes)
+      const allEdges = useWorkflowStore(selectEdges)
+      const getNodeLabel = useCallback((n: Node) => {
+        const rawLabel = (n.data as any)?.label
+        if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
+        switch (n.type) {
+          case 'trigger':
+            return 'Trigger'
+          case 'condition':
+            return 'Condition'
+          default:
+            return 'Action'
+        }
+      }, [])
+      const inputNodeOptions = useMemo(
+        () =>
+          allNodes
+            .filter((n) => n.id !== nodeId)
+            .map((n) => ({ label: getNodeLabel(n), value: n.id })),
+        [allNodes, getNodeLabel, nodeId]
+      )
+      const outputNodeOptions = useMemo(
+        () =>
+          allNodes
+            .filter((n) => n.id !== nodeId && n.type !== 'trigger')
+            .map((n) => ({ label: getNodeLabel(n), value: n.id })),
+        [allNodes, getNodeLabel, nodeId]
+      )
+
+      const currentInputId = useMemo(() => {
+        const incoming = allEdges.filter((e) => e.target === nodeId)
+        return incoming[0]?.source ?? ''
+      }, [allEdges, nodeId])
+      const currentOutputId = useMemo(() => {
+        const outgoing = allEdges.filter((e) => e.source === nodeId && !e.sourceHandle)
+        return outgoing[0]?.target ?? ''
+      }, [allEdges, nodeId])
+
+      const handleChangeInput = useCallback(
+        (nextSourceId: string) => {
+          if (!nextSourceId || nextSourceId === currentInputId) return
+          const state = useWorkflowStore.getState()
+          const base = state.edges.filter((e) => e.target !== nodeId)
+          const newEdge = {
+            id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
+            source: nextSourceId,
+            target: nodeId,
+            type: 'nodeEdge',
+            data: { edgeType: 'default' }
+          } as any
+          setEdges(normalizeEdgesForState([...base, newEdge]))
+        },
+        [currentInputId, nodeId, setEdges]
+      )
+
+      const handleChangeOutput = useCallback(
+        (nextTargetId: string) => {
+          if (!nextTargetId || nextTargetId === currentOutputId) return
+          // Prevent routing outputs to a trigger (triggers don't accept inputs)
+          const targetNode = allNodes.find((n) => n.id === nextTargetId)
+          if (targetNode?.type === 'trigger') return
+          const state = useWorkflowStore.getState()
+          const base = state.edges.filter(
+            (e) => !(e.source === nodeId && !e.sourceHandle)
+          )
+          const newEdge = {
+            id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
+            source: nodeId,
+            target: nextTargetId,
+            type: 'nodeEdge',
+            data: { edgeType: 'default' }
+          } as any
+          setEdges(normalizeEdgesForState([...base, newEdge]))
+        },
+        [allNodes, currentOutputId, nodeId, setEdges]
+      )
       const nodeData = useWorkflowStore(
         useCallback(
           (state) =>
@@ -1118,6 +1196,28 @@ export default function FlowCanvas({
 
       return (
         <div className="flex flex-col gap-3">
+          {/* Connections selectors */}
+          <div className="space-y-2">
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Input Node</label>
+              <NodeDropdownField
+                options={[{ label: 'Nodes', options: inputNodeOptions }]}
+                value={currentInputId}
+                onChange={handleChangeInput}
+                placeholder="Select input node"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Output Node</label>
+              <NodeDropdownField
+                options={[{ label: 'Nodes', options: outputNodeOptions }]}
+                value={currentOutputId}
+                onChange={handleChangeOutput}
+                placeholder="Select output node"
+              />
+            </div>
+          </div>
+
           <NodeHeader
             nodeId={nodeId}
             label={controller.label}
@@ -1186,6 +1286,8 @@ export default function FlowCanvas({
   // Fields-only flyout renderer for trigger nodes
   const FlyoutTriggerFields = useCallback(
     ({ nodeId }: { nodeId: string }) => {
+      const allNodes = useWorkflowStore(selectNodes)
+      const allEdges = useWorkflowStore(selectEdges)
       const nodeData = useWorkflowStore(
         useCallback(
           (state) => (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
@@ -1193,6 +1295,44 @@ export default function FlowCanvas({
         )
       )
       const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
+      const getNodeLabel = useCallback((n: Node) => {
+        const rawLabel = (n.data as any)?.label
+        if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
+        switch (n.type) {
+          case 'trigger':
+            return 'Trigger'
+          case 'condition':
+            return 'Condition'
+          default:
+            return 'Action'
+        }
+      }, [])
+      const nodeOptions = useMemo(
+        () => allNodes.filter((n) => n.id !== nodeId && n.type !== 'trigger').map((n) => ({ label: getNodeLabel(n), value: n.id })),
+        [allNodes, getNodeLabel, nodeId]
+      )
+      const currentOutputId = useMemo(() => {
+        const outgoing = allEdges.filter((e) => e.source === nodeId)
+        return outgoing[0]?.target ?? ''
+      }, [allEdges, nodeId])
+      const handleChangeOutput = useCallback(
+        (nextTargetId: string) => {
+          if (!nextTargetId || nextTargetId === currentOutputId) return
+          const targetNode = allNodes.find((n) => n.id === nextTargetId)
+          if (targetNode?.type === 'trigger') return
+          const state = useWorkflowStore.getState()
+          const base = state.edges.filter((e) => e.source !== nodeId)
+          const newEdge = {
+            id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
+            source: nodeId,
+            target: nextTargetId,
+            type: 'nodeEdge',
+            data: { edgeType: 'default' }
+          } as any
+          setEdges(normalizeEdgesForState([...base, newEdge]))
+        },
+        [allNodes, currentOutputId, nodeId, setEdges]
+      )
 
       const labelError: string | null = nodeData?.labelError ?? null
       const triggerType: string =
@@ -1230,6 +1370,29 @@ export default function FlowCanvas({
 
       return (
         <div className="flex flex-col gap-3">
+          {/* Connections selectors (Trigger has only output) */}
+          <div className="space-y-2">
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Input Node</label>
+              <NodeDropdownField
+                options={[{ label: 'Nodes', options: [{ label: 'N/A', value: 'na', disabled: true }] }]}
+                value={'N/A'}
+                onChange={() => undefined}
+                placeholder="N/A"
+                disabled
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Output Node</label>
+              <NodeDropdownField
+                options={[{ label: 'Nodes', options: nodeOptions }]}
+                value={currentOutputId}
+                onChange={handleChangeOutput}
+                placeholder="Select output node"
+              />
+            </div>
+          </div>
+
           <NodeHeader
             nodeId={nodeId}
             label={(nodeData?.label as string) || 'Trigger'}
@@ -1312,6 +1475,8 @@ export default function FlowCanvas({
   // Fields-only flyout renderer for condition nodes
   const FlyoutConditionFields = useCallback(
     ({ nodeId }: { nodeId: string }) => {
+      const allNodes = useWorkflowStore(selectNodes)
+      const allEdges = useWorkflowStore(selectEdges)
       const nodeData = useWorkflowStore(
         useCallback(
           (state) => (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
@@ -1319,6 +1484,59 @@ export default function FlowCanvas({
         )
       )
       const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
+      const getNodeLabel = useCallback((n: Node) => {
+        const rawLabel = (n.data as any)?.label
+        if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
+        switch (n.type) {
+          case 'trigger':
+            return 'Trigger'
+          case 'condition':
+            return 'Condition'
+          default:
+            return 'Action'
+        }
+      }, [])
+      const nodeOptions = useMemo(
+        () =>
+          allNodes
+            .filter((n) => n.id !== nodeId && n.type !== 'trigger')
+            .map((n) => ({ label: getNodeLabel(n), value: n.id })),
+        [allNodes, getNodeLabel, nodeId]
+      )
+      const trueOutputId = useMemo(() => {
+        const t = allEdges.find((e) => e.source === nodeId && e.sourceHandle === 'cond-true')
+        return t?.target ?? ''
+      }, [allEdges, nodeId])
+      const falseOutputId = useMemo(() => {
+        const f = allEdges.find((e) => e.source === nodeId && e.sourceHandle === 'cond-false')
+        return f?.target ?? ''
+      }, [allEdges, nodeId])
+      const changeCondOutput = useCallback(
+        (handle: 'cond-true' | 'cond-false', nextTargetId: string) => {
+          const currId = handle === 'cond-true' ? trueOutputId : falseOutputId
+          if (!nextTargetId || nextTargetId === currId) return
+          // Prevent routing condition outputs to a trigger
+          const targetNode = allNodes.find((n) => n.id === nextTargetId)
+          if (targetNode?.type === 'trigger') return
+          const state = useWorkflowStore.getState()
+          const base = state.edges.filter(
+            (e) => !(e.source === nodeId && e.sourceHandle === handle)
+          )
+          const label = handle === 'cond-true' ? 'True' : 'False'
+          const outcome = handle === 'cond-true' ? 'true' : 'false'
+          const newEdge = {
+            id: `e-${nodeId}-${handle}-${nextTargetId}-${Date.now()}`,
+            source: nodeId,
+            sourceHandle: handle,
+            target: nextTargetId,
+            type: 'nodeEdge',
+            label,
+            data: { edgeType: 'default', outcome }
+          } as any
+          setEdges(normalizeEdgesForState([...base, newEdge]))
+        },
+        [allNodes, falseOutputId, nodeId, setEdges, trueOutputId]
+      )
 
       const labelError: string | null = nodeData?.labelError ?? null
       const field = typeof nodeData?.field === 'string' ? nodeData.field : ''
@@ -1389,6 +1607,48 @@ export default function FlowCanvas({
 
       return (
         <div className="flex flex-col gap-3">
+          {/* Connections selectors (Condition has True/False outputs) */}
+          <div className="space-y-2">
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Input Node</label>
+              <NodeDropdownField
+                options={[{ label: 'Nodes', options: allNodes.filter((n) => n.id !== nodeId).map((n) => ({ label: getNodeLabel(n), value: n.id })) }]}
+                value={allEdges.find((e) => e.target === nodeId)?.source ?? ''}
+                onChange={(nextSourceId) => {
+                  const state = useWorkflowStore.getState()
+                  const base = state.edges.filter((e) => e.target !== nodeId)
+                  const newEdge = {
+                    id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
+                    source: nextSourceId,
+                    target: nodeId,
+                    type: 'nodeEdge',
+                    data: { edgeType: 'default' }
+                  } as any
+                  setEdges(normalizeEdgesForState([...base, newEdge]))
+                }}
+                placeholder="Select input node"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">True Output</label>
+              <NodeDropdownField
+                options={[{ label: 'Nodes', options: nodeOptions }]}
+                value={trueOutputId}
+                onChange={(v) => changeCondOutput('cond-true', v)}
+                placeholder="Select true output"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">False Output</label>
+              <NodeDropdownField
+                options={[{ label: 'Nodes', options: nodeOptions }]}
+                value={falseOutputId}
+                onChange={(v) => changeCondOutput('cond-false', v)}
+                placeholder="Select false output"
+              />
+            </div>
+          </div>
+
           <NodeHeader
             nodeId={nodeId}
             label={(nodeData?.label as string) || 'Condition'}
@@ -1422,8 +1682,8 @@ export default function FlowCanvas({
 
 
   const flyoutSubtype = useMemo<ActionDropSubtype | null>(() => {
-    if (!selectedNode) return null
-    const t = (selectedNode.type || '').toString()
+    if (!flyoutNode) return null
+    const t = (flyoutNode.type || '').toString()
     if (t === 'trigger' || t === 'condition') return null
     const known = new Set([
       'actionEmailSendgrid',
@@ -1441,17 +1701,17 @@ export default function FlowCanvas({
     if (known.has(t)) {
       return t as ActionDropSubtype
     }
-    return determineActionSubtype(selectedNode.data)
-  }, [selectedNode, determineActionSubtype])
+    return determineActionSubtype(flyoutNode.data)
+  }, [flyoutNode, determineActionSubtype])
 
   const selectedNodeLabel = useMemo(() => {
-    if (!selectedNode) return null
-    const rawLabel = (selectedNode.data as { label?: unknown } | undefined)
+    if (!flyoutNode) return null
+    const rawLabel = (flyoutNode.data as { label?: unknown } | undefined)
       ?.label
     if (typeof rawLabel === 'string' && rawLabel.trim().length > 0) {
       return rawLabel
     }
-    switch (selectedNode.type) {
+    switch (flyoutNode.type) {
       case 'trigger':
         return 'Trigger'
       case 'condition':
@@ -1459,7 +1719,7 @@ export default function FlowCanvas({
       default:
         return 'Action'
     }
-  }, [selectedNode])
+  }, [flyoutNode])
 
   const handleEdgeTypeChange = useCallback(
     (edgeId, newType) => {
@@ -1539,25 +1799,36 @@ export default function FlowCanvas({
           </div>
         </ReactFlow>
 
-        {selectedNode ? (
+        {flyoutNode ? (
           <WorkflowFlyoutProvider value={flyoutPreviewContextValue}>
             <aside className="flex w-full md:w-[360px] xl:w-[420px] shrink-0 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur flex-col">
-              <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
-                <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  Node details
+              <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Node details
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                    {selectedNodeLabel}
+                  </div>
                 </div>
-                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-                  {selectedNodeLabel}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setFlyoutNodeId(null)}
+                  className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                  aria-label="Close details"
+                  title="Close details"
+                >
+                  <X size={16} />
+                </button>
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
                 <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-4">
-                  {selectedNode.type === 'trigger' ? (
-                    <FlyoutTriggerFields nodeId={selectedNode.id} />
-                  ) : selectedNode.type === 'condition' ? (
-                    <FlyoutConditionFields nodeId={selectedNode.id} />
+                  {flyoutNode.type === 'trigger' ? (
+                    <FlyoutTriggerFields nodeId={flyoutNode.id} />
+                  ) : flyoutNode.type === 'condition' ? (
+                    <FlyoutConditionFields nodeId={flyoutNode.id} />
                   ) : flyoutSubtype ? (
-                    <FlyoutActionFields nodeId={selectedNode.id} subtype={flyoutSubtype} />
+                    <FlyoutActionFields nodeId={flyoutNode.id} subtype={flyoutSubtype} />
                   ) : (
                     <p className="text-xs text-zinc-500">
                       Fields for this node type are not available in the flyout yet.

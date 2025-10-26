@@ -6,6 +6,7 @@ import FlowCanvas from './FlowCanvas'
 import ActionIcon from '@/assets/svg-components/ActionIcon'
 import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
+import { ChevronDown, ChevronUp, Search } from 'lucide-react'
 import type { Edge, Node } from '@xyflow/react'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { selectIsSaving, useWorkflowStore } from '@/stores/workflowStore'
@@ -1123,6 +1124,28 @@ export default function Dashboard() {
     }
   ] as const
 
+  // Collapsible state for action categories; initialized expanded
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(actionSidebarTileGroups.map((g) => [g.heading, true]))
+  )
+
+  // Search state for actions
+  const [actionSearch, setActionSearch] = useState('')
+  const trimmedQuery = actionSearch.trim().toLowerCase()
+  const filteredGroups = useMemo(() => {
+    if (!trimmedQuery) return actionSidebarTileGroups
+    return actionSidebarTileGroups
+      .map((group) => ({
+        heading: group.heading,
+        tiles: group.tiles.filter((tile) => {
+          const label = tile.label.toLowerCase()
+          const desc = (tile.description || '').toLowerCase()
+          return label.includes(trimmedQuery) || desc.includes(trimmedQuery)
+        })
+      }))
+      .filter((g) => g.tiles.length > 0)
+  }, [trimmedQuery])
+
   function DraggableTile({
     label,
     description,
@@ -1323,18 +1346,57 @@ export default function Dashboard() {
                 gradient="from-amber-500 to-orange-600"
                 dragType="condition"
               />
-              {actionSidebarTileGroups.map((group) => (
-                <div key={group.heading} className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    {group.heading}
-                  </h3>
-                  <div className="space-y-2">
-                    {group.tiles.map((tile) => (
-                      <DraggableTile key={tile.id} {...tile} />
-                    ))}
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mt-1">
+                Actions
+              </h3>
+              <div className="relative mb-2">
+                <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-zinc-400">
+                  <Search className="h-4 w-4" />
+                </span>
+                <input
+                  type="text"
+                  value={actionSearch}
+                  onChange={(e) => setActionSearch(e.target.value)}
+                  placeholder="Search actions..."
+                  className="w-full rounded-lg border border-zinc-300 bg-white pl-8 pr-2 py-1.5 text-sm text-zinc-800 placeholder-zinc-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                />
+              </div>
+              {filteredGroups.length === 0 ? (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">No actions match your search.</p>
+              ) : null}
+              {filteredGroups.map((group) => {
+                const searching = trimmedQuery.length > 0
+                const isOpen = searching ? true : (openGroups[group.heading] ?? true)
+                return (
+                  <div key={group.heading} className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenGroups((prev) => ({
+                          ...prev,
+                          [group.heading]: !(prev[group.heading] ?? true)
+                        }))
+                      }
+                      aria-expanded={isOpen}
+                      className="w-full flex items-center justify-between text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    >
+                      <span>{group.heading}</span>
+                      {isOpen ? (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                    {isOpen ? (
+                      <div className="space-y-2">
+                        {group.tiles.map((tile) => (
+                          <DraggableTile key={tile.id} {...tile} />
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
             <div className="mt-4">
               <button
