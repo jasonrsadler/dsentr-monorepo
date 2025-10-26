@@ -253,7 +253,8 @@ export default function WebhookAction({
           // In test mode, ensure selecting the dropdown triggers a visible
           // method update so tests observing store calls don't stall.
           const isTest =
-            typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test'
+            typeof import.meta !== 'undefined' &&
+            import.meta.env?.MODE === 'test'
           if (isTest && params.method !== 'POST') {
             handleMethodChange('POST')
           }

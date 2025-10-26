@@ -185,7 +185,8 @@ export const useAuth = create<AuthState>((set, get) => ({
             ...(incoming.companyName == null && incoming.company_name != null
               ? { companyName: incoming.company_name }
               : {}),
-            ...(incoming.oauthProvider == null && incoming.oauth_provider != null
+            ...(incoming.oauthProvider == null &&
+            incoming.oauth_provider != null
               ? { oauthProvider: incoming.oauth_provider }
               : {})
           }

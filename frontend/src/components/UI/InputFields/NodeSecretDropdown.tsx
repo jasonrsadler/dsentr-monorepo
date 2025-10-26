@@ -1,5 +1,6 @@
 import { useContext, useMemo, useState } from 'react'
 import { SecretsContext } from '@/contexts/SecretsContext'
+import type { SecretEntry, SecretStore } from '@/lib/optionsApi'
 
 interface NodeSecretDropdownProps {
   group: string
@@ -14,6 +15,9 @@ interface SecretOption {
   name: string
   value: string
 }
+
+// Reuse a stable empty object to avoid changing deps in hooks
+const EMPTY_SECRETS: SecretStore = {} as SecretStore
 
 function maskLabel(value: string): string {
   if (!value) return ''
@@ -34,7 +38,7 @@ export default function NodeSecretDropdown({
 }: NodeSecretDropdownProps) {
   const ctx = useContext(SecretsContext)
   // Provide a safe fallback in tests or contexts where SecretsProvider is not mounted
-  const secrets = ctx?.secrets ?? {}
+  const secretsMap: SecretStore = ctx?.secrets ?? EMPTY_SECRETS
   const loading = ctx?.loading ?? false
   const saveSecret = ctx?.saveSecret ?? (async () => {})
   const [open, setOpen] = useState(false)
@@ -45,12 +49,14 @@ export default function NodeSecretDropdown({
   const [error, setError] = useState<string | null>(null)
 
   const options = useMemo<SecretOption[]>(() => {
-    const serviceEntries = secrets[group]?.[service] ?? {}
+    const serviceEntries: Record<string, SecretEntry> = (secretsMap[group]?.[
+      service
+    ] ?? {}) as Record<string, SecretEntry>
     return Object.entries(serviceEntries).map(([name, entry]) => ({
       name,
       value: entry?.value ?? ''
     }))
-  }, [secrets, group, service])
+  }, [secretsMap, group, service])
 
   const selectedOption = useMemo(
     () => options.find((option) => option.value === (value ?? '')),

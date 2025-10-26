@@ -41,7 +41,10 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': [
         'warn',
-        { allowConstantExport: true },
+        {
+          allowConstantExport: true,
+          allowExportNames: ['useSecrets', 'SecretsContext']
+        },
       ],
       'no-unused-vars': 'off',
       'prettier/prettier': 'error', // Integrates Prettier into ESLint

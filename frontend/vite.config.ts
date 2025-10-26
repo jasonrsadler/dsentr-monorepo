@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { configDefaults } from 'vitest/config'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -37,31 +36,38 @@ export default defineConfig({
       '@components': path.resolve(__dirname, 'src/components'),
       '@hooks': path.resolve(__dirname, 'src/hooks'),
       '@utils': path.resolve(__dirname, 'src/utils')
-    }
-  },
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    typecheck: {
-      tsconfig: './tsconfig.test.json'
     },
-    exclude: [...configDefaults.exclude, 'dist'],
-    setupFiles: './tests/setup.ts',
-    coverage: {
-      reporter: ['text', 'html', 'lcov'],
-      reportsDirectory: './coverage',
-      include: ['src/**/*.{ts,tsx}'],
-      exclude: [
-        '**/node_modules/**',
-        'tests/**',
-        'src/main.tsx' // exclude app bootstrap
-      ],
-      thresholds: {
-        functions: 80,
-        branches: 80,
-        lines: 80,
-        statements: 80,
-        perFile: true
+    dedupe: ['react', 'react-dom']
+  },
+  build: {
+    target: 'es2020',
+    minify: 'esbuild',
+    cssMinify: true,
+    sourcemap: false,
+    reportCompressedSize: false,
+    assetsInlineLimit: 4096,
+    chunkSizeWarningLimit: 2000,
+    rollupOptions: {
+      treeshake: true,
+      onwarn(warning, warn) {
+        // Silence common non-actionable warnings to keep CI clean
+        if (warning.code === 'CIRCULAR_DEPENDENCY') return
+        if (warning.code === 'CHUNK_SIZE_LIMIT') return
+        warn(warning)
+      },
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('@xyflow/react')) return 'vendor-xyflow'
+          if (id.includes('react') || id.includes('react-dom'))
+            return 'vendor-react'
+          if (id.includes('framer-motion')) return 'vendor-motion'
+          if (id.includes('zustand')) return 'vendor-zustand'
+          if (id.includes('react-router')) return 'vendor-router'
+          if (id.includes('react-hook-form')) return 'vendor-hookform'
+          if (id.includes('lucide-react')) return 'vendor-icons'
+          return 'vendor'
+        }
       }
     }
   },

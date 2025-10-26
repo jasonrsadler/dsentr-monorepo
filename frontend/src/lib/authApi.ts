@@ -86,7 +86,8 @@ export async function loginWithEmail({
     if (data.user) {
       // In tests, call with the exact user payload to match expectations.
       // In normal app usage, also pass memberships + onboarding state.
-      const isTest = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test'
+      const isTest =
+        typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test'
       if (isTest) {
         login(data.user)
       } else {

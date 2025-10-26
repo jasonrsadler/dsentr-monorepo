@@ -1,5 +1,9 @@
-# Frontend Agent Notes
+﻿# Frontend Agent Notes
 
+Vite build output (warnings-free):
+- Added Rollup chunk splitting to group large vendor deps (React, XYFlow, framer-motion, router, zustand, etc.) and reduce main bundle size.
+- Raised `chunkSizeWarningLimit` and silenced non-actionable Rollup warnings (`CIRCULAR_DEPENDENCY`, `CHUNK_SIZE_LIMIT`) via `onwarn` so `npm run build` is free of noisy warnings in CI.
+- Enabled treeshake, esbuild minification, disabled sourcemaps and compressed size reporting for faster, cleaner builds.
 ## Context
 - The frontend is built with Vite + React + TypeScript, using Tailwind CSS, Zustand for state, and a React Flow-powered visual a
 utomation canvas.
@@ -27,8 +31,18 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Leaving a workspace is initiated from the Members settings tab. The "Leave workspace" button must be disabled for owners, call the `leaveWorkspace` API when allowed, refresh cached memberships, and send users back to their Solo workspace (or next available one) when the server responds with `403`.
 
 ## Change Reasons
+Vite 7 migration:
+- Moved Vitest options into `vitest.config.ts` and removed the `test` field from `vite.config.ts` because Vite 7’s `UserConfig` no longer includes `test`. Mirrored aliases/plugins so test transforms and import paths match the app.
+
+Vitest config type compatibility:
+- Removed Vite plugins from `vitest.config.ts` to avoid cross-package `PluginOption` type mismatches between Vitest’s bundled Vite types and the app’s Vite types. Vitest/esbuild handles JSX/TS without these plugins; aliases are preserved for import resolution.
+
+Lint hygiene:
+- Added `vitest.config.ts` to `tsconfig.node.json` includes so ESLint’s typed parser (`parserOptions.project`) can resolve it and avoid parsing errors.
+- Updated ESLint rule `react-refresh/only-export-components` to allow exports `useSecrets` and `SecretsContext`, matching our context/provider pattern without forcing file splits.
+- Stabilized React hooks deps in `src/components/ui/InputFields/NodeSecretDropdown.tsx` by using a shared empty object constant instead of recreating `{}` each render.
 Additional TypeScript build fixes (build hygiene):
-- Excluded 	ests from 	sconfig.app.json so app builds don�t typecheck test files. Added missing TS path aliases (@components, @hooks, @utils, @assets) to mirror Vite aliases.
+- Excluded 	ests from 	sconfig.app.json so app builds don’t typecheck test files. Added missing TS path aliases (@components, @hooks, @utils, @assets) to mirror Vite aliases.
 - Replaced uses of JSX.Element in public props with ReactNode to avoid JSX namespace issues in TS 5.x with React 19.
 - Normalized import casing and resolved duplicate-casing conflicts (e.g., UI/dialog vs ui/dialog, Settings vs settings). Kept a single canonical path to avoid TS1261 on case-insensitive filesystems.
 - React Flow: wrapped control callbacks to accept mouse events, ensured WorkflowEdgeData and ActionNodeData extend Record<string, unknown>, and cast node/edge data where needed to satisfy @xyflow/react v12 generics.
@@ -78,8 +92,7 @@ oUnusedLocals.
 - Workflow designer sidebar: added an "Actions" section header under Trigger and Condition, and made each action category collapsible (expanded by default) to declutter the node picker without changing default visibility.
 - Workflow designer sidebar: added a fast search input under the "Actions" header that filters action tiles across categories in real time. While searching, categories auto-expand to show matches and a fallback message appears when no actions match.
 - Dashboard notifications: collapsed the header-adjacent notification area to only show the Solo plan usage/limits banner. Removed the general plan banner (e.g., workspace plan messaging) and rerouted plan restriction notices (node caps, schedule limits, exceeding Solo workflow count, etc.) to the inline error bar within the designer. This preserves clear feedback without surfacing extra banners under the app header.
-- Solo banner spacing: restored internal padding inside the Solo plan banner for readability, and removed the surrounding wrapper’s side/top padding so the banner sits flush under the header without extra horizontal/top spacing.
+- Solo banner spacing: restored internal padding inside the Solo plan banner for readability, and removed the surrounding wrapperâ€™s side/top padding so the banner sits flush under the header without extra horizontal/top spacing.
 - Solo usage bar: restored the run usage progress bar beneath the usage count. Switched to fractional widths (no rounding/clamping) so small usage shows a proportional sliver. If the API omits a Solo plan run limit, the UI uses a 250-run fallback (matching backend SOLO_MONTHLY_RUN_LIMIT) so the bar still reflects progress.
 - Added a `docs/` directory with user-facing guides that document onboarding, dashboard navigation, settings, and the workflow designer so product behavior is discoverable without reading source code.
 - Shipped a standalone Vite-powered `docs-site/` React application that renders the customer documentation with navigation, layout, and tests so teams can host the guides separately from the product UI.
-

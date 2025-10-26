@@ -148,7 +148,6 @@ export function SecretsProvider({
   )
 }
 
-/* eslint-disable-next-line react-refresh/only-export-components -- Hook export shares the provider's context helper. */
 export function useSecrets() {
   const ctx = useContext(SecretsContext)
   if (!ctx) {
