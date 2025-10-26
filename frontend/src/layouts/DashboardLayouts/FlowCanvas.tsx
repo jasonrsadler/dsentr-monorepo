@@ -1168,9 +1168,9 @@ export default function FlowCanvas({
       const nextEdges = currentEdges.map<WorkflowEdge>((edge) =>
         edge.id === edgeId
           ? {
-            ...edge,
-            data: { ...edge.data, edgeType: normalizedType }
-          }
+              ...edge,
+              data: { ...edge.data, edgeType: normalizedType }
+            }
           : edge
       )
       if (nextEdges === currentEdges) return
@@ -1892,9 +1892,13 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
     window.addEventListener('scroll', recalc, true)
 
     const handleMouseDown = (event: MouseEvent) => {
-      const targetNode = event.target as Node
-      const inAnchor = timezonePickerContainerRef.current?.contains(targetNode)
-      const inDropdown = timezoneDropdownRef.current?.contains(targetNode)
+      const targetNode = event.target as unknown as globalThis.Node
+      const inAnchor = (timezonePickerContainerRef.current as any)?.contains(
+        targetNode as any
+      )
+      const inDropdown = (timezoneDropdownRef.current as any)?.contains(
+        targetNode as any
+      )
       if (!inAnchor && !inDropdown) setTimezonePickerOpen(false)
     }
 
@@ -1912,8 +1916,6 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [timezonePickerOpen])
-
-
   return (
     <div className="flex flex-col gap-3">
       <div className="space-y-2">
@@ -2098,7 +2100,12 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
                     }}
                     className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
                   >
-                    {scheduleConfig?.timezone || 'Select timezone'}
+                    <span
+                      className="block truncate"
+                      title={scheduleConfig?.timezone || 'Select timezone'}
+                    >
+                      {scheduleConfig?.timezone || 'Select timezone'}
+                    </span>
                   </button>
                   <AnimatePresence>
                     {timezonePickerOpen && tzPos && (
