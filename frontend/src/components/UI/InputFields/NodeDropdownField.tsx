@@ -36,6 +36,7 @@ interface NodeDropdownFieldProps {
   loading?: boolean
   emptyMessage?: string
   onOptionBlocked?: (value: string) => void
+  onButtonClick?: () => void
 }
 
 export default function NodeDropdownField({
@@ -46,7 +47,8 @@ export default function NodeDropdownField({
   disabled = false,
   loading = false,
   emptyMessage = 'No options available',
-  onOptionBlocked
+  onOptionBlocked,
+  onButtonClick
 }: NodeDropdownFieldProps) {
   const [open, setOpen] = useState(false)
 
@@ -102,6 +104,7 @@ export default function NodeDropdownField({
     : selected?.label || value || placeholder
   const toggleOpen = () => {
     if (disabled || loading) return
+    onButtonClick?.()
     setOpen((prev) => !prev)
   }
 

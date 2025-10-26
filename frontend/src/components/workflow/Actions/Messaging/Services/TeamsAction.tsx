@@ -1637,9 +1637,11 @@ export default function TeamsAction({
 
   const updateField = useCallback(
     (key: keyof TeamsActionValues, value: string) => {
+      const currentValue = (currentParams[key] ?? '') as string
+      if (typeof currentValue === 'string' && currentValue === value) return
       mergeTeamsParams({ [key]: value } as Partial<TeamsActionValues>)
     },
-    [mergeTeamsParams]
+    [currentParams, mergeTeamsParams]
   )
 
   const handleTeamChange = useCallback(

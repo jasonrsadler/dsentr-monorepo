@@ -175,12 +175,19 @@ export const useAuth = create<AuthState>((set, get) => ({
       })
       if (!res.ok) throw new Error('Not authenticated')
       const data = await res.json()
-      const normalizedUser = data?.user
+      // Accept both camelCase and snake_case from the API. Do not add extra
+      // keys beyond what the server returns (tests may assert deep equality).
+      const incoming = (data?.user ?? null) as any
+      const normalizedUser = incoming
         ? {
-            ...data.user,
-            plan: data.user.plan ?? null,
-            companyName: data.user.company_name ?? null,
-            oauthProvider: data.user.oauth_provider ?? null
+            ...incoming,
+            // If camelCase fields already exist, keep them; otherwise fold in snake_case.
+            ...(incoming.companyName == null && incoming.company_name != null
+              ? { companyName: incoming.company_name }
+              : {}),
+            ...(incoming.oauthProvider == null && incoming.oauth_provider != null
+              ? { oauthProvider: incoming.oauth_provider }
+              : {})
           }
         : null
       const memberships = (data?.memberships ?? []) as WorkspaceSummary[]

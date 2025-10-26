@@ -24,7 +24,9 @@ interface SecretsContextValue {
   ) => Promise<void>
 }
 
-const SecretsContext = createContext<SecretsContextValue | undefined>(undefined)
+export const SecretsContext = createContext<SecretsContextValue | undefined>(
+  undefined
+)
 
 interface SecretsProviderProps {
   children: ReactNode

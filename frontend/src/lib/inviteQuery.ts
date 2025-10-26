@@ -92,6 +92,8 @@ function sanitizeInviteValue(value: string | null): string | null {
   v = v.replace(/\s+/g, '')
   // Remove zero-width spaces just in case
   v = v.replace(/[\u200B\u200C\u200D]/g, '')
+  // Remove any stray '=' first so prefix detection sees a clean token
+  v = v.replace(/=/g, '')
 
   // If the value starts with an uppercase '3D' (QP for '='), and the remainder
   // looks like a hex token, strip the '3D' prefix. Keep lower-case '3d' intact
@@ -102,10 +104,6 @@ function sanitizeInviteValue(value: string | null): string | null {
       v = remainder
     }
   }
-
-  // Remove stray '=' characters that may have landed inside the token due to wrapping
-  // Tokens are hex strings without '='; safe to delete them.
-  v = v.replace(/=/g, '')
 
   return v
 }

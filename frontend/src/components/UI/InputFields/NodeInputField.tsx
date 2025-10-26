@@ -19,11 +19,13 @@ export default function NodeInputField({
 }: NodeInputFieldProps) {
   const [internalValue, setInternalValue] = useState(value ?? '')
   const latestValue = useRef(value ?? '')
+  const lastEmittedRef = useRef<string>(value ?? '')
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     if (value !== latestValue.current) {
       latestValue.current = value ?? ''
+      lastEmittedRef.current = value ?? ''
       setInternalValue(value ?? '')
     }
   }, [value])
@@ -39,8 +41,12 @@ export default function NodeInputField({
     setInternalValue(sanitized)
     latestValue.current = sanitized
 
+    if (sanitized === lastEmittedRef.current) {
+      return
+    }
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
     timeoutRef.current = setTimeout(() => {
+      lastEmittedRef.current = sanitized
       onChange(sanitized)
     }, 250)
   }

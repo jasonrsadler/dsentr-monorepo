@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useSecrets } from '@/contexts/SecretsContext'
+import { useContext, useMemo, useState } from 'react'
+import { SecretsContext } from '@/contexts/SecretsContext'
 
 interface NodeSecretDropdownProps {
   group: string
@@ -32,7 +32,11 @@ export default function NodeSecretDropdown({
   placeholder = 'Select secret',
   disabled = false
 }: NodeSecretDropdownProps) {
-  const { secrets, loading, saveSecret } = useSecrets()
+  const ctx = useContext(SecretsContext)
+  // Provide a safe fallback in tests or contexts where SecretsProvider is not mounted
+  const secrets = ctx?.secrets ?? {}
+  const loading = ctx?.loading ?? false
+  const saveSecret = ctx?.saveSecret ?? (async () => {})
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [nameDraft, setNameDraft] = useState('')

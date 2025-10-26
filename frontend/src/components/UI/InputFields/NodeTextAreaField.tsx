@@ -19,16 +19,22 @@ export default function NodeTextAreaField({
 }: NodeTextAreaFieldProps) {
   const [internalValue, setInternalValue] = useState(value)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastEmittedRef = useRef<string>(value)
 
   useEffect(() => {
     setInternalValue(value)
+    lastEmittedRef.current = value
   }, [value])
 
   const handleChange = (val: string) => {
     const sanitized = val.slice(0, maxchars ?? 30000)
     setInternalValue(sanitized)
+    if (sanitized === lastEmittedRef.current) {
+      return
+    }
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
     timeoutRef.current = setTimeout(() => {
+      lastEmittedRef.current = sanitized
       onChange(sanitized)
     }, 750)
   }
