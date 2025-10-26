@@ -74,9 +74,6 @@ export default function Dashboard() {
   const [runToast, setRunToast] = useState<string | null>(null)
   const [planUsage, setPlanUsage] = useState<PlanUsageSummary | null>(null)
   const [planUsageError, setPlanUsageError] = useState<string | null>(null)
-  const [restrictionNotice, setRestrictionNotice] = useState<string | null>(
-    null
-  )
   const [lockBusy, setLockBusy] = useState(false)
   const userId = useAuth((state) => state.user?.id ?? null)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
@@ -141,18 +138,7 @@ export default function Dashboard() {
       ),
     [nodeRuns]
   )
-  const planNotice = useMemo(() => {
-    switch (planTier) {
-      case 'workspace':
-        return 'Workspace plan: invite teammates to collaborate inside your shared workspace.'
-      default: {
-        if (hiddenWorkflowCount > 0) {
-          return `Solo plan is a monitored sandbox. Only your first three workflows stay active—${hiddenWorkflowCount} additional workflow${hiddenWorkflowCount > 1 ? 's are' : ' is'} read-only. Upgrade in Settings → Plan to unlock more capacity and premium integrations.`
-        }
-        return 'Solo plan is a monitored sandbox with manual & webhook triggers. Upgrade in Settings → Plan to unlock scheduled triggers, premium integrations, and collaboration.'
-      }
-    }
-  }, [planTier, hiddenWorkflowCount])
+  // Top-of-page notifications under the header are limited to the Solo usage banner only.
   const failedIds = useMemo(
     () =>
       new Set(
@@ -162,11 +148,17 @@ export default function Dashboard() {
   )
   const runsLimit = planUsage?.runs.limit ?? null
   const runsUsed = planUsage?.runs.used ?? 0
+  // Some environments may omit the Solo limit from the API even when the UI is in Solo context.
+  // Mirror backend SOLO_MONTHLY_RUN_LIMIT (250) as a visual fallback to keep the bar meaningful.
+  const effectiveRunsLimit = useMemo(() => {
+    if (runsLimit && runsLimit > 0) return runsLimit
+    return planTier === 'solo' ? 250 : null
+  }, [runsLimit, planTier])
   const runsPercent = useMemo(() => {
-    if (!runsLimit || runsLimit <= 0) return null
+    if (!effectiveRunsLimit || effectiveRunsLimit <= 0) return null
     if (runsUsed <= 0) return 0
-    return Math.min(100, Math.round((runsUsed / runsLimit) * 100))
-  }, [runsLimit, runsUsed])
+    return Math.min(100, (runsUsed / effectiveRunsLimit) * 100)
+  }, [effectiveRunsLimit, runsUsed])
 
   const normalizeWorkflowData = useCallback((data: any) => {
     if (data && typeof data === 'object') {
@@ -421,7 +413,7 @@ export default function Dashboard() {
     if (isWorkflowActionBusy || workflowSaving || !canEditCurrentWorkflow)
       return
     if (planTier === 'solo' && workflows.length >= 3) {
-      setRestrictionNotice(
+      setError(
         'You have reached the solo plan limit of 3 saved workflows. Upgrade in Settings → Plan to create additional workflows.'
       )
       return
@@ -800,7 +792,7 @@ export default function Dashboard() {
     } catch (e: any) {
       console.error('Failed to start run', e)
       if (Array.isArray(e?.violations) && e.violations.length > 0) {
-        setRestrictionNotice(e.violations[0]?.message || e?.message || null)
+        setError(e.violations[0]?.message || e?.message || null)
       } else {
         setError(e?.message || 'Failed to start run')
       }
@@ -926,7 +918,7 @@ export default function Dashboard() {
           (err as any).violations[0]?.message ||
           (err as any).message ||
           'This workflow uses a premium feature that is locked on the solo plan.'
-        setRestrictionNotice(violationMessage)
+        setError(violationMessage)
       } else {
         setError((err as any)?.message || 'Failed to save workflow.')
         window.alert('Failed to save workflow. Please try again.')
@@ -943,7 +935,6 @@ export default function Dashboard() {
     normalizeWorkflowData,
     pushGraphToStore,
     setError,
-    setRestrictionNotice
   ])
 
   const handleLockWorkflow = useCallback(async () => {
@@ -1264,65 +1255,40 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] min-h-0">
       {/* Header moved to DashboardLayout */}
-      {(planNotice || planTier === 'solo' || restrictionNotice) && (
-        <div className="px-6 pt-4 space-y-3">
-          {planNotice ? (
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800 shadow-sm dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
-              {planNotice}
-            </div>
-          ) : null}
-          {planTier === 'solo' ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
-              {planUsageError ? (
-                <p>{planUsageError}</p>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span>
-                      {runsLimit
-                        ? `You have used ${runsUsed} of ${runsLimit} monthly runs.`
-                        : `You have used ${runsUsed} runs this month.`}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={openPlanSettings}
-                      className="rounded-md border border-amber-400 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
-                    >
-                      Upgrade
-                    </button>
-                  </div>
-                  {runsPercent !== null ? (
-                    <div className="h-2 w-full overflow-hidden rounded bg-amber-100 dark:bg-amber-500/20">
-                      <div
-                        className="h-full rounded bg-amber-500 transition-all duration-300 dark:bg-amber-300"
-                        style={{ width: `${runsPercent}%` }}
-                      />
-                    </div>
-                  ) : null}
-                  <div className="flex items-center justify-between text-xs text-amber-700 dark:text-amber-200/80">
-                    <span>Hidden workflows: {hiddenWorkflowCount}</span>
-                    <span>
-                      Manual & webhook triggers only on the solo plan.
-                    </span>
-                  </div>
+      {planTier === 'solo' && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+            {planUsageError ? (
+              <p>{planUsageError}</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span>
+                    {effectiveRunsLimit
+                      ? `You have used ${runsUsed} of ${effectiveRunsLimit} monthly runs.`
+                      : `You have used ${runsUsed} runs this month.`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={openPlanSettings}
+                    className="rounded-md border border-amber-400 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+                  >
+                    Upgrade
+                  </button>
                 </div>
-              )}
-            </div>
-          ) : null}
-          {restrictionNotice ? (
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900 shadow-sm dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
-              <div className="flex items-start justify-between gap-3">
-                <span>{restrictionNotice}</span>
-                <button
-                  type="button"
-                  onClick={() => setRestrictionNotice(null)}
-                  className="text-xs font-semibold uppercase tracking-wide text-indigo-700 hover:underline dark:text-indigo-200"
-                >
-                  Dismiss
-                </button>
+                <div className="h-2 w-full overflow-hidden rounded bg-amber-100 dark:bg-amber-500/20">
+                  <div
+                    className="h-full rounded bg-amber-500 transition-all duration-300 dark:bg-amber-300"
+                    style={{ width: `${runsPercent ?? 0}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs text-amber-700 dark:text-amber-200/80">
+                  <span>Hidden workflows: {hiddenWorkflowCount}</span>
+                  <span>Manual & webhook triggers only on the solo plan.</span>
+                </div>
               </div>
-            </div>
-          ) : null}
+            )}
+          </div>
         </div>
       )}
       <div className="flex h-full min-h-0">
@@ -2093,7 +2059,7 @@ export default function Dashboard() {
                       succeededIds={succeededIds}
                       failedIds={failedIds}
                       planTier={planTier}
-                      onRestrictionNotice={setRestrictionNotice}
+                      onRestrictionNotice={(message: string) => setError(message)}
                     />
                   ) : (
                     <div className="m-auto text-sm text-zinc-500 dark:text-zinc-400">

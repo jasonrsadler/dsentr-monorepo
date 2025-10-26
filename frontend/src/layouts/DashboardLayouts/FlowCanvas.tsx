@@ -1129,16 +1129,19 @@ export default function FlowCanvas({
         if (ok) controller.confirmDelete()
       }, [controller])
 
-      // Compute plan gating for actions that have restrictions
+      // Compute plan gating for actions that have restrictions.
+      // Only enable the provider matching the current subtype to avoid emitting notices for unrelated actions.
       const slackRestriction = useMessagingActionRestriction({
         provider: 'slack',
         isSoloPlan: controller.isSoloPlan,
-        onRestrictionNotice
+        onRestrictionNotice,
+        enabled: subtype === 'actionSlack'
       })
       const teamsRestriction = useMessagingActionRestriction({
         provider: 'teams',
         isSoloPlan: controller.isSoloPlan,
-        onRestrictionNotice
+        onRestrictionNotice,
+        enabled: subtype === 'actionTeams'
       })
       const messagingRestriction =
         subtype === 'actionSlack'
