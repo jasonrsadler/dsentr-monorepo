@@ -57,6 +57,19 @@ import {
 } from './FlowCanvas.helpers'
 import { WorkflowFlyoutProvider } from '@/components/workflow/useWorkflowFlyout'
 import { X } from 'lucide-react'
+import { CalendarDays, Clock, Globe2, RefreshCcw } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import {
+  CalendarMonth,
+  formatDisplayDate,
+  formatDisplayTime,
+  getInitialMonth,
+  parseTime,
+  toISODateString
+} from '@/components/ui/schedule/utils'
+import { ScheduleCalendar } from '@/components/ui/schedule/ScheduleCalendar'
+import { ScheduleTimePicker } from '@/components/ui/schedule/ScheduleTimePicker'
+import { ScheduleTimezonePicker } from '@/components/ui/schedule/ScheduleTimezonePicker'
 import NodeHeader from '@/components/UI/ReactFlow/NodeHeader'
 import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeCheckBoxField from '@/components/UI/InputFields/NodeCheckboxField'
@@ -1155,9 +1168,9 @@ export default function FlowCanvas({
       const nextEdges = currentEdges.map<WorkflowEdge>((edge) =>
         edge.id === edgeId
           ? {
-              ...edge,
-              data: { ...edge.data, edgeType: normalizedType }
-            }
+            ...edge,
+            data: { ...edge.data, edgeType: normalizedType }
+          }
           : edge
       )
       if (nextEdges === currentEdges) return
@@ -1250,8 +1263,8 @@ export default function FlowCanvas({
                   <X size={16} />
                 </button>
               </div>
-              <div className="flex-1 min-h-0 overflow-y-auto themed-scroll px-4 py-4">
-                <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-4">
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-visible themed-scroll px-4 py-4">
+                <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-4 overflow-visible">
                   {flyoutNode.type === 'trigger' ? (
                     <FlyoutTriggerFields
                       nodeId={flyoutNode.id}
@@ -1695,6 +1708,212 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
     [nodeId, scheduleConfig, updateNodeData]
   )
 
+  // Schedule pickers state (mirror TriggerNode behavior)
+  const defaultTimezone = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    } catch {
+      return 'UTC'
+    }
+  }, [])
+
+  const [datePickerOpen, setDatePickerOpen] = useState(false)
+  const [timePickerOpen, setTimePickerOpen] = useState(false)
+  const [timezonePickerOpen, setTimezonePickerOpen] = useState(false)
+  const [timezoneSearch, setTimezoneSearch] = useState('')
+  const timezoneDropdownRef = useRef<HTMLDivElement | null>(null)
+  const timezoneButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [tzPos, setTzPos] = useState<{
+    top: number
+    left: number
+    width: number
+  } | null>(null)
+
+  const [datePickerMonth, setDatePickerMonth] = useState<CalendarMonth>(() =>
+    getInitialMonth(scheduleConfig?.startDate)
+  )
+  useEffect(() => {
+    setDatePickerMonth((prev) => {
+      const next = getInitialMonth(scheduleConfig?.startDate)
+      return prev.year === next.year && prev.month === next.month ? prev : next
+    })
+  }, [scheduleConfig?.startDate])
+
+  const datePickerContainerRef = useRef<HTMLDivElement | null>(null)
+  const timePickerContainerRef = useRef<HTMLDivElement | null>(null)
+  const timezonePickerContainerRef = useRef<HTMLDivElement | null>(null)
+
+  const timezoneOptions = useMemo(() => {
+    const options: string[] = []
+    if (typeof Intl !== 'undefined') {
+      const maybeSupported = (Intl as any).supportedValuesOf
+      if (typeof maybeSupported === 'function') {
+        try {
+          const supported = maybeSupported('timeZone')
+          if (Array.isArray(supported)) options.push(...supported)
+        } catch {
+          /* noop */
+        }
+      }
+    }
+    options.push(defaultTimezone || 'UTC')
+    options.push('UTC')
+    if (scheduleConfig?.timezone) options.push(scheduleConfig.timezone)
+    return Array.from(new Set(options))
+  }, [defaultTimezone, scheduleConfig?.timezone])
+
+  const filteredTimezoneOptions = useMemo(() => {
+    const needle = timezoneSearch.trim().toLowerCase()
+    if (!needle) return timezoneOptions
+    return timezoneOptions.filter((tz) => tz.toLowerCase().includes(needle))
+  }, [timezoneOptions, timezoneSearch])
+
+  const selectedTime = useMemo(
+    () => parseTime(scheduleConfig?.startTime),
+    [scheduleConfig?.startTime]
+  )
+  const todayISO = useMemo(() => {
+    const now = new Date()
+    return toISODateString(now.getFullYear(), now.getMonth(), now.getDate())
+  }, [])
+
+  useEffect(() => {
+    if (!datePickerOpen) return
+    const handleMouseDown = (event: MouseEvent) => {
+      if (
+        !datePickerContainerRef.current?.contains(
+          event.target as unknown as globalThis.Node
+        )
+      ) {
+        setDatePickerOpen(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDatePickerOpen(false)
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [datePickerOpen])
+
+  useEffect(() => {
+    if (!timePickerOpen) return
+    const handleMouseDown = (event: MouseEvent) => {
+      if (
+        !timePickerContainerRef.current?.contains(
+          event.target as unknown as globalThis.Node
+        )
+      ) {
+        setTimePickerOpen(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTimePickerOpen(false)
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [timePickerOpen])
+
+  useEffect(() => {
+    if (!timezonePickerOpen) {
+      setTimezoneSearch('')
+      return
+    }
+
+    const recalc = () => {
+      const anchor =
+        timezoneButtonRef.current || timezonePickerContainerRef.current
+      const dropdown = timezoneDropdownRef.current
+      const container = timezonePickerContainerRef.current
+      if (!anchor || !container) return
+
+      const containerRect = container.getBoundingClientRect()
+      const anchorRect = anchor.getBoundingClientRect()
+      const dropdownRect = dropdown?.getBoundingClientRect()
+      const gap = 8
+
+      // fallback sizes
+      const fallbackWidth = 352
+      const fallbackHeight = 320
+
+      const menuW = Math.max(
+        288,
+        Math.min(fallbackWidth, containerRect.width - gap * 2)
+      )
+      const menuH = dropdownRect?.height || fallbackHeight
+
+      // vertical positioning: prefer below; flip above if not enough space
+      const spaceBelow =
+        containerRect.height - (anchorRect.bottom - containerRect.top)
+      let top = anchorRect.bottom - containerRect.top + gap
+      if (
+        spaceBelow < menuH + gap &&
+        anchorRect.top - containerRect.top > menuH + gap
+      ) {
+        top = anchorRect.top - containerRect.top - menuH - gap
+      }
+      const maxTop = containerRect.height - menuH - gap
+      if (top > maxTop) top = maxTop
+      if (top < gap) top = gap
+
+      // horizontal: align dropdown’s right edge with the field’s left edge
+      const fieldRect =
+        timezoneButtonRef.current?.getBoundingClientRect() ?? anchorRect
+
+      const relativeFieldLeft = fieldRect.left - containerRect.left
+      const relativeFieldRight = fieldRect.right - containerRect.left
+
+      // position dropdown to the left of the field with a small gap
+      let left = relativeFieldLeft - menuW - gap
+      if (left < gap) {
+        // not enough space on the left, open to the right side of the field
+        left = relativeFieldRight + gap
+        if (left + menuW > containerRect.width - gap) {
+          left = containerRect.width - menuW - gap
+        }
+      }
+      if (left < gap) left = gap
+
+      setTzPos({ top, left, width: menuW })
+    }
+
+    recalc()
+    requestAnimationFrame(recalc)
+    setTimeout(recalc, 0)
+
+    window.addEventListener('resize', recalc)
+    window.addEventListener('scroll', recalc, true)
+
+    const handleMouseDown = (event: MouseEvent) => {
+      const targetNode = event.target as Node
+      const inAnchor = timezonePickerContainerRef.current?.contains(targetNode)
+      const inDropdown = timezoneDropdownRef.current?.contains(targetNode)
+      if (!inAnchor && !inDropdown) setTimezonePickerOpen(false)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTimezonePickerOpen(false)
+    }
+
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('resize', recalc)
+      window.removeEventListener('scroll', recalc, true)
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [timezonePickerOpen])
+
+
   return (
     <div className="flex flex-col gap-3">
       <div className="space-y-2">
@@ -1760,36 +1979,217 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
       </div>
 
       {triggerType === 'Schedule' ? (
-        <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40 space-y-2">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Start Date (YYYY-MM-DD)
-            </label>
-            <NodeInputField
-              placeholder="2025-01-31"
-              value={scheduleConfig.startDate || ''}
-              onChange={(v) => handleSchedulePatch({ startDate: v })}
-            />
+        <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+              Schedule Settings
+            </h4>
+            <button
+              type="button"
+              onClick={() => {
+                if (scheduleConfig?.repeat) {
+                  // Disable repeat
+                  handleSchedulePatch({ repeat: undefined })
+                } else {
+                  handleSchedulePatch({ repeat: { every: 1, unit: 'days' } })
+                }
+              }}
+              className="flex items-center gap-2 text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+            >
+              <RefreshCcw className="h-3 w-3" />
+              {scheduleConfig?.repeat ? 'Disable repeat' : 'Enable repeat'}
+            </button>
           </div>
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Start Time (HH:MM)
-            </label>
-            <NodeInputField
-              placeholder="09:00"
-              value={scheduleConfig.startTime || ''}
-              onChange={(v) => handleSchedulePatch({ startTime: v })}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Timezone
-            </label>
-            <NodeInputField
-              placeholder="UTC"
-              value={scheduleConfig.timezone || ''}
-              onChange={(v) => handleSchedulePatch({ timezone: v })}
-            />
+
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Start Date
+              </label>
+              <div ref={datePickerContainerRef} className="relative mt-2">
+                <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTimePickerOpen(false)
+                    setTimezonePickerOpen(false)
+                    setDatePickerOpen((p) => !p)
+                  }}
+                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                >
+                  {formatDisplayDate(scheduleConfig?.startDate)}
+                </button>
+                <AnimatePresence>
+                  {datePickerOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute left-0 right-0 z-20 mt-2"
+                    >
+                      <ScheduleCalendar
+                        month={datePickerMonth}
+                        selectedDate={scheduleConfig?.startDate}
+                        todayISO={todayISO}
+                        onMonthChange={(m) => setDatePickerMonth(m)}
+                        onSelectDate={(isoDate) => {
+                          handleSchedulePatch({ startDate: isoDate })
+                          setDatePickerOpen(false)
+                        }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Start Time
+                </label>
+                <div ref={timePickerContainerRef} className="relative mt-2">
+                  <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDatePickerOpen(false)
+                      setTimezonePickerOpen(false)
+                      setTimePickerOpen((p) => !p)
+                    }}
+                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                  >
+                    {formatDisplayTime(scheduleConfig?.startTime)}
+                  </button>
+                  <AnimatePresence>
+                    {timePickerOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute left-0 right-0 z-20 mt-2"
+                      >
+                        <ScheduleTimePicker
+                          selectedTime={selectedTime}
+                          onSelect={(time) => {
+                            handleSchedulePatch({ startTime: time })
+                          }}
+                          onClose={() => setTimePickerOpen(false)}
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Timezone
+                </label>
+                <div ref={timezonePickerContainerRef} className="relative mt-2">
+                  <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                  <button
+                    ref={timezoneButtonRef}
+                    type="button"
+                    onClick={() => {
+                      setDatePickerOpen(false)
+                      setTimePickerOpen(false)
+                      setTimezonePickerOpen((p) => !p)
+                    }}
+                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                  >
+                    {scheduleConfig?.timezone || 'Select timezone'}
+                  </button>
+                  <AnimatePresence>
+                    {timezonePickerOpen && tzPos && (
+                      <motion.div
+                        ref={timezoneDropdownRef}
+                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                        transition={{ duration: 0.15 }}
+                        className="z-50"
+                        style={{
+                          position: 'fixed',
+                          top: tzPos.top,
+                          left: tzPos.left,
+                          width: tzPos.width
+                        }}
+                      >
+                        <ScheduleTimezonePicker
+                          options={filteredTimezoneOptions}
+                          selectedTimezone={scheduleConfig?.timezone || ''}
+                          search={timezoneSearch}
+                          onSearchChange={(v) => setTimezoneSearch(v)}
+                          onSelect={(tz) => {
+                            handleSchedulePatch({ timezone: tz })
+                            setTimezonePickerOpen(false)
+                          }}
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </div>
+
+            {scheduleConfig?.repeat ? (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Repeat every
+                  </label>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      value={scheduleConfig?.repeat?.every ?? 1}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value)
+                        const clamped = Number.isFinite(raw)
+                          ? Math.max(1, Math.floor(raw))
+                          : 1
+                        handleSchedulePatch({
+                          repeat: {
+                            every: clamped,
+                            unit: scheduleConfig?.repeat?.unit ?? 'days'
+                          }
+                        })
+                      }}
+                      className="h-10 w-20 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                    />
+                    <select
+                      value={scheduleConfig?.repeat?.unit ?? 'days'}
+                      onChange={(e) => {
+                        const val = (e.target.value || 'days') as
+                          | 'minutes'
+                          | 'hours'
+                          | 'days'
+                          | 'weeks'
+                        const unit = (
+                          ['minutes', 'hours', 'days', 'weeks'] as const
+                        ).includes(val as any)
+                          ? val
+                          : 'days'
+                        handleSchedulePatch({
+                          repeat: {
+                            every: scheduleConfig?.repeat?.every ?? 1,
+                            unit
+                          }
+                        })
+                      }}
+                      className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pr-8 text-sm font-semibold capitalize text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 sm:w-40"
+                    >
+                      {['minutes', 'hours', 'days', 'weeks'].map((u) => (
+                        <option key={u} value={u}>
+                          {u.charAt(0).toUpperCase() + u.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

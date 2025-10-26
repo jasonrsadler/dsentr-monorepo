@@ -10,6 +10,7 @@
 - UI > Dialogs: `JsonDialog` content area
 - UI > InputFields: dropdown menus for nodes and secrets
 - UI > Schedule: time and timezone pickers
+  - Removed redundant "Remove repeat" action in Trigger node (repeat is toggled via the header control).
 - Workflow > Actions: email provider dropdowns, Teams mentions list
 - Workflow > Trigger: trigger type dropdown
 

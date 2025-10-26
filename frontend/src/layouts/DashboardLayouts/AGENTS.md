@@ -1,9 +1,8 @@
-# Dashboard Layouts Agent Notes
+# FlowCanvas Agent Notes
 
 ## Change Reasons
-- UI: Unified scrollbar styling in this directory to match Settings modal.
-- Applied `themed-scroll` to scrollable containers so light/dark mode scrollbar visuals are consistent.
-- Affected files:
-  - `Dashboard.tsx`: node/task sidebar list and templates panel now use `themed-scroll`.
-  - `FlowCanvas.tsx`: flyout content area now uses `themed-scroll`.
-- Styles are defined globally in `src/css/globals.css` under `.themed-scroll` and already used by `SettingsModal`.
+- Flyout Trigger schedule parity: replaced plain text inputs with the same calendar, time, and timezone pickers used on the Trigger node, and added repeat enable/fields to match node behavior.
+
+## Notes
+- Pickers are locally stateful and wrapped in useMemo/useCallback with click-outside + Escape handling to avoid React Flow re-render loops.
+- Schedule changes patch node data via `updateNodeData` with shallow merges; removing repeat sets `repeat: undefined` to clear it without extra writes.

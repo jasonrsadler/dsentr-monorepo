@@ -877,21 +877,6 @@ function TriggerNodeContent({
                               </select>
                             </div>
                           </div>
-                          <div className="flex items-end">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                updateSchedule((prev) => ({
-                                  startDate: prev.startDate,
-                                  startTime: prev.startTime,
-                                  timezone: prev.timezone
-                                }))
-                              }}
-                              className="text-xs text-red-500 hover:text-red-600"
-                            >
-                              Remove repeat
-                            </button>
-                          </div>
                         </div>
                       )}
                     </div>
