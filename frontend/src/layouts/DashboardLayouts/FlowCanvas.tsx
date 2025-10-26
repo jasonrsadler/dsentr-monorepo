@@ -57,7 +57,9 @@ import GoogleChatAction from '@/components/workflow/Actions/Messaging/Services/G
 import SheetsAction from '@/components/workflow/Actions/Google/SheetsAction'
 import HttpRequestAction from '@/components/workflow/Actions/HttpRequestAction'
 import RunCustomCodeAction from '@/components/workflow/Actions/RunCustomCodeAction'
-import useActionNodeController, { type ActionNodeData } from '@/components/workflow/nodes/useActionNodeController'
+import useActionNodeController, {
+  type ActionNodeData
+} from '@/components/workflow/nodes/useActionNodeController'
 import useMessagingActionRestriction from '@/components/workflow/nodes/useMessagingActionRestriction'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
@@ -1062,7 +1064,9 @@ export default function FlowCanvas({
         return incoming[0]?.source ?? ''
       }, [allEdges, nodeId])
       const currentOutputId = useMemo(() => {
-        const outgoing = allEdges.filter((e) => e.source === nodeId && !e.sourceHandle)
+        const outgoing = allEdges.filter(
+          (e) => e.source === nodeId && !e.sourceHandle
+        )
         return outgoing[0]?.target ?? ''
       }, [allEdges, nodeId])
 
@@ -1125,7 +1129,9 @@ export default function FlowCanvas({
       })
 
       const handleDeleteClick = useCallback(() => {
-        const ok = window.confirm('Delete this node? This action cannot be undone.')
+        const ok = window.confirm(
+          'Delete this node? This action cannot be undone.'
+        )
         if (ok) controller.confirmDelete()
       }, [controller])
 
@@ -1151,20 +1157,46 @@ export default function FlowCanvas({
             : { planRestrictionMessage: null, isRestricted: false }
 
       const combinedRestrictionMessage =
-        messagingRestriction.planRestrictionMessage ?? controller.planRestrictionMessage
+        messagingRestriction.planRestrictionMessage ??
+        controller.planRestrictionMessage
 
       const renderFields = () => {
         switch (subtype) {
           case 'actionEmailSendgrid':
-            return <SendGridAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+            return (
+              <SendGridAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
+            )
           case 'actionEmailMailgun':
-            return <MailGunAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+            return (
+              <MailGunAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
+            )
           case 'actionEmailAmazonSes':
-            return <AmazonSESAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+            return (
+              <AmazonSESAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
+            )
           case 'actionEmailSmtp':
-            return <SMTPAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+            return (
+              <SMTPAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
+            )
           case 'actionWebhook':
-            return <WebhookAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+            return (
+              <WebhookAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
+            )
           case 'actionSlack':
             return (
               <SlackAction
@@ -1182,16 +1214,34 @@ export default function FlowCanvas({
               />
             )
           case 'actionGoogleChat':
-            return <GoogleChatAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+            return (
+              <GoogleChatAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
+            )
           case 'actionSheets':
             // Match node behavior: show gate message instead of fields when restricted
             return controller.planRestrictionMessage ? null : (
-              <SheetsAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+              <SheetsAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
             )
           case 'actionHttp':
-            return <HttpRequestAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+            return (
+              <HttpRequestAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
+            )
           case 'actionCode':
-            return <RunCustomCodeAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+            return (
+              <RunCustomCodeAction
+                nodeId={nodeId}
+                canEdit={controller.effectiveCanEdit}
+              />
+            )
           default:
             return null
         }
@@ -1202,7 +1252,9 @@ export default function FlowCanvas({
           {/* Connections selectors */}
           <div className="space-y-2">
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Input Node</label>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Input Node
+              </label>
               <NodeDropdownField
                 options={[{ label: 'Nodes', options: inputNodeOptions }]}
                 value={currentInputId}
@@ -1211,7 +1263,9 @@ export default function FlowCanvas({
               />
             </div>
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Output Node</label>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Output Node
+              </label>
               <NodeDropdownField
                 options={[{ label: 'Nodes', options: outputNodeOptions }]}
                 value={currentOutputId}
@@ -1261,20 +1315,26 @@ export default function FlowCanvas({
               <NodeInputField
                 type="number"
                 value={controller.timeout}
-                onChange={(value) => controller.handleTimeoutChange(Number(value))}
+                onChange={(value) =>
+                  controller.handleTimeoutChange(Number(value))
+                }
                 className="w-24 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
               />
               <span className="text-xs">ms timeout</span>
               <NodeInputField
                 type="number"
                 value={controller.retries}
-                onChange={(value) => controller.handleRetriesChange(Number(value))}
+                onChange={(value) =>
+                  controller.handleRetriesChange(Number(value))
+                }
                 className="w-16 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
               />
               <span className="text-xs">retries</span>
               <NodeCheckBoxField
                 checked={controller.stopOnError}
-                onChange={(value) => controller.handleStopOnErrorChange(Boolean(value))}
+                onChange={(value) =>
+                  controller.handleStopOnErrorChange(Boolean(value))
+                }
               >
                 Stop on error
               </NodeCheckBoxField>
@@ -1287,193 +1347,208 @@ export default function FlowCanvas({
   )
 
   // Fields-only flyout renderer for trigger nodes
-  const FlyoutTriggerFields = useCallback(
-    ({ nodeId }: { nodeId: string }) => {
-      const allNodes = useWorkflowStore(selectNodes)
-      const allEdges = useWorkflowStore(selectEdges)
-      const nodeData = useWorkflowStore(
-        useCallback(
-          (state) => (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
-          [nodeId]
-        )
+  const FlyoutTriggerFields = useCallback(({ nodeId }: { nodeId: string }) => {
+    const allNodes = useWorkflowStore(selectNodes)
+    const allEdges = useWorkflowStore(selectEdges)
+    const nodeData = useWorkflowStore(
+      useCallback(
+        (state) =>
+          (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
+        [nodeId]
       )
-      const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
-      const getNodeLabel = useCallback((n: Node) => {
-        const rawLabel = (n.data as any)?.label
-        if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
-        switch (n.type) {
-          case 'trigger':
-            return 'Trigger'
-          case 'condition':
-            return 'Condition'
-          default:
-            return 'Action'
-        }
-      }, [])
-      const nodeOptions = useMemo(
-        () => allNodes.filter((n) => n.id !== nodeId && n.type !== 'trigger').map((n) => ({ label: getNodeLabel(n), value: n.id })),
-        [allNodes, getNodeLabel, nodeId]
+    )
+    const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
+    const getNodeLabel = useCallback((n: Node) => {
+      const rawLabel = (n.data as any)?.label
+      if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
+      switch (n.type) {
+        case 'trigger':
+          return 'Trigger'
+        case 'condition':
+          return 'Condition'
+        default:
+          return 'Action'
+      }
+    }, [])
+    const nodeOptions = useMemo(
+      () =>
+        allNodes
+          .filter((n) => n.id !== nodeId && n.type !== 'trigger')
+          .map((n) => ({ label: getNodeLabel(n), value: n.id })),
+      [allNodes, getNodeLabel, nodeId]
+    )
+    const currentOutputId = useMemo(() => {
+      const outgoing = allEdges.filter((e) => e.source === nodeId)
+      return outgoing[0]?.target ?? ''
+    }, [allEdges, nodeId])
+    const handleChangeOutput = useCallback(
+      (nextTargetId: string) => {
+        if (!nextTargetId || nextTargetId === currentOutputId) return
+        const targetNode = allNodes.find((n) => n.id === nextTargetId)
+        if (targetNode?.type === 'trigger') return
+        const state = useWorkflowStore.getState()
+        const base = state.edges.filter((e) => e.source !== nodeId)
+        const newEdge = {
+          id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
+          source: nodeId,
+          target: nextTargetId,
+          type: 'nodeEdge',
+          data: { edgeType: 'default' }
+        } as any
+        setEdges(normalizeEdgesForState([...base, newEdge]))
+      },
+      [allNodes, currentOutputId, nodeId, setEdges]
+    )
+
+    const labelError: string | null = nodeData?.labelError ?? null
+    const triggerType: string =
+      typeof nodeData?.triggerType === 'string'
+        ? nodeData.triggerType
+        : 'Manual'
+
+    const handleLabelChange = useCallback(
+      (value: string) => updateNodeData(nodeId, { label: value, dirty: true }),
+      [nodeId, updateNodeData]
+    )
+    const handleDeleteClick = useCallback(() => {
+      const ok = window.confirm(
+        'Delete this node? This action cannot be undone.'
       )
-      const currentOutputId = useMemo(() => {
-        const outgoing = allEdges.filter((e) => e.source === nodeId)
-        return outgoing[0]?.target ?? ''
-      }, [allEdges, nodeId])
-      const handleChangeOutput = useCallback(
-        (nextTargetId: string) => {
-          if (!nextTargetId || nextTargetId === currentOutputId) return
-          const targetNode = allNodes.find((n) => n.id === nextTargetId)
-          if (targetNode?.type === 'trigger') return
-          const state = useWorkflowStore.getState()
-          const base = state.edges.filter((e) => e.source !== nodeId)
-          const newEdge = {
-            id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
-            source: nodeId,
-            target: nextTargetId,
-            type: 'nodeEdge',
-            data: { edgeType: 'default' }
-          } as any
-          setEdges(normalizeEdgesForState([...base, newEdge]))
-        },
-        [allNodes, currentOutputId, nodeId, setEdges]
-      )
+      if (ok) useWorkflowStore.getState().removeNode(nodeId)
+    }, [nodeId])
+    const handleTriggerTypeChange = useCallback(
+      (value: string) =>
+        updateNodeData(nodeId, { triggerType: value, dirty: true }),
+      [nodeId, updateNodeData]
+    )
 
-      const labelError: string | null = nodeData?.labelError ?? null
-      const triggerType: string =
-        typeof nodeData?.triggerType === 'string' ? nodeData.triggerType : 'Manual'
+    const inputs = Array.isArray(nodeData?.inputs) ? nodeData.inputs : []
+    const handleInputsChange = useCallback(
+      (vars: { key: string; value: string }[]) =>
+        updateNodeData(nodeId, { inputs: vars, dirty: true }),
+      [nodeId, updateNodeData]
+    )
 
-      const handleLabelChange = useCallback(
-        (value: string) => updateNodeData(nodeId, { label: value, dirty: true }),
-        [nodeId, updateNodeData]
-      )
-      const handleDeleteClick = useCallback(() => {
-        const ok = window.confirm('Delete this node? This action cannot be undone.')
-        if (ok) useWorkflowStore.getState().removeNode(nodeId)
-      }, [nodeId])
-      const handleTriggerTypeChange = useCallback(
-        (value: string) => updateNodeData(nodeId, { triggerType: value, dirty: true }),
-        [nodeId, updateNodeData]
-      )
+    const scheduleConfig = (nodeData?.scheduleConfig as any) || {}
+    const handleSchedulePatch = useCallback(
+      (patch: Record<string, any>) =>
+        updateNodeData(nodeId, {
+          scheduleConfig: { ...scheduleConfig, ...patch },
+          dirty: true
+        }),
+      [nodeId, scheduleConfig, updateNodeData]
+    )
 
-      const inputs = Array.isArray(nodeData?.inputs) ? nodeData.inputs : []
-      const handleInputsChange = useCallback(
-        (vars: { key: string; value: string }[]) =>
-          updateNodeData(nodeId, { inputs: vars, dirty: true }),
-        [nodeId, updateNodeData]
-      )
-
-      const scheduleConfig = (nodeData?.scheduleConfig as any) || {}
-      const handleSchedulePatch = useCallback(
-        (patch: Record<string, any>) =>
-          updateNodeData(nodeId, {
-            scheduleConfig: { ...scheduleConfig, ...patch },
-            dirty: true
-          }),
-        [nodeId, scheduleConfig, updateNodeData]
-      )
-
-      return (
-        <div className="flex flex-col gap-3">
-          {/* Connections selectors (Trigger has only output) */}
-          <div className="space-y-2">
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Input Node</label>
-              <NodeDropdownField
-                options={[{ label: 'Nodes', options: [{ label: 'N/A', value: 'na', disabled: true }] }]}
-                value={'N/A'}
-                onChange={() => undefined}
-                placeholder="N/A"
-                disabled
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Output Node</label>
-              <NodeDropdownField
-                options={[{ label: 'Nodes', options: nodeOptions }]}
-                value={currentOutputId}
-                onChange={handleChangeOutput}
-                placeholder="Select output node"
-              />
-            </div>
-          </div>
-
-          <NodeHeader
-            nodeId={nodeId}
-            label={(nodeData?.label as string) || 'Trigger'}
-            dirty={Boolean(nodeData?.dirty)}
-            hasValidationErrors={Boolean(labelError)}
-            expanded={true}
-            onLabelChange={handleLabelChange}
-            onExpanded={() => undefined}
-            onConfirmingDelete={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              handleDeleteClick()
-            }}
-          />
-          {labelError ? (
-            <p className="text-xs text-red-500">{labelError}</p>
-          ) : null}
-
+    return (
+      <div className="flex flex-col gap-3">
+        {/* Connections selectors (Trigger has only output) */}
+        <div className="space-y-2">
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Trigger Type
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Input Node
             </label>
-            <div className="mt-2">
-              <TriggerTypeDropdown
-                value={triggerType}
-                onChange={handleTriggerTypeChange}
-                disabledOptions={
-                  isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
+            <NodeDropdownField
+              options={[
+                {
+                  label: 'Nodes',
+                  options: [{ label: 'N/A', value: 'na', disabled: true }]
                 }
+              ]}
+              value={'N/A'}
+              onChange={() => undefined}
+              placeholder="N/A"
+              disabled
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Output Node
+            </label>
+            <NodeDropdownField
+              options={[{ label: 'Nodes', options: nodeOptions }]}
+              value={currentOutputId}
+              onChange={handleChangeOutput}
+              placeholder="Select output node"
+            />
+          </div>
+        </div>
+
+        <NodeHeader
+          nodeId={nodeId}
+          label={(nodeData?.label as string) || 'Trigger'}
+          dirty={Boolean(nodeData?.dirty)}
+          hasValidationErrors={Boolean(labelError)}
+          expanded={true}
+          onLabelChange={handleLabelChange}
+          onExpanded={() => undefined}
+          onConfirmingDelete={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleDeleteClick()
+          }}
+        />
+        {labelError ? (
+          <p className="text-xs text-red-500">{labelError}</p>
+        ) : null}
+
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Trigger Type
+          </label>
+          <div className="mt-2">
+            <TriggerTypeDropdown
+              value={triggerType}
+              onChange={handleTriggerTypeChange}
+              disabledOptions={
+                isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
+              }
+            />
+          </div>
+        </div>
+
+        {triggerType === 'Schedule' ? (
+          <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40 space-y-2">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Start Date (YYYY-MM-DD)
+              </label>
+              <NodeInputField
+                placeholder="2025-01-31"
+                value={scheduleConfig.startDate || ''}
+                onChange={(v) => handleSchedulePatch({ startDate: v })}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Start Time (HH:MM)
+              </label>
+              <NodeInputField
+                placeholder="09:00"
+                value={scheduleConfig.startTime || ''}
+                onChange={(v) => handleSchedulePatch({ startTime: v })}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Timezone
+              </label>
+              <NodeInputField
+                placeholder="UTC"
+                value={scheduleConfig.timezone || ''}
+                onChange={(v) => handleSchedulePatch({ timezone: v })}
               />
             </div>
           </div>
+        ) : null}
 
-          {triggerType === 'Schedule' ? (
-            <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40 space-y-2">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  Start Date (YYYY-MM-DD)
-                </label>
-                <NodeInputField
-                  placeholder="2025-01-31"
-                  value={scheduleConfig.startDate || ''}
-                  onChange={(v) => handleSchedulePatch({ startDate: v })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  Start Time (HH:MM)
-                </label>
-                <NodeInputField
-                  placeholder="09:00"
-                  value={scheduleConfig.startTime || ''}
-                  onChange={(v) => handleSchedulePatch({ startTime: v })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  Timezone
-                </label>
-                <NodeInputField
-                  placeholder="UTC"
-                  value={scheduleConfig.timezone || ''}
-                  onChange={(v) => handleSchedulePatch({ timezone: v })}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          <KeyValuePair
-            title="Input Variables"
-            variables={inputs}
-            onChange={(vars) => handleInputsChange(vars)}
-          />
-        </div>
-      )
-    },
-    []
-  )
+        <KeyValuePair
+          title="Input Variables"
+          variables={inputs}
+          onChange={(vars) => handleInputsChange(vars)}
+        />
+      </div>
+    )
+  }, [])
 
   // Fields-only flyout renderer for condition nodes
   const FlyoutConditionFields = useCallback(
@@ -1482,7 +1557,8 @@ export default function FlowCanvas({
       const allEdges = useWorkflowStore(selectEdges)
       const nodeData = useWorkflowStore(
         useCallback(
-          (state) => (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
+          (state) =>
+            (state.nodes.find((n) => n.id === nodeId)?.data as any) ?? {},
           [nodeId]
         )
       )
@@ -1507,11 +1583,15 @@ export default function FlowCanvas({
         [allNodes, getNodeLabel, nodeId]
       )
       const trueOutputId = useMemo(() => {
-        const t = allEdges.find((e) => e.source === nodeId && e.sourceHandle === 'cond-true')
+        const t = allEdges.find(
+          (e) => e.source === nodeId && e.sourceHandle === 'cond-true'
+        )
         return t?.target ?? ''
       }, [allEdges, nodeId])
       const falseOutputId = useMemo(() => {
-        const f = allEdges.find((e) => e.source === nodeId && e.sourceHandle === 'cond-false')
+        const f = allEdges.find(
+          (e) => e.source === nodeId && e.sourceHandle === 'cond-false'
+        )
         return f?.target ?? ''
       }, [allEdges, nodeId])
       const changeCondOutput = useCallback(
@@ -1547,48 +1627,64 @@ export default function FlowCanvas({
         typeof nodeData?.operator === 'string' ? nodeData.operator : 'equals'
       const value = typeof nodeData?.value === 'string' ? nodeData.value : ''
 
-      const buildExpression = useCallback((f: string, op: string, v: string) => {
-        const left = (f || '').trim()
-        if (!left) return ''
-        const OP: Record<string, string> = {
-          equals: '==',
-          'not equals': '!=',
-          'greater than': '>',
-          'less than': '<',
-          contains: 'contains'
-        }
-        const opSym = OP[(op || 'equals').toLowerCase()] ?? '=='
-        const formattedLeft = left.startsWith('{{') ? left : `{{${left}}}`
-        const formattedRight = (() => {
-          const t = (v || '').trim()
-          if (!t) return '""'
-          if (t.startsWith('{{') && t.endsWith('}}')) return t
-          if (/^(true|false|null)$/i.test(t)) return t.toLowerCase()
-          if (!Number.isNaN(Number(t))) return t
-          if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
-            try {
-              return JSON.stringify(JSON.parse(t))
-            } catch {
-              return JSON.stringify(t.slice(1, -1))
-            }
+      const buildExpression = useCallback(
+        (f: string, op: string, v: string) => {
+          const left = (f || '').trim()
+          if (!left) return ''
+          const OP: Record<string, string> = {
+            equals: '==',
+            'not equals': '!=',
+            'greater than': '>',
+            'less than': '<',
+            contains: 'contains'
           }
-          return JSON.stringify(t)
-        })()
-        return `${formattedLeft} ${opSym} ${formattedRight}`.trim()
-      }, [])
+          const opSym = OP[(op || 'equals').toLowerCase()] ?? '=='
+          const formattedLeft = left.startsWith('{{') ? left : `{{${left}}}`
+          const formattedRight = (() => {
+            const t = (v || '').trim()
+            if (!t) return '""'
+            if (t.startsWith('{{') && t.endsWith('}}')) return t
+            if (/^(true|false|null)$/i.test(t)) return t.toLowerCase()
+            if (!Number.isNaN(Number(t))) return t
+            if (
+              (t.startsWith('"') && t.endsWith('"')) ||
+              (t.startsWith("'") && t.endsWith("'"))
+            ) {
+              try {
+                return JSON.stringify(JSON.parse(t))
+              } catch {
+                return JSON.stringify(t.slice(1, -1))
+              }
+            }
+            return JSON.stringify(t)
+          })()
+          return `${formattedLeft} ${opSym} ${formattedRight}`.trim()
+        },
+        []
+      )
 
       const hasValidationErrors = !field.trim() || !value.trim()
       useEffect(() => {
         const expression = buildExpression(field, operator, value)
         updateNodeData(nodeId, { expression, hasValidationErrors })
-      }, [buildExpression, field, operator, value, nodeId, updateNodeData, hasValidationErrors])
+      }, [
+        buildExpression,
+        field,
+        operator,
+        value,
+        nodeId,
+        updateNodeData,
+        hasValidationErrors
+      ])
 
       const handleLabelChange = useCallback(
         (v: string) => updateNodeData(nodeId, { label: v, dirty: true }),
         [nodeId, updateNodeData]
       )
       const handleDeleteClick = useCallback(() => {
-        const ok = window.confirm('Delete this node? This action cannot be undone.')
+        const ok = window.confirm(
+          'Delete this node? This action cannot be undone.'
+        )
         if (ok) useWorkflowStore.getState().removeNode(nodeId)
       }, [nodeId])
       const handleField = useCallback(
@@ -1613,9 +1709,18 @@ export default function FlowCanvas({
           {/* Connections selectors (Condition has True/False outputs) */}
           <div className="space-y-2">
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Input Node</label>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Input Node
+              </label>
               <NodeDropdownField
-                options={[{ label: 'Nodes', options: allNodes.filter((n) => n.id !== nodeId).map((n) => ({ label: getNodeLabel(n), value: n.id })) }]}
+                options={[
+                  {
+                    label: 'Nodes',
+                    options: allNodes
+                      .filter((n) => n.id !== nodeId)
+                      .map((n) => ({ label: getNodeLabel(n), value: n.id }))
+                  }
+                ]}
                 value={allEdges.find((e) => e.target === nodeId)?.source ?? ''}
                 onChange={(nextSourceId) => {
                   const state = useWorkflowStore.getState()
@@ -1633,7 +1738,9 @@ export default function FlowCanvas({
               />
             </div>
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">True Output</label>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                True Output
+              </label>
               <NodeDropdownField
                 options={[{ label: 'Nodes', options: nodeOptions }]}
                 value={trueOutputId}
@@ -1642,7 +1749,9 @@ export default function FlowCanvas({
               />
             </div>
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">False Output</label>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                False Output
+              </label>
               <NodeDropdownField
                 options={[{ label: 'Nodes', options: nodeOptions }]}
                 value={falseOutputId}
@@ -1670,19 +1779,32 @@ export default function FlowCanvas({
             <p className="text-xs text-red-500">{labelError}</p>
           ) : null}
 
-          <NodeInputField placeholder="Field name" value={field} onChange={handleField} />
+          <NodeInputField
+            placeholder="Field name"
+            value={field}
+            onChange={handleField}
+          />
           <NodeDropdownField
-            options={["equals", "not equals", "greater than", "less than", "contains"]}
+            options={[
+              'equals',
+              'not equals',
+              'greater than',
+              'less than',
+              'contains'
+            ]}
             value={operator}
             onChange={handleOperator}
           />
-          <NodeInputField placeholder="Comparison value" value={value} onChange={handleValue} />
+          <NodeInputField
+            placeholder="Comparison value"
+            value={value}
+            onChange={handleValue}
+          />
         </div>
       )
     },
     []
   )
-
 
   const flyoutSubtype = useMemo<ActionDropSubtype | null>(() => {
     if (!flyoutNode) return null
@@ -1709,8 +1831,7 @@ export default function FlowCanvas({
 
   const selectedNodeLabel = useMemo(() => {
     if (!flyoutNode) return null
-    const rawLabel = (flyoutNode.data as { label?: unknown } | undefined)
-      ?.label
+    const rawLabel = (flyoutNode.data as { label?: unknown } | undefined)?.label
     if (typeof rawLabel === 'string' && rawLabel.trim().length > 0) {
       return rawLabel
     }
@@ -1831,10 +1952,14 @@ export default function FlowCanvas({
                   ) : flyoutNode.type === 'condition' ? (
                     <FlyoutConditionFields nodeId={flyoutNode.id} />
                   ) : flyoutSubtype ? (
-                    <FlyoutActionFields nodeId={flyoutNode.id} subtype={flyoutSubtype} />
+                    <FlyoutActionFields
+                      nodeId={flyoutNode.id}
+                      subtype={flyoutSubtype}
+                    />
                   ) : (
                     <p className="text-xs text-zinc-500">
-                      Fields for this node type are not available in the flyout yet.
+                      Fields for this node type are not available in the flyout
+                      yet.
                     </p>
                   )}
                 </div>

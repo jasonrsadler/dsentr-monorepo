@@ -934,7 +934,7 @@ export default function Dashboard() {
     workflowSaving,
     normalizeWorkflowData,
     pushGraphToStore,
-    setError,
+    setError
   ])
 
   const handleLockWorkflow = useCallback(async () => {
@@ -1328,11 +1328,15 @@ export default function Dashboard() {
                 />
               </div>
               {filteredGroups.length === 0 ? (
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">No actions match your search.</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  No actions match your search.
+                </p>
               ) : null}
               {filteredGroups.map((group) => {
                 const searching = trimmedQuery.length > 0
-                const isOpen = searching ? true : (openGroups[group.heading] ?? true)
+                const isOpen = searching
+                  ? true
+                  : (openGroups[group.heading] ?? true)
                 return (
                   <div key={group.heading} className="space-y-2">
                     <button
@@ -2059,7 +2063,9 @@ export default function Dashboard() {
                       succeededIds={succeededIds}
                       failedIds={failedIds}
                       planTier={planTier}
-                      onRestrictionNotice={(message: string) => setError(message)}
+                      onRestrictionNotice={(message: string) =>
+                        setError(message)
+                      }
                     />
                   ) : (
                     <div className="m-auto text-sm text-zinc-500 dark:text-zinc-400">
