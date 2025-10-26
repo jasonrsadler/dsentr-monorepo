@@ -19,3 +19,6 @@
 - Each action should return `(outputs, next_node)`; keep outputs JSON-serializable because they flow back into the context map.
 - When adding new actions, register them inside `actions/mod.rs` and ensure they respect the allowlist/denylist enforcement enforced in `executor.rs`.
 - Avoid blocking operations inside actions; always use async HTTP clients and timeouts to keep workers responsive.
+
+## Change Log
+- Context key casing: Node outputs are now inserted into the workflow context using the node label's original casing, with a lowercase alias added for backward compatibility. This allows templates like `{{Trigger.Name}}` to resolve while still supporting existing `{{trigger.Name}}` references. Field/property casing remains unchanged and must be matched exactly.

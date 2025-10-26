@@ -37,7 +37,7 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
             .nodes
             .values()
             .find(|n| n.kind == "trigger")
-            .map(context_key);
+            .map(|n| context_keys(n).0);
         let key = trigger_key.unwrap_or_else(|| "trigger".to_string());
         context.insert(key, initial.clone());
     }
@@ -206,8 +206,16 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
                         .await;
                 }
 
-                let key = context_key(node);
-                context.insert(key, outputs.clone());
+                // Insert node outputs into the workflow context under both the
+                // original-cased label and a lowercase alias (for backward
+                // compatibility with existing templates that used lowercased
+                // node names). Field/property casing remains respected.
+                let (primary_key, alias_key) = context_keys(node);
+                context.insert(primary_key, outputs.clone());
+                if let Some(alias) = alias_key {
+                    // If an alias exists and differs from the primary key, also insert it
+                    context.insert(alias, outputs.clone());
+                }
 
                 match selected_next {
                     Some(next_id) => next_nodes.push(next_id),
@@ -314,11 +322,26 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) {
     };
 }
 
-fn context_key(node: &super::graph::Node) -> String {
-    node.data
+fn context_keys(node: &super::graph::Node) -> (String, Option<String>) {
+    // Prefer the node label if present; preserve its original casing.
+    // Also provide a lowercase alias to maintain compatibility with
+    // previously-generated templates that referenced lowercased node names.
+    let label_opt = node
+        .data
         .get("label")
         .and_then(|v| v.as_str())
-        .map(|label| label.trim().to_lowercase())
-        .filter(|label| !label.is_empty())
-        .unwrap_or_else(|| node.id.clone())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+
+    if let Some(label) = label_opt {
+        let primary = label.to_string();
+        let lower = label.to_lowercase();
+        if lower != label {
+            (primary, Some(lower))
+        } else {
+            (primary, None)
+        }
+    } else {
+        (node.id.clone(), None)
+    }
 }
