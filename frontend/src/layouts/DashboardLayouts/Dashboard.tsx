@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE_URL } from '@/lib/config'
+import { errorMessage } from '@/lib/errorMessage'
 import '@xyflow/react/dist/style.css'
 import WorkflowToolbar from './Toolbar'
 import FlowCanvas from './FlowCanvas'
@@ -7,7 +8,6 @@ import ActionIcon from '@/assets/svg-components/ActionIcon'
 import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
 import { ChevronDown, ChevronUp, Search } from 'lucide-react'
-import type { Edge, Node } from '@xyflow/react'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { selectIsSaving, useWorkflowStore } from '@/stores/workflowStore'
 import {
@@ -34,10 +34,12 @@ import {
 } from '@/lib/workflowApi'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import {
+  cloneWorkflowData,
   hydrateIncomingEdges,
   hydrateIncomingNodes,
   normalizeNodesForState
 } from './FlowCanvas.helpers'
+import type { WorkflowEdge, WorkflowNode } from './FlowCanvas'
 
 const TriggerIcon = () => (
   <svg
@@ -238,7 +240,9 @@ export default function Dashboard() {
   const [activePane, setActivePane] = useState<'designer' | 'runs'>('designer')
   const [runsScope, setRunsScope] = useState<'current' | 'all'>('current')
   const [runQueue, setRunQueue] = useState<WorkflowRunRecord[]>([])
-  const runQueueTimerRef = useRef<any>(null)
+  const _runQueueTimerRef = useRef<any>(null)
+  void globalRunsTimerRef
+  void _runQueueTimerRef
   // Stable execution state identities to avoid unnecessary re-renders
   const runningIds = useMemo(
     () =>
@@ -276,32 +280,46 @@ export default function Dashboard() {
     return Math.min(100, (runsUsed / effectiveRunsLimit) * 100)
   }, [effectiveRunsLimit, runsUsed])
 
-  const normalizeWorkflowData = useCallback((data: any) => {
+  const normalizeWorkflowData = useCallback((data: unknown) => {
     if (data && typeof data === 'object') {
-      const rawNodes = Array.isArray((data as any).nodes)
-        ? (data as any).nodes
+      const rawNodes = Array.isArray((data as { nodes?: unknown }).nodes)
+        ? ((data as { nodes?: unknown }).nodes as Array<Partial<WorkflowNode>>)
         : []
-      const rawEdges = Array.isArray((data as any).edges)
-        ? (data as any).edges
+      const rawEdges = Array.isArray((data as { edges?: unknown }).edges)
+        ? ((data as { edges?: unknown }).edges as Array<Partial<WorkflowEdge>>)
         : []
-      // Deep-clone to avoid accidental shared references across workflows
-      const nodes = rawNodes.map((n: any) => ({
-        id: n.id,
-        type: n.type,
-        position: n.position,
-        data: n.data ? JSON.parse(JSON.stringify(n.data)) : undefined
-      }))
-      const edges = rawEdges.map((e: any) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-        type: e.type,
-        data: e.data ? JSON.parse(JSON.stringify(e.data)) : undefined,
-        label: e.label ?? null,
-        animated: Boolean((e as any).animated)
-      }))
+
+      const nodes: WorkflowNode[] = []
+      rawNodes.forEach((rawNode) => {
+        if (!rawNode || typeof rawNode.id !== 'string') return
+        const node = rawNode as WorkflowNode
+        nodes.push({
+          ...node,
+          data:
+            node?.data && typeof node.data === 'object'
+              ? cloneWorkflowData(node.data)
+              : node.data
+        })
+      })
+
+      const edges: WorkflowEdge[] = []
+      rawEdges.forEach((rawEdge) => {
+        if (!rawEdge || typeof rawEdge.id !== 'string') return
+        const edge = rawEdge as WorkflowEdge
+        edges.push({
+          ...edge,
+          data:
+            edge?.data && typeof edge.data === 'object'
+              ? cloneWorkflowData(edge.data)
+              : edge.data,
+          label:
+            typeof (rawEdge as any)?.label === 'string'
+              ? (rawEdge as any).label
+              : undefined,
+          animated: Boolean((rawEdge as { animated?: unknown }).animated)
+        })
+      })
+
       return { nodes, edges }
     }
 
@@ -309,12 +327,15 @@ export default function Dashboard() {
   }, [])
 
   const pushGraphToStore = useCallback(
-    (graph: { nodes: any[]; edges: any[] }, markDirty: boolean) => {
+    (
+      graph: { nodes: WorkflowNode[]; edges: WorkflowEdge[] },
+      markDirty: boolean
+    ) => {
       const epoch = Date.now()
       const incomingNodes = hydrateIncomingNodes(graph?.nodes ?? [], epoch)
       const incomingEdges = hydrateIncomingEdges(graph?.edges ?? [])
-      const normalizedNodes = normalizeNodesForState(incomingNodes) as Node[]
-      const normalizedEdges = incomingEdges as Edge[]
+      const normalizedNodes = normalizeNodesForState(incomingNodes)
+      const normalizedEdges = incomingEdges
 
       const { setGraph } = useWorkflowStore.getState()
       // Atomically replace graph and control dirty state to avoid transient re-dirty
@@ -353,13 +374,14 @@ export default function Dashboard() {
     setLockBusy(false)
   }, [currentWorkflow?.id])
 
-  const currentMeta = useMemo(
+  const _currentMeta = useMemo(
     () => ({
       name: currentWorkflow?.name ?? '',
       description: currentWorkflow?.description ?? null
     }),
     [currentWorkflow?.name, currentWorkflow?.description]
   )
+  void _currentMeta
 
   const workflowOptions = useMemo(
     () =>
@@ -637,7 +659,7 @@ export default function Dashboard() {
                   return
                 }
               } catch (e) {
-                console.error(e.message)
+                console.error(errorMessage(e))
               }
               if (
                 runOverlayOpen &&
@@ -710,7 +732,7 @@ export default function Dashboard() {
     try {
       window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
     } catch (e) {
-      console.error(e.message)
+      console.error(errorMessage(e))
     }
     // Kick off selection of the appropriate run for this workflow
     ensureOverlayRunForSelected()
@@ -736,7 +758,7 @@ export default function Dashboard() {
         try {
           es?.close()
         } catch (e) {
-          console.error(e.message)
+          console.error(errorMessage(e))
         }
         if (fallbackTimer) {
           clearTimeout(fallbackTimer)
@@ -753,7 +775,7 @@ export default function Dashboard() {
           const runs = await listActiveRuns(currentWorkflowIdValue)
           if (pickFrom(runs)) return
         } catch (e) {
-          console.error(e.message)
+          console.error(errorMessage(e))
         }
         // schedule next attempt with capped backoff
         backoff = Math.min(5000, backoff * 2)
@@ -777,14 +799,14 @@ export default function Dashboard() {
         const runs = JSON.parse(e.data)
         pickFrom(runs)
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
     const onError = () => {
       try {
         es?.close()
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
       if (!fallbackTimer) startFallback()
     }
@@ -795,7 +817,7 @@ export default function Dashboard() {
       try {
         es?.close()
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
       if (fallbackTimer) {
         clearTimeout(fallbackTimer)
@@ -822,7 +844,7 @@ export default function Dashboard() {
         else if (s.has_queued) setGlobalRunStatus('queued')
         else setGlobalRunStatus('idle')
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
     es.addEventListener('status', onStatus as any)
@@ -830,14 +852,14 @@ export default function Dashboard() {
       try {
         es?.close()
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
     return () => {
       try {
         es?.close()
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
   }, [])
@@ -845,8 +867,7 @@ export default function Dashboard() {
     if (activeRun?.status === 'running') return 'running'
     if (globalRunStatus === 'running') return 'running'
     if (globalRunStatus === 'queued') return 'queued'
-    if (activeRun?.status === 'queued' && globalRunStatus !== 'running')
-      return 'queued'
+    if (activeRun?.status === 'queued') return 'queued'
     return 'idle'
   }, [activeRun?.status, globalRunStatus])
 
@@ -866,7 +887,7 @@ export default function Dashboard() {
       try {
         setRunQueue(JSON.parse(e.data))
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
     es.addEventListener('runs', onRuns as any)
@@ -874,14 +895,14 @@ export default function Dashboard() {
       try {
         es?.close()
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
     return () => {
       try {
         es?.close()
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
   }, [activePane, currentWorkflowIdValue])
@@ -903,7 +924,7 @@ export default function Dashboard() {
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     } catch (e: any) {
       console.error('Failed to start run', e)
@@ -939,14 +960,14 @@ export default function Dashboard() {
           es?.close()
         }
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
     const onNodes = (e: MessageEvent) => {
       try {
         setNodeRuns(JSON.parse(e.data))
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
     const onError = () => {
@@ -954,7 +975,7 @@ export default function Dashboard() {
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
       es?.close()
     }
@@ -967,7 +988,7 @@ export default function Dashboard() {
       try {
         es?.close()
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     }
   }, [runOverlayOpen, currentWorkflowIdValue, activeRunId, stopPolling])
@@ -992,6 +1013,7 @@ export default function Dashboard() {
     }
 
     const { getGraph, setSaving, markClean } = useWorkflowStore.getState()
+    void markClean
 
     setSaving(true)
     setError(null)
@@ -1145,7 +1167,7 @@ export default function Dashboard() {
   }: {
     label: string
     description: string
-    icon: JSX.Element
+    icon: React.ReactNode
     gradient: string
     dragType: string
     disabled?: boolean

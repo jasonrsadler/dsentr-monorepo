@@ -136,8 +136,8 @@ describe('GoogleChatAction messaging persistence', () => {
       .find((call) =>
         Boolean(
           call?.[0] === nodeId &&
-          call?.[1] &&
-          'params' in (call?.[1] as Record<string, unknown>)
+            call?.[1] &&
+            'params' in (call?.[1] as Record<string, unknown>)
         )
       )
 

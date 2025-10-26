@@ -38,7 +38,7 @@ export default function EmailActionNode({
   ServiceComponent
 }: EmailActionNodeProps) {
   return (
-    <BaseActionNode
+    <BaseActionNode<ActionNodeData>
       id={id}
       selected={selected}
       canEdit={canEdit}
@@ -170,7 +170,7 @@ function EmailActionNodeContent({
               <div className="flex gap-2 items-center">
                 <NodeInputField
                   type="number"
-                  value={controller.timeout}
+                  value={String(controller.timeout)}
                   onChange={(value) => {
                     controller.handleTimeoutChange(Number(value))
                   }}
@@ -179,7 +179,7 @@ function EmailActionNodeContent({
                 <span className="text-xs">ms timeout</span>
                 <NodeInputField
                   type="number"
-                  value={controller.retries}
+                  value={String(controller.retries)}
                   onChange={(value) => {
                     controller.handleRetriesChange(Number(value))
                   }}

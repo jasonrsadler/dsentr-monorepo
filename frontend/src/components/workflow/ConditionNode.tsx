@@ -13,7 +13,7 @@ import NodeHeader from '@/components/UI/ReactFlow/NodeHeader'
 import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
 
-type ConditionNodeData = {
+export type ConditionNodeData = {
   field?: string
   operator?: string
   value?: string

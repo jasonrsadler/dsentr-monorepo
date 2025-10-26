@@ -1,8 +1,5 @@
 import { useState, useCallback, type ReactNode } from 'react'
-import BaseNode, {
-  type BaseNodeProps,
-  type BaseNodeRenderProps
-} from '../BaseNode'
+import BaseNode, { type BaseNodeRenderProps } from '../BaseNode'
 
 export type BaseActionNodeRunState = {
   canInvoke: boolean
@@ -18,8 +15,13 @@ export type BaseActionNodeChildrenProps<TData extends Record<string, unknown>> =
     runState: BaseActionNodeRunState
   }
 
-interface BaseActionNodeProps<TData extends Record<string, unknown>>
-  extends BaseNodeProps<TData> {
+interface BaseActionNodeProps<TData extends Record<string, unknown>> {
+  id: string
+  selected: boolean
+  canEdit?: boolean
+  fallbackLabel?: string
+  defaultExpanded?: boolean
+  defaultDirty?: boolean
   onRun?: (id: string, params: unknown) => Promise<void>
   isRunning?: boolean
   isSucceeded?: boolean
@@ -68,7 +70,7 @@ export default function BaseActionNode<TData extends Record<string, unknown>>({
     >
       {(baseProps) =>
         children({
-          ...baseProps,
+          ...(baseProps as BaseNodeRenderProps<TData>),
           runState: {
             canInvoke,
             isInvoking,

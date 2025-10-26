@@ -40,7 +40,7 @@ export default function RunCustomCodeActionNode({
   canEdit = true
 }: RunCustomCodeActionNodeProps) {
   return (
-    <BaseActionNode
+    <BaseActionNode<ActionNodeData>
       id={id}
       selected={selected}
       canEdit={canEdit}
@@ -157,7 +157,7 @@ function RunCustomCodeActionNodeContent({
               <div className="flex gap-2 items-center">
                 <NodeInputField
                   type="number"
-                  value={controller.timeout}
+                  value={String(controller.timeout)}
                   onChange={(value) => {
                     controller.handleTimeoutChange(Number(value))
                   }}
@@ -166,7 +166,7 @@ function RunCustomCodeActionNodeContent({
                 <span className="text-xs">ms timeout</span>
                 <NodeInputField
                   type="number"
-                  value={controller.retries}
+                  value={String(controller.retries)}
                   onChange={(value) => {
                     controller.handleRetriesChange(Number(value))
                   }}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { API_BASE_URL } from '@/lib/config'
+import { errorMessage } from '@/lib/errorMessage'
 import {
   OAuthProvider,
   ProviderConnectionSet,
@@ -15,7 +16,7 @@ import {
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
-import ConfirmDialog from '@/components/UI/Dialog/ConfirmDialog'
+import ConfirmDialog from '@/components/UI/dialog/ConfirmDialog'
 
 export type IntegrationNotice =
   | { kind: 'connected'; provider?: OAuthProvider }
@@ -182,7 +183,7 @@ export default function IntegrationsTab({
         new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
       )
     } catch (err) {
-      console.error((err as Error).message)
+      console.error(errorMessage(err))
     }
   }, [])
 
@@ -254,6 +255,9 @@ export default function IntegrationsTab({
           if (removeBusyId === entry.id) {
             continue
           }
+          if (!entry.id) {
+            continue
+          }
           await unshareWorkspaceConnection(entry.workspaceId, entry.id)
         }
         await disconnectProvider(provider)
@@ -301,7 +305,7 @@ export default function IntegrationsTab({
   const handleDisconnect = useCallback(
     (provider: OAuthProvider) => {
       const status = statuses[provider]
-      const personal = status?.personal
+      // no-op: personal reference unused
       const workspaceConnections = (status?.workspace ?? []).filter(
         (entry) => !workspaceId || entry.workspaceId === workspaceId
       )

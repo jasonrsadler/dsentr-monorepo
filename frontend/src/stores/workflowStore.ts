@@ -1,28 +1,34 @@
 import { create } from 'zustand'
-import type { Edge, Node } from '@xyflow/react'
 import {
   reconcileNodeLabels,
   shallowEqualData,
   sanitizeNodeData,
-  normalizeEdgeForPayload,
-  type FlowNode
+  normalizeEdgeForPayload
 } from '@/lib/workflowGraph'
+import type {
+  WorkflowEdge,
+  WorkflowNode
+} from '@/layouts/DashboardLayouts/FlowCanvas'
 
 type Graph = {
-  nodes: Node[]
-  edges: Edge[]
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
 }
 
 export interface WorkflowState {
-  nodes: Node[]
-  edges: Edge[]
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
   isDirty: boolean
   isSaving: boolean
   canEdit: boolean
-  setNodes: (nodes: Node[]) => void
-  setEdges: (edges: Edge[]) => void
+  setNodes: (nodes: WorkflowNode[]) => void
+  setEdges: (edges: WorkflowEdge[]) => void
   // Atomically replace the graph and control dirty flag
-  setGraph: (nodes: Node[], edges: Edge[], markDirty: boolean) => void
+  setGraph: (
+    nodes: WorkflowNode[],
+    edges: WorkflowEdge[],
+    markDirty: boolean
+  ) => void
   updateNodeData: (id: string, data: unknown) => void
   removeNode: (id: string) => void
   setCanEdit: (flag: boolean) => void
@@ -40,8 +46,8 @@ const clone = <T>(value: T): T => {
 }
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
-  nodes: [],
-  edges: [],
+  nodes: [] as WorkflowNode[],
+  edges: [] as WorkflowEdge[],
   isDirty: false,
   isSaving: false,
   canEdit: true,
@@ -83,7 +89,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       if (index === -1) {
         return state
       }
-      const nextNodes = state.nodes.map((node, nodeIndex) => {
+      const nextNodes = state.nodes.map<WorkflowNode>((node, nodeIndex) => {
         if (nodeIndex !== index) {
           return node
         }
@@ -95,13 +101,16 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
           return {
             ...node,
-            data
+            data: data as any
           }
         }
 
         const currentData =
           node.data !== null && typeof node.data === 'object' ? node.data : {}
-        const mergedData = { ...currentData, ...(data as Record<string, any>) }
+        const mergedData = {
+          ...currentData,
+          ...(data as Record<string, unknown>)
+        }
 
         if (shallowEqualData(currentData, mergedData)) {
           return node
@@ -109,11 +118,11 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
         return {
           ...node,
-          data: mergedData
+          data: mergedData as any
         }
       })
 
-      const reconciledNodes = reconcileNodeLabels(nextNodes as FlowNode[])
+      const reconciledNodes = reconcileNodeLabels<WorkflowNode>(nextNodes)
 
       if (reconciledNodes === state.nodes) {
         return state
@@ -122,7 +131,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       const prevSanitized = [...state.nodes]
         .map(sanitizeNodeData)
         .sort((a, b) => a.id.localeCompare(b.id))
-      const nextSanitized = [...(reconciledNodes as any[])]
+      const nextSanitized = [...reconciledNodes]
         .map(sanitizeNodeData)
         .sort((a, b) => a.id.localeCompare(b.id))
       const changed =

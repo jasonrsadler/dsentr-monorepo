@@ -133,9 +133,9 @@ describe('WebhookAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-              'params' in payload &&
-              (payload as { params: WebhookActionParams }).params.method ===
-              'POST'
+                'params' in payload &&
+                (payload as { params: WebhookActionParams }).params.method ===
+                  'POST'
             )
         )
       ).toBe(true)
@@ -178,9 +178,9 @@ describe('WebhookAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-              'params' in payload &&
-              (payload as { params: WebhookActionParams }).params
-                .authUsername === 'alice'
+                'params' in payload &&
+                (payload as { params: WebhookActionParams }).params
+                  .authUsername === 'alice'
             )
         )
       ).toBe(true)
@@ -237,9 +237,9 @@ describe('WebhookAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-              'params' in payload &&
-              (payload as { params: WebhookActionParams }).params.body ===
-              '{"ok":true}'
+                'params' in payload &&
+                (payload as { params: WebhookActionParams }).params.body ===
+                  '{"ok":true}'
             )
         )
       ).toBe(true)

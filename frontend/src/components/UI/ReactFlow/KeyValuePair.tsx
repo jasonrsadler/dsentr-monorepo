@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Trash2, Plus } from 'lucide-react'
-import NodeInputField from '../InputFields/NodeInputField'
+import NodeInputField from '@components/UI/InputFields/NodeInputField'
 
 interface KeyValuePairProps {
   title?: string
@@ -79,12 +79,12 @@ export default function KeyValuePair({
           <NodeInputField
             placeholder={placeholderKey}
             value={v.key}
-            onChange={(val) => updateVar(index, 'key', val)}
+            onChange={(val: string) => updateVar(index, 'key', val)}
           />
           <NodeInputField
             placeholder={placeholderValue}
             value={v.value}
-            onChange={(val) => updateVar(index, 'value', val)}
+            onChange={(val: string) => updateVar(index, 'value', val)}
           />
           <button
             onClick={() => removeVar(index)}

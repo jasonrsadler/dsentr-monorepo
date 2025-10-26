@@ -107,7 +107,7 @@ export function shallowEqualData(
   return true
 }
 
-export function reconcileNodeLabels(nodes: FlowNode[]): FlowNode[] {
+export function reconcileNodeLabels<T extends FlowNode>(nodes: T[]): T[] {
   const metadata = nodes.map((node) => {
     const trimmed = sanitizeLabelInput(node?.data?.label)
     return {
@@ -122,7 +122,7 @@ export function reconcileNodeLabels(nodes: FlowNode[]): FlowNode[] {
     counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
   })
   let hasChanges = false
-  const nextNodes = nodes.map((node, index) => {
+  const nextNodes = nodes.map<T>((node, index) => {
     const prevData = node.data ?? {}
     const { trimmed, hasSpaces, normalized } = metadata[index]
     let labelError: string | null = null

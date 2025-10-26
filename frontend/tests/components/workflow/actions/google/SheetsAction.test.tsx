@@ -47,19 +47,19 @@ const buildGoogleConnections = (includeWorkspace: boolean) => ({
   },
   workspace: includeWorkspace
     ? [
-      {
-        scope: 'workspace' as const,
-        id: 'google-workspace',
-        connected: true,
-        accountEmail: 'ops@example.com',
-        expiresAt: '2025-01-01T00:00:00.000Z',
-        workspaceId: 'ws-1',
-        workspaceName: 'Operations',
-        sharedByName: 'Team Admin',
-        sharedByEmail: 'admin@example.com',
-        requiresReconnect: false
-      }
-    ]
+        {
+          scope: 'workspace' as const,
+          id: 'google-workspace',
+          connected: true,
+          accountEmail: 'ops@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          workspaceId: 'ws-1',
+          workspaceName: 'Operations',
+          sharedByName: 'Team Admin',
+          sharedByEmail: 'admin@example.com',
+          requiresReconnect: false
+        }
+      ]
     : []
 })
 

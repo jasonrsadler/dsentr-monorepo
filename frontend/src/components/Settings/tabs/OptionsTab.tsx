@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import ConfirmDialog from '@/components/UI/Dialog/ConfirmDialog'
+import ConfirmDialog from '@/components/UI/dialog/ConfirmDialog'
 import {
   SecretStore,
   deleteSecret,

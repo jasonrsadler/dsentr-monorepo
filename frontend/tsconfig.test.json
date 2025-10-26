@@ -12,5 +12,6 @@
         "src",
         "vite.config.ts",
         "src/test/setup.ts"
-    ]
+    ],
+    "exclude": []
 }

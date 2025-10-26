@@ -5,6 +5,7 @@ import {
   WorkflowRecord
 } from '@/lib/workflowApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
+import { errorMessage } from '@/lib/errorMessage'
 
 type Props = {
   workflows?: WorkflowRecord[]
@@ -61,7 +62,7 @@ export default function WorkflowsTab({
           new CustomEvent('workflow-deleted', { detail: { id: selected.id } })
         )
       } catch (e) {
-        console.error(e.message)
+        console.error(errorMessage(e))
       }
     } finally {
       setBusy(false)

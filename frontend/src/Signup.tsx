@@ -435,7 +435,8 @@ export default function SignupPage() {
                   { name: 'country', label: 'Country' },
                   { name: 'tax_id', label: 'Tax ID' }
                 ].map(({ name, label, required, type }) => {
-                  const value = (form as Record<string, string>)[name] ?? ''
+                  const rawVal = (form as any)[name]
+                  const value = typeof rawVal === 'string' ? rawVal : ''
                   const hasError = fieldErrors[name]
                   const isReadOnly =
                     inviteStatus === 'valid' && name === 'email'

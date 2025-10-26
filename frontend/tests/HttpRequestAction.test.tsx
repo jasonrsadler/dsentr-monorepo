@@ -142,9 +142,9 @@ describe('HttpRequestAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-              'params' in payload &&
-              (payload as { params: HttpRequestActionParams }).params.url ===
-              'https://example.com/posts'
+                'params' in payload &&
+                (payload as { params: HttpRequestActionParams }).params.url ===
+                  'https://example.com/posts'
             )
         )
       ).toBe(true)
@@ -189,9 +189,9 @@ describe('HttpRequestAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-              'params' in payload &&
-              (payload as { params: HttpRequestActionParams }).params
-                .headers?.[0]?.key === 'X-Trace-ID'
+                'params' in payload &&
+                (payload as { params: HttpRequestActionParams }).params
+                  .headers?.[0]?.key === 'X-Trace-ID'
             )
         )
       ).toBe(true)
@@ -236,9 +236,9 @@ describe('HttpRequestAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-              'params' in payload &&
-              (payload as { params: HttpRequestActionParams }).params.url ===
-              'https://valid.example.com'
+                'params' in payload &&
+                (payload as { params: HttpRequestActionParams }).params.url ===
+                  'https://valid.example.com'
             )
         )
       ).toBe(true)

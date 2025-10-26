@@ -97,7 +97,9 @@ export default function BaseNode<
   const handleToggleExpanded = useCallback(() => {
     if (!effectiveCanEdit) return
     if (isFlyoutRender) return
-    updateNodeData(id, { expanded: !storedExpanded } as Partial<TData>)
+    updateNodeData(id, {
+      expanded: !storedExpanded
+    } as unknown as Partial<TData>)
   }, [effectiveCanEdit, id, isFlyoutRender, storedExpanded, updateNodeData])
 
   const handleRemove = useCallback(() => {

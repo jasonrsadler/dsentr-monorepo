@@ -26,6 +26,7 @@ import { ScheduleTimePicker } from '../ui/schedule/ScheduleTimePicker'
 import { ScheduleTimezonePicker } from '../ui/schedule/ScheduleTimezonePicker'
 import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
 import { normalizePlanTier } from '@/lib/planTiers'
+import { errorMessage } from '@/lib/errorMessage'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
 import { useWorkflowFlyout } from '@/components/workflow/useWorkflowFlyout'
 
@@ -100,7 +101,7 @@ type TriggerInput = {
   value: string
 }
 
-type TriggerNodeData = {
+export type TriggerNodeData = {
   id?: string
   label?: string
   expanded?: boolean
@@ -393,7 +394,7 @@ function TriggerNodeContent({
         new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
       )
     } catch (err) {
-      console.error((err as Error).message)
+      console.error(errorMessage(err))
     }
   }, [])
 
@@ -661,8 +662,8 @@ function TriggerNodeContent({
                             return {
                               ...prev,
                               repeat: {
-                                every: prev.repeat?.every ?? 1,
-                                unit: prev.repeat?.unit ?? 'days'
+                                every: 1,
+                                unit: 'days'
                               }
                             }
                           })
@@ -814,7 +815,6 @@ function TriggerNodeContent({
                                       }))
                                       setTimezonePickerOpen(false)
                                     }}
-                                    onClose={() => setTimezonePickerOpen(false)}
                                   />
                                 </motion.div>
                               )}

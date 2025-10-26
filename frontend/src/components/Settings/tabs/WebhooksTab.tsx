@@ -8,6 +8,7 @@ import {
   setWebhookConfig
 } from '@/lib/workflowApi'
 import { API_BASE_URL } from '@/lib/config'
+import { errorMessage } from '@/lib/errorMessage'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 
 export default function WebhooksTab() {
@@ -151,7 +152,7 @@ export default function WebhooksTab() {
                   setCopied(true)
                   setTimeout(() => setCopied(false), 1500)
                 } catch (e) {
-                  console.error(e.message)
+                  console.error(errorMessage(e))
                 }
               }}
             >
@@ -244,7 +245,7 @@ export default function WebhooksTab() {
                   try {
                     await navigator.clipboard.writeText(curlCopy)
                   } catch (e) {
-                    console.error(e.message)
+                    console.error(errorMessage(e))
                   }
                   setCopiedCurl(true)
                   setTimeout(() => setCopiedCurl(false), 1500)
@@ -269,7 +270,7 @@ export default function WebhooksTab() {
                   try {
                     await navigator.clipboard.writeText(psCopy)
                   } catch (e) {
-                    console.error(e.message)
+                    console.error(errorMessage(e))
                   }
                   setCopiedPS(true)
                   setTimeout(() => setCopiedPS(false), 1500)
@@ -294,7 +295,7 @@ export default function WebhooksTab() {
                   try {
                     await navigator.clipboard.writeText(jsCopy)
                   } catch (e) {
-                    console.error(e.message)
+                    console.error(errorMessage(e))
                   }
                   setCopiedJS(true)
                   setTimeout(() => setCopiedJS(false), 1500)
@@ -355,7 +356,7 @@ export default function WebhooksTab() {
                   replay_window_sec: replayWindow
                 })
               } catch (e) {
-                console.error(e.message)
+                console.error(errorMessage(e))
               }
             }}
           >
@@ -376,7 +377,7 @@ export default function WebhooksTab() {
                 try {
                   await navigator.clipboard.writeText(signingKey)
                 } catch (e) {
-                  console.error(e.message)
+                  console.error(errorMessage(e))
                 }
               }}
             >

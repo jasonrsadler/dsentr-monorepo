@@ -169,7 +169,6 @@ const STRING_KEYS: (keyof TeamsActionValues)[] = [
   'workflowHeaderSecret',
   'oauthProvider',
   'oauthConnectionId',
-  'oauthConnectionScope',
   'oauthAccountEmail',
   'teamId',
   'teamName',
@@ -311,7 +310,7 @@ const applyConnectionSelection = (
   }
 
   if (!selection) {
-    next.oauthConnectionScope = ''
+    delete (next as Record<string, unknown>).oauthConnectionScope
     next.oauthConnectionId = ''
     next.oauthAccountEmail = ''
     if ('connection' in next) {
@@ -381,7 +380,6 @@ const normalizeParams = (incoming?: TeamsActionValues): TeamsActionValues => {
     workflowHeaderSecret: '',
     oauthProvider: '',
     oauthConnectionId: '',
-    oauthConnectionScope: '',
     oauthAccountEmail: '',
     teamId: '',
     teamName: '',
@@ -398,7 +396,9 @@ const normalizeParams = (incoming?: TeamsActionValues): TeamsActionValues => {
   STRING_KEYS.forEach((key) => {
     const value = incoming[key]
     if (typeof value === 'string') {
-      next[key] = value
+      ;(next as Record<string, string | undefined>)[
+        key as Extract<keyof TeamsActionValues, string>
+      ] = value
     }
   })
 
@@ -519,7 +519,9 @@ const computeTeamsPatch = (
 
   keys.forEach((key) => {
     if (!deepEqual(current[key], next[key])) {
-      patch[key] = next[key] as TeamsActionValues[keyof TeamsActionValues]
+      ;(patch as Record<string, unknown>)[
+        key as Extract<keyof TeamsActionValues, string>
+      ] = next[key] as unknown
     }
   })
 
@@ -555,7 +557,7 @@ const sanitizeForSelection = (
   if (isIncomingWebhook) {
     sanitized.oauthProvider = ''
     sanitized.oauthConnectionId = ''
-    sanitized.oauthConnectionScope = ''
+    delete (sanitized as Record<string, unknown>).oauthConnectionScope
     sanitized.oauthAccountEmail = ''
     sanitized.teamId = ''
     sanitized.teamName = ''
@@ -655,7 +657,7 @@ const sanitizeForSelection = (
             ? inferredSelection.connectionId
             : 'microsoft'
     } else {
-      sanitized.oauthConnectionScope = ''
+      delete (sanitized as Record<string, unknown>).oauthConnectionScope
       sanitized.oauthConnectionId = ''
       sanitized.oauthAccountEmail = ''
       if ('connection' in sanitized) {
@@ -716,7 +718,7 @@ const sanitizeForSelection = (
   sanitized.workflowHeaderSecret = ''
   sanitized.oauthProvider = ''
   sanitized.oauthConnectionId = ''
-  sanitized.oauthConnectionScope = ''
+  delete (sanitized as Record<string, unknown>).oauthConnectionScope
   sanitized.oauthAccountEmail = ''
   sanitized.teamId = ''
   sanitized.teamName = ''
@@ -1154,7 +1156,6 @@ export default function TeamsAction({
         isDelegated: effectiveContext.isDelegated,
         isConnector: effectiveContext.isConnector,
         isWorkflow: effectiveContext.isWorkflow,
-        workflowOption: effectiveContext.workflowOption,
         workflowUsesHeaderSecret: effectiveContext.workflowUsesHeaderSecret,
         delegatedMessageType: effectiveContext.delegatedMessageType,
         delegatedCardMode: effectiveContext.delegatedCardMode
@@ -1165,7 +1166,7 @@ export default function TeamsAction({
         : null
       const sanitizedWithSelection = applyConnectionSelection(
         sanitizedForContext,
-        selection
+        selection ?? null
       )
 
       const mentions = (sanitizedWithSelection.mentions ?? []).map(
@@ -1859,7 +1860,7 @@ export default function TeamsAction({
   return (
     <div className="flex flex-col gap-2">
       <NodeDropdownField
-        options={deliveryOptions}
+        options={[...deliveryOptions]}
         value={currentParams.deliveryMethod}
         onChange={(val) => updateField('deliveryMethod', val)}
       />
@@ -2100,7 +2101,7 @@ export default function TeamsAction({
           )}
 
           <NodeDropdownField
-            options={delegatedMessageTypes}
+            options={[...delegatedMessageTypes]}
             value={delegatedMessageType}
             onChange={handleMessageTypeChange}
           />
@@ -2174,7 +2175,7 @@ export default function TeamsAction({
           ) : (
             <>
               <NodeDropdownField
-                options={delegatedCardModes}
+                options={[...delegatedCardModes]}
                 value={delegatedCardMode}
                 onChange={handleCardModeChange}
               />

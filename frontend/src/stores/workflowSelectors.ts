@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import { shallow } from 'zustand/shallow'
 
 import { useWorkflowStore, type WorkflowState } from './workflowStore'
 
@@ -19,7 +18,7 @@ export interface KeyValuePair {
   value: string
 }
 
-export interface HttpRequestActionParams {
+export interface HttpRequestActionParams extends Record<string, unknown> {
   url: string
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
   headers: KeyValuePair[]
@@ -36,7 +35,7 @@ export interface HttpRequestActionParams {
   dirty: boolean
 }
 
-export interface WebhookActionParams {
+export interface WebhookActionParams extends Record<string, unknown> {
   url: string
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   headers: KeyValuePair[]
@@ -51,14 +50,14 @@ export interface WebhookActionParams {
   dirty: boolean
 }
 
-export interface RunCustomCodeActionParams {
+export interface RunCustomCodeActionParams extends Record<string, unknown> {
   code: string
   inputs: KeyValuePair[]
   outputs: KeyValuePair[]
   dirty: boolean
 }
 
-export interface SheetsActionParams {
+export interface SheetsActionParams extends Record<string, unknown> {
   spreadsheetId: string
   worksheet: string
   columns: KeyValuePair[]
@@ -187,17 +186,15 @@ function toInteger(value: unknown, fallback: number): number {
 
 function normalizeKeyValuePairs(value: unknown): KeyValuePair[] {
   if (!Array.isArray(value)) return []
-  const normalized = value
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return DEFAULT_KEY_VALUE
-      const record = entry as Record<string, unknown>
-      const key = toString(record.key)
-      const val = toString(record.value)
-      return { key, value: val }
-    })
-    .map((pair) => Object.freeze(pair))
+  const normalized = value.map((entry) => {
+    if (!entry || typeof entry !== 'object') return DEFAULT_KEY_VALUE
+    const record = entry as Record<string, unknown>
+    const key = toString(record.key)
+    const val = toString(record.value)
+    return { key, value: val }
+  })
 
-  return Object.freeze(normalized)
+  return normalized
 }
 
 function cloneRecord(source: Record<string, unknown> | null | undefined) {
@@ -318,7 +315,7 @@ function extractParams(data: ActionNodeDataLike): Record<string, unknown> {
   return {}
 }
 
-function withDirty<T extends Record<string, unknown>>(
+function withDirty<T extends object>(
   value: T,
   dirty: boolean
 ): T & {
@@ -429,7 +426,7 @@ function normalizeSheetsParams(
     oauthConnectionId: toString(params.oauthConnectionId)
   }
 
-  return withDirty(normalized, meta.dirty)
+  return withDirty(normalized as SheetsActionParams, meta.dirty)
 }
 
 // Stable default params per action type to avoid returning
@@ -531,9 +528,10 @@ export function selectActionMeta(nodeId: string) {
   }
 }
 
-export function selectActionParams<
-  T extends Record<string, unknown> = Record<string, unknown>
->(nodeId: string, overrideType?: string) {
+export function selectActionParams<T extends object = Record<string, unknown>>(
+  nodeId: string,
+  overrideType?: string
+) {
   return (state: WorkflowState): T => {
     const data = findNodeData(state, nodeId)
     if (!data) {
@@ -553,15 +551,16 @@ export function useSheetsActionParams(nodeId: string) {
 
 export function useActionMeta(nodeId: string) {
   const selector = useMemo(() => selectActionMeta(nodeId), [nodeId])
-  return useWorkflowStore(selector, shallow)
+  return useWorkflowStore(selector)
 }
 
-export function useActionParams<
-  T extends Record<string, unknown> = Record<string, unknown>
->(nodeId: string, overrideType?: string) {
+export function useActionParams<T extends object = Record<string, unknown>>(
+  nodeId: string,
+  overrideType?: string
+) {
   const selector = useMemo(
     () => selectActionParams<T>(nodeId, overrideType),
     [nodeId, overrideType]
   )
-  return useWorkflowStore(selector, shallow)
+  return useWorkflowStore(selector)
 }

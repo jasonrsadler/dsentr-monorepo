@@ -1,5 +1,6 @@
 import { ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { errorMessage } from '@/lib/errorMessage'
 
 interface JsonDialogProps {
   isOpen: boolean
@@ -39,7 +40,7 @@ export default function JsonDialog({
                     try {
                       navigator.clipboard.writeText(jsonText)
                     } catch (e) {
-                      console.error(e.message)
+                      console.error(errorMessage(e))
                     }
                   }}
                   className="px-2 py-1 text-xs rounded bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600"

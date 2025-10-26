@@ -108,7 +108,7 @@ const fetchConnections = vi.fn().mockResolvedValue({
   }
 })
 const getCachedConnections = vi.fn().mockReturnValue(null)
-const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => { })
+const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => {})
 
 vi.mock('@/stores/workflowSelectors', () => ({
   useActionParams: () => mockParamsRef.current

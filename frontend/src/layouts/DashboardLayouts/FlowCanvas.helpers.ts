@@ -1,4 +1,5 @@
 import { normalizeEdge, reconcileNodeLabels } from '@/lib/workflowGraph'
+import type { WorkflowEdge, WorkflowNode, WorkflowNodeData } from './FlowCanvas'
 
 const ACTION_NODE_TYPE_ALIASES: Record<string, string> = {
   'action.email': 'actionEmail',
@@ -46,47 +47,69 @@ export function cloneWorkflowData<T>(value: T): T {
   return JSON.parse(JSON.stringify(value))
 }
 
-export function normalizeEdgesForState(edges: any[]) {
-  return edges.map((edge: any) => {
-    const normalized = normalizeEdge(edge)
+export function normalizeEdgesForState(
+  edges: ReadonlyArray<WorkflowEdge>
+): WorkflowEdge[] {
+  return edges.map((edge) => {
+    const normalized = normalizeEdge(edge) as WorkflowEdge
+    const data =
+      normalized?.data && typeof normalized.data === 'object'
+        ? cloneWorkflowData(normalized.data)
+        : normalized.data
+
     return {
       ...normalized,
       // Preserve selection state so edge UI depending on `selected` works
-      selected: Boolean((edge as any)?.selected),
-      data:
-        normalized?.data && typeof normalized.data === 'object'
-          ? cloneWorkflowData(normalized.data)
-          : normalized.data
+      selected: Boolean(edge?.selected),
+      data
     }
   })
 }
 
-export function normalizeNodesForState(nodes: any[]) {
-  return reconcileNodeLabels(
-    nodes.map((node: any) => ({
+export function normalizeNodesForState(
+  nodes: ReadonlyArray<WorkflowNode>
+): WorkflowNode[] {
+  const normalizedNodes = nodes.map((node) => {
+    const data =
+      node?.data && typeof node.data === 'object'
+        ? cloneWorkflowData(node.data)
+        : node.data
+
+    return {
       ...node,
       type: normalizeNodeType(node?.type),
-      data:
-        node?.data && typeof node.data === 'object'
-          ? cloneWorkflowData(node.data)
-          : node.data
-    }))
-  )
-}
-
-export function hydrateIncomingNodes(rawNodes: any[], epoch: number) {
-  return rawNodes.map((node: any) => ({
-    id: node.id,
-    type: normalizeNodeType(node.type),
-    position: node.position,
-    data: {
-      ...(node?.data ? cloneWorkflowData(node.data) : {}),
-      dirty: Boolean(node?.data?.dirty),
-      wfEpoch: epoch
+      data
     }
-  }))
+  })
+
+  return reconcileNodeLabels(normalizedNodes)
 }
 
-export function hydrateIncomingEdges(rawEdges: any[]) {
+export function hydrateIncomingNodes(
+  rawNodes: ReadonlyArray<WorkflowNode>,
+  epoch: number
+): WorkflowNode[] {
+  return rawNodes.map((node) => {
+    const baseData =
+      node?.data && typeof node.data === 'object'
+        ? cloneWorkflowData(node.data)
+        : ({} as WorkflowNodeData)
+
+    return {
+      id: node.id,
+      type: normalizeNodeType(node.type),
+      position: node.position,
+      data: {
+        ...(baseData as WorkflowNodeData),
+        dirty: Boolean((node?.data as WorkflowNodeData | undefined)?.dirty),
+        wfEpoch: epoch
+      }
+    }
+  })
+}
+
+export function hydrateIncomingEdges(
+  rawEdges: ReadonlyArray<WorkflowEdge>
+): WorkflowEdge[] {
   return normalizeEdgesForState(rawEdges)
 }

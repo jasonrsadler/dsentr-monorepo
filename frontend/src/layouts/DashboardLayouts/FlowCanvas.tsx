@@ -1,4 +1,11 @@
-import { useCallback, useMemo, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useMemo,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent
+} from 'react'
 import {
   ReactFlow,
   Background,
@@ -8,9 +15,17 @@ import {
   applyNodeChanges,
   useReactFlow,
   type Node,
+  type Edge,
+  type NodeProps,
+  type EdgeProps,
+  type NodeChange,
+  type EdgeChange,
+  type Connection,
   type OnSelectionChangeParams
 } from '@xyflow/react'
-import TriggerNode from '@/components/Workflow/TriggerNode'
+import TriggerNode, {
+  type TriggerNodeData
+} from '@/components/workflow/TriggerNode'
 import {
   SendGridActionNode,
   MailgunActionNode,
@@ -24,9 +39,11 @@ import {
   HttpRequestActionNode,
   RunCustomCodeActionNode
 } from '@/components/workflow/nodes'
-import NodeEdge from '@/components/Workflow/NodeEdge'
+import NodeEdge from '@/components/workflow/NodeEdge'
 import CustomControls from '@/components/UI/ReactFlow/CustomControl'
-import ConditionNode from '@/components/Workflow/ConditionNode'
+import ConditionNode, {
+  type ConditionNodeData
+} from '@/components/workflow/ConditionNode'
 import { normalizePlanTier } from '@/lib/planTiers'
 import { generateUniqueLabel } from '@/lib/workflowGraph'
 import {
@@ -45,7 +62,7 @@ import NodeInputField from '@/components/UI/InputFields/NodeInputField'
 import NodeCheckBoxField from '@/components/UI/InputFields/NodeCheckboxField'
 import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
 import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
-import TriggerTypeDropdown from '@/components/Workflow/TriggerTypeDropdown'
+import TriggerTypeDropdown from '@/components/workflow/TriggerTypeDropdown'
 import SendGridAction from '@/components/workflow/Actions/Email/Services/SendGridAction'
 import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunAction'
 import AmazonSESAction from '@/components/workflow/Actions/Email/Services/AmazonSESAction'
@@ -65,6 +82,37 @@ import useMessagingActionRestriction from '@/components/workflow/nodes/useMessag
 const SCHEDULE_RESTRICTION_MESSAGE =
   'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'
 
+type WorkflowEdgeStyle = 'default' | 'bold' | 'dashed'
+
+export interface WorkflowEdgeData extends Record<string, unknown> {
+  edgeType?: WorkflowEdgeStyle
+  outcome?: string | null
+}
+
+export type WorkflowNodeData =
+  | TriggerNodeData
+  | ConditionNodeData
+  | ActionNodeData
+  | Record<string, unknown>
+
+export type WorkflowNode = Node<WorkflowNodeData>
+export type WorkflowEdge = Edge<WorkflowEdgeData>
+
+type TriggerNodeRendererProps = NodeProps<Node<TriggerNodeData>>
+type ConditionNodeRendererProps = NodeProps<Node<ConditionNodeData>>
+
+type ActionNodeRendererProps = NodeProps<Node<ActionNodeData>> & {
+  onRun?: (id: string, params: unknown) => Promise<void>
+  isRunning?: boolean
+  isSucceeded?: boolean
+  isFailed?: boolean
+  canEdit?: boolean
+  planTier?: string | null
+  onRestrictionNotice?: (message: string) => void
+}
+
+type WorkflowEdgeRendererProps = EdgeProps<WorkflowEdge>
+
 type ActionDropSubtype =
   | 'actionEmailSendgrid'
   | 'actionEmailMailgun'
@@ -83,7 +131,7 @@ interface DropDescriptor {
   labelBase: string
   idPrefix: string
   expanded: boolean
-  data: Record<string, unknown>
+  data: ActionNodeData
 }
 
 type ActionDropConfig = {
@@ -91,7 +139,7 @@ type ActionDropConfig = {
   labelBase: string
   idPrefix: string
   expanded: boolean
-  createData: () => Record<string, unknown>
+  createData: () => ActionNodeData
 }
 
 const ACTION_NODE_DROP_CONFIG: Record<ActionDropSubtype, ActionDropConfig> = {
@@ -422,7 +470,7 @@ function normalizeDropType(rawType: string): DropDescriptor {
       labelBase: 'Trigger',
       idPrefix: 'trigger',
       expanded: true,
-      data: {}
+      data: {} as ActionNodeData
     }
   }
 
@@ -432,7 +480,7 @@ function normalizeDropType(rawType: string): DropDescriptor {
       labelBase: 'Condition',
       idPrefix: 'condition',
       expanded: true,
-      data: {}
+      data: {} as ActionNodeData
     }
   }
 
@@ -483,14 +531,14 @@ export default function FlowCanvas({
 }: FlowCanvasProps) {
   const nodes = useWorkflowStore(selectNodes)
   const edges = useWorkflowStore(selectEdges)
-  const reactFlow = useReactFlow()
+  const reactFlow = useReactFlow<WorkflowNode, WorkflowEdge>()
   // Track which node's details flyout is open for (independent of selection)
   const [flyoutNodeId, setFlyoutNodeId] = useState<string | null>(null)
   const syncSelectionToStore = useCallback((nextSelectedId: string | null) => {
     const state = useWorkflowStore.getState()
     const currentNodes = state.nodes
     let nodeChanged = false
-    const nextNodes = currentNodes.map((node) => {
+    const nextNodes = currentNodes.map<WorkflowNode>((node) => {
       const shouldSelect = nextSelectedId !== null && node.id === nextSelectedId
       if (Boolean(node.selected) === shouldSelect) {
         return node
@@ -507,7 +555,7 @@ export default function FlowCanvas({
 
     const currentEdges = state.edges
     let edgeChanged = false
-    const nextEdges = currentEdges.map((edge) => {
+    const nextEdges = currentEdges.map<WorkflowEdge>((edge) => {
       if (!edge.selected) {
         return edge
       }
@@ -590,121 +638,134 @@ export default function FlowCanvas({
     }
   }, [flyoutNodeId, flyoutNode, syncSelectionToStore])
 
-  const determineActionSubtype = useCallback((data: any): ActionDropSubtype => {
-    const rawActionType =
-      typeof data?.actionType === 'string' ? data.actionType : null
-    const normalizedActionType = (() => {
-      if (!rawActionType) return 'email'
-      const lowered = rawActionType.trim().toLowerCase()
-      switch (lowered) {
-        case 'send email':
-          return 'email'
-        case 'post webhook':
-          return 'webhook'
-        case 'create google sheet row':
-          return 'sheets'
-        case 'http request':
-          return 'http'
-        case 'run custom code':
-          return 'code'
-        default:
-          return lowered || 'email'
+  const determineActionSubtype = useCallback(
+    (data: ActionNodeData | null | undefined): ActionDropSubtype => {
+      const rawActionType =
+        typeof data?.actionType === 'string' ? data.actionType : null
+      const normalizedActionType = (() => {
+        if (!rawActionType) return 'email'
+        const lowered = rawActionType.trim().toLowerCase()
+        switch (lowered) {
+          case 'send email':
+            return 'email'
+          case 'post webhook':
+            return 'webhook'
+          case 'create google sheet row':
+            return 'sheets'
+          case 'http request':
+            return 'http'
+          case 'run custom code':
+            return 'code'
+          default:
+            return lowered || 'email'
+        }
+      })()
+
+      if (normalizedActionType === 'messaging') {
+        const platform =
+          typeof data?.params?.platform === 'string'
+            ? data.params.platform.trim().toLowerCase()
+            : ''
+        if (platform === 'google chat' || platform === 'googlechat') {
+          return 'actionGoogleChat'
+        }
+        if (platform === 'teams') return 'actionTeams'
+        return 'actionSlack'
       }
-    })()
 
-    if (normalizedActionType === 'messaging') {
-      const platform =
-        typeof data?.params?.platform === 'string'
-          ? data.params.platform.trim().toLowerCase()
-          : ''
-      if (platform === 'google chat' || platform === 'googlechat') {
-        return 'actionGoogleChat'
-      }
-      if (platform === 'teams') return 'actionTeams'
-      return 'actionSlack'
-    }
+      switch (normalizedActionType) {
+        case 'email': {
+          const providerSource = (() => {
+            if (typeof data?.emailProvider === 'string') {
+              return data.emailProvider
+            }
+            if (typeof data?.params?.provider === 'string') {
+              return data.params.provider
+            }
+            if (typeof data?.params?.service === 'string') {
+              return data.params.service
+            }
+            return ''
+          })()
 
-    switch (normalizedActionType) {
-      case 'email': {
-        const providerSource = (() => {
-          if (typeof data?.emailProvider === 'string') {
-            return data.emailProvider
+          const normalizedProvider = providerSource.trim().toLowerCase()
+          if (normalizedProvider.includes('mailgun')) {
+            return 'actionEmailMailgun'
           }
-          if (typeof data?.params?.provider === 'string') {
-            return data.params.provider
+          if (
+            normalizedProvider === 'amazon ses' ||
+            normalizedProvider === 'amazon_ses' ||
+            normalizedProvider === 'amazonses'
+          ) {
+            return 'actionEmailAmazonSes'
           }
-          if (typeof data?.params?.service === 'string') {
-            return data.params.service
+          if (normalizedProvider === 'smtp') {
+            return 'actionEmailSmtp'
           }
-          return ''
-        })()
+          if (normalizedProvider.includes('sendgrid')) {
+            return 'actionEmailSendgrid'
+          }
 
-        const normalizedProvider = providerSource.trim().toLowerCase()
-        if (normalizedProvider.includes('mailgun')) {
-          return 'actionEmailMailgun'
-        }
-        if (
-          normalizedProvider === 'amazon ses' ||
-          normalizedProvider === 'amazon_ses' ||
-          normalizedProvider === 'amazonses'
-        ) {
-          return 'actionEmailAmazonSes'
-        }
-        if (normalizedProvider === 'smtp') {
-          return 'actionEmailSmtp'
-        }
-        if (normalizedProvider.includes('sendgrid')) {
+          const paramsRecord =
+            data?.params && typeof data.params === 'object'
+              ? (data.params as Record<string, unknown>)
+              : ({} as Record<string, unknown>)
+
+          if ('smtpHost' in paramsRecord || 'smtpUser' in paramsRecord) {
+            return 'actionEmailSmtp'
+          }
+          if (
+            'awsAccessKey' in paramsRecord ||
+            'awsSecretKey' in paramsRecord ||
+            'sesVersion' in paramsRecord ||
+            'awsRegion' in paramsRecord
+          ) {
+            return 'actionEmailAmazonSes'
+          }
+          if ('domain' in paramsRecord || 'region' in paramsRecord) {
+            return 'actionEmailMailgun'
+          }
           return 'actionEmailSendgrid'
         }
-
-        const paramsRecord =
-          data?.params && typeof data.params === 'object'
-            ? (data.params as Record<string, unknown>)
-            : ({} as Record<string, unknown>)
-
-        if ('smtpHost' in paramsRecord || 'smtpUser' in paramsRecord) {
-          return 'actionEmailSmtp'
-        }
-        if (
-          'awsAccessKey' in paramsRecord ||
-          'awsSecretKey' in paramsRecord ||
-          'sesVersion' in paramsRecord ||
-          'awsRegion' in paramsRecord
-        ) {
-          return 'actionEmailAmazonSes'
-        }
-        if ('domain' in paramsRecord || 'region' in paramsRecord) {
-          return 'actionEmailMailgun'
-        }
-        return 'actionEmailSendgrid'
+        case 'webhook':
+          return 'actionWebhook'
+        case 'slack':
+          return 'actionSlack'
+        case 'teams':
+          return 'actionTeams'
+        case 'googlechat':
+          return 'actionGoogleChat'
+        case 'sheets':
+          return 'actionSheets'
+        case 'http':
+          return 'actionHttp'
+        case 'code':
+          return 'actionCode'
+        default:
+          return 'actionEmailSendgrid'
       }
-      case 'webhook':
-        return 'actionWebhook'
-      case 'slack':
-        return 'actionSlack'
-      case 'teams':
-        return 'actionTeams'
-      case 'googlechat':
-        return 'actionGoogleChat'
-      case 'sheets':
-        return 'actionSheets'
-      case 'http':
-        return 'actionHttp'
-      case 'code':
-        return 'actionCode'
-      default:
-        return 'actionEmailSendgrid'
-    }
-  }, [])
+    },
+    []
+  )
 
-  const actionRenderers = useMemo(() => {
-    const createSharedRunProps = () => ({
-      onRun: () => invokeRunWorkflowRef.current?.(),
+  const actionRenderers = useMemo<
+    Record<
+      ActionDropSubtype,
+      (props: ActionNodeRendererProps) => React.ReactNode
+    >
+  >(() => {
+    const createSharedRunProps = (): Pick<
+      ActionNodeRendererProps,
+      'onRun' | 'canEdit'
+    > => ({
+      onRun: async () => {
+        invokeRunWorkflowRef.current?.()
+      },
       canEdit: canEditRef.current
     })
 
     return {
-      actionEmailSendgrid: (props) => (
+      actionEmailSendgrid: (props: ActionNodeRendererProps) => (
         <SendGridActionNode
           key={`action-email-sendgrid-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -714,7 +775,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionEmailMailgun: (props) => (
+      actionEmailMailgun: (props: ActionNodeRendererProps) => (
         <MailgunActionNode
           key={`action-email-mailgun-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -724,7 +785,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionEmailAmazonSes: (props) => (
+      actionEmailAmazonSes: (props: ActionNodeRendererProps) => (
         <AmazonSesActionNode
           key={`action-email-amazon-ses-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -734,7 +795,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionEmailSmtp: (props) => (
+      actionEmailSmtp: (props: ActionNodeRendererProps) => (
         <SmtpActionNode
           key={`action-email-smtp-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -744,7 +805,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionWebhook: (props) => (
+      actionWebhook: (props: ActionNodeRendererProps) => (
         <WebhookActionNode
           key={`action-webhook-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -756,7 +817,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionSlack: (props) => (
+      actionSlack: (props: ActionNodeRendererProps) => (
         <SlackActionNode
           key={`action-slack-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -768,7 +829,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionTeams: (props) => (
+      actionTeams: (props: ActionNodeRendererProps) => (
         <TeamsActionNode
           key={`action-teams-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -780,7 +841,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionGoogleChat: (props) => (
+      actionGoogleChat: (props: ActionNodeRendererProps) => (
         <GoogleChatActionNode
           key={`action-google-chat-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -792,7 +853,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionSheets: (props) => (
+      actionSheets: (props: ActionNodeRendererProps) => (
         <GoogleSheetsActionNode
           key={`action-sheets-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -804,7 +865,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionHttp: (props) => (
+      actionHttp: (props: ActionNodeRendererProps) => (
         <HttpRequestActionNode
           key={`action-http-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -814,7 +875,7 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
-      actionCode: (props) => (
+      actionCode: (props: ActionNodeRendererProps) => (
         <RunCustomCodeActionNode
           key={`action-code-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
@@ -828,7 +889,7 @@ export default function FlowCanvas({
   }, [])
 
   const renderActionNode = useCallback(
-    (subtype: keyof typeof actionRenderers, props: any) => {
+    (subtype: keyof typeof actionRenderers, props: ActionNodeRendererProps) => {
       const renderer =
         actionRenderers[subtype] ?? actionRenderers.actionEmailSendgrid
       return renderer(props)
@@ -838,22 +899,24 @@ export default function FlowCanvas({
 
   const nodeTypes = useMemo(
     () => ({
-      trigger: (props) => (
+      trigger: (props: TriggerNodeRendererProps) => (
         <TriggerNode
-          key={`trigger-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          key={`trigger-${props.id}-${(props?.data as any)?.wfEpoch ?? ''}`}
           {...props}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
-          onRun={() => invokeRunWorkflowRef.current?.()}
+          onRun={async () => {
+            invokeRunWorkflowRef.current?.()
+          }}
           planTier={normalizedPlanTierRef.current}
           onRestrictionNotice={onRestrictionNoticeRef.current}
           canEdit={canEditRef.current}
         />
       ),
-      condition: (props) => (
+      condition: (props: ConditionNodeRendererProps) => (
         <ConditionNode
-          key={`condition-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          key={`condition-${props.id}-${(props?.data as any)?.wfEpoch ?? ''}`}
           {...props}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
@@ -861,25 +924,33 @@ export default function FlowCanvas({
           canEdit={canEditRef.current}
         />
       ),
-      actionEmailSendgrid: (props) =>
+      actionEmailSendgrid: (props: ActionNodeRendererProps) =>
         renderActionNode('actionEmailSendgrid', props),
-      actionEmailMailgun: (props) =>
+      actionEmailMailgun: (props: ActionNodeRendererProps) =>
         renderActionNode('actionEmailMailgun', props),
-      actionEmailAmazonSes: (props) =>
+      actionEmailAmazonSes: (props: ActionNodeRendererProps) =>
         renderActionNode('actionEmailAmazonSes', props),
-      actionEmailSmtp: (props) => renderActionNode('actionEmailSmtp', props),
-      actionEmail: (props) => {
+      actionEmailSmtp: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionEmailSmtp', props),
+      actionEmail: (props: ActionNodeRendererProps) => {
         const subtype = determineActionSubtype(props?.data)
         return renderActionNode(subtype as keyof typeof actionRenderers, props)
       },
-      actionWebhook: (props) => renderActionNode('actionWebhook', props),
-      actionSlack: (props) => renderActionNode('actionSlack', props),
-      actionTeams: (props) => renderActionNode('actionTeams', props),
-      actionGoogleChat: (props) => renderActionNode('actionGoogleChat', props),
-      actionSheets: (props) => renderActionNode('actionSheets', props),
-      actionHttp: (props) => renderActionNode('actionHttp', props),
-      actionCode: (props) => renderActionNode('actionCode', props),
-      action: (props) => {
+      actionWebhook: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionWebhook', props),
+      actionSlack: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionSlack', props),
+      actionTeams: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionTeams', props),
+      actionGoogleChat: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionGoogleChat', props),
+      actionSheets: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionSheets', props),
+      actionHttp: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionHttp', props),
+      actionCode: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionCode', props),
+      action: (props: ActionNodeRendererProps) => {
         const subtype = determineActionSubtype(props?.data)
         return renderActionNode(subtype as keyof typeof actionRenderers, props)
       }
@@ -888,7 +959,7 @@ export default function FlowCanvas({
   )
 
   const onNodesChange = useCallback(
-    (changes) => {
+    (changes: NodeChange<WorkflowNode>[]) => {
       if (!canEditRef.current) return
       const currentNodes = useWorkflowStore.getState().nodes
       const nextNodes = applyNodeChanges(changes, currentNodes)
@@ -900,7 +971,7 @@ export default function FlowCanvas({
   )
 
   const onEdgesChange = useCallback(
-    (changes) => {
+    (changes: EdgeChange<WorkflowEdge>[]) => {
       if (!canEditRef.current) return
       const currentEdges = useWorkflowStore.getState().edges
       const nextEdges = applyEdgeChanges(changes, currentEdges)
@@ -912,7 +983,7 @@ export default function FlowCanvas({
   )
 
   const onConnect = useCallback(
-    (params) => {
+    (params: Connection) => {
       if (!canEditRef.current) return
       const outcomeLabel =
         params?.sourceHandle === 'cond-true'
@@ -921,7 +992,7 @@ export default function FlowCanvas({
             ? 'False'
             : null
       const currentEdges = useWorkflowStore.getState().edges
-      const withNewEdge = addEdge(
+      const withNewEdge = addEdge<WorkflowEdge>(
         {
           ...params,
           type: 'nodeEdge',
@@ -940,7 +1011,7 @@ export default function FlowCanvas({
   )
 
   const onDrop = useCallback(
-    (event) => {
+    (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault()
       if (!canEditRef.current) return
       const rawType = event.dataTransfer.getData('application/reactflow')
@@ -960,7 +1031,7 @@ export default function FlowCanvas({
       const label = generateUniqueLabel(dropDescriptor.labelBase, currentNodes)
       const nodeIdPrefix = dropDescriptor.idPrefix.replace(/[^a-z0-9]+/gi, '-')
       const newNodeId = `${nodeIdPrefix}-${Date.now()}`
-      const newNode = {
+      const newNode: WorkflowNode = {
         id: newNodeId,
         type: dropDescriptor.nodeType,
         position,
@@ -980,13 +1051,15 @@ export default function FlowCanvas({
     [setNodes, isSoloPlan, onRestrictionNotice, reactFlow]
   )
 
-  const onDragOver = useCallback((event) => {
+  const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
   const handleSelectionChange = useCallback(
-    ({ nodes: selectedNodes }: OnSelectionChangeParams) => {
+    ({
+      nodes: selectedNodes
+    }: OnSelectionChangeParams<WorkflowNode, WorkflowEdge>) => {
       const lastSelected =
         selectedNodes && selectedNodes.length > 0
           ? selectedNodes[selectedNodes.length - 1]
@@ -1054,7 +1127,7 @@ export default function FlowCanvas({
     if (known.has(t)) {
       return t as ActionDropSubtype
     }
-    return determineActionSubtype(flyoutNode.data)
+    return determineActionSubtype(flyoutNode.data as ActionNodeData | null)
   }, [flyoutNode, determineActionSubtype])
 
   const selectedNodeLabel = useMemo(() => {
@@ -1074,14 +1147,16 @@ export default function FlowCanvas({
   }, [flyoutNode])
 
   const handleEdgeTypeChange = useCallback(
-    (edgeId, newType) => {
+    (edgeId: string, newType: WorkflowEdgeData['edgeType']) => {
       if (!canEditRef.current) return
+      const normalizedType: WorkflowEdgeStyle =
+        newType === 'bold' || newType === 'dashed' ? newType : 'default'
       const currentEdges = useWorkflowStore.getState().edges
-      const nextEdges = currentEdges.map((edge) =>
+      const nextEdges = currentEdges.map<WorkflowEdge>((edge) =>
         edge.id === edgeId
           ? {
               ...edge,
-              data: { ...edge.data, edgeType: newType }
+              data: { ...edge.data, edgeType: normalizedType }
             }
           : edge
       )
@@ -1093,7 +1168,7 @@ export default function FlowCanvas({
   )
 
   const handleEdgeDelete = useCallback(
-    (edgeId) => {
+    (edgeId: string) => {
       if (!canEditRef.current) return
       const currentEdges = useWorkflowStore.getState().edges
       const nextEdges = currentEdges.filter((e) => e.id !== edgeId)
@@ -1105,9 +1180,11 @@ export default function FlowCanvas({
     [setEdges]
   )
 
-  const edgeTypes = useMemo(
+  const edgeTypes = useMemo<
+    Record<string, (props: WorkflowEdgeRendererProps) => React.ReactNode>
+  >(
     () => ({
-      nodeEdge: (edgeProps) => (
+      nodeEdge: (edgeProps: WorkflowEdgeRendererProps) => (
         <NodeEdge
           {...edgeProps}
           onDelete={handleEdgeDelete}
@@ -1121,7 +1198,7 @@ export default function FlowCanvas({
   return (
     <WorkflowFlyoutProvider value={flyoutContextValue}>
       <div className="flex flex-1 min-h-0 flex-col md:flex-row">
-        <ReactFlow
+        <ReactFlow<WorkflowNode, WorkflowEdge>
           key={workflowId || 'no-workflow'}
           nodes={nodes}
           edges={edges}
@@ -1224,8 +1301,11 @@ function FlyoutActionFields({
   const allNodes = useWorkflowStore(selectNodes)
   const allEdges = useWorkflowStore(selectEdges)
   const setEdges = useWorkflowStore((state) => state.setEdges)
-  const getNodeLabel = useCallback((n: Node) => {
-    const rawLabel = (n.data as any)?.label
+  const getNodeLabel = useCallback((n: WorkflowNode) => {
+    const rawLabel =
+      n.data && typeof n.data === 'object' && 'label' in n.data
+        ? (n.data.label as unknown)
+        : undefined
     if (typeof rawLabel === 'string' && rawLabel.trim()) return rawLabel
     switch (n.type) {
       case 'trigger':
@@ -1267,13 +1347,13 @@ function FlyoutActionFields({
       if (!nextSourceId || nextSourceId === currentInputId) return
       const state = useWorkflowStore.getState()
       const base = state.edges.filter((e) => e.target !== nodeId)
-      const newEdge = {
+      const newEdge: WorkflowEdge = {
         id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
         source: nextSourceId,
         target: nodeId,
         type: 'nodeEdge',
         data: { edgeType: 'default' }
-      } as any
+      }
       setEdges(normalizeEdgesForState([...base, newEdge]))
     },
     [currentInputId, nodeId, setEdges]
@@ -1288,13 +1368,13 @@ function FlyoutActionFields({
       const base = state.edges.filter(
         (e) => !(e.source === nodeId && !e.sourceHandle)
       )
-      const newEdge = {
+      const newEdge: WorkflowEdge = {
         id: `e-${nodeId}-${nextTargetId}-${Date.now()}`,
         source: nodeId,
         target: nextTargetId,
         type: 'nodeEdge',
         data: { edgeType: 'default' }
-      } as any
+      }
       setEdges(normalizeEdgesForState([...base, newEdge]))
     },
     [allNodes, currentOutputId, nodeId, setEdges]
@@ -1493,14 +1573,14 @@ function FlyoutActionFields({
         <div className="mt-2 flex flex-wrap gap-2 items-center">
           <NodeInputField
             type="number"
-            value={controller.timeout}
+            value={String(controller.timeout)}
             onChange={(value) => controller.handleTimeoutChange(Number(value))}
             className="w-24 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
           />
           <span className="text-xs">ms timeout</span>
           <NodeInputField
             type="number"
-            value={controller.retries}
+            value={String(controller.retries)}
             onChange={(value) => controller.handleRetriesChange(Number(value))}
             className="w-16 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
           />

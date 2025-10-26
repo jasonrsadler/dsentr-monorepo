@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import JsonDialog from '@/components/UI/Dialog/JsonDialog'
+import JsonDialog from '@/components/UI/dialog/JsonDialog'
 import { useSecrets } from '@/contexts/SecretsContext'
+import { errorMessage } from '@/lib/errorMessage'
 import {
   getWorkflowLogs,
   listWorkflows,
@@ -642,7 +643,7 @@ export default function LogsTab() {
       await clearDeadLetters(workflowId)
       await refreshDeadLetters()
     } catch (error) {
-      console.error((error as Error).message)
+      console.error(errorMessage(error))
     }
   }, [workflowId, canAdministerEngine, refreshDeadLetters])
 
@@ -652,7 +653,7 @@ export default function LogsTab() {
       await clearEgressBlocks(workflowId)
       await refreshEgressBlocks()
     } catch (error) {
-      console.error((error as Error).message)
+      console.error(errorMessage(error))
     }
   }, [workflowId, canAdministerEngine, refreshEgressBlocks])
 
@@ -679,7 +680,7 @@ export default function LogsTab() {
         setJsonBody(JSON.stringify(normalized, null, 2))
         setJsonOpen(true)
       } catch (error) {
-        console.error((error as Error).message)
+        console.error(errorMessage(error))
       }
     },
     [workflowId, secretValues]

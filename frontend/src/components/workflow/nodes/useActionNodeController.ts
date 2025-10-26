@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 
 import { normalizePlanTier } from '@/lib/planTiers'
+import { errorMessage } from '@/lib/errorMessage'
 import type { BaseActionNodeRunState } from './BaseActionNode'
 import { useActionMeta, useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
@@ -17,7 +18,7 @@ export const PLAN_RESTRICTION_MESSAGES = {
 
 export type ActionNodeParams = Record<string, unknown>
 
-export interface ActionNodeData {
+export interface ActionNodeData extends Record<string, unknown> {
   id?: string
   label?: string
   expanded?: boolean
@@ -254,7 +255,7 @@ export function useActionNodeController({
         new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
       )
     } catch (err) {
-      console.error((err as Error).message)
+      console.error(errorMessage(err))
     }
   }, [])
 

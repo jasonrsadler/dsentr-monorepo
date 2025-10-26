@@ -27,6 +27,17 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Leaving a workspace is initiated from the Members settings tab. The "Leave workspace" button must be disabled for owners, call the `leaveWorkspace` API when allowed, refresh cached memberships, and send users back to their Solo workspace (or next available one) when the server responds with `403`.
 
 ## Change Reasons
+Additional TypeScript build fixes (build hygiene):
+- Excluded 	ests from 	sconfig.app.json so app builds don’t typecheck test files. Added missing TS path aliases (@components, @hooks, @utils, @assets) to mirror Vite aliases.
+- Replaced uses of JSX.Element in public props with ReactNode to avoid JSX namespace issues in TS 5.x with React 19.
+- Normalized import casing and resolved duplicate-casing conflicts (e.g., UI/dialog vs ui/dialog, Settings vs settings). Kept a single canonical path to avoid TS1261 on case-insensitive filesystems.
+- React Flow: wrapped control callbacks to accept mouse events, ensured WorkflowEdgeData and ActionNodeData extend Record<string, unknown>, and cast node/edge data where needed to satisfy @xyflow/react v12 generics.
+- Workflow selectors: relaxed generic constraints from Record<string, unknown> to object and removed Object.freeze returns to avoid "readonly to mutable" assignment errors. Preserved immutability via cloning where it matters.
+- Teams action: removed empty-string assignments to ConnectionScope (use undefined/delete), coalesced option types, fixed readonly dropdown arrays via spreads, and tightened diff/patch typing to avoid index/union assignment errors.
+- Fixed minor TS issues: implicit any in trigger dropdown, safe conversions to string for numeric NodeInputField values, label type on edges (use undefined instead of 
+ull), and Signup form access to string fields.
+- Removed or referenced unused locals (e.g., timers, memo caches) to comply with 
+oUnusedLocals.
 - Removed the Members tab workspace selector so the dashboard header switcher is the single mechanism for context changes.
 - Updated Members tab data loading so workspace viewers don't get redirected when invite lists return 403 responses.
 - Allowed the Members tab to keep viewer contexts active by loading roster data even when invite management remains restricted.
@@ -71,3 +82,4 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Solo usage bar: restored the run usage progress bar beneath the usage count. Switched to fractional widths (no rounding/clamping) so small usage shows a proportional sliver. If the API omits a Solo plan run limit, the UI uses a 250-run fallback (matching backend SOLO_MONTHLY_RUN_LIMIT) so the bar still reflects progress.
 - Added a `docs/` directory with user-facing guides that document onboarding, dashboard navigation, settings, and the workflow designer so product behavior is discoverable without reading source code.
 - Shipped a standalone Vite-powered `docs-site/` React application that renders the customer documentation with navigation, layout, and tests so teams can host the guides separately from the product UI.
+

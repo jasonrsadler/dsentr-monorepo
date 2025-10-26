@@ -10,6 +10,7 @@ import {
   setEgressAllowlistApi
 } from '@/lib/workflowApi'
 import { normalizePlanTier } from '@/lib/planTiers'
+import { errorMessage } from '@/lib/errorMessage'
 
 const CONCURRENCY_RESTRICTION_MESSAGE =
   'Solo plan workflows run one job at a time. Upgrade in Settings → Plan to raise the concurrency limit.'
@@ -32,7 +33,7 @@ export default function EngineTab() {
         new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
       )
     } catch (err) {
-      console.error((err as Error).message)
+      console.error(errorMessage(err))
     }
   }, [])
   const [items, setItems] = useState<WorkflowRecord[]>([])

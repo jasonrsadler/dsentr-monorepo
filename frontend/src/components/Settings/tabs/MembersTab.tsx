@@ -286,9 +286,7 @@ export default function MembersTab() {
             if (m.role === 'owner') {
               return { ...m, role: 'admin' }
             }
-            if (user && m.user_id === user.id && m.role === 'owner') {
-              return { ...m, role: 'admin' }
-            }
+            // Previous owner demotion handled above
             return m
           })
         }
