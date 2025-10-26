@@ -18,7 +18,7 @@ export function ScheduleTimePicker({
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
             Hour
           </p>
-          <div className="mt-2 max-h-56 space-y-1 overflow-y-auto pr-1">
+          <div className="mt-2 max-h-56 space-y-1 overflow-y-auto themed-scroll pr-1">
             {hoursList.map((hour) => {
               const isSelected = selectedTime?.hours === hour
               return (
@@ -45,7 +45,7 @@ export function ScheduleTimePicker({
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
             Minute
           </p>
-          <div className="mt-2 max-h-56 space-y-1 overflow-y-auto pr-1">
+          <div className="mt-2 max-h-56 space-y-1 overflow-y-auto themed-scroll pr-1">
             {minutesList.map((minute) => {
               const isSelected = selectedTime?.minutes === minute
               return (

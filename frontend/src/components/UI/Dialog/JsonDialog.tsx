@@ -55,7 +55,7 @@ export default function JsonDialog({
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto text-sm text-zinc-700 dark:text-zinc-200">
+            <div className="flex-1 overflow-auto themed-scroll text-sm text-zinc-700 dark:text-zinc-200">
               {content ?? (
                 <pre className="text-xs whitespace-pre-wrap break-words bg-white/80 dark:bg-black/30 p-2 rounded border border-zinc-200 dark:border-zinc-700">
                   {jsonText}

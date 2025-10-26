@@ -50,7 +50,7 @@ export default function SESVersionDropdown({
       </button>
 
       {open && (
-        <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-40 overflow-auto">
+        <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-40 overflow-auto themed-scroll">
           {versions.map((version) => (
             <li
               key={version.value}

@@ -1317,7 +1317,7 @@ export default function Dashboard() {
             <h2 className="font-semibold mb-3 text-zinc-700 dark:text-zinc-200">
               Tasks
             </h2>
-            <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+            <div className="flex-1 min-h-0 overflow-y-auto themed-scroll space-y-3 pr-1">
               <DraggableTile
                 label="Trigger"
                 description="Start your flow"
@@ -1412,7 +1412,7 @@ export default function Dashboard() {
               </button>
               {templatesOpen && (
                 <div
-                  className={`mt-2 max-h-64 overflow-auto pr-1 space-y-2 ${isGraphEmpty ? '' : 'opacity-60'}`}
+                  className={`mt-2 max-h-64 overflow-auto themed-scroll pr-1 space-y-2 ${isGraphEmpty ? '' : 'opacity-60'}`}
                 >
                   <TemplateButton
                     label="HTTP Trigger → Webhook"
@@ -2099,7 +2099,7 @@ export default function Dashboard() {
             </div>
           ) : (
             // Runs pane
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 overflow-auto themed-scroll p-4">
               {runQueue.length === 0 ? (
                 <div className="text-sm text-zinc-500 dark:text-zinc-400">
                   No queued or running jobs.
@@ -2278,7 +2278,7 @@ export default function Dashboard() {
                       </button>
                     )}
                 </div>
-                <div className="border rounded p-2 h-[42vh] overflow-auto bg-zinc-50 dark:bg-zinc-950/40">
+                <div className="border rounded p-2 h-[42vh] overflow-auto themed-scroll bg-zinc-50 dark:bg-zinc-950/40">
                   {nodeRuns.length === 0 ? (
                     <div className="text-zinc-500">No node events yet…</div>
                   ) : (

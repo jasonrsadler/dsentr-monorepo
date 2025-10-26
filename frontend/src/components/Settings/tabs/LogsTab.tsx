@@ -1024,7 +1024,7 @@ export default function LogsTab() {
                       Delete
                     </button>
                   </div>
-                  <ul className="text-xs space-y-1 max-h-48 overflow-auto">
+                  <ul className="text-xs space-y-1 max-h-48 overflow-auto themed-scroll">
                     {(Array.isArray(e.diffs) ? e.diffs : []).map(
                       (d: any, i: number) => {
                         const maskedFrom = maskValueForPath(

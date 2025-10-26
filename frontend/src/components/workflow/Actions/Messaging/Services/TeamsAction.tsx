@@ -2147,7 +2147,7 @@ export default function TeamsAction({
                       This channel does not list any members you can mention.
                     </p>
                   ) : (
-                    <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
+                    <div className="flex max-h-32 flex-col gap-1 overflow-y-auto themed-scroll">
                       {members.map((member) => {
                         const label = member.email
                           ? `${member.displayName} (${member.email})`

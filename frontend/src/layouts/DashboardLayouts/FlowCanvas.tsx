@@ -1250,7 +1250,7 @@ export default function FlowCanvas({
                   <X size={16} />
                 </button>
               </div>
-              <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
+              <div className="flex-1 min-h-0 overflow-y-auto themed-scroll px-4 py-4">
                 <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-4">
                   {flyoutNode.type === 'trigger' ? (
                     <FlyoutTriggerFields

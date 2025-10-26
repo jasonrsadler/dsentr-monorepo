@@ -139,7 +139,7 @@ export default function NodeSecretDropdown({
         </button>
 
         {open && (
-          <ul className="absolute z-20 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-40 overflow-auto">
+          <ul className="absolute z-20 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-40 overflow-auto themed-scroll">
             {options.length === 0 && (
               <li className="px-2 py-2 text-zinc-500 dark:text-zinc-400 text-[11px]">
                 No secrets saved yet.

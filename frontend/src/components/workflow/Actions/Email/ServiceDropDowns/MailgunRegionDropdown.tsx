@@ -42,7 +42,7 @@ export default function MailgunRegionDropdown({
       </button>
 
       {open && (
-        <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-32 overflow-auto">
+        <ul className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-32 overflow-auto themed-scroll">
           {regions.map((region) => (
             <li
               key={region}

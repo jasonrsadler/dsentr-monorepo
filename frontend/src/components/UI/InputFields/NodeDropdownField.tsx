@@ -142,7 +142,7 @@ export default function NodeDropdownField({
       {open && (
         <ul
           role="listbox"
-          className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-40 overflow-auto"
+          className="absolute z-10 w-full mt-1 border rounded bg-white dark:bg-zinc-900 shadow-md max-h-40 overflow-auto themed-scroll"
         >
           {loading ? (
             <li className="px-2 py-2 text-zinc-500 dark:text-zinc-400">

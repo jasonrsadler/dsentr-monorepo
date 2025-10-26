@@ -27,7 +27,7 @@ export function ScheduleTimezonePicker({
           className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-8 pr-3 text-sm text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-950/60 dark:text-zinc-100"
         />
       </div>
-      <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-zinc-200/60 bg-white dark:border-zinc-700/60 dark:bg-zinc-950/40">
+      <div className="mt-3 max-h-64 overflow-y-auto themed-scroll rounded-lg border border-zinc-200/60 bg-white dark:border-zinc-700/60 dark:bg-zinc-950/40">
         {options.length > 0 ? (
           options.map((timezone) => {
             const isSelected = selectedTimezone === timezone
