@@ -214,7 +214,7 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::mock_db::{MockDb, NoopWorkspaceRepository};
     use crate::db::workflow_repository::{MockWorkflowRepository, WorkflowRepository};
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
@@ -370,6 +370,11 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
+            },
         });
 
         let state = AppState {
@@ -382,6 +387,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config: Arc::clone(&config),
             worker_id: Arc::new("worker".into()),

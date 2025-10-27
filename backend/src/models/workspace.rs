@@ -4,6 +4,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub const WORKSPACE_PLAN_SOLO: &str = "solo";
+#[allow(dead_code)]
 pub const WORKSPACE_PLAN_TEAM: &str = "workspace";
 
 pub const INVITATION_STATUS_PENDING: &str = "pending";

@@ -93,6 +93,17 @@ export default function DashboardLayout() {
   )
 
   useEffect(() => {
+    // Open plan settings when returning from Stripe Checkout
+    const params = new URLSearchParams(location.search)
+    const billing = params.get('billing')
+    if (billing === 'success' || billing === 'cancel') {
+      setInitialSettingsTab('plan')
+      setSettingsOpen(true)
+      // Do not clear params here; allow PlanTab to process confirmation state.
+    }
+  }, [location.search])
+
+  useEffect(() => {
     const id = currentWorkspace?.workspace.id ?? null
     const params = new URLSearchParams(location.search)
     const existing = params.get('workspace')

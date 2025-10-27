@@ -74,4 +74,28 @@ pub trait UserRepository: Send + Sync {
         user_id: Uuid,
         onboarded_at: OffsetDateTime,
     ) -> Result<(), sqlx::Error>;
+
+    // Stripe customer tracking
+    async fn get_user_stripe_customer_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error>;
+
+    async fn set_user_stripe_customer_id(
+        &self,
+        user_id: Uuid,
+        stripe_customer_id: &str,
+    ) -> Result<(), sqlx::Error>;
+
+    // Billing helpers
+    async fn find_user_id_by_stripe_customer_id(
+        &self,
+        customer_id: &str,
+    ) -> Result<Option<Uuid>, sqlx::Error>;
+
+    async fn clear_pending_checkout_with_error(
+        &self,
+        user_id: Uuid,
+        message: &str,
+    ) -> Result<(), sqlx::Error>;
 }

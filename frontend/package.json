@@ -10,12 +10,13 @@
     "preview": "vite preview",
     "test:watch": "vitest",
     "test:no-cov": "vitest run",
-    "test": "vitest run --coverage",
+    "test": "vitest run",
     "dev:app": "vite",
     "dev:api": "cargo run",
     "dev:api:watch": "cargo watch -x run"
   },
   "dependencies": {
+    "@stripe/stripe-js": "^4.8.0",
     "@xyflow/react": "^12.8.5",
     "framer-motion": "^12.10.4",
     "lucide-react": "^0.508.0",

@@ -8,6 +8,7 @@
 - `microsoft`: Fetches Teams/channels/members via Microsoft Graph REST API with friendly structs and error handling.
 - `oauth`: Houses shared OAuth account management plus provider-specific clients/services.
 - `smtp_mailer`: Trait + implementations for sending transactional email (real SMTP + mock).
+- `stripe`: Trait-based Stripe integration for Checkout Sessions, webhook verification, and event retrieval with a live SDK-backed client and a mock for tests.
 
 ## Usage Tips
 - Keep external HTTP calls in these modules; routes should only orchestrate and shape responses.
@@ -15,3 +16,7 @@
 
 ## Change Reasons
 - Introduced workspace OAuth service for cloning encrypted tokens into workspace-level connections and emitting audit events.
+- Added `stripe` service: unified trait for creating Checkout Sessions, verifying webhooks safely, and retrieving events; live implementation wraps `async-stripe` and mock captures calls for deterministic tests.
+ - Extended StripeService to support customer creation (`create_customer`) and enriched Checkout Session requests with `customer` and `metadata` fields so routes can associate sessions with users and desired workspace upgrades.
+ - New: subscription helpers for plan lifecycle – `get_active_subscription_for_customer` and `set_subscription_cancel_at_period_end` – so routes can display renewal dates and schedule downgrades at period end without immediate plan changes. The mock tracks a synthetic `active_subscription` to keep tests deterministic.
+ - Tests: added unit tests for the Stripe service validating request construction (via the mock capturing last requests) and error mapping (invalid webhook signature, invalid customer id parsing) without hitting the network.

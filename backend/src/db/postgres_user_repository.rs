@@ -58,6 +58,7 @@ impl UserRepository for PostgresUserRepository {
                    last_name,
                    plan,
                    company_name,
+                   stripe_customer_id,
                    oauth_provider as "oauth_provider: OauthProvider",
                    onboarded_at,
                    created_at
@@ -102,6 +103,7 @@ impl UserRepository for PostgresUserRepository {
                 role as "role: crate::models::user::UserRole",
                 plan,
                 company_name,
+                stripe_customer_id,
                 oauth_provider as "oauth_provider: OauthProvider",
                 onboarded_at,
                 created_at
@@ -363,5 +365,75 @@ impl UserRepository for PostgresUserRepository {
         }
 
         Ok(())
+    }
+
+    async fn get_user_stripe_customer_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let rec = sqlx::query_scalar!(
+            "SELECT stripe_customer_id FROM users WHERE id = $1",
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(rec.flatten())
+    }
+
+    async fn set_user_stripe_customer_id(
+        &self,
+        user_id: Uuid,
+        stripe_customer_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        let result = sqlx::query!(
+            "UPDATE users SET stripe_customer_id = $2, updated_at = now() WHERE id = $1",
+            user_id,
+            stripe_customer_id
+        )
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        Ok(())
+    }
+
+    async fn find_user_id_by_stripe_customer_id(
+        &self,
+        customer_id: &str,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
+        let rec = sqlx::query_scalar!(
+            "SELECT id FROM users WHERE stripe_customer_id = $1",
+            customer_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(rec)
+    }
+
+    async fn clear_pending_checkout_with_error(
+        &self,
+        user_id: Uuid,
+        message: &str,
+    ) -> Result<(), sqlx::Error> {
+        // Load, mutate, and persist settings to avoid clobbering other keys
+        let mut settings = self.get_user_settings(user_id).await?;
+        if let Some(obj) = settings.as_object_mut() {
+            let billing = obj
+                .entry("billing")
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .unwrap();
+            billing.insert("pending_checkout".to_string(), serde_json::Value::Null);
+            billing.insert(
+                "last_error".to_string(),
+                serde_json::Value::String(message.to_string()),
+            );
+            billing.insert(
+                "last_error_at".to_string(),
+                serde_json::json!(time::OffsetDateTime::now_utc()),
+            );
+        }
+        self.update_user_settings(user_id, settings).await
     }
 }

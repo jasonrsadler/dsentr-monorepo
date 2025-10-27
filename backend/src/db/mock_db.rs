@@ -33,6 +33,8 @@ pub struct MockDb {
     pub set_user_verified_fn: Box<dyn Fn(Uuid) -> Result<(), sqlx::Error> + Send + Sync>,
     pub insert_early_access_email_fn: Box<dyn Fn(String) -> Result<(), sqlx::Error> + Send + Sync>,
     pub user_settings: Mutex<Value>,
+    pub stripe_customer_id: Mutex<Option<String>>,
+    pub update_user_plan_calls: Mutex<usize>,
 }
 
 impl Default for MockDb {
@@ -45,6 +47,8 @@ impl Default for MockDb {
             set_user_verified_fn: Box::new(|_| Ok(())),
             insert_early_access_email_fn: Box::new(|_| Ok(())),
             user_settings: Mutex::new(Value::Object(Default::default())),
+            stripe_customer_id: Mutex::new(None),
+            update_user_plan_calls: Mutex::new(0),
         }
     }
 }
@@ -170,6 +174,8 @@ impl UserRepository for MockDb {
     }
 
     async fn update_user_plan(&self, _user_id: Uuid, _plan: &str) -> Result<(), sqlx::Error> {
+        let mut guard = self.update_user_plan_calls.lock().unwrap();
+        *guard += 1;
         Ok(())
     }
 
@@ -178,6 +184,59 @@ impl UserRepository for MockDb {
         _user_id: Uuid,
         _onboarded_at: OffsetDateTime,
     ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn get_user_stripe_customer_id(
+        &self,
+        _user_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
+        Ok(self.stripe_customer_id.lock().unwrap().clone())
+    }
+
+    async fn set_user_stripe_customer_id(
+        &self,
+        _user_id: Uuid,
+        stripe_customer_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        *self.stripe_customer_id.lock().unwrap() = Some(stripe_customer_id.to_string());
+        Ok(())
+    }
+
+    async fn find_user_id_by_stripe_customer_id(
+        &self,
+        customer_id: &str,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
+        let guard = self.stripe_customer_id.lock().unwrap();
+        if guard.as_deref() == Some(customer_id) {
+            Ok(self.find_user_result.as_ref().map(|u| u.id))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn clear_pending_checkout_with_error(
+        &self,
+        _user_id: Uuid,
+        message: &str,
+    ) -> Result<(), sqlx::Error> {
+        let mut settings = self.user_settings.lock().unwrap();
+        if let Some(obj) = settings.as_object_mut() {
+            let billing = obj
+                .entry("billing")
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .unwrap();
+            billing.insert("pending_checkout".to_string(), serde_json::Value::Null);
+            billing.insert(
+                "last_error".to_string(),
+                serde_json::Value::String(message.to_string()),
+            );
+            billing.insert(
+                "last_error_at".to_string(),
+                serde_json::json!(OffsetDateTime::now_utc()),
+            );
+        }
         Ok(())
     }
 }

@@ -30,3 +30,15 @@ SLACK_INTEGRATIONS_CLIENT_SECRET=<slack-oauth-client-secret>
 ```
 
 The backend reads these values from the corresponding environment variables when constructing OAuth authorization URLs and exchanging authorization codes. The Google login flow continues to rely on the existing `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` environment variables, so auth and workflow integrations can be configured independently. No additional frontend endpoints are required—the callback handlers live entirely on the backend under `/api/oauth/*`.
+
+## Stripe configuration
+
+Stripe uses a separate OAuth application for the billing console alongside signing keys for API and webhook validation. Provision the credentials in the Stripe dashboard and add the following variables to your `.env` file:
+
+```
+STRIPE_CLIENT_ID=<stripe-connect-client-id>
+STRIPE_SECRET_KEY=<stripe-api-secret-key>
+STRIPE_WEBHOOK_SECRET=<stripe-webhook-signing-secret>
+```
+
+The Dsentr backend reads these values during startup to initialize the Stripe SDK, authenticate API calls, and verify incoming webhook signatures.

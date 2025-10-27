@@ -11,3 +11,6 @@
 ## Usage Tips
 - Keep these docs updated whenever OAuth URLs or required secrets change, otherwise onboarding breaks silently.
 - For SQL maintenance scripts, list the expected preconditions and postconditions directly in the file so production support knows how to validate execution.
+
+## Change Reasons
+- Documented Stripe OAuth and webhook secrets alongside existing provider guidance so billing setup stays aligned with backend config.

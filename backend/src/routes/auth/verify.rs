@@ -51,7 +51,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        config::{Config, OAuthProviderConfig, OAuthSettings},
+        config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings},
         db::{
             mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
             workspace_connection_repository::NoopWorkspaceConnectionRepository,
@@ -90,6 +90,11 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
+            },
         })
     }
 
@@ -108,6 +113,7 @@ mod tests {
                 google_oauth: Arc::new(MockGoogleOAuth::default()),
                 oauth_accounts: OAuthAccountService::test_stub(),
                 workspace_oauth: WorkspaceOAuthService::test_stub(),
+                stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
                 http_client: Arc::new(Client::new()),
                 config: test_config(),
                 worker_id: Arc::new("test-worker".to_string()),

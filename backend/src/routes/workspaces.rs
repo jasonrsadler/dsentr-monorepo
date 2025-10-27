@@ -108,9 +108,9 @@ async fn process_plan_change(
     now: OffsetDateTime,
     mark_onboarded: bool,
 ) -> Result<serde_json::Value, Response> {
-    let mut created_workspace: Option<Workspace> = None;
+    let created_workspace: Option<Workspace> = None;
     let mut updated_workflows: Vec<Workflow> = Vec::new();
-    let mut workspace_id: Option<Uuid> = None;
+    let workspace_id: Option<Uuid> = None;
 
     match payload.plan_tier {
         PlanTier::Solo => {
@@ -139,6 +139,63 @@ async fn process_plan_change(
                 }
             };
 
+            // For Stripe-billed workspace plans, schedule cancellation at period end
+            let owns_workspace_on_workspace_plan = existing_memberships.iter().any(|m| {
+                m.workspace.owner_id == user_id
+                    && !NormalizedPlanTier::from_option(Some(m.workspace.plan.as_str())).is_solo()
+            });
+
+            if owns_workspace_on_workspace_plan {
+                if let Ok(Some(customer_id)) = app_state.db.get_user_stripe_customer_id(user_id).await {
+                    match app_state
+                        .stripe
+                        .get_active_subscription_for_customer(&customer_id)
+                        .await
+                    {
+                        Ok(Some(sub)) => {
+                            // If not already scheduled, set cancel_at_period_end
+                            let updated = if !sub.cancel_at_period_end {
+                                match app_state
+                                    .stripe
+                                    .set_subscription_cancel_at_period_end(&sub.id, true)
+                                    .await
+                                {
+                                    Ok(u) => u,
+                                    Err(err) => {
+                                        tracing::error!("failed to schedule subscription cancellation: {:?}", err);
+                                        return Err(JsonResponse::server_error("Failed to schedule downgrade").into_response());
+                                    }
+                                }
+                            } else {
+                                sub
+                            };
+
+                            // Respond with scheduled downgrade info (do not change plan immediately)
+                            let effective_ts = updated
+                                .cancel_at
+                                .unwrap_or(updated.current_period_end);
+                            let effective_iso = time::OffsetDateTime::from_unix_timestamp(effective_ts)
+                                .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+                                .format(&time::format_description::well_known::Rfc3339)
+                                .unwrap_or_else(|_| String::new());
+
+                            return Ok(json!({
+                                "success": true,
+                                "scheduled_downgrade": { "effective_at": effective_iso },
+                            }));
+                        }
+                        Ok(None) => {
+                            // No active subscription; fall through to immediate downgrade below
+                        }
+                        Err(err) => {
+                            tracing::warn!("failed to lookup active subscription: {:?}", err);
+                            // Fall through to immediate downgrade
+                        }
+                    }
+                }
+            }
+
+            // Immediate downgrade for non-Stripe or no active subscription
             for membership in existing_memberships
                 .iter()
                 .filter(|membership| membership.workspace.owner_id == user_id)
@@ -162,6 +219,7 @@ async fn process_plan_change(
             }
         }
         PlanTier::Workspace => {
+            // New behavior: start a Stripe Checkout for workspace upgrades instead of immediate plan updates
             let workspace_name = payload
                 .workspace_name
                 .as_ref()
@@ -174,135 +232,115 @@ async fn process_plan_change(
                     .into_response()
                 })?;
 
-            let existing_memberships = match app_state
-                .workspace_repo
-                .list_memberships_for_user(user_id)
-                .await
-            {
-                Ok(list) => list,
+            let user = match app_state.db.find_public_user_by_id(user_id).await {
+                Ok(Some(u)) => u,
+                Ok(None) => return Err(JsonResponse::not_found("User not found").into_response()),
                 Err(err) => {
-                    tracing::error!(
-                        "failed to inspect workspace memberships during plan change: {:?}",
-                        err
-                    );
-                    return Err(
-                        JsonResponse::server_error("Failed to update workspace settings")
-                            .into_response(),
-                    );
+                    tracing::error!("failed to fetch user for stripe customer: {:?}", err);
+                    return Err(JsonResponse::server_error("Failed to start checkout").into_response());
                 }
             };
 
-            let mut workspace = if let Some(membership) = existing_memberships
-                .iter()
-                .find(|membership| {
-                    membership.workspace.owner_id == user_id
-                        && matches!(membership.role, WorkspaceRole::Owner | WorkspaceRole::Admin)
-                })
-                .or_else(|| {
-                    existing_memberships
-                        .iter()
-                        .find(|membership| membership.workspace.owner_id == user_id)
-                })
-                .or_else(|| {
-                    existing_memberships
-                        .iter()
-                        .find(|membership| membership.role == WorkspaceRole::Admin)
-                }) {
-                membership.workspace.clone()
+            let existing_customer = match app_state.db.get_user_stripe_customer_id(user_id).await {
+                Ok(id) => id,
+                Err(err) => {
+                    tracing::error!("failed to lookup stripe customer id: {:?}", err);
+                    return Err(JsonResponse::server_error("Failed to start checkout").into_response());
+                }
+            };
+
+            let customer_id = if let Some(id) = existing_customer {
+                id
             } else {
+                let name = format!("{} {}", user.first_name, user.last_name);
                 match app_state
-                    .workspace_repo
-                    .create_workspace(workspace_name, user_id, PlanTier::Workspace.as_str())
+                    .stripe
+                    .create_customer(&user.email, Some(name.trim()))
                     .await
                 {
-                    Ok(record) => record,
+                    Ok(id) => {
+                        if let Err(err) = app_state
+                            .db
+                            .set_user_stripe_customer_id(user_id, &id)
+                            .await
+                        {
+                            tracing::warn!(
+                                "failed to persist stripe customer id for user {}: {:?}",
+                                user_id, err
+                            );
+                        }
+                        id
+                    }
                     Err(err) => {
-                        tracing::error!("failed to create workspace during plan change: {:?}", err);
-                        return Err(JsonResponse::server_error("Failed to create workspace")
-                            .into_response());
+                        tracing::error!("failed to create stripe customer: {:?}", err);
+                        return Err(JsonResponse::server_error("Failed to start checkout").into_response());
                     }
                 }
             };
 
-            if workspace.name.trim() != workspace_name {
-                workspace = match app_state
-                    .workspace_repo
-                    .update_workspace_name(workspace.id, workspace_name)
-                    .await
-                {
-                    Ok(updated) => updated,
-                    Err(err) => {
-                        tracing::error!("failed to rename workspace during plan change: {:?}", err);
-                        return Err(JsonResponse::server_error("Failed to update workspace")
-                            .into_response());
-                    }
-                };
-            }
+            let price_id = std::env::var("STRIPE_WORKSPACE_PRICE_ID").unwrap_or_else(|_| "price_test".to_string());
+            let success_url = format!(
+                "{}/dashboard?billing=success&session_id={{CHECKOUT_SESSION_ID}}",
+                app_state.config.frontend_origin
+            );
+            let cancel_url = format!(
+                "{}/dashboard?billing=cancel",
+                app_state.config.frontend_origin
+            );
 
-            if NormalizedPlanTier::from_option(Some(workspace.plan.as_str())).is_solo() {
-                workspace = match app_state
-                    .workspace_repo
-                    .update_workspace_plan(workspace.id, PlanTier::Workspace.as_str())
-                    .await
-                {
-                    Ok(updated) => updated,
-                    Err(err) => {
-                        tracing::error!(
-                            "failed to update workspace plan during plan change: {:?}",
-                            err
-                        );
-                        return Err(JsonResponse::server_error("Failed to update workspace")
-                            .into_response());
-                    }
-                };
-            }
+            let mut metadata = BTreeMap::new();
+            metadata.insert("plan".to_string(), PlanTier::Workspace.as_str().to_string());
+            metadata.insert("workspace_name".to_string(), workspace_name.to_string());
+            metadata.insert("user_id".to_string(), user_id.to_string());
 
-            let workspace_members = match app_state.workspace_repo.list_members(workspace.id).await
-            {
-                Ok(members) => members,
-                Err(err) => {
-                    tracing::warn!(
-                        "failed to inspect workspace members during plan change: {:?}",
-                        err
-                    );
-                    Vec::new()
-                }
-            };
-
-            for member in workspace_members
-                .iter()
-                .filter(|m| m.role == WorkspaceRole::Owner && m.user_id != user_id)
-            {
-                if let Err(err) = app_state
-                    .workspace_repo
-                    .set_member_role(workspace.id, member.user_id, WorkspaceRole::Admin)
-                    .await
-                {
-                    tracing::error!(
-                        "failed to reassign workspace owner during plan change: {:?}",
-                        err
-                    );
-                    return Err(JsonResponse::server_error(
-                        "Failed to configure workspace membership",
-                    )
-                    .into_response());
-                }
-            }
-
-            if let Err(err) = app_state
-                .workspace_repo
-                .add_member(workspace.id, user_id, WorkspaceRole::Owner)
+            let session = match app_state
+                .stripe
+                .create_checkout_session(crate::services::stripe::CreateCheckoutSessionRequest {
+                    success_url,
+                    cancel_url,
+                    mode: crate::services::stripe::CheckoutMode::Subscription,
+                    line_items: vec![crate::services::stripe::CheckoutLineItem { price: price_id, quantity: 1 }],
+                    client_reference_id: Some(user_id.to_string()),
+                    customer: Some(customer_id.clone()),
+                    metadata: Some(metadata),
+                })
                 .await
             {
-                tracing::error!("failed to add onboarding user to workspace: {:?}", err);
-                return Err(
-                    JsonResponse::server_error("Failed to configure workspace membership")
-                        .into_response(),
-                );
+                Ok(s) => s,
+                Err(err) => {
+                    tracing::error!("failed to create stripe checkout session: {:?}", err);
+                    return Err(JsonResponse::server_error("Failed to start checkout").into_response());
+                }
+            };
+
+            // Persist pending checkout in user settings for later reconciliation
+            let mut settings = match app_state.db.get_user_settings(user_id).await {
+                Ok(val) => val,
+                Err(err) => {
+                    tracing::warn!("failed to load user settings for pending checkout: {:?}", err);
+                    serde_json::Value::Object(Default::default())
+                }
+            };
+            let pending = serde_json::json!({
+                "session_id": session.id,
+                "plan_tier": PlanTier::Workspace.as_str(),
+                "workspace_name": workspace_name,
+            });
+            if let Some(map) = settings.as_object_mut() {
+                map.entry("billing").or_insert_with(|| serde_json::json!({}));
+                if let Some(billing) = map.get_mut("billing").and_then(|b| b.as_object_mut()) {
+                    billing.insert("pending_checkout".to_string(), pending);
+                    // clear any previous error state now that a new attempt has started
+                    billing.remove("last_error");
+                    billing.remove("last_error_at");
+                }
+            }
+            if let Err(err) = app_state.db.update_user_settings(user_id, settings).await {
+                tracing::warn!("failed to persist pending checkout session: {:?}", err);
             }
 
-            workspace_id = Some(workspace.id);
-            created_workspace = Some(workspace);
+            let checkout_url = session.url.unwrap_or_default();
+            return Ok(json!({ "success": true, "checkout_url": checkout_url }));
         }
     }
 
@@ -337,18 +375,20 @@ async fn process_plan_change(
         .into_response());
     }
 
-    if let Err(err) = app_state
-        .db
-        .update_user_plan(user_id, payload.plan_tier.as_str())
-        .await
-    {
-        tracing::error!("failed to update user plan tier: {:?}", err);
-        return Err(
-            JsonResponse::server_error("Failed to save subscription choice").into_response(),
-        );
+    if matches!(payload.plan_tier, PlanTier::Solo) {
+        if let Err(err) = app_state
+            .db
+            .update_user_plan(user_id, payload.plan_tier.as_str())
+            .await
+        {
+            tracing::error!("failed to update user plan tier: {:?}", err);
+            return Err(
+                JsonResponse::server_error("Failed to save subscription choice").into_response(),
+            );
+        }
     }
 
-    if mark_onboarded {
+    if mark_onboarded && matches!(payload.plan_tier, PlanTier::Solo) {
         if let Err(err) = app_state.db.mark_workspace_onboarded(user_id, now).await {
             tracing::error!("failed to mark onboarding completion: {:?}", err);
             return Err(JsonResponse::server_error("Failed to finalize onboarding").into_response());
@@ -385,7 +425,7 @@ pub async fn get_onboarding_context(
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
-    let user = match app_state.db.find_public_user_by_id(user_id).await {
+    let mut user = match app_state.db.find_public_user_by_id(user_id).await {
         Ok(Some(user)) => user,
         Ok(None) => return JsonResponse::not_found("User not found").into_response(),
         Err(err) => {
@@ -409,7 +449,7 @@ pub async fn get_onboarding_context(
         }
     };
 
-    let memberships = match app_state
+    let mut memberships = match app_state
         .workspace_repo
         .list_memberships_for_user(user_id)
         .await
@@ -423,12 +463,161 @@ pub async fn get_onboarding_context(
 
     let plans = plan_options();
 
+    // Surface billing status (e.g., last error) and subscription info
+    let mut billing = serde_json::json!({});
+    let mut has_pending_checkout = false;
+    if let Ok(settings) = app_state.db.get_user_settings(user_id).await {
+        if let Some(obj) = settings.as_object() {
+            if let Some(b) = obj.get("billing").and_then(|v| v.as_object()) {
+                if let Some(err) = b.get("last_error").and_then(|v| v.as_str()) {
+                    billing["last_error"] = serde_json::json!(err);
+                }
+                if let Some(at) = b.get("last_error_at").cloned() {
+                    billing["last_error_at"] = at;
+                }
+                has_pending_checkout = b
+                    .get("pending_checkout")
+                    .map(|v| !v.is_null())
+                    .unwrap_or(false);
+                billing["has_pending_checkout"] = serde_json::json!(has_pending_checkout);
+            }
+        }
+    }
+
+    // Attach subscription renewal/cancel info when we have a Stripe customer
+    let mut has_active_subscription = false;
+    if let Ok(Some(customer_id)) = app_state.db.get_user_stripe_customer_id(user_id).await {
+        if let Ok(Some(sub)) = app_state
+            .stripe
+            .get_active_subscription_for_customer(&customer_id)
+            .await
+        {
+            has_active_subscription = true;
+            let renew_iso = time::OffsetDateTime::from_unix_timestamp(sub.current_period_end)
+                .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| String::new());
+            let cancel_iso = sub.cancel_at.and_then(|ts| {
+                time::OffsetDateTime::from_unix_timestamp(ts)
+                    .ok()
+                    .and_then(|dt| dt.format(&time::format_description::well_known::Rfc3339).ok())
+            });
+            billing["subscription"] = serde_json::json!({
+                "id": sub.id,
+                "status": sub.status,
+                "renews_at": renew_iso,
+                "cancel_at": cancel_iso,
+                "cancel_at_period_end": sub.cancel_at_period_end,
+            });
+        }
+    }
+
+    // Passive reconciliation: if user is on workspace plan but there's no active subscription
+    // and no pending checkout, revert to solo and downgrade owned workspaces.
+    if !NormalizedPlanTier::from_option(user.plan.as_deref()).is_solo()
+        && !has_pending_checkout
+        && !has_active_subscription
+    {
+        if let Err(err) = app_state.db.update_user_plan(user_id, "solo").await {
+            tracing::warn!(?err, %user_id, "failed to revert user plan to solo during onboarding context");
+        } else {
+            if let Ok(m) = app_state.workspace_repo.list_memberships_for_user(user_id).await {
+                for item in m
+                    .iter()
+                    .filter(|m| m.workspace.owner_id == user_id && m.workspace.plan.as_str() != "solo")
+                {
+                    if let Err(err) = app_state
+                        .workspace_repo
+                        .update_workspace_plan(item.workspace.id, "solo")
+                        .await
+                    {
+                        tracing::warn!(?err, workspace_id=%item.workspace.id, %user_id, "failed to downgrade workspace to solo during onboarding context");
+                    }
+                }
+            }
+            // Refresh user + memberships to reflect changes in response
+            if let Ok(Some(u)) = app_state.db.find_public_user_by_id(user_id).await {
+                user = u;
+            }
+            if let Ok(list) = app_state.workspace_repo.list_memberships_for_user(user_id).await {
+                memberships = list;
+            }
+        }
+    }
+
     Json(json!({
         "success": true,
         "user": user,
         "workflows": workflows,
         "memberships": memberships,
         "plan_options": plans,
+        "billing": billing,
+    }))
+    .into_response()
+}
+
+// POST /api/workspaces/billing/subscription/resume
+// Clears cancel_at_period_end on the active Stripe subscription so the Workspace plan continues.
+pub async fn resume_workspace_subscription(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    // Lookup stripe customer id
+    let customer_id = match app_state.db.get_user_stripe_customer_id(user_id).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return JsonResponse::bad_request("No Stripe customer configured").into_response(),
+        Err(err) => {
+            error!(?err, %user_id, "failed to load stripe customer id");
+            return JsonResponse::server_error("Failed to resume subscription").into_response();
+        }
+    };
+
+    // Find active subscription
+    let sub = match app_state
+        .stripe
+        .get_active_subscription_for_customer(&customer_id)
+        .await
+    {
+        Ok(Some(s)) => s,
+        Ok(None) => return JsonResponse::bad_request("No active subscription to resume").into_response(),
+        Err(err) => {
+            error!(?err, %user_id, "failed to load subscription");
+            return JsonResponse::server_error("Failed to resume subscription").into_response();
+        }
+    };
+
+    // Clear cancel_at_period_end
+    let updated = match app_state
+        .stripe
+        .set_subscription_cancel_at_period_end(&sub.id, false)
+        .await
+    {
+        Ok(u) => u,
+        Err(err) => {
+            error!(?err, %user_id, subscription_id=%sub.id, "failed to clear cancel_at_period_end");
+            return JsonResponse::server_error("Failed to resume subscription").into_response();
+        }
+    };
+
+    let renew_iso = time::OffsetDateTime::from_unix_timestamp(updated.current_period_end)
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| String::new());
+
+    Json(json!({
+        "success": true,
+        "subscription": {
+            "id": updated.id,
+            "status": updated.status,
+            "renews_at": renew_iso,
+            "cancel_at": serde_json::Value::Null,
+            "cancel_at_period_end": false,
+        }
     }))
     .into_response()
 }
@@ -1542,7 +1731,7 @@ mod tests {
         remove_workspace_connection, revoke_workspace_member, CompleteOnboardingPayload,
         InvitationDecisionPayload, PromoteWorkspaceConnectionPayload, RevokeWorkspaceMemberPayload,
     };
-    use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::{
         mock_db::{MockDb, NoopWorkflowRepository},
         oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
@@ -2522,6 +2711,11 @@ mod tests {
                 },
                 token_encryption_key: vec![0; 32],
             },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
+            },
         })
     }
 
@@ -2556,6 +2750,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts,
             workspace_oauth,
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config,
             worker_id: Arc::new("worker-1".into()),
@@ -2574,6 +2769,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("worker-1".into()),
@@ -2596,6 +2792,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("worker-1".into()),
@@ -3124,7 +3321,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn change_plan_updates_workspace_plan_field() {
+    async fn change_plan_workspace_returns_checkout_url() {
         let user_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
         let now = OffsetDateTime::now_utc();
@@ -3152,7 +3349,23 @@ mod tests {
 
         let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, vec![member]));
         let mailer: Arc<dyn Mailer> = Arc::new(NoopMailer);
-        let db = Arc::new(MockDb::default());
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                stripe_customer_id: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: Some(now),
+                created_at: now,
+            }),
+            ..Default::default()
+        });
         let state = state_with_components(repo.clone(), mailer, db);
 
         let claims = claims_fixture(user_id, "owner@example.com");
@@ -3168,21 +3381,80 @@ mod tests {
         let body = to_bytes(response.into_body(), 2048).await.unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let returned_plan = json
-            .get("memberships")
-            .and_then(|value| value.as_array())
-            .and_then(|list| list.first())
-            .and_then(|membership| membership.get("workspace"))
-            .and_then(|workspace| workspace.get("plan"))
-            .and_then(|plan| plan.as_str())
-            .unwrap_or_default();
+        assert_eq!(json["success"], Value::Bool(true));
+        let checkout_url = json["checkout_url"].as_str().unwrap_or("");
+        assert!(!checkout_url.is_empty());
+    }
 
-        assert_eq!(returned_plan, super::PlanTier::Workspace.as_str());
+    #[tokio::test]
+    async fn initiating_workspace_upgrade_invokes_stripe_and_does_not_mutate_plan() {
+        use crate::services::stripe::MockStripeService as StripeMock;
+        use crate::state::AppState;
+        use crate::db::mock_db::NoopWorkflowRepository;
+        use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
 
-        let stored_plan = repo
-            .workspace_plan(workspace_id)
-            .expect("workspace plan should be recorded");
-        assert_eq!(stored_plan, super::PlanTier::Workspace.as_str());
+        let user_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        // Prepare DB with a solo user (plan None/solo), and empty settings
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                stripe_customer_id: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: Some(now),
+                created_at: now,
+            }),
+            ..Default::default()
+        });
+
+        // Keep a handle to the mock so we can assert requests captured
+        let stripe = Arc::new(StripeMock::new());
+
+        let state = AppState {
+            db: db.clone(),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(RecordingWorkspaceRepo::default()),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            mailer: Arc::new(NoopMailer),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: stripe.clone(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
+            worker_id: Arc::new("worker-1".into()),
+            worker_lease_seconds: 30,
+        };
+
+        let claims = claims_fixture(user_id, "owner@example.com");
+        let payload = CompleteOnboardingPayload {
+            plan_tier: super::PlanTier::Workspace,
+            workspace_name: Some("My Team".into()),
+            shared_workflow_ids: Vec::new(),
+        };
+
+        let response = change_plan(State(state), AuthSession(claims), Json(payload)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Stripe mock captured the checkout creation request
+        let captured = stripe.last_create_requests.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let req = &captured[0];
+        assert_eq!(req.mode, crate::services::stripe::CheckoutMode::Subscription);
+        let expected = user_id.to_string();
+        assert_eq!(req.client_reference_id.as_deref(), Some(expected.as_str()));
+
+        // Plan should not be mutated during initiation (only at webhook success)
+        assert_eq!(*db.update_user_plan_calls.lock().unwrap(), 0);
     }
 
     #[tokio::test]
@@ -3333,6 +3605,7 @@ mod tests {
                 role: Some(UserRole::User),
                 plan: None,
                 company_name: None,
+                stripe_customer_id: None,
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,
@@ -3408,6 +3681,7 @@ mod tests {
                 role: Some(UserRole::User),
                 plan: None,
                 company_name: None,
+                stripe_customer_id: None,
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,
@@ -3486,6 +3760,7 @@ mod tests {
                 role: Some(UserRole::User),
                 plan: None,
                 company_name: None,
+                stripe_customer_id: None,
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,

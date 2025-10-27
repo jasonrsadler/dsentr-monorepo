@@ -2,7 +2,7 @@ use crate::routes::auth::claims::Claims;
 use crate::{
     responses::JsonResponse,
     state::AppState,
-    utils::{jwt::create_jwt, password::verify_password},
+    utils::{jwt::create_jwt, password::verify_password, plan_limits::NormalizedPlanTier},
 };
 
 use axum::{
@@ -146,7 +146,62 @@ pub async fn handle_me(
     let user = app_state.db.find_public_user_by_id(user_id).await;
 
     match user {
-        Ok(Some(user)) => {
+        Ok(Some(mut user)) => {
+            // Passive billing reconciliation: if personal plan is workspace but Stripe has no active subscription
+            // and there is no pending checkout, revert plan to solo and downgrade owned workspaces.
+            let mut has_pending_checkout = false;
+            if let Ok(settings) = app_state.db.get_user_settings(user_id).await {
+                if let Some(obj) = settings.as_object() {
+                    if let Some(b) = obj.get("billing").and_then(|v| v.as_object()) {
+                        has_pending_checkout = b
+                            .get("pending_checkout")
+                            .map(|v| !v.is_null())
+                            .unwrap_or(false);
+                    }
+                }
+            }
+            let mut should_revert = false;
+            if !NormalizedPlanTier::from_option(user.plan.as_deref()).is_solo() && !has_pending_checkout {
+                if let Ok(Some(customer_id)) = app_state.db.get_user_stripe_customer_id(user.id).await {
+                    match app_state
+                        .stripe
+                        .get_active_subscription_for_customer(&customer_id)
+                        .await
+                    {
+                        Ok(Some(_)) => { /* active subscription present */ }
+                        Ok(None) => should_revert = true,
+                        Err(err) => {
+                            tracing::warn!(?err, user_id=%user.id, "stripe subscription lookup failed during session check");
+                        }
+                    }
+                }
+            }
+            if should_revert {
+                if let Err(err) = app_state.db.update_user_plan(user.id, "solo").await {
+                    tracing::warn!(?err, user_id=%user.id, "failed to revert user plan to solo during session check");
+                } else {
+                    // Downgrade any owned workspaces to solo
+                    if let Ok(memberships) = app_state.workspace_repo.list_memberships_for_user(user.id).await {
+                        for m in memberships
+                            .into_iter()
+                            .filter(|m| m.workspace.owner_id == user.id && m.workspace.plan.as_str() != "solo")
+                        {
+                            if let Err(err) = app_state
+                                .workspace_repo
+                                .update_workspace_plan(m.workspace.id, "solo")
+                                .await
+                            {
+                                tracing::warn!(?err, workspace_id=%m.workspace.id, user_id=%user.id, "failed to downgrade workspace to solo during session check");
+                            }
+                        }
+                    }
+                    // Refresh user after change for response
+                    if let Ok(Some(u)) = app_state.db.find_public_user_by_id(user.id).await {
+                        user = u;
+                    }
+                }
+            }
+
             let memberships = match app_state
                 .workspace_repo
                 .list_memberships_for_user(user.id)
@@ -203,7 +258,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        config::{Config, OAuthProviderConfig, OAuthSettings},
+        config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings},
         db::{
             mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::UserRepository,
@@ -243,6 +298,7 @@ mod tests {
             role: Some(UserRole::User),
             plan: Some("free".into()),
             company_name: Some("Acme Corp".into()),
+            stripe_customer_id: None,
             onboarded_at: None,
             created_at: OffsetDateTime::now_utc(),
         };
@@ -272,6 +328,11 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
+            },
         });
         let app_state = AppState {
             db: Arc::new(db),
@@ -283,6 +344,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()), // Not used in these tests
             oauth_accounts: OAuthAccountService::test_stub(),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config,
             worker_id: Arc::new("test-worker".to_string()),

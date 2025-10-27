@@ -511,7 +511,7 @@ fn extract_error_message(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::{
         mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
         workspace_connection_repository::{
@@ -785,6 +785,11 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
+            },
         })
     }
 
@@ -817,6 +822,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts,
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client,
             config: test_config(),
             worker_id: Arc::new("worker".to_string()),

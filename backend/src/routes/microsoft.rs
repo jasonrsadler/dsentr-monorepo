@@ -369,7 +369,7 @@ mod tests {
     use time::{Duration, OffsetDateTime};
     use uuid::Uuid;
 
-    use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::{
         mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
         oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
@@ -585,6 +585,11 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
+            },
         })
     }
 
@@ -599,6 +604,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config,
             worker_id: Arc::new("test-worker".into()),

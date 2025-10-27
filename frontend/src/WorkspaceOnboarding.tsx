@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE_URL } from '@/lib'
+import { STRIPE_PUBLISHABLE_KEY } from '@/lib'
+import { loadStripe } from '@stripe/stripe-js'
 import { getCsrfToken } from '@/lib/csrfCache'
 import { useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
@@ -62,6 +64,7 @@ export default function WorkspaceOnboarding() {
   )
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isRedirecting, setIsRedirecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -201,11 +204,36 @@ export default function WorkspaceOnboarding() {
         body: JSON.stringify(payload)
       })
 
+      const body = await res.json().catch(() => null)
+
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
         throw new Error(body?.message ?? 'Failed to complete onboarding')
       }
 
+      // If Workspace is chosen, the backend may return a Stripe Checkout URL.
+      if (canConfigureWorkspace && (body?.checkout_url || body?.checkoutUrl)) {
+        const checkoutUrl: string = body.checkout_url || body.checkoutUrl
+        setIsRedirecting(true)
+        try {
+          if (STRIPE_PUBLISHABLE_KEY) {
+            const stripe = await loadStripe(STRIPE_PUBLISHABLE_KEY)
+            const sessionId: string | undefined =
+              body.session_id || body.sessionId
+            if (stripe && sessionId) {
+              await stripe.redirectToCheckout({ sessionId })
+            } else {
+              window.location.assign(checkoutUrl)
+            }
+          } else {
+            window.location.assign(checkoutUrl)
+          }
+        } catch {
+          setIsRedirecting(false)
+        }
+        return
+      }
+
+      // Solo path (or legacy non-Stripe response): complete immediately
       await checkAuth()
       navigate('/dashboard', { replace: true })
     } catch (err) {
@@ -372,7 +400,11 @@ export default function WorkspaceOnboarding() {
               disabled={isSubmitting}
               className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {isSubmitting ? 'Saving...' : 'Complete setup'}
+              {isRedirecting
+                ? 'Redirecting…'
+                : isSubmitting
+                  ? 'Saving...'
+                  : 'Complete setup'}
             </button>
           </div>
         </form>

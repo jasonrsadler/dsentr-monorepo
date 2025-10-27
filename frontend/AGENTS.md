@@ -149,3 +149,24 @@ oUnusedLocals.
 
 ## Email Actions type fixes
 - Relaxed `normalizeParams` input types in `MailGunAction.tsx`, `SendGridAction.tsx`, and `SMTPAction.tsx` to accept `Partial<...> | undefined`. This matches how we build `nextRaw` from patches (which omit the internal `dirty` flag) and prevents TS2345 errors about `dirty?: boolean | undefined` not assignable to required `boolean`. No runtime behavior changes; validation and normalization already treat missing fields as empty.
+
+## Stripe checkout integration (billing)
+- Added `@stripe/stripe-js` and a side-effect import in `src/main.tsx` to insert the Stripe.js script tag on every page for PCI and fraud detection best practices.
+- Introduced `STRIPE_PUBLISHABLE_KEY` in `src/lib/config.ts` sourced from `VITE_STRIPE_PUBLISHABLE_KEY`. Added a dev default in `.env`.
+- Plan change flows now initiate Stripe Checkout for the Workspace tier instead of directly patching the plan:
+  - `src/components/settings/tabs/PlanTab.tsx`: when selecting Workspace, calls `POST /api/workspaces/plan`, uses the returned `checkout_url` to redirect (prefers `stripe.redirectToCheckout` if a session id is present; falls back to `window.location.assign(checkout_url)`).
+  - `src/WorkspaceOnboarding.tsx`: when selecting Workspace, calls `POST /api/workspaces/onboarding`, then redirects similarly.
+- UI updates: disabled submit while redirecting and surface a "Redirecting to Stripe Checkout…" status. Solo plan behavior remains unchanged and does not use Stripe.
+- Tests: added `PlanTab.stripe.test.tsx` and `WorkspaceOnboarding.stripe.test.tsx`; globally mocked `@stripe/stripe-js` in `tests/setup.ts`.
+
+## Plan tab renewal/downgrade UX (Stripe)
+- Plans tab now shows renewal or scheduled downgrade date for Workspace subscribers:
+  - `GET /api/workspaces/onboarding` returns `billing.subscription` with `renews_at`, `cancel_at`, and `cancel_at_period_end`.
+  - The tab renders “Renews on <date>” when active, or “Workspace subscription will revert back to Solo on <date>” when `cancel_at_period_end` is set.
+- Downgrading from Workspace to Solo is now scheduled at the end of the current billing period when the account has an active Stripe subscription:
+  - Submitting `Solo` triggers `POST /api/workspaces/plan`. If backend returns `{ scheduled_downgrade: { effective_at } }`, the UI keeps the current plan as `Workspace`, sets the status message with the effective date, and updates its local billing state.
+  - For non‑Stripe accounts (or no active subscription), downgrade remains immediate as before.
+- While a scheduled downgrade is pending (`cancel_at_period_end = true`):
+  - The primary “Update plan” button stays disabled until the subscription actually expires.
+  - The Workspace card shows an info message with the reversion date and a small “Continue subscription” button that calls `POST /api/workspaces/billing/subscription/resume` to clear the scheduled cancel.
+  - Messages include an inline info icon; spacing uses `inline-flex` + `gap-1` to avoid layout jitter.

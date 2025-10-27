@@ -52,6 +52,7 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 subtle = "2"
+stripe = { package = "async-stripe", version = "0.41.0", features = ["runtime-tokio-hyper", "checkout", "webhook-events", "billing"] }
 
 [dev-dependencies]
 hyper = "1"

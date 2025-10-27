@@ -44,6 +44,7 @@ pub struct User {
     pub role: Option<UserRole>,
     pub plan: Option<String>,
     pub company_name: Option<String>,
+    pub stripe_customer_id: Option<String>,
     pub oauth_provider: Option<OauthProvider>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub onboarded_at: Option<time::OffsetDateTime>,

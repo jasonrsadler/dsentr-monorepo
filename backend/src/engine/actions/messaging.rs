@@ -449,7 +449,10 @@ async fn send_teams(
                     "deliveryMethod".to_string(),
                     Value::String("Delegated OAuth (Post as user)".to_string()),
                 );
-                (Value::Object(map), "Delegated OAuth (Post as user)".to_string())
+                (
+                    Value::Object(map),
+                    "Delegated OAuth (Post as user)".to_string(),
+                )
             } else {
                 (params.clone(), "Incoming Webhook".to_string())
             }
@@ -1659,7 +1662,7 @@ mod tests {
 
     use crate::engine::graph::Node;
     use crate::{
-        config::{Config, OAuthProviderConfig, OAuthSettings},
+        config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings},
         db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
         db::{
             mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
@@ -2003,6 +2006,11 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
+            },
         })
     }
 
@@ -2021,6 +2029,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts,
             workspace_oauth,
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config,
             worker_id: Arc::new("worker".to_string()),

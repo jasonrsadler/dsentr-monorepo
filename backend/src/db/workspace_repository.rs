@@ -13,6 +13,7 @@ pub trait WorkspaceRepository: Send + Sync {
         plan: &str,
     ) -> Result<Workspace, sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn update_workspace_name(
         &self,
         workspace_id: Uuid,

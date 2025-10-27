@@ -20,3 +20,6 @@
 
 ## Change Reasons
 - Added workspace connection repositories and shared-token helpers for promoting OAuth credentials into workspaces.
+ - Extended `UserRepository` with Stripe customer tracking: `get_user_stripe_customer_id` and `set_user_stripe_customer_id`, and updated `PostgresUserRepository` queries and the `User` model to include an optional `stripe_customer_id` column.
+ - Introduced billing helpers: `find_user_id_by_stripe_customer_id` to map Stripe customer IDs back to local users for webhook processing, and `clear_pending_checkout_with_error` to atomically clear `settings.billing.pending_checkout` while recording `last_error`/`last_error_at` for frontend retry UX.
+ - Test support: `MockDb` now tracks `update_user_plan` call count to assert that plan mutations do not occur during checkout initiation and do occur in webhook success/failure flows.

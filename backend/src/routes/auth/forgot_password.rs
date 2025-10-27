@@ -62,7 +62,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        config::{Config, OAuthProviderConfig, OAuthSettings},
+        config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings},
         db::{
             mock_db::{NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::{UserId, UserRepository},
@@ -105,6 +105,11 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+            },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
             },
         })
     }
@@ -162,6 +167,7 @@ mod tests {
                 password_hash: "".to_string(),
                 plan: None,
                 company_name: None,
+                stripe_customer_id: None,
                 oauth_provider: Some(provider),
                 onboarded_at: None,
                 created_at: OffsetDateTime::now_utc(),
@@ -241,6 +247,36 @@ mod tests {
         async fn mark_workspace_onboarded(&self, _: Uuid, _: OffsetDateTime) -> Result<(), Error> {
             Ok(())
         }
+
+        async fn get_user_stripe_customer_id(
+            &self,
+            _: Uuid,
+        ) -> Result<Option<String>, Error> {
+            Ok(None)
+        }
+
+        async fn set_user_stripe_customer_id(
+            &self,
+            _: Uuid,
+            _: &str,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn find_user_id_by_stripe_customer_id(
+            &self,
+            _customer_id: &str,
+        ) -> Result<Option<Uuid>, Error> {
+            Ok(None)
+        }
+
+        async fn clear_pending_checkout_with_error(
+            &self,
+            _user_id: Uuid,
+            _message: &str,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
     }
 
     fn make_app(behavior: MockBehavior) -> Router {
@@ -258,6 +294,7 @@ mod tests {
             github_oauth,
             oauth_accounts: OAuthAccountService::test_stub(),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("test-worker".to_string()),
@@ -374,6 +411,7 @@ mod tests {
             github_oauth,
             oauth_accounts: OAuthAccountService::test_stub(),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("test-worker".to_string()),

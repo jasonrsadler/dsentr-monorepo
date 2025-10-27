@@ -9,6 +9,7 @@ use crate::services::oauth::{
     google::service::GoogleOAuthService, workspace_service::WorkspaceOAuthService,
 };
 use crate::services::smtp_mailer::Mailer;
+use crate::services::stripe::StripeService;
 use crate::utils::plan_limits::NormalizedPlanTier;
 use reqwest::Client;
 use std::sync::Arc;
@@ -26,6 +27,7 @@ pub struct AppState {
     pub github_oauth: Arc<dyn GitHubOAuthService + Send + Sync>,
     pub oauth_accounts: Arc<OAuthAccountService>,
     pub workspace_oauth: Arc<WorkspaceOAuthService>,
+    pub stripe: Arc<dyn StripeService>,
     pub http_client: Arc<Client>,
     pub config: Arc<Config>,
     pub worker_id: Arc<String>,
@@ -39,20 +41,92 @@ impl AppState {
         claims_plan: Option<&str>,
     ) -> NormalizedPlanTier {
         let from_claims = NormalizedPlanTier::from_option(claims_plan);
-        if !from_claims.is_solo() {
-            return from_claims;
-        }
+        // If claims already show a non-solo plan, still verify against current DB/Stripe to avoid stale auth
+        let tier = from_claims;
 
-        match self.db.find_public_user_by_id(user_id).await {
-            Ok(Some(user)) => NormalizedPlanTier::from_option(user.plan.as_deref()),
-            Ok(None) => from_claims,
+        // Load current user record
+        let user_opt = match self.db.find_public_user_by_id(user_id).await {
+            Ok(u) => u,
             Err(err) => {
                 error!(%user_id, ?err, "failed to refresh user plan tier from database");
-                from_claims
+                return tier;
+            }
+        };
+
+        let Some(user) = user_opt else {
+            return tier;
+        };
+        let db_tier = NormalizedPlanTier::from_option(user.plan.as_deref());
+
+        // If DB says solo, trust it.
+        if db_tier.is_solo() {
+            return db_tier;
+        }
+
+        // Verify if a non-solo plan is still valid:
+        // - skip when a checkout is pending (upgrade flow in progress)
+        // - otherwise, ensure an active Stripe subscription exists; if not, revert to solo
+        let mut has_pending_checkout = false;
+        if let Ok(settings) = self.db.get_user_settings(user_id).await {
+            if let Some(obj) = settings.as_object() {
+                if let Some(b) = obj.get("billing").and_then(|v| v.as_object()) {
+                    has_pending_checkout = b
+                        .get("pending_checkout")
+                        .map(|v| !v.is_null())
+                        .unwrap_or(false);
+                }
             }
         }
+
+        if !has_pending_checkout {
+            if let Ok(Some(customer_id)) = self.db.get_user_stripe_customer_id(user_id).await {
+                match self
+                    .stripe
+                    .get_active_subscription_for_customer(&customer_id)
+                    .await
+                {
+                    Ok(Some(_sub)) => {
+                        // Active subscription present → keep workspace tier
+                        return db_tier;
+                    }
+                    Ok(None) => {
+                        // No active subscription → revert personal + owned workspaces to solo
+                        if let Err(err) = self.db.update_user_plan(user_id, "solo").await {
+                            error!(%user_id, ?err, "failed to revert user plan to solo during tier resolution");
+                        } else if let Ok(memberships) =
+                            self.workspace_repo.list_memberships_for_user(user_id).await
+                        {
+                            for m in memberships.into_iter().filter(|m| {
+                                m.workspace.owner_id == user_id
+                                    && m.workspace.plan.as_str() != "solo"
+                            }) {
+                                if let Err(err) = self
+                                    .workspace_repo
+                                    .update_workspace_plan(m.workspace.id, "solo")
+                                    .await
+                                {
+                                    error!(workspace_id=%m.workspace.id, %user_id, ?err, "failed to downgrade workspace to solo during tier resolution");
+                                }
+                            }
+                        }
+                        return NormalizedPlanTier::Solo;
+                    }
+                    Err(err) => {
+                        error!(%user_id, ?err, "failed to verify subscription while resolving plan tier");
+                        // Fall through to DB tier since we couldn't verify
+                        return db_tier;
+                    }
+                }
+            }
+        }
+
+        db_tier
     }
 }
+
+// Re-export the StripeService trait (and mock for tests) for convenience in helpers/tests.
+#[allow(unused_imports)]
+pub use crate::services::stripe::{MockStripeService, StripeService as StripeServiceTrait};
 
 #[cfg(test)]
 mod tests {
@@ -116,6 +190,7 @@ mod tests {
                 role: Some(UserRole::User),
                 plan: plan.map(|p| p.to_string()),
                 company_name: None,
+                stripe_customer_id: None,
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(OffsetDateTime::now_utc()),
                 created_at: OffsetDateTime::now_utc(),
@@ -144,6 +219,11 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            stripe: crate::config::StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "stub".into(),
+            },
         });
 
         let state = AppState {
@@ -156,6 +236,7 @@ mod tests {
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
             config,
             worker_id: Arc::new("test-worker".into()),

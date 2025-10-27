@@ -6,7 +6,7 @@ use axum::{
 use axum_extra::extract::cookie::CookieJar;
 use std::sync::Arc;
 
-use crate::config::{Config, OAuthProviderConfig, OAuthSettings};
+use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
 use crate::db::{
     mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
     oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
@@ -69,6 +69,11 @@ fn stub_config() -> Arc<Config> {
             },
             token_encryption_key: vec![0u8; 32],
         },
+        stripe: StripeSettings {
+            client_id: "stub".into(),
+            secret_key: "stub".into(),
+            webhook_secret: "stub".into(),
+        },
     })
 }
 
@@ -83,6 +88,7 @@ fn stub_state(config: Arc<Config>) -> AppState {
         github_oauth: Arc::new(MockGitHubOAuth::default()),
         oauth_accounts: OAuthAccountService::test_stub(),
         workspace_oauth: WorkspaceOAuthService::test_stub(),
+        stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
         http_client: Arc::new(reqwest::Client::new()),
         config,
         worker_id: Arc::new("test-worker".into()),

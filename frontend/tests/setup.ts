@@ -17,3 +17,22 @@ Object.defineProperty(window, 'matchMedia', {
     dispatchEvent: vi.fn()
   })
 })
+
+// Mock Stripe loader globally to avoid real network and to control redirect calls.
+vi.mock('@stripe/stripe-js', () => {
+  return {
+    // loadStripe resolves to a stub with a redirectToCheckout method
+    loadStripe: vi.fn(async () => ({
+      redirectToCheckout: vi.fn(async (_opts?: any) => ({ error: undefined }))
+    }))
+  }
+})
+
+// Prevent actual navigation during tests when components call window.location.assign
+Object.defineProperty(window, 'location', {
+  writable: true,
+  value: {
+    ...window.location,
+    assign: vi.fn()
+  }
+})

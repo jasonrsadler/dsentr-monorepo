@@ -76,6 +76,7 @@ use crate::db::{
     workspace_repository::WorkspaceRepository,
 };
 use crate::services::smtp_mailer::SmtpMailer;
+use crate::services::stripe::{LiveStripeService, StripeService};
 use crate::state::AppState;
 
 #[cfg(feature = "tls")]
@@ -208,6 +209,8 @@ async fn main() {
         encryption_key.clone(),
     ));
 
+    let stripe: Arc<dyn StripeService> = Arc::new(LiveStripeService::from_settings(&config.stripe));
+
     let state = AppState {
         db: user_repo,
         workflow_repo,
@@ -218,6 +221,7 @@ async fn main() {
         github_oauth,
         oauth_accounts,
         workspace_oauth,
+        stripe,
         http_client: http_client_arc,
         config: config.clone(),
         worker_id: Arc::new(uuid::Uuid::new_v4().to_string()),
@@ -361,6 +365,10 @@ async fn main() {
         )
         .route("/plan", post(routes::workspaces::change_plan))
         .route(
+            "/billing/subscription/resume",
+            post(routes::workspaces::resume_workspace_subscription),
+        )
+        .route(
             "/{workspace_id}/members",
             get(routes::workspaces::list_workspace_members)
                 .post(routes::workspaces::add_workspace_member),
@@ -471,6 +479,13 @@ async fn main() {
         .route("/", get(root))
         .route("/api/early-access", post(handle_early_access))
         .route("/api/dashboard", get(dashboard_handler))
+        // Stripe webhook: public endpoint, no CSRF/auth
+        .route(
+            "/api/billing/stripe/webhook",
+            post(routes::billing::stripe_webhook),
+        )
+        // New consolidated Stripe webhook path
+        .route("/api/stripe/webhook", post(routes::stripe::webhook))
         .nest("/api/auth", auth_routes) // <-- your auth routes with CSRF selectively applied
         .nest(
             "/api/workflows",

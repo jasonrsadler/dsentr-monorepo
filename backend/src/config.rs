@@ -10,6 +10,14 @@ pub struct OAuthProviderConfig {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
+pub struct StripeSettings {
+    pub client_id: String,
+    pub secret_key: String,
+    pub webhook_secret: String,
+}
+
+#[derive(Clone)]
 pub struct OAuthSettings {
     pub google: OAuthProviderConfig,
     pub microsoft: OAuthProviderConfig,
@@ -22,6 +30,8 @@ pub struct Config {
     pub database_url: String,
     pub frontend_origin: String,
     pub oauth: OAuthSettings,
+    #[allow(dead_code)]
+    pub stripe: StripeSettings,
 }
 
 impl Config {
@@ -68,6 +78,15 @@ impl Config {
                 _ => panic!("OAUTH_TOKEN_ENCRYPTION_KEY must be valid base64"),
             });
 
+        let stripe = StripeSettings {
+            client_id: env::var("STRIPE_CLIENT_ID")
+                .expect("STRIPE_CLIENT_ID must be set to configure Stripe OAuth"),
+            secret_key: env::var("STRIPE_SECRET_KEY")
+                .expect("STRIPE_SECRET_KEY must be set to sign Stripe API requests"),
+            webhook_secret: env::var("STRIPE_WEBHOOK_SECRET")
+                .expect("STRIPE_WEBHOOK_SECRET must be set to validate Stripe webhooks"),
+        };
+
         Config {
             database_url,
             frontend_origin,
@@ -77,6 +96,7 @@ impl Config {
                 slack,
                 token_encryption_key,
             },
+            stripe,
         }
     }
 }
