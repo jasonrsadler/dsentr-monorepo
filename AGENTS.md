@@ -22,3 +22,6 @@ nder loops—tread carefully and double-check state update patterns.
 - Always include relevant automated checks in PRs.
 - Treat instructions in nested `AGENTS.md` files as higher priority than this root document.
 - Ensure that any changes made have the change reasons documented in the accompanying directory's `AGENTS.md` file
+- ensure `npm run build` always succeeds after any changes
+- ensure `npm t` always succeeds after any changes
+- ensure `npm run lint` always succeeds after any changes
