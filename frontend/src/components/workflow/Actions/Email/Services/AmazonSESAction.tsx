@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
-import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
-import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/ui/InputFields/NodeSecretDropdown'
+import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
+import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import SESRegionDropdown from '../ServiceDropDowns/SESRegionDropdown'
 import SESVersionDropdown from '../ServiceDropDowns/SESVersionDropdown'
 import { useActionParams } from '@/stores/workflowSelectors'

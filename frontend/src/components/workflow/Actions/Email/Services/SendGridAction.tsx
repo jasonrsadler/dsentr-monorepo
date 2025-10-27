@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
-import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/ui/InputFields/NodeSecretDropdown'
+import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
 import { useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
@@ -53,10 +53,12 @@ function normalizeSubstitutions(value: unknown): SendGridSubstitution[] {
 }
 
 function normalizeParams(
-  params: SendGridParams | undefined
+  params: Partial<SendGridParams> | undefined
 ): NormalizedSendGridState {
   const record =
-    params && typeof params === 'object' ? params : ({} as SendGridParams)
+    params && typeof params === 'object'
+      ? params
+      : ({} as Partial<SendGridParams>)
   return {
     service: typeof record.service === 'string' ? record.service : undefined,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',

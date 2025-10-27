@@ -44,8 +44,5 @@
   },
   "include": [
     "src"
-  ],
-  "exclude": [
-    "src/components/ui/**/*"
   ]
 }

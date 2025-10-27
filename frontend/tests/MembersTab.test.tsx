@@ -1,7 +1,7 @@
 import { describe, beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import MembersTab from './MembersTab'
+import MembersTab from '@/components/settings/tabs/MembersTab'
 import { useAuth } from '@/stores/auth'
 import {
   HttpError,

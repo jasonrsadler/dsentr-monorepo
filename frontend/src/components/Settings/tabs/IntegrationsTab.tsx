@@ -16,7 +16,7 @@ import {
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
-import ConfirmDialog from '@/components/UI/dialog/ConfirmDialog'
+import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog'
 
 export type IntegrationNotice =
   | { kind: 'connected'; provider?: OAuthProvider }
@@ -754,7 +754,10 @@ export default function IntegrationsTab({
             try {
               const data = await fetchConnections({ workspaceId })
               if (data && typeof data === 'object') {
-                const normalized = {} as Record<OAuthProvider, ProviderConnectionSet>
+                const normalized = {} as Record<
+                  OAuthProvider,
+                  ProviderConnectionSet
+                >
                 PROVIDERS.forEach((p) => {
                   normalized[p.key] = cloneProviderState(
                     (data as Record<string, ProviderConnectionSet>)[p.key]

@@ -5,7 +5,7 @@ import SlackAction from '../src/components/workflow/Actions/Messaging/Services/S
 import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
 import { useAuth } from '@/stores/auth'
 
-vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
+vi.mock('@/components/ui/InputFields/NodeInputField', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder }: any) => (
     <input
@@ -16,7 +16,7 @@ vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
   )
 }))
 
-vi.mock('@/components/UI/InputFields/NodeDropdownField', () => ({
+vi.mock('@/components/ui/InputFields/NodeDropdownField', () => ({
   __esModule: true,
   default: ({ value, onChange, options, placeholder }: any) => {
     const flatOptions = (options as any[]).flatMap((entry) => {
@@ -48,7 +48,7 @@ vi.mock('@/components/UI/InputFields/NodeDropdownField', () => ({
   }
 }))
 
-vi.mock('@/components/UI/InputFields/NodeSecretDropdown', () => ({
+vi.mock('@/components/ui/InputFields/NodeSecretDropdown', () => ({
   __esModule: true,
   default: ({ value, onChange }: any) => (
     <select

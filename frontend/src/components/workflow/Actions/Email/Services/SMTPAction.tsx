@@ -1,8 +1,8 @@
 import { useCallback, useEffect } from 'react'
 
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
-import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/ui/InputFields/NodeSecretDropdown'
+import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
 import { useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
@@ -91,9 +91,11 @@ const defaultPortForMode = (mode: TlsMode): number => {
   }
 }
 
-function normalizeParams(params: SMTPParams | undefined): NormalizedSMTPState {
+function normalizeParams(
+  params: Partial<SMTPParams> | undefined
+): NormalizedSMTPState {
   const record =
-    params && typeof params === 'object' ? params : ({} as SMTPParams)
+    params && typeof params === 'object' ? params : ({} as Partial<SMTPParams>)
   const port = parsePort(record.smtpPort)
   const tlsMode = (() => {
     if (isTlsMode(record.smtpTlsMode)) {

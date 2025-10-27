@@ -480,68 +480,68 @@ export default function MembersTab() {
 
         {planTier === 'workspace' && (
           <div className="flex items-end gap-2">
-          <div className="flex-1">
-            <label className="block text-sm">Invite by Email</label>
-            <input
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              placeholder="name@example.com"
-              disabled={!canManageMembers}
+            <div className="flex-1">
+              <label className="block text-sm">Invite by Email</label>
+              <input
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="name@example.com"
+                disabled={!canManageMembers}
+                title={
+                  !isWorkspaceAdminOrOwner
+                    ? manageMembersPermissionMessage
+                    : undefined
+                }
+                className="mt-1 w-full rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-sm">Role</label>
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value as any)}
+                disabled={!canManageMembers}
+                title={
+                  !isWorkspaceAdminOrOwner
+                    ? manageMembersPermissionMessage
+                    : undefined
+                }
+                className="mt-1 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
+              >
+                <option value="user">User</option>
+                <option value="viewer">Viewer</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm">Expires (days)</label>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={inviteExpires}
+                onChange={(e) => setInviteExpires(Number(e.target.value))}
+                disabled={!canManageMembers}
+                title={
+                  !isWorkspaceAdminOrOwner
+                    ? manageMembersPermissionMessage
+                    : undefined
+                }
+                className="mt-1 w-24 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
+              />
+            </div>
+            <button
+              onClick={handleInvite}
+              disabled={!canManageMembers || busy}
               title={
                 !isWorkspaceAdminOrOwner
                   ? manageMembersPermissionMessage
                   : undefined
               }
-              className="mt-1 w-full rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
-            />
-          </div>
-          <div>
-            <label className="block text-sm">Role</label>
-            <select
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value as any)}
-              disabled={!canManageMembers}
-              title={
-                !isWorkspaceAdminOrOwner
-                  ? manageMembersPermissionMessage
-                  : undefined
-              }
-              className="mt-1 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
+              className="h-9 rounded bg-indigo-600 px-3 text-sm text-white disabled:opacity-50"
             >
-              <option value="user">User</option>
-              <option value="viewer">Viewer</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm">Expires (days)</label>
-            <input
-              type="number"
-              min={1}
-              max={60}
-              value={inviteExpires}
-              onChange={(e) => setInviteExpires(Number(e.target.value))}
-              disabled={!canManageMembers}
-              title={
-                !isWorkspaceAdminOrOwner
-                  ? manageMembersPermissionMessage
-                  : undefined
-              }
-              className="mt-1 w-24 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
-            />
-          </div>
-          <button
-            onClick={handleInvite}
-            disabled={!canManageMembers || busy}
-            title={
-              !isWorkspaceAdminOrOwner
-                ? manageMembersPermissionMessage
-                : undefined
-            }
-            className="h-9 rounded bg-indigo-600 px-3 text-sm text-white disabled:opacity-50"
-          >
-            Invite
-          </button>
+              Invite
+            </button>
           </div>
         )}
 

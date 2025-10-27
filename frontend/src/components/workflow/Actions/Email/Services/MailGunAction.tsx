@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/ui/InputFields/NodeSecretDropdown'
 import MailgunRegionDropdown from '../ServiceDropDowns/MailgunRegionDropdown'
-import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
-import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
+import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import { useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
@@ -61,10 +61,12 @@ function normalizeVariables(value: unknown): MailgunVariable[] {
 }
 
 function normalizeParams(
-  params: MailgunParams | undefined
+  params: Partial<MailgunParams> | undefined
 ): NormalizedMailgunState {
   const record =
-    params && typeof params === 'object' ? params : ({} as MailgunParams)
+    params && typeof params === 'object'
+      ? params
+      : ({} as Partial<MailgunParams>)
   return {
     service: typeof record.service === 'string' ? record.service : undefined,
     domain: typeof record.domain === 'string' ? record.domain : '',

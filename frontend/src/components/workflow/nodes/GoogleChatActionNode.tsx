@@ -2,9 +2,9 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 
 import GoogleChatAction from '../Actions/Messaging/Services/GoogleChatAction'
-import NodeHeader from '../../UI/ReactFlow/NodeHeader'
-import NodeInputField from '../../UI/InputFields/NodeInputField'
-import NodeCheckBoxField from '../../UI/InputFields/NodeCheckboxField'
+import NodeHeader from '../../ui/ReactFlow/NodeHeader'
+import NodeInputField from '../../ui/InputFields/NodeInputField'
+import NodeCheckBoxField from '../../ui/InputFields/NodeCheckboxField'
 import BaseActionNode, {
   type BaseActionNodeChildrenProps
 } from './BaseActionNode'

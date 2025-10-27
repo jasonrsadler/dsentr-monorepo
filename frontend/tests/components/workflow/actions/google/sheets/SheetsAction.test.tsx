@@ -24,7 +24,7 @@ const workflowState = {
   updateNodeData
 }
 
-vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
+vi.mock('@/components/ui/InputFields/NodeInputField', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder }: any) => (
     <input
@@ -35,7 +35,7 @@ vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
   )
 }))
 
-vi.mock('@/components/UI/ReactFlow/KeyValuePair', () => ({
+vi.mock('@/components/ui/ReactFlow/KeyValuePair', () => ({
   __esModule: true,
   default: ({ onChange, variables }: any) => (
     <button onClick={() => onChange(variables)}>MockKeyValuePair</button>

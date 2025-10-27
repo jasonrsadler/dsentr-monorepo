@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo } from 'react'
 
-import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
-import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
-import NodeCheckBoxField from '@/components/UI/InputFields/NodeCheckboxField'
-import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/ui/InputFields/NodeSecretDropdown'
+import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
+import NodeCheckBoxField from '@/components/ui/InputFields/NodeCheckboxField'
+import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import {
   type HttpRequestActionParams,
   useActionParams

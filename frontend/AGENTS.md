@@ -39,6 +39,7 @@ Vitest config type compatibility:
 
 Lint hygiene:
 - Added `vitest.config.ts` to `tsconfig.node.json` includes so ESLint’s typed parser (`parserOptions.project`) can resolve it and avoid parsing errors.
+- Removed temporary root-level re-export shims (`frontend/DashboardLayout.tsx`, `frontend/IntegrationsTab.tsx`) and updated tests to import via `'@/components/...` paths. `tsconfig.app.json` now includes only `src` again.
 - Updated ESLint rule `react-refresh/only-export-components` to allow exports `useSecrets` and `SecretsContext`, matching our context/provider pattern without forcing file splits.
 - Stabilized React hooks deps in `src/components/ui/InputFields/NodeSecretDropdown.tsx` by using a shared empty object constant instead of recreating `{}` each render.
 Additional TypeScript build fixes (build hygiene):
@@ -145,3 +146,6 @@ oUnusedLocals.
 ## DashboardLayout test fix
 - Changed the workspace switcher label from “Workspace” to “Active workspace” to disambiguate it from the plan badge text “Workspace”, preventing duplicate text matches in tests that assert the plan badge value.
 - Query param syncing: On first mount, respect an existing `?workspace=` in the URL by not overriding it immediately; subsequent changes always sync the query param to the current selection. This avoids a mount-time race that previously caused timeouts in `prefers workspace specified in the query string`.
+
+## Email Actions type fixes
+- Relaxed `normalizeParams` input types in `MailGunAction.tsx`, `SendGridAction.tsx`, and `SMTPAction.tsx` to accept `Partial<...> | undefined`. This matches how we build `nextRaw` from patches (which omit the internal `dirty` flag) and prevents TS2345 errors about `dirty?: boolean | undefined` not assignable to required `boolean`. No runtime behavior changes; validation and normalization already treat missing fields as empty.

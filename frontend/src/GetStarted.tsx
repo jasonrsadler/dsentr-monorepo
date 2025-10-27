@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 
 import { joinWaitlist } from '@/lib/waitlistApi' // adjust path if needed
-import { FormButton } from './components/UI/Buttons/FormButton'
+import { FormButton } from './components/ui/buttons/FormButton'
 import { MetaTags } from '@/components/MetaTags'
 import { MarketingShell } from '@/components/marketing/MarketingShell'
 import { BrandHero } from '@/components/marketing/BrandHero'

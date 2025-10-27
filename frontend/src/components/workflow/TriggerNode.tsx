@@ -12,7 +12,7 @@ import {
   RefreshCcw
 } from 'lucide-react'
 import TriggerTypeDropdown from './TriggerTypeDropdown'
-import KeyValuePair from '../UI/ReactFlow/KeyValuePair'
+import KeyValuePair from '../ui/ReactFlow/KeyValuePair'
 import {
   CalendarMonth,
   formatDisplayDate,

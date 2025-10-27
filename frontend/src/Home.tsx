@@ -8,7 +8,7 @@ import { usePageMeta } from '@/hooks/usePageMeta'
 import { MetaTags } from '@/components/MetaTags'
 import { MarketingShell } from '@/components/marketing/MarketingShell'
 import { BrandHero } from '@/components/marketing/BrandHero'
-import { NavigateButton } from './components/UI/Buttons/NavigateButton'
+import { NavigateButton } from './components/ui/buttons/NavigateButton'
 
 export default function Home() {
   usePageMeta({

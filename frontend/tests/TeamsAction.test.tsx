@@ -15,7 +15,7 @@ import {
   fetchMicrosoftChannelMembers
 } from '@/lib/microsoftGraphApi'
 
-vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
+vi.mock('@/components/ui/InputFields/NodeInputField', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder }: any) => (
     <input
@@ -26,7 +26,7 @@ vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
   )
 }))
 
-vi.mock('@/components/UI/InputFields/NodeTextAreaField', () => ({
+vi.mock('@/components/ui/InputFields/NodeTextAreaField', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder }: any) => (
     <textarea
@@ -37,7 +37,7 @@ vi.mock('@/components/UI/InputFields/NodeTextAreaField', () => ({
   )
 }))
 
-vi.mock('@/components/UI/InputFields/NodeDropdownField', () => ({
+vi.mock('@/components/ui/InputFields/NodeDropdownField', () => ({
   __esModule: true,
   default: ({ value, onChange, options }: any) => {
     const normalized = (options as any[]).flatMap((entry) => {
@@ -77,7 +77,7 @@ vi.mock('@/components/UI/InputFields/NodeDropdownField', () => ({
   }
 }))
 
-vi.mock('@/components/UI/InputFields/NodeSecretDropdown', () => ({
+vi.mock('@/components/ui/InputFields/NodeSecretDropdown', () => ({
   __esModule: true,
   default: ({ value, onChange }: any) => (
     <select

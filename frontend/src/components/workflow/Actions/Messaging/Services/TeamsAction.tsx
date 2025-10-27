@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import deepEqual from 'fast-deep-equal'
 import NodeDropdownField, {
   type NodeDropdownOptionGroup
-} from '@/components/UI/InputFields/NodeDropdownField'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/UI/InputFields/NodeSecretDropdown'
-import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+} from '@/components/ui/InputFields/NodeDropdownField'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeSecretDropdown from '@/components/ui/InputFields/NodeSecretDropdown'
+import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
 import {
   fetchConnections,
   getCachedConnections,

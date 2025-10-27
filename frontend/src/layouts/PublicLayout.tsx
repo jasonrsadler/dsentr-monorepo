@@ -3,7 +3,7 @@ import { Outlet } from 'react-router-dom'
 import { NavLinks } from '@/components/NavLinks'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { MobileNav } from '@/components/MobileNav'
-import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
+import { NavigateButton } from '@/components/ui/buttons/NavigateButton'
 import { DsentrLogo } from '@/components/DsentrLogo'
 import { useAuth } from '@/stores/auth'
 

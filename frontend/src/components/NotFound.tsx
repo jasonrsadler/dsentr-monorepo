@@ -1,6 +1,6 @@
 // src/NotFound.tsx
 import { Link } from 'react-router-dom'
-import { NavigateButton } from './UI/Buttons/NavigateButton'
+import { NavigateButton } from './ui/buttons/NavigateButton'
 
 export default function NotFound() {
   return (

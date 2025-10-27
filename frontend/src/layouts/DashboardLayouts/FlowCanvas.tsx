@@ -40,7 +40,7 @@ import {
   RunCustomCodeActionNode
 } from '@/components/workflow/nodes'
 import NodeEdge from '@/components/workflow/NodeEdge'
-import CustomControls from '@/components/UI/ReactFlow/CustomControl'
+import CustomControls from '@/components/ui/ReactFlow/CustomControl'
 import ConditionNode, {
   type ConditionNodeData
 } from '@/components/workflow/ConditionNode'
@@ -70,11 +70,11 @@ import {
 import { ScheduleCalendar } from '@/components/ui/schedule/ScheduleCalendar'
 import { ScheduleTimePicker } from '@/components/ui/schedule/ScheduleTimePicker'
 import { ScheduleTimezonePicker } from '@/components/ui/schedule/ScheduleTimezonePicker'
-import NodeHeader from '@/components/UI/ReactFlow/NodeHeader'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeCheckBoxField from '@/components/UI/InputFields/NodeCheckboxField'
-import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
-import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeCheckBoxField from '@/components/ui/InputFields/NodeCheckboxField'
+import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
+import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import TriggerTypeDropdown from '@/components/workflow/TriggerTypeDropdown'
 import SendGridAction from '@/components/workflow/Actions/Email/Services/SendGridAction'
 import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunAction'

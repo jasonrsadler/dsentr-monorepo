@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
-import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeTextAreaField from '@/components/UI/InputFields/NodeTextAreaField'
+import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
 import { useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
 

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from '@/components/ThemeToggle'
-import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
+import { NavigateButton } from '@/components/ui/buttons/NavigateButton'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import SettingsButton from '@/components/settings/SettingsButton'
 import SettingsModal from '@/components/settings/SettingsModal'

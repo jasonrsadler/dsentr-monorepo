@@ -3,7 +3,7 @@ import { vi } from 'vitest'
 
 import GoogleChatAction from '@/components/workflow/Actions/Messaging/Services/GoogleChatAction'
 
-vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
+vi.mock('@/components/ui/InputFields/NodeInputField', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder }: any) => (
     <input
@@ -14,7 +14,7 @@ vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
   )
 }))
 
-vi.mock('@/components/UI/InputFields/NodeTextAreaField', () => ({
+vi.mock('@/components/ui/InputFields/NodeTextAreaField', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder, rows }: any) => (
     <textarea
@@ -26,7 +26,7 @@ vi.mock('@/components/UI/InputFields/NodeTextAreaField', () => ({
   )
 }))
 
-vi.mock('@/components/UI/InputFields/NodeDropdownField', () => ({
+vi.mock('@/components/ui/InputFields/NodeDropdownField', () => ({
   __esModule: true,
   default: ({ value, onChange, options }: any) => {
     const normalized = (options as any[]).map((option) =>

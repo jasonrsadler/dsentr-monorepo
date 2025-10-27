@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import NodeDropdownField, {
   type NodeDropdownOptionGroup
-} from '@/components/UI/InputFields/NodeDropdownField'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import KeyValuePair from '@/components/UI/ReactFlow/KeyValuePair'
+} from '@/components/ui/InputFields/NodeDropdownField'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import {
   fetchConnections,
   getCachedConnections,

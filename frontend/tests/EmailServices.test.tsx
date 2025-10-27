@@ -6,7 +6,7 @@ import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunA
 import SendGridAction from '@/components/workflow/Actions/Email/Services/SendGridAction'
 import SMTPAction from '@/components/workflow/Actions/Email/Services/SMTPAction'
 
-vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
+vi.mock('@/components/ui/InputFields/NodeInputField', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder, type }: any) => (
     <input
@@ -18,7 +18,7 @@ vi.mock('@/components/UI/InputFields/NodeInputField', () => ({
   )
 }))
 
-vi.mock('@/components/UI/InputFields/NodeTextAreaField', () => ({
+vi.mock('@/components/ui/InputFields/NodeTextAreaField', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder, rows }: any) => (
     <textarea
@@ -30,7 +30,7 @@ vi.mock('@/components/UI/InputFields/NodeTextAreaField', () => ({
   )
 }))
 
-vi.mock('@/components/UI/InputFields/NodeSecretDropdown', () => ({
+vi.mock('@/components/ui/InputFields/NodeSecretDropdown', () => ({
   __esModule: true,
   default: ({ value, onChange, placeholder }: any) => (
     <select
@@ -86,7 +86,7 @@ vi.mock('../ServiceDropDowns/MailgunRegionDropdown', () => ({
   )
 }))
 
-vi.mock('@/components/UI/ReactFlow/KeyValuePair', () => ({
+vi.mock('@/components/ui/ReactFlow/KeyValuePair', () => ({
   __esModule: true,
   default: ({ title, onChange }: any) => (
     <button

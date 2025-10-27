@@ -7,9 +7,9 @@ import {
 } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
-import NodeInputField from '@/components/UI/InputFields/NodeInputField'
-import NodeDropdownField from '@/components/UI/InputFields/NodeDropdownField'
-import NodeHeader from '@/components/UI/ReactFlow/NodeHeader'
+import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
+import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
 import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
 

@@ -1,4 +1,4 @@
-import { NavigateButton } from './components/UI/Buttons/NavigateButton'
+import { NavigateButton } from './components/ui/buttons/NavigateButton'
 import { MarketingShell } from '@/components/marketing/MarketingShell'
 import { BrandHero } from '@/components/marketing/BrandHero'
 import { MetaTags } from '@/components/MetaTags'

@@ -9,8 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:watch": "vitest",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:no-cov": "vitest run",
+    "test": "vitest run --coverage",
     "dev:app": "vite",
     "dev:api": "cargo run",
     "dev:api:watch": "cargo watch -x run"
