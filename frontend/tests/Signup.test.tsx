@@ -137,7 +137,10 @@ describe('SignupPage', () => {
       target: { value: 'Password123!' }
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /join workspace/i }))
+    const joinButtons = screen.getAllByRole('button', {
+      name: /join workspace/i
+    })
+    fireEvent.click(joinButtons[joinButtons.length - 1])
 
     await waitFor(() => {
       expect(signupUser).toHaveBeenCalledWith(

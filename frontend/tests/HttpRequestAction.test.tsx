@@ -86,7 +86,6 @@ const findParamsCall = (mock: ReturnType<typeof vi.fn>) =>
 
 describe('HttpRequestAction', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
     useWorkflowStore.setState((state) => ({
       ...state,
       nodes: [],
@@ -97,8 +96,6 @@ describe('HttpRequestAction', () => {
   })
 
   afterEach(() => {
-    vi.runOnlyPendingTimers()
-    vi.useRealTimers()
     useWorkflowStore.setState((state) => ({
       ...state,
       nodes: [],
@@ -132,7 +129,6 @@ describe('HttpRequestAction', () => {
       fireEvent.change(urlInput, {
         target: { value: 'https://example.com/posts' }
       })
-      vi.advanceTimersByTime(250)
     })
 
     await waitFor(() => {
@@ -179,7 +175,6 @@ describe('HttpRequestAction', () => {
 
     act(() => {
       fireEvent.change(headerKeyInput, { target: { value: 'X-Trace-ID' } })
-      vi.advanceTimersByTime(250)
     })
 
     await waitFor(() => {
@@ -226,7 +221,6 @@ describe('HttpRequestAction', () => {
       fireEvent.change(urlInput, {
         target: { value: 'https://valid.example.com' }
       })
-      vi.advanceTimersByTime(250)
     })
 
     await waitFor(() => {

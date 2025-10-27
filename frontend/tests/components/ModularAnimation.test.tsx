@@ -3,13 +3,9 @@ import ModularAnimation from '@/components/ModularAnimation'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 describe('ModularAnimation', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
+  beforeEach(() => {})
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
+  afterEach(() => {})
 
   it('clears interval on unmount', () => {
     const clearIntervalSpy = vi.spyOn(global, 'clearInterval')

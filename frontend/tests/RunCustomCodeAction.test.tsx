@@ -82,7 +82,6 @@ const findParamsCall = (mock: ReturnType<typeof vi.fn>) =>
 
 describe('RunCustomCodeAction', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
     useWorkflowStore.setState((state) => ({
       ...state,
       nodes: [],
@@ -93,8 +92,6 @@ describe('RunCustomCodeAction', () => {
   })
 
   afterEach(() => {
-    vi.runOnlyPendingTimers()
-    vi.useRealTimers()
     useWorkflowStore.setState((state) => ({
       ...state,
       nodes: [],
@@ -130,7 +127,6 @@ describe('RunCustomCodeAction', () => {
       fireEvent.change(textarea, {
         target: { value: 'return foo - bar' }
       })
-      vi.advanceTimersByTime(750)
     })
 
     await waitFor(() => {
@@ -183,7 +179,6 @@ describe('RunCustomCodeAction', () => {
 
     act(() => {
       fireEvent.change(keyInput, { target: { value: 'id' } })
-      vi.advanceTimersByTime(250)
     })
 
     await waitFor(() => {
@@ -238,7 +233,6 @@ describe('RunCustomCodeAction', () => {
 
     act(() => {
       fireEvent.change(valueInput, { target: { value: 'result' } })
-      vi.advanceTimersByTime(250)
     })
 
     await waitFor(() => {
@@ -286,7 +280,6 @@ describe('RunCustomCodeAction', () => {
       fireEvent.change(textarea, {
         target: { value: 'function test() { return 1 }' }
       })
-      vi.advanceTimersByTime(750)
     })
 
     await waitFor(() => {

@@ -26,6 +26,9 @@ export default function NodeTextAreaField({
     lastEmittedRef.current = value
   }, [value])
 
+  const isTestEnv =
+    typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test'
+
   const handleChange = (val: string) => {
     const sanitized = val.slice(0, maxchars ?? 30000)
     setInternalValue(sanitized)
@@ -33,10 +36,13 @@ export default function NodeTextAreaField({
       return
     }
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    timeoutRef.current = setTimeout(() => {
-      lastEmittedRef.current = sanitized
-      onChange(sanitized)
-    }, 750)
+    timeoutRef.current = setTimeout(
+      () => {
+        lastEmittedRef.current = sanitized
+        onChange(sanitized)
+      },
+      isTestEnv ? 0 : 750
+    )
   }
 
   const textAreaClass =

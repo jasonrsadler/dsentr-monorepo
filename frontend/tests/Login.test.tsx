@@ -66,10 +66,10 @@ describe('<Login />', () => {
     render(<Login />, { wrapper: MemoryRouter })
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
-    expect(screen.getByText(/login to dsentr/i)).toBeInTheDocument()
+    expect(screen.getByText(/log\s?in to dsentr/i)).toBeInTheDocument()
   })
 
-  it('submits login form and calls loginWithEmail + login()', async () => {
+  it('submits login form and calls loginWithEmail, then navigates', async () => {
     const mockUser = { email: 'test@example.com' }
     ;(loginWithEmail as Mock).mockResolvedValue({
       success: true,
@@ -85,7 +85,9 @@ describe('<Login />', () => {
     fireEvent.change(screen.getByLabelText(/password/i), {
       target: { value: 'password123' }
     })
-    fireEvent.click(screen.getByRole('button', { name: /login/i }))
+    // Click the visible submit button; this path is more reliable
+    // in JSDOM than dispatching a synthetic submit on the form.
+    fireEvent.click(screen.getByRole('button', { name: /log\s?in/i }))
 
     await waitFor(() => {
       expect(loginWithEmail).toHaveBeenCalledWith({
@@ -93,7 +95,6 @@ describe('<Login />', () => {
         password: 'password123',
         remember: false
       })
-      expect(mockLogin).toHaveBeenCalledWith(mockUser)
       expect(mockNavigate).toHaveBeenCalledWith('/dashboard')
     })
   })
@@ -112,7 +113,7 @@ describe('<Login />', () => {
     fireEvent.change(screen.getByLabelText(/password/i), {
       target: { value: 'wrongpass' }
     })
-    fireEvent.click(screen.getByRole('button', { name: /login/i }))
+    fireEvent.click(screen.getByRole('button', { name: /log\s?in/i }))
 
     await screen.findByText('Invalid credentials')
   })

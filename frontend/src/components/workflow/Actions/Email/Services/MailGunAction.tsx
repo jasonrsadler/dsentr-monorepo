@@ -134,12 +134,20 @@ export default function MailGunAction({
         params && typeof params === 'object' ? params : ({} as MailgunParams)
       const { dirty: _dirty, ...rest } = base
 
+      const nextRaw = { ...rest, ...patch }
+      const nextNormalized = normalizeParams(nextRaw)
+      const nextErrors = validateMailgun(nextNormalized)
+      const nextHasErrors =
+        Object.keys(nextErrors).length > 0 ||
+        (variableErrors && nextNormalized.template.trim().length > 0)
+
       updateNodeData(nodeId, {
-        params: { ...rest, ...patch },
-        dirty: true
+        params: nextRaw,
+        dirty: true,
+        hasValidationErrors: nextHasErrors
       })
     },
-    [effectiveCanEdit, nodeId, params, updateNodeData]
+    [effectiveCanEdit, nodeId, params, updateNodeData, variableErrors]
   )
 
   const errors = validateMailgun(normalizedParams)

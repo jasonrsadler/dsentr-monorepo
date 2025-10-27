@@ -7,7 +7,7 @@ const steps = [
   {
     title: 'Modular plugin system',
     description:
-      'Every capability in Dsentr is a composable module. Triggers, actions, and enrichers snap together with predictable inputs and outputs.',
+      'Powered by a dynamic plugin architecture that keeps complexity manageable as you scale.',
     icon: (
       <svg
         className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
@@ -21,9 +21,9 @@ const steps = [
     )
   },
   {
-    title: 'Visual workflow builder',
+    title: 'Workflow builder',
     description:
-      'Design flows on an infinite canvas. Configure parameters, test data paths, and collaborate in real time before deploying.',
+      'Build powerful automations by chaining plugins together in a visual canvas.',
     icon: (
       <svg
         className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
@@ -37,9 +37,9 @@ const steps = [
     )
   },
   {
-    title: 'Deterministic execution engine',
+    title: 'Execution engine',
     description:
-      'A Rust-powered runtime executes steps sequentially or in parallel, manages retries, and keeps state in sync across branches.',
+      'Our engine runs workflows step-by-step, with reliable retries and clear state at every stage.',
     icon: (
       <svg
         className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
@@ -53,9 +53,9 @@ const steps = [
     )
   },
   {
-    title: 'Insights & control',
+    title: 'Web UI',
     description:
-      'Track run history, surface metrics, and govern access with workspace-level controls so teams stay aligned as they scale.',
+      'Our clean interface makes it easy to build, test, and manage workflows.',
     icon: (
       <svg
         className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
@@ -110,7 +110,7 @@ export default function HowItWorks() {
               access Dsentr as soon as it opens to early teams.
             </p>
             <NavigateButton to="/get-started" className="px-6 py-3 text-base">
-              Get started
+              Try Now
             </NavigateButton>
           </div>
         </div>

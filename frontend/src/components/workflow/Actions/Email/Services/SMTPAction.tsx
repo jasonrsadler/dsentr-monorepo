@@ -177,10 +177,13 @@ export default function SMTPAction({
       const base: SMTPParams =
         params && typeof params === 'object' ? params : ({} as SMTPParams)
       const { dirty: _dirty, ...rest } = base
-
+      const nextRaw = { ...rest, ...patch }
+      const nextNormalized = normalizeParams(nextRaw)
+      const nextErrors = validate(nextNormalized)
       updateNodeData(nodeId, {
-        params: { ...rest, ...patch },
-        dirty: true
+        params: nextRaw,
+        dirty: true,
+        hasValidationErrors: Object.keys(nextErrors).length > 0
       })
     },
     [effectiveCanEdit, nodeId, params, updateNodeData]
@@ -278,12 +281,16 @@ export default function SMTPAction({
               name="smtp-tls-mode"
               value={option.value}
               checked={normalizedParams.smtpTlsMode === option.value}
+              aria-label={option.label}
               onChange={() => handleTlsModeChange(option.value)}
             />
             <span>
               {option.label}
               {option.helper && (
-                <span className="block text-[10px] text-slate-400">
+                <span
+                  className="block text-[10px] text-slate-400"
+                  aria-hidden="true"
+                >
                   {option.helper}
                 </span>
               )}

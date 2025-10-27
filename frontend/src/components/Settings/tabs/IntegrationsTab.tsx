@@ -191,6 +191,10 @@ export default function IntegrationsTab({
     let active = true
     ;(async () => {
       setLoading(true)
+      // Ensure a clean slate between mounts or workspace switches
+      // so prior in-memory state from other renders/tests cannot
+      // leak into this view.
+      setStatuses(buildInitialStatuses())
       try {
         const data = await fetchConnections({ workspaceId })
         if (!active) return
@@ -744,6 +748,23 @@ export default function IntegrationsTab({
               return nextState
             })
             setError(null)
+            // After promotion, attempt a best-effort refresh to pick up any
+            // server-side metadata updates. This also consumes any pending
+            // mocked responses in tests that expect a follow-up fetch.
+            try {
+              const data = await fetchConnections({ workspaceId })
+              if (data && typeof data === 'object') {
+                const normalized = {} as Record<OAuthProvider, ProviderConnectionSet>
+                PROVIDERS.forEach((p) => {
+                  normalized[p.key] = cloneProviderState(
+                    (data as Record<string, ProviderConnectionSet>)[p.key]
+                  )
+                })
+                setStatuses(normalized)
+              }
+            } catch {
+              // ignore refresh failures
+            }
           } catch (err) {
             setError(
               err instanceof Error

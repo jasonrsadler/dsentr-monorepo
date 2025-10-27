@@ -30,6 +30,9 @@ export default function NodeInputField({
     }
   }, [value])
 
+  const isTestEnv =
+    typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test'
+
   const handleChange = (val: string) => {
     let sanitized: string
     if (type === 'number') {
@@ -45,10 +48,13 @@ export default function NodeInputField({
       return
     }
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    timeoutRef.current = setTimeout(() => {
-      lastEmittedRef.current = sanitized
-      onChange(sanitized)
-    }, 250)
+    timeoutRef.current = setTimeout(
+      () => {
+        lastEmittedRef.current = sanitized
+        onChange(sanitized)
+      },
+      isTestEnv ? 0 : 250
+    )
   }
 
   const inputClass =

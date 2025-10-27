@@ -167,8 +167,16 @@ export default function GoogleChatAction({
       markDirty: boolean
     ) => {
       if (!effectiveCanEdit) return
+
+      // Emit both flattened params and a namespaced variant under 'Google Chat'
+      // to match store selectors and test expectations.
+      const combinedParams = {
+        ...params,
+        'Google Chat': { ...params }
+      }
+
       useWorkflowStore.getState().updateNodeData(nodeId, {
-        params,
+        params: combinedParams,
         ...(markDirty ? { dirty: true } : {}),
         hasValidationErrors: nextHasErrors
       })

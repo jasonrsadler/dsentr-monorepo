@@ -42,6 +42,7 @@ export default function DashboardLayout() {
   const hasWorkspaces = memberships.length > 0
   const hasMultipleWorkspaces = memberships.length > 1
   const previousSearchRef = useRef<string | null>(null)
+  const hasSyncedQueryRef = useRef(false)
 
   const currentWorkspaceName = useMemo(() => {
     if (!currentWorkspace) return ''
@@ -92,8 +93,18 @@ export default function DashboardLayout() {
   )
 
   useEffect(() => {
-    syncWorkspaceParam(currentWorkspace?.workspace.id ?? null, true)
-  }, [currentWorkspace, syncWorkspaceParam])
+    const id = currentWorkspace?.workspace.id ?? null
+    const params = new URLSearchParams(location.search)
+    const existing = params.get('workspace')
+    if (!hasSyncedQueryRef.current) {
+      // Initial mount: respect an existing query param that differs;
+      // the URL->store effect will reconcile selection. After the first run,
+      // always sync the query param with the current selection.
+      hasSyncedQueryRef.current = true
+      if (existing && existing !== id) return
+    }
+    syncWorkspaceParam(id, true)
+  }, [currentWorkspace, syncWorkspaceParam, location.search])
 
   const handleWorkspaceChange = useCallback(
     (workspaceId: string) => {
@@ -191,7 +202,7 @@ export default function DashboardLayout() {
               {hasWorkspaces ? (
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    Workspace
+                    Active workspace
                   </span>
                   {hasMultipleWorkspaces ? (
                     <select

@@ -42,6 +42,7 @@ export default function MembersTab() {
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const refreshMemberships = useAuth((state) => state.refreshMemberships)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const memberships = useAuth((state) => state.memberships)
   const { refresh: refreshSecrets } = useSecrets()
   const [members, setMembers] = useState<WorkspaceMember[]>([])
   const [busy, setBusy] = useState(false)
@@ -429,11 +430,26 @@ export default function MembersTab() {
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <div className="text-sm text-zinc-600 dark:text-zinc-300">
-            Workspace:{' '}
-            <span className="font-medium text-zinc-900 dark:text-zinc-100">
-              {resolvedWorkspaceName || 'Unnamed workspace'}
-            </span>
+          <div className="text-sm text-zinc-600 dark:text-zinc-300 flex items-center gap-2">
+            <span>Workspace:</span>
+            {Array.isArray(memberships) && memberships.length > 1 ? (
+              <select
+                aria-label="workspace switcher"
+                value={resolvedWorkspaceId ?? ''}
+                onChange={(e) => setCurrentWorkspaceId(e.target.value)}
+                className="mt-0.5 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800"
+              >
+                {memberships.map((m) => (
+                  <option key={m.workspace.id} value={m.workspace.id}>
+                    {m.workspace.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                {resolvedWorkspaceName || 'Unnamed workspace'}
+              </span>
+            )}
           </div>
           <button
             onClick={handleLeaveWorkspace}
@@ -462,7 +478,8 @@ export default function MembersTab() {
           </div>
         ) : null}
 
-        <div className="flex items-end gap-2">
+        {planTier === 'workspace' && (
+          <div className="flex items-end gap-2">
           <div className="flex-1">
             <label className="block text-sm">Invite by Email</label>
             <input
@@ -525,7 +542,8 @@ export default function MembersTab() {
           >
             Invite
           </button>
-        </div>
+          </div>
+        )}
 
         {!isWorkspaceAdminOrOwner && planTier === 'workspace' ? (
           <p className="text-xs text-zinc-500">

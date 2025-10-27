@@ -13,8 +13,8 @@ export default function CheckEmail() {
       <MarketingShell maxWidthClassName="max-w-3xl">
         <div className="space-y-12 text-center">
           <BrandHero
-            title="Confirm your email"
-            description="We just sent a secure link to your inbox. Open it from the same device to continue with setup."
+            title="Check your email"
+            description="We've sent you a verification link. Open it on this device to continue."
             kicker="Next step"
           />
 

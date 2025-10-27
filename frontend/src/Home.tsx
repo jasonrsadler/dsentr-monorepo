@@ -30,12 +30,12 @@ export default function Home() {
 
         <div className="relative space-y-16">
           <BrandHero
-            title="Visual automation for ambitious teams"
-            description="Build, launch, and scale sophisticated workflows without the spreadsheet hacks. Dsentr turns automation into a canvas you can trust."
-            kicker="Launch faster"
+            title="Automate your work with modular logic"
+            description="Dsentr is a modular no-code automation platform that lets you assemble workflows using plug-and-play components."
+            kicker="Get started"
             actions={
               <NavigateButton to="/get-started" className="px-6 py-3 text-base">
-                Start building
+                Get Started
               </NavigateButton>
             }
           />
@@ -43,18 +43,18 @@ export default function Home() {
           <section className="grid gap-8 md:grid-cols-3">
             <FeatureCard
               icon={<PlugIcon />}
-              title="Composable building blocks"
-              description="Assemble logic from reusable modules that connect with your existing stack. No fragile scripts, just components that snap together."
+              title="Modular by design"
+              description="Pluggable components that fit your logic"
             />
             <FeatureCard
               icon={<ClockIcon />}
-              title="Event-ready orchestration"
-              description="Orchestrate workflows that respond instantly to triggers, schedules, and data changes without manual intervention."
+              title="Trigger-driven"
+              description="Schedule tasks, respond to webhooks"
             />
             <FeatureCard
               icon={<ShieldIcon />}
-              title="Enterprise-grade guardrails"
-              description="Security, observability, and governance are built in so your automations scale safely across teams and environments."
+              title="Secure & scalable"
+              description="Built with robust architecture"
             />
           </section>
         </div>

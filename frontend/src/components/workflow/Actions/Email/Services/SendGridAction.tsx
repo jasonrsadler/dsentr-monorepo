@@ -121,12 +121,20 @@ export default function SendGridAction({
         params && typeof params === 'object' ? params : ({} as SendGridParams)
       const { dirty: _dirty, ...rest } = base
 
+      const nextRaw = { ...rest, ...patch }
+      const nextNormalized = normalizeParams(nextRaw)
+      const nextErrors = validate(nextNormalized)
+      const nextHasErrors =
+        Object.keys(nextErrors).length > 0 ||
+        (substitutionErrors && nextNormalized.templateId.trim().length > 0)
+
       updateNodeData(nodeId, {
-        params: { ...rest, ...patch },
-        dirty: true
+        params: nextRaw,
+        dirty: true,
+        hasValidationErrors: nextHasErrors
       })
     },
-    [effectiveCanEdit, nodeId, params, updateNodeData]
+    [effectiveCanEdit, nodeId, params, updateNodeData, substitutionErrors]
   )
 
   const errors = validate(normalizedParams)

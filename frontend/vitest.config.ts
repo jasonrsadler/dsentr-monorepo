@@ -1,4 +1,5 @@
 import { defineConfig, configDefaults } from 'vitest/config'
+import react from '@vitejs/plugin-react'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -8,6 +9,7 @@ const __dirname = path.dirname(__filename)
 
 // Vitest config (separate from Vite 7 app config)
 export default defineConfig({
+  plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),

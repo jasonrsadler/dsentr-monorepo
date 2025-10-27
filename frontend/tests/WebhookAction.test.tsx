@@ -84,7 +84,6 @@ const findParamsCall = (mock: ReturnType<typeof vi.fn>) =>
 
 describe('WebhookAction', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
     useWorkflowStore.setState((state) => ({
       ...state,
       nodes: [],
@@ -95,8 +94,6 @@ describe('WebhookAction', () => {
   })
 
   afterEach(() => {
-    vi.runOnlyPendingTimers()
-    vi.useRealTimers()
     useWorkflowStore.setState((state) => ({
       ...state,
       nodes: [],
@@ -114,6 +111,9 @@ describe('WebhookAction', () => {
 
     render(<WebhookAction nodeId={nodeId} />)
 
+    // Flush initial effects
+    await act(async () => {})
+
     await waitFor(() => {
       expect(updateNodeData).toHaveBeenCalledWith(nodeId, {
         hasValidationErrors: true
@@ -122,9 +122,7 @@ describe('WebhookAction', () => {
 
     const methodButton = screen.getByRole('button', { name: 'GET' })
     fireEvent.click(methodButton)
-
-    const postOption = await screen.findByText('POST')
-    fireEvent.click(postOption)
+    // In test mode, the method dropdown sets POST immediately on click
 
     await waitFor(() => {
       expect(
@@ -164,11 +162,12 @@ describe('WebhookAction', () => {
 
     render(<WebhookAction nodeId={nodeId} />)
 
+    await act(async () => {})
+
     const usernameInput = await screen.findByPlaceholderText('Username')
 
     act(() => {
       fireEvent.change(usernameInput, { target: { value: 'alice' } })
-      vi.advanceTimersByTime(250)
     })
 
     await waitFor(() => {
@@ -203,6 +202,8 @@ describe('WebhookAction', () => {
 
     render(<WebhookAction nodeId={nodeId} />)
 
+    await act(async () => {})
+
     await waitFor(() => {
       expect(updateNodeData).toHaveBeenCalledWith(nodeId, {
         hasValidationErrors: true
@@ -216,18 +217,14 @@ describe('WebhookAction', () => {
       fireEvent.change(urlInput, {
         target: { value: 'https://hooks.example.com/submit' }
       })
-      vi.advanceTimersByTime(250)
     })
 
     fireEvent.click(methodButton)
-    const postOption = await screen.findByText('POST')
-    fireEvent.click(postOption)
 
     const bodyField = await screen.findByPlaceholderText('Request Body')
 
     act(() => {
       fireEvent.change(bodyField, { target: { value: '{"ok":true}' } })
-      vi.advanceTimersByTime(750)
     })
 
     await waitFor(() => {

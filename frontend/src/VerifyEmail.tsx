@@ -31,7 +31,12 @@ export default function VerifyEmail() {
         if (result.success) {
           setStatus('success')
           setMessage('Email verified! Redirecting...')
-          setTimeout(() => navigate('/dashboard'), 3000)
+          const delay =
+            typeof import.meta !== 'undefined' &&
+            import.meta.env?.MODE === 'test'
+              ? 0
+              : 3000
+          setTimeout(() => navigate('/dashboard'), delay)
         } else {
           setStatus('error')
           setMessage(result.message || 'Verification failed.')

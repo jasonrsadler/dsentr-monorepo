@@ -30,7 +30,7 @@ export default function About() {
       <MarketingShell>
         <div className="space-y-16">
           <BrandHero
-            title="People-first automation"
+            title="About Dsentr"
             description="We are designers, engineers, and operators who believe automation should accelerate human creativity. Dsentr turns sophisticated workflows into approachable, dependable systems."
             kicker="Our story"
           />
@@ -54,14 +54,14 @@ export default function About() {
           <section className="grid gap-10 rounded-2xl border border-zinc-200/60 bg-gradient-to-br from-indigo-500/10 via-white/60 to-purple-500/10 p-10 text-left shadow-inner dark:border-white/10 dark:from-indigo-400/10 dark:via-zinc-900/60 dark:to-purple-400/10">
             <div className="space-y-4">
               <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-                Why we built Dsentr
+                The Story Behind Dsentr
               </h2>
               <p className="text-base leading-relaxed text-zinc-600 dark:text-zinc-300">
-                Dsentr started as a response to brittle, opaque automation
-                stacks. We wanted a platform that made complex orchestration
-                approachable without hiding the details that matter. Triggers,
-                actions, and data flow are all modular so teams can move quickly
-                without losing governance.
+                Dsentr began as a personal frustration with brittle, opaque
+                automation stacks. We wanted a platform that made complex
+                orchestration approachable without hiding the details that
+                matter. Triggers, actions, and data flow are all modular so
+                teams can move quickly without losing governance.
               </p>
             </div>
             <p className="text-base leading-relaxed text-zinc-600 dark:text-zinc-300">

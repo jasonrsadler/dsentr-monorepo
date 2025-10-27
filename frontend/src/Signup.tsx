@@ -448,13 +448,19 @@ export default function SignupPage() {
                       >
                         {label}
                         {required && (
-                          <span className="ml-1 text-red-500">*</span>
+                          <span
+                            className="ml-1 text-red-500"
+                            aria-hidden="true"
+                          >
+                            *
+                          </span>
                         )}
                       </label>
                       <input
                         id={name}
                         type={type || 'text'}
                         name={name}
+                        aria-label={label}
                         value={value}
                         onChange={handleChange}
                         readOnly={isReadOnly}

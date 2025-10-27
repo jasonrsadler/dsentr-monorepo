@@ -31,7 +31,6 @@ export function BrandHero({
         <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
           <DsentrLogo className="h-7 w-7" />
         </span>
-        <span>Dsentr</span>
       </div>
       {kicker ? (
         <span className="text-xs font-semibold uppercase tracking-[0.4em] text-indigo-500">

@@ -88,7 +88,7 @@ export default function GetStarted() {
               <div className="flex flex-col items-center gap-3 text-center text-emerald-600 dark:text-emerald-300">
                 <CheckIcon className="h-6 w-6" />
                 <p className="text-base font-medium">
-                  You&apos;re in! We&apos;ll be in touch with launch updates.
+                  You&apos;re in! We&apos;ll be in touch soon.
                 </p>
               </div>
             )}

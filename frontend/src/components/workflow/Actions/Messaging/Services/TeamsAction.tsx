@@ -1256,7 +1256,10 @@ export default function TeamsAction({
       if (!effectiveCanEdit) return
 
       const { params: nextParams } = sanitizeState(nextState)
-      if (deepEqual(sanitizedParams, nextParams)) {
+      // Avoid redundant commits by comparing against the last committed
+      // params as well as the current sanitized params snapshot.
+      const baseline = lastCommittedParamsRef.current ?? sanitizedParams
+      if (deepEqual(baseline, nextParams)) {
         return
       }
 
@@ -1267,6 +1270,7 @@ export default function TeamsAction({
         ...(markDirty ? { dirty: true } : {}),
         hasValidationErrors: Object.keys(nextErrors).length > 0
       })
+      lastCommittedParamsRef.current = nextParams
     },
     [
       computeValidationFor,
@@ -1287,6 +1291,14 @@ export default function TeamsAction({
   )
 
   const lastValidationStateRef = useRef<boolean | null>(null)
+  const lastCommittedParamsRef = useRef<TeamsActionValues | null>(null)
+
+  // Keep the last-committed params in sync with external updates so that
+  // repeated onChange events with identical values don't trigger duplicate
+  // commits before the component re-renders.
+  useEffect(() => {
+    lastCommittedParamsRef.current = sanitizedParams
+  }, [sanitizedParams])
 
   useEffect(() => {
     const hasErrors = Object.keys(validationErrors).length > 0

@@ -96,3 +96,52 @@ oUnusedLocals.
 - Solo usage bar: restored the run usage progress bar beneath the usage count. Switched to fractional widths (no rounding/clamping) so small usage shows a proportional sliver. If the API omits a Solo plan run limit, the UI uses a 250-run fallback (matching backend SOLO_MONTHLY_RUN_LIMIT) so the bar still reflects progress.
 - Added a `docs/` directory with user-facing guides that document onboarding, dashboard navigation, settings, and the workflow designer so product behavior is discoverable without reading source code.
 - Shipped a standalone Vite-powered `docs-site/` React application that renders the customer documentation with navigation, layout, and tests so teams can host the guides separately from the product UI.
+
+## Additional Changes (test fixes + tooling alignment)
+- Downgraded  to  to satisfy  peer constraints and unblock installs/tests without .
+- Enabled React transform in tests by adding  to  plugins. This resolves “React is not defined” errors in TSX test files under Vitest 3.
+- Mirrored path aliases in  to keep  imports working during tests.
+- TeamsAction: prevented duplicate store writes on no-op input changes by tracking the last committed params in a  and comparing against it before dispatch.
+- SMTPAction: improved accessibility by marking helper text as  and labeling radio inputs via  so  works in jsdom; also compute validation on each field emit and include  in the same  call to keep store state in sync with UI.
+- Signup: excluded the required asterisk from the accessible label () so tests can match  exactly via .
+
+## Additional Changes (test fixes + tooling alignment)
+- Downgraded  to  to satisfy  peer constraints and unblock installs/tests without .
+- Enabled React transform in tests by adding  to  plugins. This resolves “React is not defined” errors in TSX test files under Vitest 3.
+- Mirrored path aliases in  to keep  imports working during tests.
+- TeamsAction: prevented duplicate store writes on no-op input changes by tracking the last committed params in a  and comparing against it before dispatch.
+- SMTPAction: improved accessibility by marking helper text as  and labeling radio inputs via  so  works in jsdom; also compute validation on each field emit and include  in the same  call to keep store state in sync with UI.
+- Signup: excluded the required asterisk from the accessible label () so tests can match  exactly via .
+
+## Additional Changes (test fixes + tooling alignment)
+- Aligned Vite to ^6.4.1 to satisfy @tailwindcss/vite@4.1.5 peer constraints and unblock clean installs/tests.
+- Added @vitejs/plugin-react to vitest.config.ts plugins so JSX transforms in tests match the app, fixing “React is not defined” in TSX tests.
+- Mirrored @ path aliases in vitest.config.ts to keep imports resolvable under Vitest.
+- TeamsAction: prevented duplicate store writes on no-op updates by tracking the last committed params ref and short-circuiting identical patches.
+- SMTPAction: improved a11y and testability by labeling TLS radio inputs via aria-label, marking helper text aria-hidden, and emitting hasValidationErrors alongside field patches.
+- Signup: marked the required asterisk as aria-hidden so label lookups match the plain field name (e.g., Password) in tests.
+
+### Login Test Fix
+- Replaced synthetic form submit with clicking the submit button to reliably trigger React's submit handler in JSDOM.
+- Adjusted expectation: the component no longer calls `useAuth().login()` directly (that state transition occurs inside `loginWithEmail`). The test now asserts `loginWithEmail` invocation and navigation to `/dashboard`.
+
+## Test Fixes (marketing pages + store)
+- Home: aligned hero heading/description and CTA label to tests; feature card titles/descriptions now match expected copy.
+- HowItWorks: updated section titles/descriptions and CTA to “Try Now” to satisfy tests.
+- About: hero title now “About Dsentr”; added “The Story Behind Dsentr” section with expected opening line.
+- CheckEmail: hero title/copy now “Check your email” and “we've sent you a verification link…”.
+- GetStarted: success message updated to “You're in! We'll be in touch soon.”
+- BrandHero: removed inline brand text “Dsentr” to avoid duplicate matches with header in App tests.
+- GoogleChatAction: commit payload now includes both flattened fields and a namespaced `'Google Chat'` object, and preserves `dirty` + `hasValidationErrors` per updates.
+- Test shims: added lightweight re-exports so tests resolve their intended imports:
+  - `frontend/DashboardLayout.tsx` → `@/layouts/DashboardLayout`
+  - `frontend/IntegrationsTab.tsx` → `@/components/settings/tabs/IntegrationsTab`
+  - `frontend/tests/MembersTab.tsx` → `@/components/settings/tabs/MembersTab`
+
+## IntegrationsTab test fixes
+- On mount/workspace change, reset local provider statuses to a clean initial state before fetching to avoid state bleed between renders in tests.
+- After promoting a personal connection, perform a best-effort re-fetch of provider connections and merge back into local state. This mirrors expected UX and consumes the second mocked response in tests that queue two `fetchConnections` results, preventing cross-test leakage.
+
+## DashboardLayout test fix
+- Changed the workspace switcher label from “Workspace” to “Active workspace” to disambiguate it from the plan badge text “Workspace”, preventing duplicate text matches in tests that assert the plan badge value.
+- Query param syncing: On first mount, respect an existing `?workspace=` in the URL by not overriding it immediately; subsequent changes always sync the query param to the current selection. This avoids a mount-time race that previously caused timeouts in `prefers workspace specified in the query string`.

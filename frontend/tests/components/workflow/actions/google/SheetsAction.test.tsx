@@ -325,7 +325,6 @@ describe('SheetsAction', () => {
   })
 
   it('dispatches spreadsheet updates through focused patches', async () => {
-    vi.useFakeTimers()
     vi.spyOn(global, 'fetch').mockResolvedValue(
       createJsonResponse({ success: true, personal: [], workspace: [] })
     )
@@ -333,18 +332,12 @@ describe('SheetsAction', () => {
     try {
       render(<SheetsAction nodeId={nodeId} />)
 
-      await act(async () => {
-        vi.runAllTimers()
-      })
-
       updateNodeData.mockClear()
 
       const input = screen.getByPlaceholderText('Spreadsheet ID')
       fireEvent.change(input, { target: { value: 'new-sheet-id' } })
 
-      await act(async () => {
-        vi.runAllTimers()
-      })
+      await act(async () => {})
 
       expect(updateNodeData).toHaveBeenCalledWith(
         nodeId,
@@ -354,7 +347,7 @@ describe('SheetsAction', () => {
         })
       )
     } finally {
-      vi.useRealTimers()
+      /* no-op */
     }
   })
 

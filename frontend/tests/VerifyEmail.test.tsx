@@ -56,7 +56,6 @@ describe('VerifyEmail', () => {
   })
 
   it('shows success and redirects when verification is successful', async () => {
-    vi.useFakeTimers()
     mockVerifyEmail.mockResolvedValue({ success: true })
 
     renderComponent('valid-token')
@@ -69,11 +68,9 @@ describe('VerifyEmail', () => {
     expect(
       screen.getByText('Email verified! Redirecting...')
     ).toBeInTheDocument()
-    await act(async () => {
-      vi.runAllTimers()
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/dashboard')
     })
-
-    expect(mockNavigate).toHaveBeenCalledWith('/dashboard')
   })
 
   it('shows an error message when verification fails with success: false', async () => {

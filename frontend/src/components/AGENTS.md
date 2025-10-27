@@ -3,6 +3,9 @@
 ## Change Reasons
 - UI: Unified scrollbar theming across scrollable components to match the Settings modal.
 - Applied the shared `themed-scroll` utility class to elements with `overflow-auto`/`overflow-y-auto` for consistent, theme-aware scrollbars in light and dark modes.
+- TeamsAction: Prevented duplicate store writes for no-op input changes by tracking the last committed params in a ref and short-circuiting when the next state is identical. This avoids redundant `updateNodeData` calls that can cause render thrash in tests and the canvas.
+- SMTPAction: Improved accessibility of TLS radio options by marking helper text as `aria-hidden` and adding `aria-label` to radio inputs so `getByLabelText` works under jsdom. Also compute validation on each field change and include `hasValidationErrors` in the same `updateNodeData` payload to keep store state in sync with UI.
+- Signup form: Excluded the required asterisk from accessible labels (`aria-hidden`) so tests can select the `Password` field by its exact label.
 
 ## Affected Areas
 - Settings > LogsTab: change history list

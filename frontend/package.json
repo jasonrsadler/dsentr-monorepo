@@ -8,8 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest",
-    "test:run": "vitest run",
+    "test:watch": "vitest",
+    "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "dev:app": "vite",
     "dev:api": "cargo run",
@@ -53,7 +53,7 @@
     "tailwindcss": "^4.1.5",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.26.1",
-    "vite": "^7.1.12",
+    "vite": "^6.4.1",
     "vitest": "^3.1.2"
   }
 }
