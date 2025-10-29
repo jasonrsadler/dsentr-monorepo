@@ -1,0 +1,16 @@
+[
+  {
+    "name": "VITE_API_BASE_URL",
+    "description": "Base URL for the public API gateway consumed by the browser client.",
+    "approved_by": "security-team",
+    "approved_on": "2024-05-01",
+    "notes": "Value is observable from network traffic and carries no credential material."
+  },
+  {
+    "name": "VITE_STRIPE_PUBLISHABLE_KEY",
+    "description": "Stripe publishable key required by Stripe.js for client-side checkout initialization.",
+    "approved_by": "payments-team",
+    "approved_on": "2024-05-01",
+    "notes": "Publishable keys are intentionally public per Stripe guidance; secret keys remain server-side."
+  }
+]

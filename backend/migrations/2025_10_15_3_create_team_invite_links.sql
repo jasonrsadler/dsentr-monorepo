@@ -16,3 +16,7 @@ CREATE TABLE IF NOT EXISTS team_invite_links (
 CREATE INDEX IF NOT EXISTS idx_team_invite_links_team
 ON team_invite_links (team_id);
 
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_team_invite_links_team;
+--   DROP TABLE IF EXISTS team_invite_links;
+

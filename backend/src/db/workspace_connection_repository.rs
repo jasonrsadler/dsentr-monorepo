@@ -6,6 +6,12 @@ use crate::models::oauth_token::{
     ConnectedOAuthProvider, WorkspaceAuditEvent, WorkspaceConnection,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleWorkspaceConnection {
+    pub connection_id: Uuid,
+    pub workspace_id: Uuid,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewWorkspaceConnection {
     pub workspace_id: Uuid,
@@ -93,7 +99,7 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         &self,
         creator_id: Uuid,
         provider: ConnectedOAuthProvider,
-    ) -> Result<(), sqlx::Error>;
+    ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error>;
 
     async fn record_audit_event(
         &self,
@@ -173,8 +179,8 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         &self,
         _creator_id: Uuid,
         _provider: ConnectedOAuthProvider,
-    ) -> Result<(), sqlx::Error> {
-        Ok(())
+    ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
+        Ok(Vec::new())
     }
 
     async fn record_audit_event(

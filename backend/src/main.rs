@@ -9,6 +9,7 @@ mod state;
 pub mod utils;
 mod worker;
 
+use anyhow::{anyhow, Context, Result};
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::HeaderValue;
 use axum::http::Method;
@@ -27,7 +28,7 @@ use db::postgres_workspace_connection_repository::PostgresWorkspaceConnectionRep
 use db::postgres_workspace_repository::PostgresWorkspaceRepository;
 use reqwest::Client;
 use responses::JsonResponse;
-use routes::auth::{handle_login, handle_signup, verify_email};
+use routes::auth::{handle_login, handle_refresh, handle_signup, verify_email};
 use routes::{
     admin::purge_runs,
     auth::{
@@ -68,7 +69,10 @@ use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
-use utils::csrf::{get_csrf_token, validate_csrf};
+use utils::{
+    csrf::{get_csrf_token, validate_csrf},
+    jwt::JwtKeys,
+};
 
 use crate::db::{
     user_repository::UserRepository, workflow_repository::WorkflowRepository,
@@ -83,11 +87,16 @@ use crate::state::AppState;
 use axum_server::tls_rustls::RustlsConfig;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .finish();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    tracing::subscriber::set_global_default(subscriber)
+        .map_err(|error| {
+            tracing::error!(error = ?error, "Failed to set global tracing subscriber");
+            error
+        })
+        .context("failed to set global tracing subscriber")?;
 
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
@@ -95,7 +104,10 @@ async fn main() {
             .burst_size(5)
             .use_headers() // optional: adds RateLimit-* headers
             .finish()
-            .unwrap(),
+            .ok_or_else(|| {
+                tracing::error!("Failed to build rate limiter configuration");
+                anyhow!("failed to build rate limiter configuration")
+            })?,
     );
 
     // ✅ Background task to cleanup old IPs
@@ -131,7 +143,10 @@ async fn main() {
                 .into_response()
             })
             .finish()
-            .unwrap(),
+            .ok_or_else(|| {
+                tracing::error!("Failed to build global rate limiter configuration");
+                anyhow!("failed to build global rate limiter configuration")
+            })?,
     );
 
     let rate_limit_auth_s: u64 = std::env::var("RATE_LIMITER_AUTH_SECONDS")
@@ -155,12 +170,31 @@ async fn main() {
                 .into_response()
             })
             .finish()
-            .unwrap(),
+            .ok_or_else(|| {
+                tracing::error!("Failed to build auth rate limiter configuration");
+                anyhow!("failed to build auth rate limiter configuration")
+            })?,
     );
 
-    let config = Arc::new(Config::from_env());
+    let config = Arc::new(
+        Config::from_env()
+            .map_err(|error| {
+                tracing::error!(error = %error, "Failed to load configuration from environment");
+                error
+            })
+            .context("failed to load configuration from environment")?,
+    );
 
-    let pg_pool = establish_connection(&config.database_url).await;
+    let jwt_keys = Arc::new(
+        JwtKeys::from_env()
+            .map_err(|error| {
+                tracing::error!(error = %error, "Failed to load JWT secret");
+                anyhow!(error)
+            })
+            .context("failed to load JWT secret from environment")?,
+    );
+
+    let pg_pool = establish_connection(&config.database_url).await?;
     let user_repo = Arc::new(PostgresUserRepository {
         pool: pg_pool.clone(),
     }) as Arc<dyn UserRepository>;
@@ -174,7 +208,14 @@ async fn main() {
     }) as Arc<dyn WorkspaceRepository>;
 
     // Initialize mailer
-    let mailer = Arc::new(SmtpMailer::new().expect("Failed to initialize mailer"));
+    let mailer = Arc::new(
+        SmtpMailer::new()
+            .map_err(|error| {
+                tracing::error!(error = ?error, "Failed to initialize SMTP mailer");
+                error
+            })
+            .context("failed to initialize SMTP mailer")?,
+    );
     let http_client = Client::new();
     let http_client_arc = Arc::new(http_client.clone());
 
@@ -229,11 +270,25 @@ async fn main() {
             .ok()
             .and_then(|v| v.parse::<i32>().ok())
             .unwrap_or(15),
+        jwt_keys: jwt_keys.clone(),
     };
     let state_for_worker = state.clone();
 
+    let frontend_origin = config
+        .frontend_origin
+        .parse::<HeaderValue>()
+        .map_err(|error| {
+            tracing::error!(
+                error = %error,
+                origin = %config.frontend_origin,
+                "Invalid FRONTEND_ORIGIN provided"
+            );
+            error
+        })
+        .context("invalid FRONTEND_ORIGIN value")?;
+
     let cors = CorsLayer::new()
-        .allow_origin(config.frontend_origin.parse::<HeaderValue>().unwrap())
+        .allow_origin(frontend_origin.clone())
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([
             AUTHORIZATION,
@@ -248,6 +303,7 @@ async fn main() {
     let csrf_protected_routes = Router::new()
         .route("/signup", post(handle_signup))
         .route("/login", post(handle_login))
+        .route("/refresh", post(handle_refresh))
         .route("/logout", post(handle_logout))
         .route("/verify", post(verify_email))
         .route("/forgot-password", post(handle_forgot_password))
@@ -512,25 +568,63 @@ async fn main() {
     #[cfg(feature = "tls")]
     {
         // TLS: Only run this block when `--features tls` is used
-        let tls_config = RustlsConfig::from_pem_file(
-            std::env::var("DEV_CERT_LOCATION").unwrap(),
-            std::env::var("DEV_KEY_LOCATION").unwrap(),
-        )
-        .await
-        .expect("Failed to load TLS certs");
+        let cert_path = std::env::var("DEV_CERT_LOCATION")
+            .map_err(|error| {
+                tracing::error!(error = %error, "DEV_CERT_LOCATION environment variable missing");
+                error
+            })
+            .context("missing DEV_CERT_LOCATION environment variable")?;
+        let key_path = std::env::var("DEV_KEY_LOCATION")
+            .map_err(|error| {
+                tracing::error!(error = %error, "DEV_KEY_LOCATION environment variable missing");
+                error
+            })
+            .context("missing DEV_KEY_LOCATION environment variable")?;
 
-        println!("Running with TLS at https://{}", addr);
-        let _ = axum_server::bind_rustls(addr, tls_config)
+        let tls_config = RustlsConfig::from_pem_file(&cert_path, &key_path)
+            .await
+            .map_err(|error| {
+                tracing::error!(
+                    error = ?error,
+                    cert_path = %cert_path,
+                    key_path = %key_path,
+                    "Failed to load TLS configuration"
+                );
+                error
+            })
+            .context("failed to load TLS certificate or key")?;
+
+        info!(%addr, "Running with TLS");
+        axum_server::bind_rustls(addr, tls_config)
             .serve(make_service)
-            .await;
+            .await
+            .map_err(|error| {
+                tracing::error!(error = ?error, %addr, "TLS server encountered an error");
+                error
+            })
+            .context("TLS server encountered an error")?;
     }
 
     #[cfg(not(feature = "tls"))]
     {
-        let listener = TcpListener::bind(addr).await.unwrap();
-        println!("Running without TLS at http://{}", addr);
-        axum::serve(listener, make_service).await.unwrap();
+        let listener = TcpListener::bind(addr)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = ?error, %addr, "Failed to bind TCP listener");
+                error
+            })
+            .with_context(|| format!("failed to bind TCP listener to {addr}"))?;
+        info!(%addr, "Running without TLS");
+        axum::serve(listener, make_service)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = ?error, %addr, "Server encountered an error");
+                error
+            })
+            .context("server encountered an error")?;
     }
+
+    Ok(())
 }
 /// A simple root route.
 async fn root() -> Response {
@@ -538,16 +632,24 @@ async fn root() -> Response {
 }
 
 /// Establish a connection to the database and verify it.
-async fn establish_connection(database_url: &str) -> PgPool {
+async fn establish_connection(database_url: &str) -> Result<PgPool> {
     let pool = PgPool::connect(database_url)
         .await
-        .expect("Failed to connect to the database");
+        .map_err(|error| {
+            tracing::error!(error = ?error, "Failed to connect to the database");
+            error
+        })
+        .context("failed to connect to the database")?;
 
     sqlx::query("SELECT 1")
         .execute(&pool)
         .await
-        .expect("Failed to verify database connection");
+        .map_err(|error| {
+            tracing::error!(error = ?error, "Failed to verify database connection");
+            error
+        })
+        .context("failed to verify database connection")?;
 
     info!("✅ Successfully connected to the database");
-    pool
+    Ok(pool)
 }

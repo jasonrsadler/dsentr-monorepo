@@ -29,3 +29,10 @@ CREATE TABLE workspace_audit_events (
 
 CREATE INDEX workspace_audit_events_workspace_idx
   ON workspace_audit_events(workspace_id);
+
+-- Rollback:
+--   DROP INDEX IF EXISTS workspace_audit_events_workspace_idx;
+--   DROP TABLE IF EXISTS workspace_audit_events;
+--   ALTER TABLE user_oauth_tokens DROP COLUMN IF EXISTS is_shared;
+--   DROP INDEX IF EXISTS workspace_connections_workspace_idx;
+--   DROP TABLE IF EXISTS workspace_connections;

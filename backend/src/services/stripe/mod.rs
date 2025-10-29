@@ -1,4 +1,8 @@
 #![allow(dead_code)]
+// NOTE: async-stripe is compiled with a minimal feature set (runtime-tokio-hyper, checkout,
+// webhook-events, and connect to satisfy webhook payload types). Touching APIs outside those
+// features will require updating backend/Cargo.toml explicitly so we keep compile times and binary
+// size in check.
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -131,7 +135,10 @@ mod tests {
             success_url: "https://example.test/success".into(),
             cancel_url: "https://example.test/cancel".into(),
             mode: CheckoutMode::Subscription,
-            line_items: vec![CheckoutLineItem { price: "price_123".into(), quantity: 1 }],
+            line_items: vec![CheckoutLineItem {
+                price: "price_123".into(),
+                quantity: 1,
+            }],
             client_reference_id: Some("00000000-0000-0000-0000-000000000000".into()),
             customer: Some("cus_test_123".into()),
             metadata: Some(
@@ -146,7 +153,10 @@ mod tests {
 
         let session = mock.create_checkout_session(req.clone()).await.unwrap();
         assert!(session.id.starts_with("cs_test_"));
-        assert_eq!(session.url.as_deref(), Some("https://example.test/checkout"));
+        assert_eq!(
+            session.url.as_deref(),
+            Some("https://example.test/checkout")
+        );
 
         let captured = mock.last_create_requests.lock().unwrap();
         assert_eq!(captured.len(), 1);
@@ -176,7 +186,10 @@ mod tests {
             success_url: "https://example.test/success".into(),
             cancel_url: "https://example.test/cancel".into(),
             mode: CheckoutMode::Subscription,
-            line_items: vec![CheckoutLineItem { price: "price_123".into(), quantity: 1 }],
+            line_items: vec![CheckoutLineItem {
+                price: "price_123".into(),
+                quantity: 1,
+            }],
             client_reference_id: None,
             customer: Some("not_a_customer_id".into()),
             metadata: None,

@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use axum::{http::StatusCode, response::Response};
-use axum::{Json};
 use serde_json::json;
 use tracing::{error, info, warn};
 
@@ -27,7 +27,11 @@ fn extract_checkout_user_id(event: &serde_json::Value) -> Option<uuid::Uuid> {
     // checkout.session payload shape
     let obj = jget(event, &["data", "object"])?.clone();
     // Prefer explicit metadata.user_id
-    if let Some(uid) = obj.get("metadata").and_then(|m| m.get("user_id")).and_then(|v| v.as_str()) {
+    if let Some(uid) = obj
+        .get("metadata")
+        .and_then(|m| m.get("user_id"))
+        .and_then(|v| v.as_str())
+    {
         if let Ok(id) = uuid::Uuid::parse_str(uid) {
             return Some(id);
         }
@@ -49,7 +53,10 @@ fn extract_failure_message(event: &serde_json::Value) -> Option<String> {
         }
     }
     // Try invoice.last_finalization_error.message if present
-    if let Some(msg) = jget(event, &["data", "object", "last_finalization_error", "message"]) {
+    if let Some(msg) = jget(
+        event,
+        &["data", "object", "last_finalization_error", "message"],
+    ) {
         if let Some(s) = msg.as_str() {
             return Some(s.to_string());
         }
@@ -63,7 +70,10 @@ pub async fn stripe_webhook(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    let sig = match headers.get("Stripe-Signature").and_then(|h| h.to_str().ok()) {
+    let sig = match headers
+        .get("Stripe-Signature")
+        .and_then(|h| h.to_str().ok())
+    {
         Some(s) => s,
         None => return JsonResponse::bad_request("Missing Stripe-Signature").into_response(),
     };
@@ -134,7 +144,11 @@ pub async fn stripe_webhook(
             }
 
             // Downgrade any owned workspaces back to solo to ensure consistency
-            if let Ok(memberships) = app_state.workspace_repo.list_memberships_for_user(uid).await {
+            if let Ok(memberships) = app_state
+                .workspace_repo
+                .list_memberships_for_user(uid)
+                .await
+            {
                 for m in memberships
                     .into_iter()
                     .filter(|m| m.workspace.owner_id == uid && m.workspace.plan.as_str() != "solo")
@@ -151,7 +165,10 @@ pub async fn stripe_webhook(
 
             warn!(%uid, evt_type, "recorded billing failure and cleared pending checkout");
         } else {
-            warn!(evt_type, "billing failure event received but user not identified");
+            warn!(
+                evt_type,
+                "billing failure event received but user not identified"
+            );
         }
 
         return Json(json!({ "received": true })).into_response();

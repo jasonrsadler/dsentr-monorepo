@@ -215,6 +215,17 @@ pub fn map_oauth_error(err: OAuthAccountError) -> Response {
             error!("OAuth HTTP error: {e}");
             JsonResponse::server_error("Provider request failed").into_response()
         }
+        OAuthAccountError::EmailNotVerified { provider } => {
+            let provider_name = match provider {
+                ConnectedOAuthProvider::Google => "Google",
+                ConnectedOAuthProvider::Microsoft => "Microsoft",
+                ConnectedOAuthProvider::Slack => "Slack",
+            };
+            JsonResponse::bad_request(&format!(
+                "The {provider_name} account email must be verified before connecting."
+            ))
+            .into_response()
+        }
         OAuthAccountError::TokenRevoked { .. } => {
             JsonResponse::conflict("The OAuth connection was revoked. Reconnect to restore access.")
                 .into_response()
@@ -234,6 +245,9 @@ pub(crate) fn error_message_for_redirect(err: &OAuthAccountError) -> String {
         }
         OAuthAccountError::Encryption(_) => "Could not secure OAuth tokens.".to_string(),
         OAuthAccountError::Http(_) => "The OAuth provider request failed.".to_string(),
+        OAuthAccountError::EmailNotVerified { .. } => {
+            "The OAuth account's email address must be verified before connecting.".to_string()
+        }
         OAuthAccountError::InvalidResponse(_) => {
             "Received an invalid response from the OAuth provider.".to_string()
         }

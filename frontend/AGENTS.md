@@ -122,6 +122,12 @@ oUnusedLocals.
 - SMTPAction: improved a11y and testability by labeling TLS radio inputs via aria-label, marking helper text aria-hidden, and emitting hasValidationErrors alongside field patches.
 - Signup: marked the required asterisk as aria-hidden so label lookups match the plain field name (e.g., Password) in tests.
 
+Content Security Policy hardening:
+- Removed the inline theme bootstrapper from `index.html`, loading it as a bundled module instead so the app can enforce CSP without `unsafe-inline`.
+- Added baseline CSP guidance to `index.html` and `public/security-headers.conf`, defining `default-src 'self'` plus explicit `script-src`, `style-src`, and `font-src` directives aligned with Stripe and Google Fonts requirements.
+- Documented the need for `style-src 'unsafe-inline'` so React-driven inline styles render across browsers, expanded the allowed `connect-src` origins to cover the production API, Stripe endpoints, and localhost development servers, and synchronized those allowances across the dev meta tag and release engineering guide.
+- Approved Google Fonts CDN usage for Inter and Fira Code, and expanded both `style-src` and `font-src` directives to enumerate `https://fonts.googleapis.com` and `https://fonts.gstatic.com` explicitly for compliance audits.
+
 ### Login Test Fix
 - Replaced synthetic form submit with clicking the submit button to reliably trigger React's submit handler in JSDOM.
 - Adjusted expectation: the component no longer calls `useAuth().login()` directly (that state transition occurs inside `loginWithEmail`). The test now asserts `loginWithEmail` invocation and navigation to `/dashboard`.

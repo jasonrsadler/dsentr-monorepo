@@ -56,3 +56,9 @@ DROP INDEX IF EXISTS idx_organization_owner_unique;
 DROP TABLE IF EXISTS organization_members;
 DROP TABLE IF EXISTS organizations;
 DROP TYPE IF EXISTS organization_role;
+
+-- Rollback:
+--   Recreate organization_role, organizations, and organization_members using
+--   2025_10_14_2_create_organizations.sql, restore the organization_id column on
+--   workspaces, and rebuild idx_workspaces_organization_id / idx_organization_owner_unique
+--   before rehydrating data from backups.

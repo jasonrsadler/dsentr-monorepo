@@ -1,0 +1,133 @@
+name: Dependency Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    name: npm audit (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: frontend
+            working_directory: frontend
+            lockfile: package-lock.json
+            cache_dependency_path: frontend/package-lock.json
+            install_script_allowlist: |
+              {
+                "esbuild@0.25.3": "sha512-qKA6Pvai73+M2FtftpNKRxJ78GIjmFXFxd/1DVBqGo/qNhLSfv+G12n9pNoWdytJC8U00TrViOwpjT0zgqQS8Q==",
+                "fsevents@2.3.3": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="
+              }
+          - project: frontend-docs-site
+            working_directory: frontend/docs-site
+            lockfile: package-lock.json
+            cache_dependency_path: frontend/docs-site/package-lock.json
+            install_script_allowlist: |
+              {
+                "esbuild@0.25.11": "sha512-KohQwyzrKTQmhXDW1PjCv3Tyspn9n5GcY2RTDqeORIdIJY8yKIF7sTSopFmn/wpMPW4rdPXI0UE5LJLuq3bx0Q==",
+                "fsevents@2.3.3": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="
+              }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ matrix.cache_dependency_path }}
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.working_directory }}
+        run: npm ci
+
+      - name: Verify install-script packages
+        working-directory: ${{ matrix.working_directory }}
+        env:
+          LOCKFILE_PATH: ${{ matrix.lockfile }}
+          INSTALL_SCRIPT_ALLOWLIST: ${{ matrix.install_script_allowlist }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const lockfilePath = process.env.LOCKFILE_PATH;
+          const allowlistRaw = process.env.INSTALL_SCRIPT_ALLOWLIST || '{}';
+          const allowlist = JSON.parse(allowlistRaw);
+
+          const lockfile = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), lockfilePath), 'utf8'));
+          const packages = lockfile.packages || {};
+
+          const flagged = Object.entries(packages)
+            .filter(([, pkg]) => pkg && pkg.hasInstallScript)
+            .map(([location, pkg]) => ({
+              location,
+              name: pkg.name || location.split('node_modules/').pop() || location,
+              version: pkg.version,
+              integrity: pkg.integrity || null
+            }));
+
+          if (!flagged.length) {
+            console.log('No packages with install scripts detected.');
+            process.exit(0);
+          }
+
+          console.log('Packages with install scripts must be manually reviewed when their tarball integrity changes.');
+
+          const unexpected = [];
+          for (const pkg of flagged) {
+            const key = `${pkg.name}@${pkg.version}`;
+            if (!allowlist[key]) {
+              unexpected.push({ ...pkg, reason: 'missing from allowlist' });
+              continue;
+            }
+            if (allowlist[key] !== pkg.integrity) {
+              unexpected.push({ ...pkg, reason: 'integrity mismatch' });
+            } else {
+              console.log(`✔ ${key} integrity matches allowlist.`);
+            }
+          }
+
+          if (unexpected.length) {
+            console.error('Install-script dependencies changed. Perform a manual review and update the allowlist before merging.');
+            for (const entry of unexpected) {
+              console.error(`• ${entry.name}@${entry.version} (${entry.location}): ${entry.reason}`);
+            }
+            process.exit(1);
+          }
+
+          console.log('All install-script packages match the vetted checksums.');
+          NODE
+
+      - name: npm audit --omit=dev
+        working-directory: ${{ matrix.working_directory }}
+        run: npm audit --omit=dev
+
+      - name: npm audit --production
+        working-directory: ${{ matrix.working_directory }}
+        run: npm audit --production
+
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: cargo audit
+        working-directory: backend
+        run: cargo audit

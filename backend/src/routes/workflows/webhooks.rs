@@ -1,4 +1,6 @@
 use super::prelude::*;
+use crate::config::MIN_WEBHOOK_SECRET_LENGTH;
+use tracing::error;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -28,6 +30,20 @@ fn compute_webhook_signing_key(
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(res)
 }
 
+fn webhook_secret(config: &crate::config::Config) -> Option<String> {
+    let secret = config.webhook_secret.clone();
+    if secret.len() < MIN_WEBHOOK_SECRET_LENGTH {
+        error!("WEBHOOK_SECRET is not configured with sufficient entropy");
+        return None;
+    }
+    Some(secret)
+}
+
+fn missing_webhook_secret_response() -> Response {
+    JsonResponse::server_error("Webhook secret is not configured; contact an administrator.")
+        .into_response()
+}
+
 pub async fn get_webhook_url(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -43,7 +59,10 @@ pub async fn get_webhook_url(
         .await
     {
         Ok(Some(wf)) => {
-            let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
+            let secret = match webhook_secret(app_state.config.as_ref()) {
+                Some(secret) => secret,
+                None => return missing_webhook_secret_response(),
+            };
             let token = compute_webhook_token(&secret, wf.user_id, wf.id, wf.webhook_salt);
             let url = format!("/api/workflows/{}/trigger/{}", wf.id, token);
             (StatusCode::OK, Json(json!({"success": true, "url": url }))).into_response()
@@ -74,7 +93,10 @@ pub async fn webhook_trigger(
         }
     };
 
-    let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
+    let secret = match webhook_secret(app_state.config.as_ref()) {
+        Some(secret) => secret,
+        None => return missing_webhook_secret_response(),
+    };
     let expected = compute_webhook_token(&secret, wf.user_id, wf.id, wf.webhook_salt);
     if token != expected {
         return JsonResponse::unauthorized("Invalid token").into_response();
@@ -191,7 +213,10 @@ pub async fn get_webhook_config(
         .await
     {
         Ok(Some(wf)) => {
-            let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
+            let secret = match webhook_secret(app_state.config.as_ref()) {
+                Some(secret) => secret,
+                None => return missing_webhook_secret_response(),
+            };
             let signing_key =
                 compute_webhook_signing_key(&secret, wf.user_id, wf.id, wf.webhook_salt);
             (
@@ -253,8 +278,10 @@ pub async fn regenerate_webhook_token(
                 .await;
             match wf {
                 Ok(Some(w)) => {
-                    let secret =
-                        std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| "dev-secret".into());
+                    let secret = match webhook_secret(app_state.config.as_ref()) {
+                        Some(secret) => secret,
+                        None => return missing_webhook_secret_response(),
+                    };
                     let token = compute_webhook_token(&secret, w.user_id, w.id, new_salt);
                     let url = format!("/api/workflows/{}/trigger/{}", w.id, token);
                     (StatusCode::OK, Json(json!({"success": true, "url": url}))).into_response()

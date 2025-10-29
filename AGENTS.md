@@ -25,3 +25,7 @@ nder loops—tread carefully and double-check state update patterns.
 - ensure `npm run build` always succeeds after any changes
 - ensure `npm t` always succeeds after any changes
 - ensure `npm run lint` always succeeds after any changes
+
+## Change Reasons
+- Added repository-wide secret handling policy and contributor documentation links so all teams follow consistent vault-based credential management.
+- Approved Google Fonts CDN usage, expanded CSP allow lists to enumerate the domains explicitly, and added operations documentation so external dependencies stay compliant with ASVS 14.1.2 and STIG 5.10.

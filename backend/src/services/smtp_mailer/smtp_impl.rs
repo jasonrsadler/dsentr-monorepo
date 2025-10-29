@@ -18,39 +18,72 @@ use super::MailError;
 pub struct SmtpMailer {
     transport: Arc<AsyncSmtpTransport<Tokio1Executor>>,
     sender: Mailbox,
+    host: String,
+    port: u16,
+    tls_mode: TlsMode,
 }
 
 impl SmtpMailer {
-    pub fn new() -> Result<Self, anyhow::Error> {
+    pub fn new() -> Result<Self, MailError> {
+        if std::env::var("SMTP_TLS_DISABLED")
+            .map(|value| value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            return Err(MailError::Other(
+                "SMTP TLS must remain enabled; remove SMTP_TLS_DISABLED from the environment"
+                    .into(),
+            ));
+        }
+
         let host = std::env::var("SMTP_HOST")?;
+        if host.trim().is_empty() {
+            return Err(MailError::Other(
+                "SMTP_HOST must not be empty when configuring TLS".into(),
+            ));
+        }
         let username = std::env::var("SMTP_USERNAME")?;
         let password = std::env::var("SMTP_PASSWORD")?;
         let from = std::env::var("SMTP_FROM")?.parse()?;
-        let port: u16 = std::env::var("SMTP_PORT")?.parse()?;
+        let port: u16 = std::env::var("SMTP_PORT")?
+            .parse()
+            .map_err(|err| MailError::Other(format!("invalid SMTP_PORT value: {}", err)))?;
 
-        let disabled_tls = std::env::var("SMTP_TLS_DISABLED")
-            .unwrap_or_else(|_| "false".to_string())
-            .to_lowercase()
-            == "true";
-
-        let mailer = if disabled_tls {
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host)
-                .port(port)
-                .build()
+        let tls_mode = if port == 465 {
+            TlsMode::Implicit
         } else {
-            let creds = Credentials::new(username, password);
-            let tls = TlsParameters::new(host.clone())?;
-
-            AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?
-                .port(port)
-                .tls(Tls::Required(tls))
-                .credentials(creds)
-                .build()
+            TlsMode::StartTls
         };
+
+        let creds = Credentials::new(username, password);
+        let tls = TlsParameters::new(host.clone()).map_err(|err| {
+            MailError::SendError(format!(
+                "Failed to configure TLS for {}:{} (mode: {}): {}",
+                host, port, tls_mode, err
+            ))
+        })?;
+
+        let builder = AsyncSmtpTransport::<Tokio1Executor>::relay(&host)
+            .map_err(|err| {
+                MailError::SendError(format!(
+                    "Failed to configure SMTP transport for {}:{} (mode: {}): {}",
+                    host, port, tls_mode, err
+                ))
+            })?
+            .port(port);
+
+        let builder = match tls_mode {
+            TlsMode::StartTls => builder.tls(Tls::Required(tls)),
+            TlsMode::Implicit => builder.tls(Tls::Wrapper(tls)),
+        };
+
+        let mailer = builder.credentials(creds).build();
 
         Ok(Self {
             transport: Arc::new(mailer),
             sender: from,
+            host,
+            port,
+            tls_mode,
         })
     }
 
@@ -67,7 +100,19 @@ impl SmtpMailer {
             .send(email)
             .await
             .map(|_| ())
-            .map_err(|e| e.into())
+            .map_err(|error| {
+                tracing::error!(
+                    error = %error,
+                    host = %self.host,
+                    port = self.port,
+                    tls_mode = %self.tls_mode,
+                    "Failed to send SMTP email"
+                );
+                MailError::SendError(format!(
+                    "{} (host: {}:{}, tls: {})",
+                    error, self.host, self.port, self.tls_mode
+                ))
+            })
     }
 }
 
@@ -123,10 +168,18 @@ impl Mailer for SmtpMailer {
 
         let transport = build_dynamic_transport(config)?;
 
-        transport.send(email).await.map(|_| ()).map_err(|e| {
+        transport.send(email).await.map(|_| ()).map_err(|error| {
+            tracing::error!(
+                error = %error,
+                host = %config.host,
+                port = config.port,
+                tls_mode = %config.tls_mode,
+                auth_configured = config.username.is_some(),
+                "Failed to send SMTP email with dynamic configuration"
+            );
             MailError::SendError(format!(
                 "{} (host: {}:{}, tls: {}, auth: {})",
-                e,
+                error,
                 config.host,
                 config.port,
                 config.tls_mode,
@@ -147,22 +200,39 @@ impl Mailer for SmtpMailer {
 fn build_dynamic_transport(
     config: &SmtpConfig,
 ) -> Result<AsyncSmtpTransport<Tokio1Executor>, MailError> {
+    if config.host.trim().is_empty() {
+        return Err(MailError::SendError(format!(
+            "Failed to configure TLS for {}:{} (mode: {}): SMTP host is empty",
+            config.host, config.port, config.tls_mode
+        )));
+    }
+
+    let tls = TlsParameters::new(config.host.clone()).map_err(|err| {
+        MailError::SendError(format!(
+            "Failed to configure TLS for {}:{} (mode: {}): {}",
+            config.host, config.port, config.tls_mode, err
+        ))
+    })?;
+
     let mut builder = match config.tls_mode {
-        TlsMode::StartTls => {
-            let tls = TlsParameters::new(config.host.clone())?;
-            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)?
-                .port(config.port)
-                .tls(Tls::Required(tls))
-        }
-        TlsMode::Implicit => {
-            let tls = TlsParameters::new(config.host.clone())?;
-            AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)?
-                .port(config.port)
-                .tls(Tls::Wrapper(tls))
-        }
-        TlsMode::None => {
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host).port(config.port)
-        }
+        TlsMode::StartTls => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)
+            .map_err(|err| {
+                MailError::SendError(format!(
+                    "Failed to configure SMTP transport for {}:{} (mode: {}): {}",
+                    config.host, config.port, config.tls_mode, err
+                ))
+            })?
+            .port(config.port)
+            .tls(Tls::Required(tls)),
+        TlsMode::Implicit => AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)
+            .map_err(|err| {
+                MailError::SendError(format!(
+                    "Failed to configure SMTP transport for {}:{} (mode: {}): {}",
+                    config.host, config.port, config.tls_mode, err
+                ))
+            })?
+            .port(config.port)
+            .tls(Tls::Wrapper(tls)),
     };
 
     if let (Some(username), Some(password)) = (config.username.as_ref(), config.password.as_ref()) {
@@ -175,6 +245,8 @@ fn build_dynamic_transport(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use once_cell::sync::Lazy;
+    use std::sync::{Mutex, MutexGuard};
 
     fn base_config() -> SmtpConfig {
         SmtpConfig {
@@ -184,6 +256,42 @@ mod tests {
             password: Some("pass".to_string()),
             from: "sender@example.com".to_string(),
             tls_mode: TlsMode::StartTls,
+        }
+    }
+
+    static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    struct EnvGuard {
+        previous: Vec<(&'static str, Option<String>)>,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn set(vars: &[(&'static str, &'static str)]) -> Self {
+            let lock = ENV_LOCK.lock().expect("env mutex poisoned");
+            let mut previous = Vec::with_capacity(vars.len());
+
+            for (key, value) in vars {
+                previous.push((*key, std::env::var(key).ok()));
+                std::env::set_var(key, value);
+            }
+
+            Self {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                if let Some(previous) = value {
+                    std::env::set_var(key, previous);
+                } else {
+                    std::env::remove_var(key);
+                }
+            }
         }
     }
 
@@ -204,10 +312,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_dynamic_transport_allows_plaintext_when_disabled() {
+    async fn smtp_mailer_new_rejects_disabled_tls_env() {
+        let _guard = EnvGuard::set(&[
+            ("SMTP_HOST", "smtp.example.com"),
+            ("SMTP_USERNAME", "user"),
+            ("SMTP_PASSWORD", "secret"),
+            ("SMTP_FROM", "sender@example.com"),
+            ("SMTP_PORT", "587"),
+            ("SMTP_TLS_DISABLED", "true"),
+        ]);
+
+        let error = match SmtpMailer::new() {
+            Err(err) => err,
+            Ok(_) => panic!("TLS disabled configurations must be rejected"),
+        };
+
+        if let MailError::Other(message) = error {
+            assert!(
+                message.contains("TLS"),
+                "error message should mention TLS: {}",
+                message
+            );
+        } else {
+            panic!("expected MailError::Other, got: {:?}", error);
+        }
+    }
+
+    #[tokio::test]
+    async fn build_dynamic_transport_surfaces_tls_parameter_errors() {
         let mut config = base_config();
-        config.tls_mode = TlsMode::None;
-        let transport = build_dynamic_transport(&config);
-        assert!(transport.is_ok());
+        config.host = String::new();
+
+        let error = build_dynamic_transport(&config)
+            .expect_err("invalid TLS host should surface a descriptive error");
+
+        if let MailError::SendError(message) = error {
+            assert!(
+                message.contains("(mode: starttls)"),
+                "error message should contain TLS mode context: {}",
+                message
+            );
+            assert!(
+                message.to_lowercase().contains("tls"),
+                "error message should mention TLS context: {}",
+                message
+            );
+        } else {
+            panic!("expected MailError::SendError, got: {:?}", error);
+        }
     }
 }

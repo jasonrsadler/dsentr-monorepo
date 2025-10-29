@@ -14,3 +14,8 @@ CREATE TABLE user_oauth_tokens (
 );
 
 CREATE INDEX user_oauth_tokens_user_idx ON user_oauth_tokens(user_id);
+
+-- Rollback:
+--   DROP INDEX IF EXISTS user_oauth_tokens_user_idx;
+--   DROP TABLE IF EXISTS user_oauth_tokens;
+--   DROP TYPE IF EXISTS oauth_connection_provider;

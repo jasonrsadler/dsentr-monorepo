@@ -22,7 +22,8 @@
             "kind": {
               "Enum": [
                 "google",
-                "microsoft"
+                "microsoft",
+                "slack"
               ]
             }
           }

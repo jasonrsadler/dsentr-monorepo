@@ -36,3 +36,14 @@ When updating node serializers in the frontend, prefer writing both the new `con
 object and the legacy fields until the migration is complete. This ensures older workflow
 runs and downstream tooling continue to operate without requiring immediate re-publishing of
 existing workflows.
+
+## Snapshot Egress Allowlist Metadata
+
+Snapshots may include an `_egress_allowlist` array that reflects the domains selected in the
+workspace settings UI. The engine now treats this list as advisory input and intersects it
+with the deployment-wide `ALLOWED_HTTP_DOMAINS` environment variable before executing
+outbound HTTP actions. Hosts that do not appear in the environment-backed allowlist are
+rejected, a structured warning is emitted, and a run event with the
+`egress_policy_violation` type is recorded so policy relaxations remain auditable. When no
+environment policy is configured, the snapshot list is still honored to preserve local and
+development workflows.

@@ -15,3 +15,11 @@ DROP INDEX IF EXISTS idx_workflow_runs_idem_unique;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idem_unique
   ON workflow_runs (COALESCE(workspace_id, user_id), workflow_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL;
+
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_workflow_runs_idem_unique;
+--   DROP INDEX IF EXISTS idx_workflow_runs_workspace_id;
+--   ALTER TABLE workflow_runs DROP COLUMN IF EXISTS workspace_id;
+--   CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idem_unique
+--     ON workflow_runs (user_id, workflow_id, idempotency_key)
+--     WHERE idempotency_key IS NOT NULL;

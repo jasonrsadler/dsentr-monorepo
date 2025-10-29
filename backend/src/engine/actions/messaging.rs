@@ -1682,7 +1682,7 @@ mod tests {
             smtp_mailer::MockMailer,
         },
         state::AppState,
-        utils::encryption::encrypt_secret,
+        utils::{encryption::encrypt_secret, jwt::JwtKeys},
     };
     use sqlx::Error as SqlxError;
     use uuid::Uuid;
@@ -1871,8 +1871,11 @@ mod tests {
             &self,
             _creator_id: Uuid,
             _provider: ConnectedOAuthProvider,
-        ) -> Result<(), SqlxError> {
-            Ok(())
+        ) -> Result<
+            Vec<crate::db::workspace_connection_repository::StaleWorkspaceConnection>,
+            SqlxError,
+        > {
+            Ok(Vec::new())
         }
 
         async fn record_audit_event(
@@ -2009,9 +2012,20 @@ mod tests {
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
-                webhook_secret: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         })
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
     }
 
     fn build_state_with_oauth(
@@ -2034,6 +2048,7 @@ mod tests {
             config,
             worker_id: Arc::new("worker".to_string()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         }
     }
 

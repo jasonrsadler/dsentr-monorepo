@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::db::workspace_connection_repository::{
-    NewWorkspaceAuditEvent, NewWorkspaceConnection, WorkspaceConnectionListing,
-    WorkspaceConnectionRepository,
+    NewWorkspaceAuditEvent, NewWorkspaceConnection, StaleWorkspaceConnection,
+    WorkspaceConnectionListing, WorkspaceConnectionRepository,
 };
 use crate::models::oauth_token::{
     ConnectedOAuthProvider, WorkspaceAuditEvent, WorkspaceConnection,
@@ -281,8 +281,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         &self,
         creator_id: Uuid,
         provider: ConnectedOAuthProvider,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+    ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
+        let rows = sqlx::query(
             r#"
             UPDATE workspace_connections
             SET
@@ -290,14 +290,22 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 updated_at = now()
             WHERE created_by = $1
               AND provider = $2
+            RETURNING id, workspace_id
             "#,
         )
         .bind(creator_id)
         .bind(provider)
-        .execute(&self.pool)
+        .fetch_all(&self.pool)
         .await?;
 
-        Ok(())
+        rows.into_iter()
+            .map(|row| {
+                Ok(StaleWorkspaceConnection {
+                    connection_id: row.try_get("id")?,
+                    workspace_id: row.try_get("workspace_id")?,
+                })
+            })
+            .collect()
     }
 
     async fn record_audit_event(

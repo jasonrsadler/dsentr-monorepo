@@ -22,6 +22,8 @@ impl fmt::Display for MailError {
     }
 }
 
+impl std::error::Error for MailError {}
+
 use lettre::transport::smtp::Error as SmtpError;
 
 impl From<SmtpError> for MailError {
@@ -81,7 +83,6 @@ pub use smtp_impl::SmtpMailer;
 pub enum TlsMode {
     StartTls,
     Implicit,
-    None,
 }
 
 impl TlsMode {
@@ -89,7 +90,6 @@ impl TlsMode {
         match self {
             TlsMode::StartTls => "starttls",
             TlsMode::Implicit => "implicit_tls",
-            TlsMode::None => "none",
         }
     }
 }

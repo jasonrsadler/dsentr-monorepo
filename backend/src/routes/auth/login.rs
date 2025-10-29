@@ -1,4 +1,4 @@
-use crate::routes::auth::claims::Claims;
+use crate::routes::auth::claims::{Claims, TokenUse};
 use crate::{
     responses::JsonResponse,
     state::AppState,
@@ -53,21 +53,39 @@ pub async fn handle_login(
     }
     match verify_password(&payload.password, &user.password_hash) {
         Ok(true) => {
-            let expires_in = if payload.remember {
+            let access_duration = Duration::minutes(45);
+            let refresh_duration = if payload.remember {
                 Duration::days(30)
             } else {
                 Duration::days(7)
             };
 
-            let claims = Claims {
+            let access_claims = Claims {
                 id: user.id.to_string(),
                 email: user.email.clone(),
-                exp: (Utc::now() + expires_in).timestamp() as usize,
+                exp: (Utc::now() + access_duration).timestamp() as usize,
                 first_name: user.first_name.clone(),
                 last_name: user.last_name.clone(),
                 role: user.role,
                 plan: user.plan.clone(),
                 company_name: user.company_name.clone(),
+                iss: String::new(),
+                aud: String::new(),
+                token_use: TokenUse::Access,
+            };
+
+            let refresh_claims = Claims {
+                id: user.id.to_string(),
+                email: user.email.clone(),
+                exp: (Utc::now() + refresh_duration).timestamp() as usize,
+                first_name: user.first_name.clone(),
+                last_name: user.last_name.clone(),
+                role: user.role,
+                plan: user.plan.clone(),
+                company_name: user.company_name.clone(),
+                iss: String::new(),
+                aud: String::new(),
+                token_use: TokenUse::Refresh,
             };
 
             let requires_onboarding = user.onboarded_at.is_none()
@@ -90,20 +108,46 @@ pub async fn handle_login(
                 }
             };
 
-            match create_jwt(&claims) {
-                Ok(token) => {
-                    let cookie = Cookie::build(("auth_token", token))
+            match (
+                create_jwt(
+                    access_claims,
+                    app_state.jwt_keys.as_ref(),
+                    &app_state.config.jwt_issuer,
+                    &app_state.config.jwt_audience,
+                ),
+                create_jwt(
+                    refresh_claims,
+                    app_state.jwt_keys.as_ref(),
+                    &app_state.config.jwt_issuer,
+                    &app_state.config.jwt_audience,
+                ),
+            ) {
+                (Ok(access_token), Ok(refresh_token)) => {
+                    let secure_cookie = app_state.config.auth_cookie_secure;
+                    let access_cookie = Cookie::build(("auth_token", access_token))
                         .http_only(true)
-                        .secure(false)
+                        .secure(secure_cookie)
                         .same_site(SameSite::Lax)
                         .path("/")
-                        .max_age(TimeDuration::seconds(expires_in.num_seconds()))
+                        .max_age(TimeDuration::seconds(access_duration.num_seconds()))
+                        .build();
+
+                    let refresh_cookie = Cookie::build(("auth_refresh_token", refresh_token))
+                        .http_only(true)
+                        .secure(secure_cookie)
+                        .same_site(SameSite::Lax)
+                        .path("/")
+                        .max_age(TimeDuration::seconds(refresh_duration.num_seconds()))
                         .build();
 
                     let mut headers = HeaderMap::new();
                     headers.insert(
                         header::SET_COOKIE,
-                        HeaderValue::from_str(&cookie.to_string()).unwrap(),
+                        HeaderValue::from_str(&access_cookie.to_string()).unwrap(),
+                    );
+                    headers.append(
+                        header::SET_COOKIE,
+                        HeaderValue::from_str(&refresh_cookie.to_string()).unwrap(),
                     );
                     let user_json = to_value(&user).expect("User serialization failed");
                     let memberships_json =
@@ -120,7 +164,7 @@ pub async fn handle_login(
                     )
                         .into_response()
                 }
-                Err(e) => {
+                (Err(e), _) | (_, Err(e)) => {
                     eprintln!("JWT error: {:?}", e);
                     JsonResponse::server_error("Token generation failed").into_response()
                 }
@@ -161,8 +205,12 @@ pub async fn handle_me(
                 }
             }
             let mut should_revert = false;
-            if !NormalizedPlanTier::from_option(user.plan.as_deref()).is_solo() && !has_pending_checkout {
-                if let Ok(Some(customer_id)) = app_state.db.get_user_stripe_customer_id(user.id).await {
+            if !NormalizedPlanTier::from_option(user.plan.as_deref()).is_solo()
+                && !has_pending_checkout
+            {
+                if let Ok(Some(customer_id)) =
+                    app_state.db.get_user_stripe_customer_id(user.id).await
+                {
                     match app_state
                         .stripe
                         .get_active_subscription_for_customer(&customer_id)
@@ -181,11 +229,14 @@ pub async fn handle_me(
                     tracing::warn!(?err, user_id=%user.id, "failed to revert user plan to solo during session check");
                 } else {
                     // Downgrade any owned workspaces to solo
-                    if let Ok(memberships) = app_state.workspace_repo.list_memberships_for_user(user.id).await {
-                        for m in memberships
-                            .into_iter()
-                            .filter(|m| m.workspace.owner_id == user.id && m.workspace.plan.as_str() != "solo")
-                        {
+                    if let Ok(memberships) = app_state
+                        .workspace_repo
+                        .list_memberships_for_user(user.id)
+                        .await
+                    {
+                        for m in memberships.into_iter().filter(|m| {
+                            m.workspace.owner_id == user.id && m.workspace.plan.as_str() != "solo"
+                        }) {
                             if let Err(err) = app_state
                                 .workspace_repo
                                 .update_workspace_plan(m.workspace.id, "solo")
@@ -275,6 +326,7 @@ mod tests {
             smtp_mailer::MockMailer,
         },
         state::AppState,
+        utils::jwt::JwtKeys,
     };
     use reqwest::Client;
 
@@ -306,7 +358,14 @@ mod tests {
         (user, password.to_string())
     }
 
-    fn build_app(db: impl UserRepository + 'static) -> Router {
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
+    }
+
+    fn build_app(db: impl UserRepository + 'static, secure_cookie: bool) -> Router {
         let config = Arc::new(Config {
             database_url: String::new(),
             frontend_origin: "http://localhost".into(),
@@ -331,8 +390,12 @@ mod tests {
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
-                webhook_secret: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            auth_cookie_secure: secure_cookie,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         });
         let app_state = AppState {
             db: Arc::new(db),
@@ -349,6 +412,7 @@ mod tests {
             config,
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         };
 
         Router::new()
@@ -363,11 +427,13 @@ mod tests {
         let password = "password123";
         let (user, _) = test_user_with_password(password);
         eprintln!("User going into MockDb: {:?}", user.email);
-        std::env::set_var("JWT_SECRET", "test_secret_key");
-        let app = build_app(MockDb {
-            find_user_result: Some(user.clone()),
-            ..Default::default()
-        });
+        let app = build_app(
+            MockDb {
+                find_user_result: Some(user.clone()),
+                ..Default::default()
+            },
+            false,
+        );
 
         let payload = LoginPayload {
             email: user.email.clone(),
@@ -386,6 +452,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.status(), StatusCode::OK);
+        let cookies: Vec<String> = res
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert!(cookies.iter().any(|c| c.contains("auth_token=")));
+        assert!(cookies.iter().any(|c| c.contains("auth_refresh_token=")));
+
         let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["success"], true);
@@ -395,17 +470,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_login_uses_secure_cookie_when_enabled() {
+        let password = "password123";
+        let (user, _) = test_user_with_password(password);
+        let app = build_app(
+            MockDb {
+                find_user_result: Some(user.clone()),
+                ..Default::default()
+            },
+            true,
+        );
+
+        let payload = LoginPayload {
+            email: user.email.clone(),
+            password: password.to_string(),
+            remember: false,
+        };
+
+        let res = app
+            .oneshot(
+                Request::post("/login")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let cookies: Vec<String> = res
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert!(cookies.iter().all(|c| c.contains("Secure")));
+    }
+
+    #[tokio::test]
+    async fn test_login_uses_insecure_cookie_when_disabled() {
+        let password = "password123";
+        let (user, _) = test_user_with_password(password);
+        let app = build_app(
+            MockDb {
+                find_user_result: Some(user.clone()),
+                ..Default::default()
+            },
+            false,
+        );
+
+        let payload = LoginPayload {
+            email: user.email.clone(),
+            password: password.to_string(),
+            remember: false,
+        };
+
+        let res = app
+            .oneshot(
+                Request::post("/login")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let cookies: Vec<String> = res
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert!(cookies.iter().all(|c| !c.contains("Secure")));
+    }
+
+    #[tokio::test]
     async fn test_login_requires_onboarding_when_missing_plan() {
         let password = "password123";
         let (mut user, _) = test_user_with_password(password);
         user.plan = None;
         user.onboarded_at = None;
-        std::env::set_var("JWT_SECRET", "test_secret_key");
 
-        let app = build_app(MockDb {
-            find_user_result: Some(user.clone()),
-            ..Default::default()
-        });
+        let app = build_app(
+            MockDb {
+                find_user_result: Some(user.clone()),
+                ..Default::default()
+            },
+            false,
+        );
 
         let payload = LoginPayload {
             email: user.email.clone(),
@@ -434,10 +585,13 @@ mod tests {
         let password = "password123";
         let (user, _) = test_user_with_password(password);
 
-        let app = build_app(MockDb {
-            find_user_result: Some(user.clone()),
-            ..Default::default()
-        });
+        let app = build_app(
+            MockDb {
+                find_user_result: Some(user.clone()),
+                ..Default::default()
+            },
+            false,
+        );
 
         let payload = LoginPayload {
             email: user.email.clone(),
@@ -460,10 +614,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_user_not_found() {
-        let app = build_app(MockDb {
-            find_user_result: None,
-            ..Default::default()
-        });
+        let app = build_app(
+            MockDb {
+                find_user_result: None,
+                ..Default::default()
+            },
+            false,
+        );
 
         let payload = LoginPayload {
             email: "unknown@example.com".to_string(),
@@ -490,10 +647,13 @@ mod tests {
         let (mut user, _) = test_user_with_password(&password_hash);
         user.oauth_provider = Some(OauthProvider::Google);
 
-        let app = build_app(MockDb {
-            find_user_result: Some(user.clone()),
-            ..Default::default()
-        });
+        let app = build_app(
+            MockDb {
+                find_user_result: Some(user.clone()),
+                ..Default::default()
+            },
+            false,
+        );
 
         let payload = LoginPayload {
             email: user.email.clone(),
@@ -516,10 +676,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_db_error() {
-        let app = build_app(MockDb {
-            should_fail: true,
-            ..Default::default()
-        });
+        let app = build_app(
+            MockDb {
+                should_fail: true,
+                ..Default::default()
+            },
+            false,
+        );
 
         let payload = LoginPayload {
             email: "test@example.com".to_string(),

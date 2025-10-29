@@ -266,7 +266,9 @@ pub(crate) async fn execute_email(
                 match value.to_lowercase().as_str() {
                     "starttls" => Ok(TlsMode::StartTls),
                     "implicit_tls" | "implicit" | "wrapper" => Ok(TlsMode::Implicit),
-                    "none" | "plaintext" => Ok(TlsMode::None),
+                    "none" | "plaintext" => Err(
+                        "SMTP TLS must remain enabled; insecure SMTP transports are no longer supported".to_string(),
+                    ),
                     other => Err(format!("Unsupported SMTP TLS mode: {}", other)),
                 }
             };
@@ -279,7 +281,10 @@ pub(crate) async fn execute_email(
                         .and_then(|v| v.as_bool())
                         .unwrap_or(true);
                     if !tls_enabled {
-                        TlsMode::None
+                        return Err(
+                            "SMTP TLS must remain enabled; disable the smtpTls flag or provide a secure smtpTlsMode"
+                                .to_string(),
+                        );
                     } else if port == 465 {
                         TlsMode::Implicit
                     } else {
@@ -947,7 +952,7 @@ mod tests {
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
     use crate::services::oauth::workspace_service::WorkspaceOAuthService;
     use crate::services::smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig, TlsMode};
-    use crate::state::AppState;
+    use crate::{state::AppState, utils::jwt::JwtKeys};
     use async_trait::async_trait;
     use axum::body::{Body, Bytes};
     use axum::extract::State;
@@ -1027,9 +1032,20 @@ mod tests {
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
-                webhook_secret: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         })
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
     }
 
     fn test_state_with_mailer(mailer: Arc<dyn Mailer>) -> AppState {
@@ -1048,6 +1064,7 @@ mod tests {
             config: test_config(),
             worker_id: Arc::new("worker".to_string()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         }
     }
 
@@ -1108,7 +1125,6 @@ mod tests {
                     "smtpPort": 2525,
                     "smtpUser": "user@example.com",
                     "smtpPassword": "secret",
-                    "smtpTls": false,
                     "from": "sender@example.com",
                     "to": "alice@example.com, bob@example.com",
                     "subject": "Hello {{ user.name }}",
@@ -1137,7 +1153,7 @@ mod tests {
         let record = &records[0];
         assert_eq!(record.config.host, "smtp.example.com");
         assert_eq!(record.config.port, 2525);
-        assert_eq!(record.config.tls_mode, TlsMode::None);
+        assert_eq!(record.config.tls_mode, TlsMode::StartTls);
         assert_eq!(record.config.username.as_deref(), Some("user@example.com"));
         assert_eq!(record.config.from, "sender@example.com");
         assert_eq!(
@@ -1146,6 +1162,39 @@ mod tests {
         );
         assert_eq!(record.subject, "Hello Alice");
         assert_eq!(record.body, "Body for Alice");
+    }
+
+    #[tokio::test]
+    async fn smtp_email_rejects_plaintext_configuration() {
+        let state = test_state();
+        let node = Node {
+            id: "action-smtp-insecure".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "service": "SMTP",
+                    "smtpHost": "smtp.example.com",
+                    "smtpPort": 2525,
+                    "smtpUser": "user@example.com",
+                    "smtpPassword": "secret",
+                    "smtpTls": false,
+                    "from": "sender@example.com",
+                    "to": "recipient@example.com",
+                    "subject": "Hi",
+                    "body": "Body"
+                }
+            }),
+        };
+
+        let error = execute_email(&node, &Value::Null, &state)
+            .await
+            .expect_err("plaintext SMTP configuration should be rejected");
+
+        assert!(
+            error.contains("TLS"),
+            "expected TLS validation error, got: {}",
+            error
+        );
     }
 
     #[tokio::test]

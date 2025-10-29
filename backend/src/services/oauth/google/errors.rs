@@ -4,6 +4,7 @@ use std::fmt;
 pub enum GoogleAuthError {
     MissingStateCookie,
     InvalidState,
+    MissingConfiguration(&'static str),
     TokenExchangeFailed,
     InvalidTokenJson,
     UserInfoFetchFailed,
@@ -20,6 +21,9 @@ impl fmt::Display for GoogleAuthError {
         match self {
             MissingStateCookie => write!(f, "Missing 'oauth_state' cookie"),
             InvalidState => write!(f, "Invalid state parameter"),
+            MissingConfiguration(key) => {
+                write!(f, "Missing Google OAuth configuration: {key}")
+            }
             TokenExchangeFailed => write!(f, "Google token request failed"),
             InvalidTokenJson => write!(f, "Invalid token JSON"),
             UserInfoFetchFailed => write!(f, "Failed to fetch Google user info"),

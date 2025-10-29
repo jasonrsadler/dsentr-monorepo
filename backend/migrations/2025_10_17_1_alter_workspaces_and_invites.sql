@@ -38,3 +38,15 @@ CREATE TABLE workspace_member_audit (
     reason TEXT,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Rollback:
+--   DROP TABLE IF EXISTS workspace_member_audit;
+--   Recreate the prior workspace_member_audit definition from 2025_10_16_4_create_workspace_member_audit.sql.
+--   ALTER TABLE workspace_invitations DROP CONSTRAINT IF EXISTS workspace_invitations_token_key;
+--   ALTER TABLE workspace_invitations DROP CONSTRAINT IF EXISTS workspace_invitations_status_check;
+--   ALTER TABLE workspace_invitations DROP COLUMN IF EXISTS status;
+--   CREATE INDEX IF NOT EXISTS idx_workspace_invites_token ON workspace_invitations (token);
+--   ALTER TABLE workspaces DROP COLUMN IF EXISTS deleted_at;
+--   ALTER TABLE workspaces DROP COLUMN IF EXISTS plan;
+--   ALTER TABLE workspaces DROP COLUMN IF EXISTS owner_id;
+--   -- Removing owner_id requires dropping dependent foreign keys first; expect to reseed ownership data manually.

@@ -1,0 +1,24 @@
+name: Migration Rollback Lint
+
+on:
+  pull_request:
+    paths:
+      - 'backend/migrations/**'
+      - 'scripts/check_migration_rollbacks.py'
+      - '.github/workflows/migration-lint.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/migrations/**'
+      - 'scripts/check_migration_rollbacks.py'
+      - '.github/workflows/migration-lint.yml'
+
+jobs:
+  rollback-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Verify migrations include rollback guidance
+        run: python3 scripts/check_migration_rollbacks.py

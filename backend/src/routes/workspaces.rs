@@ -146,7 +146,9 @@ async fn process_plan_change(
             });
 
             if owns_workspace_on_workspace_plan {
-                if let Ok(Some(customer_id)) = app_state.db.get_user_stripe_customer_id(user_id).await {
+                if let Ok(Some(customer_id)) =
+                    app_state.db.get_user_stripe_customer_id(user_id).await
+                {
                     match app_state
                         .stripe
                         .get_active_subscription_for_customer(&customer_id)
@@ -162,8 +164,14 @@ async fn process_plan_change(
                                 {
                                     Ok(u) => u,
                                     Err(err) => {
-                                        tracing::error!("failed to schedule subscription cancellation: {:?}", err);
-                                        return Err(JsonResponse::server_error("Failed to schedule downgrade").into_response());
+                                        tracing::error!(
+                                            "failed to schedule subscription cancellation: {:?}",
+                                            err
+                                        );
+                                        return Err(JsonResponse::server_error(
+                                            "Failed to schedule downgrade",
+                                        )
+                                        .into_response());
                                     }
                                 }
                             } else {
@@ -171,13 +179,13 @@ async fn process_plan_change(
                             };
 
                             // Respond with scheduled downgrade info (do not change plan immediately)
-                            let effective_ts = updated
-                                .cancel_at
-                                .unwrap_or(updated.current_period_end);
-                            let effective_iso = time::OffsetDateTime::from_unix_timestamp(effective_ts)
-                                .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
-                                .format(&time::format_description::well_known::Rfc3339)
-                                .unwrap_or_else(|_| String::new());
+                            let effective_ts =
+                                updated.cancel_at.unwrap_or(updated.current_period_end);
+                            let effective_iso =
+                                time::OffsetDateTime::from_unix_timestamp(effective_ts)
+                                    .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+                                    .format(&time::format_description::well_known::Rfc3339)
+                                    .unwrap_or_else(|_| String::new());
 
                             return Ok(json!({
                                 "success": true,
@@ -237,7 +245,9 @@ async fn process_plan_change(
                 Ok(None) => return Err(JsonResponse::not_found("User not found").into_response()),
                 Err(err) => {
                     tracing::error!("failed to fetch user for stripe customer: {:?}", err);
-                    return Err(JsonResponse::server_error("Failed to start checkout").into_response());
+                    return Err(
+                        JsonResponse::server_error("Failed to start checkout").into_response()
+                    );
                 }
             };
 
@@ -245,7 +255,9 @@ async fn process_plan_change(
                 Ok(id) => id,
                 Err(err) => {
                     tracing::error!("failed to lookup stripe customer id: {:?}", err);
-                    return Err(JsonResponse::server_error("Failed to start checkout").into_response());
+                    return Err(
+                        JsonResponse::server_error("Failed to start checkout").into_response()
+                    );
                 }
             };
 
@@ -259,26 +271,28 @@ async fn process_plan_change(
                     .await
                 {
                     Ok(id) => {
-                        if let Err(err) = app_state
-                            .db
-                            .set_user_stripe_customer_id(user_id, &id)
-                            .await
+                        if let Err(err) =
+                            app_state.db.set_user_stripe_customer_id(user_id, &id).await
                         {
                             tracing::warn!(
                                 "failed to persist stripe customer id for user {}: {:?}",
-                                user_id, err
+                                user_id,
+                                err
                             );
                         }
                         id
                     }
                     Err(err) => {
                         tracing::error!("failed to create stripe customer: {:?}", err);
-                        return Err(JsonResponse::server_error("Failed to start checkout").into_response());
+                        return Err(
+                            JsonResponse::server_error("Failed to start checkout").into_response()
+                        );
                     }
                 }
             };
 
-            let price_id = std::env::var("STRIPE_WORKSPACE_PRICE_ID").unwrap_or_else(|_| "price_test".to_string());
+            let price_id = std::env::var("STRIPE_WORKSPACE_PRICE_ID")
+                .unwrap_or_else(|_| "price_test".to_string());
             let success_url = format!(
                 "{}/dashboard?billing=success&session_id={{CHECKOUT_SESSION_ID}}",
                 app_state.config.frontend_origin
@@ -299,7 +313,10 @@ async fn process_plan_change(
                     success_url,
                     cancel_url,
                     mode: crate::services::stripe::CheckoutMode::Subscription,
-                    line_items: vec![crate::services::stripe::CheckoutLineItem { price: price_id, quantity: 1 }],
+                    line_items: vec![crate::services::stripe::CheckoutLineItem {
+                        price: price_id,
+                        quantity: 1,
+                    }],
                     client_reference_id: Some(user_id.to_string()),
                     customer: Some(customer_id.clone()),
                     metadata: Some(metadata),
@@ -309,7 +326,9 @@ async fn process_plan_change(
                 Ok(s) => s,
                 Err(err) => {
                     tracing::error!("failed to create stripe checkout session: {:?}", err);
-                    return Err(JsonResponse::server_error("Failed to start checkout").into_response());
+                    return Err(
+                        JsonResponse::server_error("Failed to start checkout").into_response()
+                    );
                 }
             };
 
@@ -317,7 +336,10 @@ async fn process_plan_change(
             let mut settings = match app_state.db.get_user_settings(user_id).await {
                 Ok(val) => val,
                 Err(err) => {
-                    tracing::warn!("failed to load user settings for pending checkout: {:?}", err);
+                    tracing::warn!(
+                        "failed to load user settings for pending checkout: {:?}",
+                        err
+                    );
                     serde_json::Value::Object(Default::default())
                 }
             };
@@ -327,7 +349,8 @@ async fn process_plan_change(
                 "workspace_name": workspace_name,
             });
             if let Some(map) = settings.as_object_mut() {
-                map.entry("billing").or_insert_with(|| serde_json::json!({}));
+                map.entry("billing")
+                    .or_insert_with(|| serde_json::json!({}));
                 if let Some(billing) = map.get_mut("billing").and_then(|b| b.as_object_mut()) {
                     billing.insert("pending_checkout".to_string(), pending);
                     // clear any previous error state now that a new attempt has started
@@ -500,7 +523,10 @@ pub async fn get_onboarding_context(
             let cancel_iso = sub.cancel_at.and_then(|ts| {
                 time::OffsetDateTime::from_unix_timestamp(ts)
                     .ok()
-                    .and_then(|dt| dt.format(&time::format_description::well_known::Rfc3339).ok())
+                    .and_then(|dt| {
+                        dt.format(&time::format_description::well_known::Rfc3339)
+                            .ok()
+                    })
             });
             billing["subscription"] = serde_json::json!({
                 "id": sub.id,
@@ -521,11 +547,14 @@ pub async fn get_onboarding_context(
         if let Err(err) = app_state.db.update_user_plan(user_id, "solo").await {
             tracing::warn!(?err, %user_id, "failed to revert user plan to solo during onboarding context");
         } else {
-            if let Ok(m) = app_state.workspace_repo.list_memberships_for_user(user_id).await {
-                for item in m
-                    .iter()
-                    .filter(|m| m.workspace.owner_id == user_id && m.workspace.plan.as_str() != "solo")
-                {
+            if let Ok(m) = app_state
+                .workspace_repo
+                .list_memberships_for_user(user_id)
+                .await
+            {
+                for item in m.iter().filter(|m| {
+                    m.workspace.owner_id == user_id && m.workspace.plan.as_str() != "solo"
+                }) {
                     if let Err(err) = app_state
                         .workspace_repo
                         .update_workspace_plan(item.workspace.id, "solo")
@@ -539,7 +568,11 @@ pub async fn get_onboarding_context(
             if let Ok(Some(u)) = app_state.db.find_public_user_by_id(user_id).await {
                 user = u;
             }
-            if let Ok(list) = app_state.workspace_repo.list_memberships_for_user(user_id).await {
+            if let Ok(list) = app_state
+                .workspace_repo
+                .list_memberships_for_user(user_id)
+                .await
+            {
                 memberships = list;
             }
         }
@@ -570,7 +603,9 @@ pub async fn resume_workspace_subscription(
     // Lookup stripe customer id
     let customer_id = match app_state.db.get_user_stripe_customer_id(user_id).await {
         Ok(Some(id)) => id,
-        Ok(None) => return JsonResponse::bad_request("No Stripe customer configured").into_response(),
+        Ok(None) => {
+            return JsonResponse::bad_request("No Stripe customer configured").into_response()
+        }
         Err(err) => {
             error!(?err, %user_id, "failed to load stripe customer id");
             return JsonResponse::server_error("Failed to resume subscription").into_response();
@@ -584,7 +619,9 @@ pub async fn resume_workspace_subscription(
         .await
     {
         Ok(Some(s)) => s,
-        Ok(None) => return JsonResponse::bad_request("No active subscription to resume").into_response(),
+        Ok(None) => {
+            return JsonResponse::bad_request("No active subscription to resume").into_response()
+        }
         Err(err) => {
             error!(?err, %user_id, "failed to load subscription");
             return JsonResponse::server_error("Failed to resume subscription").into_response();
@@ -1737,7 +1774,7 @@ mod tests {
         oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
         workspace_connection_repository::{
             NewWorkspaceAuditEvent, NewWorkspaceConnection, NoopWorkspaceConnectionRepository,
-            WorkspaceConnectionListing, WorkspaceConnectionRepository,
+            StaleWorkspaceConnection, WorkspaceConnectionListing, WorkspaceConnectionRepository,
         },
         workspace_repository::WorkspaceRepository,
     };
@@ -1752,7 +1789,10 @@ mod tests {
             WorkspaceRole,
         },
     };
-    use crate::routes::auth::{claims::Claims, session::AuthSession};
+    use crate::routes::auth::{
+        claims::{Claims, TokenUse},
+        session::AuthSession,
+    };
     use crate::services::{
         oauth::{
             account_service::OAuthAccountService,
@@ -1763,7 +1803,7 @@ mod tests {
         smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig},
     };
     use crate::state::AppState;
-    use crate::utils::encryption::encrypt_secret;
+    use crate::utils::{encryption::encrypt_secret, jwt::JwtKeys};
     use async_trait::async_trait;
     use axum::{
         body::to_bytes,
@@ -2132,15 +2172,20 @@ mod tests {
             &self,
             creator_id: Uuid,
             provider: ConnectedOAuthProvider,
-        ) -> Result<(), sqlx::Error> {
+        ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
             let mut guard = self.connections.lock().unwrap();
+            let mut affected = Vec::new();
             for record in guard.iter_mut() {
                 if record.created_by == creator_id && record.provider == provider {
                     record.expires_at = OffsetDateTime::now_utc() - time::Duration::minutes(5);
                     record.updated_at = OffsetDateTime::now_utc();
+                    affected.push(StaleWorkspaceConnection {
+                        connection_id: record.id,
+                        workspace_id: record.workspace_id,
+                    });
                 }
             }
-            Ok(())
+            Ok(affected)
         }
 
         async fn record_audit_event(
@@ -2714,9 +2759,20 @@ mod tests {
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
-                webhook_secret: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         })
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
     }
 
     fn promotion_state(
@@ -2755,6 +2811,7 @@ mod tests {
             config,
             worker_id: Arc::new("worker-1".into()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         }
     }
 
@@ -2774,6 +2831,7 @@ mod tests {
             config: test_config(),
             worker_id: Arc::new("worker-1".into()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         }
     }
 
@@ -2797,6 +2855,7 @@ mod tests {
             config: test_config(),
             worker_id: Arc::new("worker-1".into()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         }
     }
 
@@ -2827,6 +2886,9 @@ mod tests {
             role: None,
             plan: None,
             company_name: None,
+            iss: String::new(),
+            aud: String::new(),
+            token_use: TokenUse::Access,
         }
     }
 
@@ -3388,10 +3450,10 @@ mod tests {
 
     #[tokio::test]
     async fn initiating_workspace_upgrade_invokes_stripe_and_does_not_mutate_plan() {
-        use crate::services::stripe::MockStripeService as StripeMock;
-        use crate::state::AppState;
         use crate::db::mock_db::NoopWorkflowRepository;
         use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
+        use crate::services::stripe::MockStripeService as StripeMock;
+        use crate::state::AppState;
 
         let user_id = Uuid::new_v4();
         let now = OffsetDateTime::now_utc();
@@ -3433,6 +3495,7 @@ mod tests {
             config: test_config(),
             worker_id: Arc::new("worker-1".into()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         };
 
         let claims = claims_fixture(user_id, "owner@example.com");
@@ -3449,7 +3512,10 @@ mod tests {
         let captured = stripe.last_create_requests.lock().unwrap();
         assert_eq!(captured.len(), 1);
         let req = &captured[0];
-        assert_eq!(req.mode, crate::services::stripe::CheckoutMode::Subscription);
+        assert_eq!(
+            req.mode,
+            crate::services::stripe::CheckoutMode::Subscription
+        );
         let expected = user_id.to_string();
         assert_eq!(req.client_reference_id.as_deref(), Some(expected.as_str()));
 

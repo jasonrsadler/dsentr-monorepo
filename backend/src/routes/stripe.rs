@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use axum::{http::StatusCode, response::Response};
-use axum::Json;
 use time::OffsetDateTime;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -25,7 +25,11 @@ fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> Option<&'a str>
 fn extract_checkout_user_id(event: &serde_json::Value) -> Option<Uuid> {
     // checkout.session payload shape
     let obj = jget(event, &["data", "object"])?.clone();
-    if let Some(uid) = obj.get("metadata").and_then(|m| m.get("user_id")).and_then(|v| v.as_str()) {
+    if let Some(uid) = obj
+        .get("metadata")
+        .and_then(|m| m.get("user_id"))
+        .and_then(|v| v.as_str())
+    {
         if let Ok(id) = Uuid::parse_str(uid) {
             return Some(id);
         }
@@ -54,7 +58,10 @@ fn extract_failure_message(event: &serde_json::Value) -> Option<String> {
         }
     }
     // Try invoice.last_finalization_error.message
-    if let Some(val) = jget(event, &["data", "object", "last_finalization_error", "message"]) {
+    if let Some(val) = jget(
+        event,
+        &["data", "object", "last_finalization_error", "message"],
+    ) {
         if let Some(s) = val.as_str() {
             return Some(s.to_string());
         }
@@ -68,7 +75,10 @@ pub async fn webhook(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    let sig = match headers.get("Stripe-Signature").and_then(|h| h.to_str().ok()) {
+    let sig = match headers
+        .get("Stripe-Signature")
+        .and_then(|h| h.to_str().ok())
+    {
         Some(s) => s,
         None => return JsonResponse::bad_request("Missing Stripe-Signature").into_response(),
     };
@@ -99,9 +109,15 @@ pub async fn webhook(
             let mut user_id: Option<Uuid> = extract_checkout_user_id(payload);
             if user_id.is_none() {
                 if let Some(customer_id) = extract_customer_id(payload) {
-                    match app_state.db.find_user_id_by_stripe_customer_id(&customer_id).await {
+                    match app_state
+                        .db
+                        .find_user_id_by_stripe_customer_id(&customer_id)
+                        .await
+                    {
                         Ok(opt) => user_id = opt,
-                        Err(err) => error!(?err, customer_id, "failed to map stripe customer to user"),
+                        Err(err) => {
+                            error!(?err, customer_id, "failed to map stripe customer to user")
+                        }
                     }
                 }
             }
@@ -141,7 +157,10 @@ pub async fn webhook(
                                     .get("workspace_name")
                                     .and_then(|v| v.as_str())
                                     .map(|s| s.to_string());
-                                if let Some(arr) = pending_obj.get("shared_workflow_ids").and_then(|v| v.as_array()) {
+                                if let Some(arr) = pending_obj
+                                    .get("shared_workflow_ids")
+                                    .and_then(|v| v.as_array())
+                                {
                                     for v in arr {
                                         if let Some(s) = v.as_str() {
                                             if let Ok(id) = Uuid::parse_str(s) {
@@ -164,7 +183,9 @@ pub async fn webhook(
 
             // Prefer workspace name from settings; fallback to metadata
             if workspace_name_opt.is_none() {
-                if let Some(name) = extract_str(payload, &["data", "object", "metadata", "workspace_name"]) {
+                if let Some(name) =
+                    extract_str(payload, &["data", "object", "metadata", "workspace_name"])
+                {
                     workspace_name_opt = Some(name.to_string());
                 }
             }
@@ -231,7 +252,8 @@ pub async fn webhook(
 
             // Clear pending checkout and any prior error state
             if let Some(root) = settings.as_object_mut() {
-                root.entry("billing").or_insert_with(|| serde_json::json!({}));
+                root.entry("billing")
+                    .or_insert_with(|| serde_json::json!({}));
                 if let Some(billing) = root.get_mut("billing").and_then(|b| b.as_object_mut()) {
                     billing.insert("pending_checkout".to_string(), serde_json::Value::Null);
                     billing.remove("last_error");
@@ -264,7 +286,9 @@ pub async fn webhook(
                         .await
                     {
                         Ok(opt) => user_id = opt,
-                        Err(err) => error!(?err, customer_id, "failed to map stripe customer to user"),
+                        Err(err) => {
+                            error!(?err, customer_id, "failed to map stripe customer to user")
+                        }
                     }
                 }
             }
@@ -291,11 +315,14 @@ pub async fn webhook(
                 }
 
                 // Downgrade any owned workspaces back to solo
-                if let Ok(memberships) = app_state.workspace_repo.list_memberships_for_user(uid).await {
-                    for m in memberships
-                        .into_iter()
-                        .filter(|m| m.workspace.owner_id == uid && m.workspace.plan.as_str() != "solo")
-                    {
+                if let Ok(memberships) = app_state
+                    .workspace_repo
+                    .list_memberships_for_user(uid)
+                    .await
+                {
+                    for m in memberships.into_iter().filter(|m| {
+                        m.workspace.owner_id == uid && m.workspace.plan.as_str() != "solo"
+                    }) {
                         if let Err(err) = app_state
                             .workspace_repo
                             .update_workspace_plan(m.workspace.id, "solo")
@@ -308,7 +335,10 @@ pub async fn webhook(
 
                 warn!(%uid, evt_type, "recorded billing failure and cleared pending checkout");
             } else {
-                warn!(evt_type, "billing failure event received but user not identified");
+                warn!(
+                    evt_type,
+                    "billing failure event received but user not identified"
+                );
             }
 
             Json(serde_json::json!({ "received": true })).into_response()
@@ -319,9 +349,17 @@ pub async fn webhook(
             // Resolve user by customer id
             let mut user_id: Option<Uuid> = None;
             if let Some(customer_id) = extract_customer_id(payload) {
-                match app_state.db.find_user_id_by_stripe_customer_id(&customer_id).await {
+                match app_state
+                    .db
+                    .find_user_id_by_stripe_customer_id(&customer_id)
+                    .await
+                {
                     Ok(opt) => user_id = opt,
-                    Err(err) => error!(?err, customer_id, "failed to map stripe customer to user for subscription deletion"),
+                    Err(err) => error!(
+                        ?err,
+                        customer_id,
+                        "failed to map stripe customer to user for subscription deletion"
+                    ),
                 }
             }
 
@@ -332,11 +370,14 @@ pub async fn webhook(
                 }
 
                 // Downgrade any owned workspaces back to solo
-                if let Ok(memberships) = app_state.workspace_repo.list_memberships_for_user(uid).await {
-                    for m in memberships
-                        .into_iter()
-                        .filter(|m| m.workspace.owner_id == uid && m.workspace.plan.as_str() != "solo")
-                    {
+                if let Ok(memberships) = app_state
+                    .workspace_repo
+                    .list_memberships_for_user(uid)
+                    .await
+                {
+                    for m in memberships.into_iter().filter(|m| {
+                        m.workspace.owner_id == uid && m.workspace.plan.as_str() != "solo"
+                    }) {
                         if let Err(err) = app_state
                             .workspace_repo
                             .update_workspace_plan(m.workspace.id, "solo")
@@ -349,7 +390,10 @@ pub async fn webhook(
 
                 info!(%uid, "processed subscription deletion: reverted plan to solo");
             } else {
-                warn!(evt_type, "subscription deletion received but user not identified");
+                warn!(
+                    evt_type,
+                    "subscription deletion received but user not identified"
+                );
             }
 
             Json(serde_json::json!({ "received": true })).into_response()
@@ -370,15 +414,18 @@ mod tests {
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
     use crate::db::workspace_repository::WorkspaceRepository;
     use crate::models::user::{OauthProvider, User, UserRole};
-    use crate::models::workspace::{Workspace, WorkspaceMember, WorkspaceMembershipSummary, WorkspaceRole};
+    use crate::models::workspace::{
+        Workspace, WorkspaceMember, WorkspaceMembershipSummary, WorkspaceRole,
+    };
     use crate::services::smtp_mailer::MockMailer;
     use crate::services::stripe::MockStripeService;
     use crate::state::AppState;
+    use crate::utils::jwt::JwtKeys;
     use axum::extract::State as AxumState;
     use axum::http::{HeaderMap, HeaderValue};
     use reqwest::Client;
-    use time::OffsetDateTime;
     use std::sync::{Arc, Mutex};
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     #[derive(Clone, Default)]
@@ -392,22 +439,49 @@ mod tests {
 
     #[async_trait::async_trait]
     impl WorkspaceRepository for TestWorkspaceRepo {
-        async fn create_workspace(&self, name: &str, created_by: Uuid, plan: &str) -> Result<Workspace, sqlx::Error> {
+        async fn create_workspace(
+            &self,
+            name: &str,
+            created_by: Uuid,
+            plan: &str,
+        ) -> Result<Workspace, sqlx::Error> {
             let now = OffsetDateTime::now_utc();
-            let ws = Workspace { id: Uuid::new_v4(), name: name.to_string(), created_by, owner_id: created_by, plan: plan.to_string(), created_at: now, updated_at: now, deleted_at: None };
+            let ws = Workspace {
+                id: Uuid::new_v4(),
+                name: name.to_string(),
+                created_by,
+                owner_id: created_by,
+                plan: plan.to_string(),
+                created_at: now,
+                updated_at: now,
+                deleted_at: None,
+            };
             self.created.lock().unwrap().push(ws.clone());
             self.workspaces.lock().unwrap().push(ws.clone());
             Ok(ws)
         }
 
-        async fn update_workspace_name(&self, _workspace_id: Uuid, _name: &str) -> Result<Workspace, sqlx::Error> { unimplemented!() }
+        async fn update_workspace_name(
+            &self,
+            _workspace_id: Uuid,
+            _name: &str,
+        ) -> Result<Workspace, sqlx::Error> {
+            unimplemented!()
+        }
 
-        async fn update_workspace_plan(&self, workspace_id: Uuid, plan: &str) -> Result<Workspace, sqlx::Error> {
+        async fn update_workspace_plan(
+            &self,
+            workspace_id: Uuid,
+            plan: &str,
+        ) -> Result<Workspace, sqlx::Error> {
             let mut list = self.workspaces.lock().unwrap();
             if let Some(ws) = list.iter_mut().find(|w| w.id == workspace_id) {
                 ws.plan = plan.to_string();
                 ws.updated_at = OffsetDateTime::now_utc();
-                self.plan_updates.lock().unwrap().push((workspace_id, plan.to_string()));
+                self.plan_updates
+                    .lock()
+                    .unwrap()
+                    .push((workspace_id, plan.to_string()));
                 Ok(ws.clone())
             } else {
                 // In tests, we may not have seeded the workspace list; still record the update
@@ -423,32 +497,121 @@ mod tests {
                     deleted_at: None,
                 };
                 list.push(ws.clone());
-                self.plan_updates.lock().unwrap().push((workspace_id, plan.to_string()));
+                self.plan_updates
+                    .lock()
+                    .unwrap()
+                    .push((workspace_id, plan.to_string()));
                 Ok(ws)
             }
         }
 
-        async fn find_workspace(&self, _workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> { Ok(None) }
+        async fn find_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Option<Workspace>, sqlx::Error> {
+            Ok(None)
+        }
 
-        async fn add_member(&self, workspace_id: Uuid, user_id: Uuid, role: WorkspaceRole) -> Result<(), sqlx::Error> {
-            self.added_members.lock().unwrap().push((workspace_id, user_id, role));
+        async fn add_member(
+            &self,
+            workspace_id: Uuid,
+            user_id: Uuid,
+            role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            self.added_members
+                .lock()
+                .unwrap()
+                .push((workspace_id, user_id, role));
             Ok(())
         }
 
-        async fn set_member_role(&self, _workspace_id: Uuid, _user_id: Uuid, _role: WorkspaceRole) -> Result<(), sqlx::Error> { Ok(()) }
-        async fn remove_member(&self, _workspace_id: Uuid, _user_id: Uuid) -> Result<(), sqlx::Error> { Ok(()) }
-        async fn leave_workspace(&self, _workspace_id: Uuid, _user_id: Uuid) -> Result<(), sqlx::Error> { Ok(()) }
-        async fn revoke_member(&self, _workspace_id: Uuid, _member_id: Uuid, _revoked_by: Uuid, _reason: Option<&str>) -> Result<(), sqlx::Error> { Ok(()) }
-        async fn list_members(&self, _workspace_id: Uuid) -> Result<Vec<WorkspaceMember>, sqlx::Error> { Ok(vec![]) }
-        async fn list_memberships_for_user(&self, _user_id: Uuid) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> { Ok(self.memberships.lock().unwrap().clone()) }
-        async fn list_user_workspaces(&self, _user_id: Uuid) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> { Ok(vec![]) }
-        async fn create_workspace_invitation(&self, _workspace_id: Uuid, _email: &str, _role: WorkspaceRole, _token: &str, _expires_at: OffsetDateTime, _created_by: Uuid) -> Result<crate::models::workspace::WorkspaceInvitation, sqlx::Error> { unimplemented!() }
-        async fn list_workspace_invitations(&self, _workspace_id: Uuid) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> { Ok(vec![]) }
-        async fn revoke_workspace_invitation(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> { Ok(()) }
-        async fn find_invitation_by_token(&self, _token: &str) -> Result<Option<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> { Ok(None) }
-        async fn mark_invitation_accepted(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> { Ok(()) }
-        async fn mark_invitation_declined(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> { Ok(()) }
-        async fn list_pending_invitations_for_email(&self, _email: &str) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> { Ok(vec![]) }
+        async fn set_member_role(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+            _role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn remove_member(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn leave_workspace(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn revoke_member(
+            &self,
+            _workspace_id: Uuid,
+            _member_id: Uuid,
+            _revoked_by: Uuid,
+            _reason: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn list_members(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Vec<WorkspaceMember>, sqlx::Error> {
+            Ok(vec![])
+        }
+        async fn list_memberships_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+            Ok(self.memberships.lock().unwrap().clone())
+        }
+        async fn list_user_workspaces(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+            Ok(vec![])
+        }
+        async fn create_workspace_invitation(
+            &self,
+            _workspace_id: Uuid,
+            _email: &str,
+            _role: WorkspaceRole,
+            _token: &str,
+            _expires_at: OffsetDateTime,
+            _created_by: Uuid,
+        ) -> Result<crate::models::workspace::WorkspaceInvitation, sqlx::Error> {
+            unimplemented!()
+        }
+        async fn list_workspace_invitations(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+            Ok(vec![])
+        }
+        async fn revoke_workspace_invitation(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn find_invitation_by_token(
+            &self,
+            _token: &str,
+        ) -> Result<Option<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+            Ok(None)
+        }
+        async fn mark_invitation_accepted(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn mark_invitation_declined(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn list_pending_invitations_for_email(
+            &self,
+            _email: &str,
+        ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+            Ok(vec![])
+        }
     }
 
     fn test_config() -> Arc<Config> {
@@ -456,13 +619,40 @@ mod tests {
             database_url: String::new(),
             frontend_origin: "https://app.example.com".into(),
             oauth: OAuthSettings {
-                google: OAuthProviderConfig { client_id: "client".into(), client_secret: "secret".into(), redirect_uri: "https://app.example.com/oauth/google".into() },
-                microsoft: OAuthProviderConfig { client_id: "client".into(), client_secret: "secret".into(), redirect_uri: "https://app.example.com/oauth/microsoft".into() },
-                slack: OAuthProviderConfig { client_id: "client".into(), client_secret: "secret".into(), redirect_uri: "https://app.example.com/oauth/slack".into() },
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/slack".into(),
+                },
                 token_encryption_key: vec![0; 32],
             },
-            stripe: StripeSettings { client_id: "stub".into(), secret_key: "stub".into(), webhook_secret: "stub".into() },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         })
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
     }
 
     #[tokio::test]
@@ -507,17 +697,26 @@ mod tests {
             db: db.clone(),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: workspace_repo.clone(),
-            workspace_connection_repo: Arc::new(crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository),
+            workspace_connection_repo: Arc::new(
+                crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
+            ),
             mailer: Arc::new(MockMailer::default()),
-            google_oauth: Arc::new(crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default()),
-            github_oauth: Arc::new(crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth::default()),
-            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(),
-            workspace_oauth: crate::services::oauth::workspace_service::WorkspaceOAuthService::test_stub(),
+            google_oauth: Arc::new(
+                crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),
+            ),
+            github_oauth: Arc::new(
+                crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth::default(),
+            ),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(
+            ),
+            workspace_oauth:
+                crate::services::oauth::workspace_service::WorkspaceOAuthService::test_stub(),
             stripe: stripe.clone(),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("test-worker".into()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         };
 
         // Build webhook payload that MockStripeService will accept without signature verification
@@ -529,7 +728,12 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("Stripe-Signature", HeaderValue::from_static("t=1,v1=stub"));
 
-        let resp = webhook(AxumState(state), headers, axum::body::Bytes::from(serde_json::to_vec(&body).unwrap())).await;
+        let resp = webhook(
+            AxumState(state),
+            headers,
+            axum::body::Bytes::from(serde_json::to_vec(&body).unwrap()),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         // User plan updated via webhook
@@ -553,19 +757,22 @@ mod tests {
         let workspace_id = Uuid::new_v4();
         let repo = TestWorkspaceRepo::default();
         // Seed a membership for rollback path
-        repo.memberships.lock().unwrap().push(WorkspaceMembershipSummary {
-            workspace: Workspace {
-                id: workspace_id,
-                name: "Team".into(),
-                created_by: user_id,
-                owner_id: user_id,
-                plan: "workspace".into(),
-                created_at: OffsetDateTime::now_utc(),
-                updated_at: OffsetDateTime::now_utc(),
-                deleted_at: None,
-            },
-            role: WorkspaceRole::Owner,
-        });
+        repo.memberships
+            .lock()
+            .unwrap()
+            .push(WorkspaceMembershipSummary {
+                workspace: Workspace {
+                    id: workspace_id,
+                    name: "Team".into(),
+                    created_by: user_id,
+                    owner_id: user_id,
+                    plan: "workspace".into(),
+                    created_at: OffsetDateTime::now_utc(),
+                    updated_at: OffsetDateTime::now_utc(),
+                    deleted_at: None,
+                },
+                role: WorkspaceRole::Owner,
+            });
         let workspace_repo = Arc::new(repo);
 
         let db = Arc::new(MockDb {
@@ -593,7 +800,8 @@ mod tests {
         // Seed a pending checkout
         {
             let mut settings = db.user_settings.lock().unwrap();
-            *settings = serde_json::json!({"billing": {"pending_checkout": {"session_id": "cs_test_old"}}});
+            *settings =
+                serde_json::json!({"billing": {"pending_checkout": {"session_id": "cs_test_old"}}});
         }
 
         let stripe = Arc::new(MockStripeService::new());
@@ -601,17 +809,26 @@ mod tests {
             db: db.clone(),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: workspace_repo.clone(),
-            workspace_connection_repo: Arc::new(crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository),
+            workspace_connection_repo: Arc::new(
+                crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
+            ),
             mailer: Arc::new(MockMailer::default()),
-            google_oauth: Arc::new(crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default()),
-            github_oauth: Arc::new(crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth::default()),
-            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(),
-            workspace_oauth: crate::services::oauth::workspace_service::WorkspaceOAuthService::test_stub(),
+            google_oauth: Arc::new(
+                crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),
+            ),
+            github_oauth: Arc::new(
+                crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth::default(),
+            ),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(
+            ),
+            workspace_oauth:
+                crate::services::oauth::workspace_service::WorkspaceOAuthService::test_stub(),
             stripe: stripe.clone(),
             http_client: Arc::new(Client::new()),
             config: test_config(),
             worker_id: Arc::new("test-worker".into()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         };
 
         // Use an invoice.payment_failed shape to drive failure path
@@ -623,13 +840,21 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("Stripe-Signature", HeaderValue::from_static("t=1,v1=stub"));
 
-        let resp = webhook(AxumState(state), headers, axum::body::Bytes::from(serde_json::to_vec(&body).unwrap())).await;
+        let resp = webhook(
+            AxumState(state),
+            headers,
+            axum::body::Bytes::from(serde_json::to_vec(&body).unwrap()),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         // Settings cleared pending and recorded error
         let settings = db.user_settings.lock().unwrap().clone();
         assert!(settings["billing"]["pending_checkout"].is_null());
-        assert_eq!(settings["billing"]["last_error"].as_str().unwrap_or(""), "Card declined");
+        assert_eq!(
+            settings["billing"]["last_error"].as_str().unwrap_or(""),
+            "Card declined"
+        );
 
         // Personal plan rolled back and any owned workspace downgraded
         assert_eq!(*db.update_user_plan_calls.lock().unwrap(), 1);

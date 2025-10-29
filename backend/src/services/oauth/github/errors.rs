@@ -5,6 +5,7 @@ use std::fmt;
 pub enum GitHubAuthError {
     MissingStateCookie,
     InvalidState,
+    MissingConfiguration(&'static str),
     TokenExchangeFailed,
     InvalidTokenJson,
     UserInfoFetchFailed,
@@ -22,6 +23,9 @@ impl fmt::Display for GitHubAuthError {
         match self {
             MissingStateCookie => write!(f, "Missing 'oauth_state' cookie"),
             InvalidState => write!(f, "Invalid state parameter"),
+            MissingConfiguration(key) => {
+                write!(f, "Missing GitHub OAuth configuration: {key}")
+            }
             TokenExchangeFailed => write!(f, "GitHub token exchange failed"),
             InvalidTokenJson => write!(f, "Invalid GitHub token"),
             UserInfoFetchFailed => write!(f, "Failed to fetch GitHub user info"),

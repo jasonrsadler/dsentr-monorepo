@@ -27,3 +27,10 @@ ALTER TABLE workspaces
 
 CREATE INDEX IF NOT EXISTS idx_workspaces_organization_id
     ON workspaces (organization_id);
+
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_workspaces_organization_id;
+--   ALTER TABLE workspaces DROP COLUMN IF EXISTS organization_id;
+--   DROP TABLE IF EXISTS organization_members;
+--   DROP TABLE IF EXISTS organizations;
+--   DROP TYPE IF EXISTS organization_role;

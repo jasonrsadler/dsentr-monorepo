@@ -13,14 +13,19 @@ use crate::AppState;
 use crate::{
     models::user::OauthProvider, responses::JsonResponse, utils::csrf::generate_csrf_token,
 };
-use crate::{routes::auth::claims::Claims, services::oauth::google::errors::GoogleAuthError};
+use crate::{
+    routes::auth::claims::{Claims, TokenUse},
+    services::oauth::google::errors::GoogleAuthError,
+};
 
-pub async fn google_login() -> impl IntoResponse {
+pub async fn google_login(State(app_state): State<AppState>) -> impl IntoResponse {
     let client_id = std::env::var("GOOGLE_CLIENT_ID").unwrap();
     let redirect_uri = std::env::var("GOOGLE_REDIRECT_URI").unwrap();
     let mut url = Url::parse(&std::env::var("GOOGLE_ACCOUNTS_OAUTH_API_BASE").unwrap()).unwrap();
 
     let state = generate_csrf_token();
+
+    let secure_cookie = app_state.config.auth_cookie_secure;
 
     url.query_pairs_mut()
         .append_pair("client_id", &client_id)
@@ -31,7 +36,7 @@ pub async fn google_login() -> impl IntoResponse {
 
     let oauth_state_cookie = Cookie::build(("oauth_state", state))
         .http_only(true)
-        .secure(true)
+        .secure(secure_cookie)
         .same_site(SameSite::Lax)
         .path("/")
         .max_age(time::Duration::minutes(10))
@@ -44,7 +49,7 @@ pub async fn google_login() -> impl IntoResponse {
 }
 
 pub async fn google_callback(
-    State(state): State<AppState>,
+    State(app_state): State<AppState>,
     jar: CookieJar,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
@@ -81,7 +86,7 @@ pub async fn google_callback(
         .into_response();
     }
 
-    let access_token = match state.google_oauth.exchange_code_for_token(code).await {
+    let access_token = match app_state.google_oauth.exchange_code_for_token(code).await {
         Ok(token) => token,
         Err(e) => {
             eprintln!("Token error: {:?}", e);
@@ -92,7 +97,7 @@ pub async fn google_callback(
         }
     };
 
-    let user_info = match state.google_oauth.fetch_user_info(&access_token).await {
+    let user_info = match app_state.google_oauth.fetch_user_info(&access_token).await {
         Ok(info) => info,
         Err(e) => {
             eprintln!("User info error: {:?}", e);
@@ -116,7 +121,7 @@ pub async fn google_callback(
     let first_name = user_info["given_name"].as_str().unwrap_or("").to_string();
     let last_name = user_info["family_name"].as_str().unwrap_or("").to_string();
 
-    let user = match state.db.find_user_by_email(email).await {
+    let user = match app_state.db.find_user_by_email(email).await {
         Ok(Some(user)) => {
             match (&user.oauth_provider, OauthProvider::Google) {
                 // ✅ user signed up with Google, allow login
@@ -151,7 +156,7 @@ pub async fn google_callback(
 
         Ok(None) => {
             // First-time login, create user with Google as oauth_provider
-            match state
+            match app_state
                 .db
                 .create_user_with_oauth(email, &first_name, &last_name, OauthProvider::Google)
                 .await
@@ -175,18 +180,43 @@ pub async fn google_callback(
             .into_response();
         }
     };
-    let claims = Claims {
+    let access_duration = chrono::Duration::minutes(45);
+    let refresh_duration = chrono::Duration::days(30);
+
+    let access_claims = Claims {
         id: user.id.to_string(),
         role: user.role,
-        exp: (chrono::Utc::now() + chrono::Duration::days(30)).timestamp() as usize,
+        exp: (chrono::Utc::now() + access_duration).timestamp() as usize,
+        email: email.to_string(),
+        first_name: first_name.clone(),
+        last_name: last_name.clone(),
+        plan: None,
+        company_name: None,
+        iss: String::new(),
+        aud: String::new(),
+        token_use: TokenUse::Access,
+    };
+
+    let refresh_claims = Claims {
+        id: user.id.to_string(),
+        role: user.role,
+        exp: (chrono::Utc::now() + refresh_duration).timestamp() as usize,
         email: email.to_string(),
         first_name,
         last_name,
         plan: None,
         company_name: None,
+        iss: String::new(),
+        aud: String::new(),
+        token_use: TokenUse::Refresh,
     };
 
-    let jwt = match create_jwt(&claims) {
+    let jwt = match create_jwt(
+        access_claims,
+        app_state.jwt_keys.as_ref(),
+        &app_state.config.jwt_issuer,
+        &app_state.config.jwt_audience,
+    ) {
         Ok(token) => token,
         Err(_) => {
             return JsonResponse::redirect_to_login_with_error(
@@ -196,22 +226,50 @@ pub async fn google_callback(
         }
     };
 
+    let refresh_jwt = match create_jwt(
+        refresh_claims,
+        app_state.jwt_keys.as_ref(),
+        &app_state.config.jwt_issuer,
+        &app_state.config.jwt_audience,
+    ) {
+        Ok(token) => token,
+        Err(_) => {
+            return JsonResponse::redirect_to_login_with_error(
+                &GoogleAuthError::JwtCreationFailed.to_string(),
+            )
+            .into_response()
+        }
+    };
+
+    let secure_cookie = app_state.config.auth_cookie_secure;
     let auth_cookie = Cookie::build(("auth_token", jwt))
         .http_only(true)
-        .secure(true)
+        .secure(secure_cookie)
         .same_site(SameSite::Lax)
         .path("/")
-        .max_age(time::Duration::days(30))
+        .max_age(time::Duration::seconds(access_duration.num_seconds()))
+        .build();
+
+    let refresh_cookie = Cookie::build(("auth_refresh_token", refresh_jwt))
+        .http_only(true)
+        .secure(secure_cookie)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(time::Duration::seconds(refresh_duration.num_seconds()))
         .build();
     let frontend_url =
         std::env::var("FRONTEND_ORIGIN").unwrap_or_else(|_| "https://localhost:5173".to_string());
 
     let clear_state_cookie = Cookie::build(("oauth_state", ""))
         .path("/")
+        .secure(secure_cookie)
         .max_age(time::Duration::seconds(0))
         .build();
 
-    let jar = CookieJar::new().add(auth_cookie).add(clear_state_cookie);
+    let jar = CookieJar::new()
+        .add(auth_cookie)
+        .add(refresh_cookie)
+        .add(clear_state_cookie);
     (jar, Redirect::to(&format!("{}/dashboard", frontend_url))).into_response()
 }
 
@@ -250,6 +308,7 @@ mod tests {
             smtp_mailer::MockMailer,
         },
         state::AppState,
+        utils::jwt::JwtKeys,
     }; // for `.oneshot()`
     use reqwest::Client;
 
@@ -278,9 +337,40 @@ mod tests {
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
-                webhook_secret: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         })
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
+    }
+
+    fn base_state(config: Arc<Config>) -> AppState {
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("test-worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        }
     }
 
     #[tokio::test]
@@ -291,7 +381,10 @@ mod tests {
             "GOOGLE_ACCOUNTS_OAUTH_API_BASE",
             "https://accounts.google.com/o/oauth2/auth",
         );
-        let app = Router::new().route("/auth/google", get(google_login));
+        let app_state = base_state(test_config());
+        let app = Router::new()
+            .route("/auth/google", get(google_login))
+            .with_state(app_state);
 
         let response = app
             .oneshot(Request::get("/auth/google").body(Body::empty()).unwrap())
@@ -333,6 +426,7 @@ mod tests {
             config,
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         };
 
         let code = "dummy";
@@ -411,6 +505,7 @@ mod tests {
             config: test_config(),
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         };
 
         let code = "dummy";

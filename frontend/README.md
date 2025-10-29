@@ -68,8 +68,12 @@ cargo run       # start backend
 Create `.env` files as needed. Backend expects:
 ```ini
 DATABASE_URL=postgres://user:pass@localhost:5432/dsentr
-JWT_SECRET=your-secret
+JWT_SECRET=base64-encoded-48-byte-secret
 ```
+
+`JWT_SECRET` must be at least 32 bytes of high-entropy data (eight or more
+unique bytes). Generate a random secret with `openssl rand -base64 48` or a
+similar secure tool.
 
 ## Testing
 Run tests for frontend:

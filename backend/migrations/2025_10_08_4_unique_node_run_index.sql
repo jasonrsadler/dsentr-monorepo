@@ -9,3 +9,6 @@ BEGIN
   END IF;
 END $$ LANGUAGE plpgsql;
 
+-- Rollback:
+--   DROP INDEX IF EXISTS uniq_node_runs_run_node;
+

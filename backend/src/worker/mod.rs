@@ -1,69 +1,199 @@
 use std::time::Duration;
 
-use crate::engine::execute_run;
+#[cfg(test)]
+use std::sync::Arc;
+
+use crate::engine::{complete_run_with_retry, execute_run, ExecutorError};
+use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_schedule::WorkflowSchedule;
 use crate::state::AppState;
+#[cfg(test)]
+use crate::utils::jwt::JwtKeys;
 use crate::utils::schedule::{
     compute_next_run, offset_to_utc, parse_schedule_config, utc_to_offset,
 };
 use crate::utils::workflow_connection_metadata;
 use chrono::Utc;
 use serde_json::{json, Value};
-use tokio::time::sleep;
+use tokio::task::JoinSet;
+use tokio::time::{sleep, timeout};
+use tracing::{error, warn};
+use uuid::Uuid;
+
+#[cfg(test)]
+fn test_jwt_keys() -> Arc<JwtKeys> {
+    Arc::new(
+        JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+            .expect("test JWT secret should be valid"),
+    )
+}
 
 pub async fn start_background_workers(state: AppState) {
     // Simple single-worker for now. Can be extended to multiple tasks.
     tokio::spawn(async move {
-        // Periodic retention cleanup
-        let retention_days: i32 = std::env::var("RUN_RETENTION_DAYS")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(30);
-        let mut last_cleanup = std::time::Instant::now();
-        let mut last_schedule_check = std::time::Instant::now();
-        let use_leases = std::env::var("WORKER_USE_LEASES")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(true);
-        loop {
-            if last_schedule_check.elapsed() > Duration::from_secs(5) {
-                if let Err(err) = process_due_schedules(&state).await {
-                    eprintln!("worker: error processing schedules: {:?}", err);
-                }
-                last_schedule_check = std::time::Instant::now();
-            }
-            if use_leases {
-                // Requeue any expired leases before claiming
-                let _ = state.workflow_repo.requeue_expired_leases().await;
-            }
-            let claim_res = if use_leases {
-                state
-                    .workflow_repo
-                    .claim_next_eligible_run(&state.worker_id, state.worker_lease_seconds)
-                    .await
-            } else {
-                state.workflow_repo.claim_next_queued_run().await
-            };
-
-            match claim_res {
-                Ok(Some(run)) => {
-                    execute_run(state.clone(), run).await;
-                }
-                Ok(None) => {
-                    sleep(Duration::from_millis(750)).await;
-                }
-                Err(e) => {
-                    eprintln!("worker: error claiming run: {:?}", e);
-                    sleep(Duration::from_millis(1000)).await;
-                }
-            }
-
-            // Do cleanup once in a while (every ~10 minutes)
-            if last_cleanup.elapsed() > Duration::from_secs(600) {
-                let _ = state.workflow_repo.purge_old_runs(retention_days).await;
-                last_cleanup = std::time::Instant::now();
-            }
+        if let Err(err) = worker_loop(state).await {
+            error!(
+                run_id = %err.run_id(),
+                operation = err.operation(),
+                attempts = err.attempts(),
+                error = %err,
+                "worker loop terminated due to executor persistence failure"
+            );
         }
     });
+}
+
+async fn worker_loop(state: AppState) -> Result<(), ExecutorError> {
+    // Periodic retention cleanup
+    let retention_days: i32 = std::env::var("RUN_RETENTION_DAYS")
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(30);
+    let mut last_cleanup = std::time::Instant::now();
+    let mut last_schedule_check = std::time::Instant::now();
+    let use_leases = std::env::var("WORKER_USE_LEASES")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(true);
+    let max_inflight = worker_pool_size();
+    let run_deadline = run_deadline_duration(state.worker_lease_seconds);
+    let mut inflight: JoinSet<(Uuid, Result<(), ExecutorError>)> = JoinSet::new();
+    loop {
+        while let Some(join_result) = inflight.try_join_next() {
+            match join_result {
+                Ok((_, Ok(()))) => {}
+                Ok((_, Err(err))) => return Err(err),
+                Err(err) => {
+                    warn!(?err, "worker: run task panicked");
+                }
+            }
+        }
+
+        if last_cleanup.elapsed() > Duration::from_secs(600) {
+            if let Err(err) = state.workflow_repo.purge_old_runs(retention_days).await {
+                warn!(
+                    worker_id = %state.worker_id,
+                    error = ?err,
+                    "worker: failed to purge old runs"
+                );
+            }
+            last_cleanup = std::time::Instant::now();
+        }
+
+        if last_schedule_check.elapsed() > Duration::from_secs(5) {
+            if let Err(err) = process_due_schedules(&state).await {
+                warn!(
+                    worker_id = %state.worker_id,
+                    error = ?err,
+                    "worker: error processing schedules"
+                );
+            }
+            last_schedule_check = std::time::Instant::now();
+        }
+        if use_leases {
+            // Requeue any expired leases before claiming
+            if let Err(err) = state.workflow_repo.requeue_expired_leases().await {
+                warn!(?err, "worker: failed to requeue expired leases");
+            }
+        }
+
+        if inflight.len() >= max_inflight {
+            sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+        let claim_res = if use_leases {
+            state
+                .workflow_repo
+                .claim_next_eligible_run(&state.worker_id, state.worker_lease_seconds)
+                .await
+        } else {
+            state.workflow_repo.claim_next_queued_run().await
+        };
+
+        match claim_res {
+            Ok(Some(run)) => {
+                let state_clone = state.clone();
+                let deadline = run_deadline;
+                inflight.spawn(async move { run_with_deadline(state_clone, run, deadline).await });
+            }
+            Ok(None) => {
+                if inflight.is_empty() {
+                    sleep(Duration::from_millis(750)).await;
+                } else {
+                    sleep(Duration::from_millis(250)).await;
+                }
+            }
+            Err(e) => {
+                warn!(
+                    worker_id = %state.worker_id,
+                    error = ?e,
+                    "worker: error claiming run"
+                );
+                sleep(Duration::from_millis(1000)).await;
+            }
+        }
+    }
+}
+
+fn worker_pool_size() -> usize {
+    std::env::var("WORKER_MAX_INFLIGHT_RUNS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(4)
+}
+
+fn run_deadline_duration(lease_seconds: i32) -> Duration {
+    let env_deadline = std::env::var("WORKER_RUN_DEADLINE_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_secs);
+
+    match env_deadline {
+        Some(duration) => duration,
+        None => {
+            let base = lease_seconds.max(1) as u64;
+            if base > 5 {
+                Duration::from_secs(base - 5)
+            } else {
+                Duration::from_secs(base)
+            }
+        }
+    }
+}
+
+async fn run_with_deadline(
+    state: AppState,
+    run: WorkflowRun,
+    deadline: Duration,
+) -> (Uuid, Result<(), ExecutorError>) {
+    let run_id = run.id;
+
+    if deadline.is_zero() {
+        return (run_id, execute_run(state, run).await);
+    }
+
+    match timeout(deadline, execute_run(state.clone(), run)).await {
+        Ok(result) => (run_id, result),
+        Err(_) => {
+            warn!(
+                %run_id,
+                worker_id = %state.worker_id,
+                deadline_secs = deadline.as_secs(),
+                "worker: run execution exceeded deadline"
+            );
+            let res = complete_run_with_retry(
+                &state,
+                run_id,
+                "failed",
+                Some("Worker execution deadline exceeded"),
+            )
+            .await;
+            match res {
+                Ok(()) => (run_id, Ok(())),
+                Err(err) => (run_id, Err(err)),
+            }
+        }
+    }
 }
 
 async fn process_due_schedules(state: &AppState) -> Result<(), sqlx::Error> {
@@ -75,9 +205,11 @@ async fn process_due_schedules(state: &AppState) -> Result<(), sqlx::Error> {
     for schedule in schedules {
         let schedule_id = schedule.id;
         if let Err(err) = trigger_schedule(state, schedule).await {
-            eprintln!(
-                "worker: failed to trigger schedule {}: {:?}",
-                schedule_id, err
+            error!(
+                worker_id = %state.worker_id,
+                schedule_id = %schedule_id,
+                error = ?err,
+                "worker: failed to trigger schedule"
             );
         }
     }
@@ -219,6 +351,7 @@ mod tests {
     use crate::db::workflow_repository::{MockWorkflowRepository, WorkflowRepository};
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
     use crate::models::workflow::Workflow;
+    use crate::models::workflow_node_run::WorkflowNodeRun;
     use crate::models::workflow_run::WorkflowRun;
     use crate::models::workflow_run_event::WorkflowRunEvent;
     use crate::models::workflow_schedule::WorkflowSchedule;
@@ -231,9 +364,355 @@ mod tests {
     use mockall::predicate;
     use reqwest::Client;
     use serde_json::json;
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use time::{Duration as TimeDuration, OffsetDateTime};
     use uuid::Uuid;
+
+    fn build_executor_failure_state() -> AppState {
+        let run = WorkflowRun {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            workflow_id: Uuid::new_v4(),
+            workspace_id: Some(Uuid::new_v4()),
+            snapshot: json!({
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "data": json!({"label": "Trigger"})}
+                ],
+                "edges": []
+            }),
+            status: "running".into(),
+            error: None,
+            idempotency_key: None,
+            started_at: OffsetDateTime::now_utc(),
+            finished_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_list_due_schedules()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
+        repo.expect_requeue_expired_leases()
+            .returning(|| Box::pin(async { Ok(0) }));
+        let run_queue = Arc::new(Mutex::new(VecDeque::from([run.clone()])));
+        let run_queue_claim = Arc::clone(&run_queue);
+        repo.expect_claim_next_eligible_run()
+            .returning(move |_, _| {
+                let run_queue = Arc::clone(&run_queue_claim);
+                Box::pin(async move { Ok(run_queue.lock().unwrap().pop_front()) })
+            });
+        repo.expect_record_run_event()
+            .times(3)
+            .returning(|_| Box::pin(async { Err(sqlx::Error::RowNotFound) }));
+
+        let workflow_repo: Arc<dyn WorkflowRepository> = Arc::new(repo);
+        let config = Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+        });
+
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo,
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        }
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            std::env::set_var(key, value);
+            EnvGuard { key }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var(self.key);
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_loop_surfaces_executor_failures() {
+        let _max_guard = EnvGuard::set("WORKER_MAX_INFLIGHT_RUNS", "1");
+        let _deadline_guard = EnvGuard::set("WORKER_RUN_DEADLINE_SECONDS", "0");
+        let state = build_executor_failure_state();
+
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(500), worker_loop(state))
+                .await
+                .expect("worker loop should complete");
+
+        let err = result.expect_err("expected executor error");
+        assert_eq!(err.operation(), "record_run_event");
+    }
+
+    #[tokio::test]
+    async fn worker_loop_initializes_with_structured_logging() {
+        let subscriber = tracing_subscriber::fmt().with_test_writer().json().finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let _max_guard = EnvGuard::set("WORKER_MAX_INFLIGHT_RUNS", "1");
+        let _deadline_guard = EnvGuard::set("WORKER_RUN_DEADLINE_SECONDS", "0");
+        let state = build_executor_failure_state();
+
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(500), worker_loop(state))
+                .await
+                .expect("worker loop should complete");
+
+        assert!(
+            result.is_err(),
+            "worker loop should surface executor errors"
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_handles_slow_runs_with_fresh_leases() {
+        let _max_guard = EnvGuard::set("WORKER_MAX_INFLIGHT_RUNS", "2");
+        let _deadline_guard = EnvGuard::set("WORKER_RUN_DEADLINE_SECONDS", "0");
+        let _renew_guard = EnvGuard::set("RUN_LEASE_RENEWAL_INTERVAL_MS", "100");
+
+        let workflow_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let workspace_id = Some(Uuid::new_v4());
+        let snapshot = json!({
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "data": json!({"label": "Trigger"})},
+                {"id": "check1", "type": "condition", "data": json!({"label": "Check 1", "expression": "1 == 1"})},
+                {"id": "check2", "type": "condition", "data": json!({"label": "Check 2", "expression": "1 == 1"})}
+            ],
+            "edges": [
+                {"source": "trigger", "target": "check1"},
+                {"source": "check1", "target": "check2"}
+            ]
+        });
+
+        let build_run = |id: Uuid| WorkflowRun {
+            id,
+            user_id,
+            workflow_id,
+            workspace_id,
+            snapshot: snapshot.clone(),
+            status: "running".into(),
+            error: None,
+            idempotency_key: None,
+            started_at: OffsetDateTime::now_utc(),
+            finished_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let runs_queue = Arc::new(Mutex::new(VecDeque::from([
+            build_run(Uuid::new_v4()),
+            build_run(Uuid::new_v4()),
+        ])));
+        let completed: Arc<Mutex<Vec<(Uuid, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let renew_count = Arc::new(AtomicUsize::new(0));
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_list_due_schedules()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
+        repo.expect_requeue_expired_leases()
+            .returning(|| Box::pin(async { Ok(0) }));
+        let runs_queue_claim = Arc::clone(&runs_queue);
+        repo.expect_claim_next_eligible_run()
+            .returning(move |_, _| {
+                let queue = Arc::clone(&runs_queue_claim);
+                Box::pin(async move { Ok(queue.lock().unwrap().pop_front()) })
+            });
+        repo.expect_get_run_status()
+            .returning(|_| Box::pin(async { Ok(Some("running".to_string())) }));
+        let renew_calls = Arc::clone(&renew_count);
+        repo.expect_renew_run_lease()
+            .returning(move |run_id, _, _| {
+                let renew_calls = Arc::clone(&renew_calls);
+                Box::pin(async move {
+                    let _ = run_id;
+                    renew_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                })
+            });
+        repo.expect_upsert_node_run().returning(
+            move |run_id, node_id, name, node_type, inputs, outputs, status, error| {
+                let node_id = node_id.to_owned();
+                let name = name.map(|s| s.to_owned());
+                let node_type = node_type.map(|s| s.to_owned());
+                let status = status.to_owned();
+                let error = error.map(|s| s.to_owned());
+                let inputs = inputs.clone();
+                let outputs = outputs.clone();
+
+                Box::pin(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    Ok(WorkflowNodeRun {
+                        id: Uuid::new_v4(),
+                        run_id,
+                        node_id,
+                        name,
+                        node_type,
+                        inputs,
+                        outputs,
+                        status,
+                        error,
+                        started_at: OffsetDateTime::now_utc(),
+                        finished_at: None,
+                        created_at: OffsetDateTime::now_utc(),
+                        updated_at: OffsetDateTime::now_utc(),
+                    })
+                })
+            },
+        );
+        let completed_for_repo = Arc::clone(&completed);
+        repo.expect_complete_workflow_run()
+            .returning(move |run_id, status, _| {
+                let completed = Arc::clone(&completed_for_repo);
+                let status = status.to_string();
+                Box::pin(async move {
+                    completed.lock().unwrap().push((run_id, status));
+                    Ok(())
+                })
+            });
+        repo.expect_record_run_event().returning(|event| {
+            Box::pin(async move {
+                Ok(WorkflowRunEvent {
+                    id: Uuid::new_v4(),
+                    workflow_run_id: event.workflow_run_id,
+                    workflow_id: event.workflow_id,
+                    workspace_id: event.workspace_id,
+                    triggered_by: event.triggered_by,
+                    connection_type: event.connection_type,
+                    connection_id: event.connection_id,
+                    recorded_at: event.recorded_at.unwrap_or_else(OffsetDateTime::now_utc),
+                })
+            })
+        });
+
+        let workflow_repo: Arc<dyn WorkflowRepository> = Arc::new(repo);
+        let config = Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+        });
+
+        let state = AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo,
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("worker".into()),
+            worker_lease_seconds: 3,
+            jwt_keys: test_jwt_keys(),
+        };
+
+        let worker_state = state.clone();
+        let worker_task = tokio::spawn(async move {
+            let _ = worker_loop(worker_state).await;
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if completed.lock().unwrap().len() >= 2 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("worker processed both runs");
+
+        worker_task.abort();
+
+        let finished = completed.lock().unwrap().clone();
+        assert_eq!(finished.len(), 2, "expected both runs to finish");
+        assert!(
+            finished.iter().all(|(_, status)| status == "succeeded"),
+            "runs should succeed"
+        );
+
+        assert!(
+            renew_count.load(Ordering::SeqCst) >= 2,
+            "lease renewals should occur for slow runs",
+        );
+    }
 
     #[tokio::test]
     async fn trigger_schedule_records_connection_run_events() {
@@ -373,8 +852,12 @@ mod tests {
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
-                webhook_secret: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         });
 
         let state = AppState {
@@ -392,6 +875,7 @@ mod tests {
             config: Arc::clone(&config),
             worker_id: Arc::new("worker".into()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         };
 
         let schedule = WorkflowSchedule {

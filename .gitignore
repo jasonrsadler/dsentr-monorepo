@@ -1,2 +1,29 @@
+# Environment and secret files
+.env
+.env.*
+*.env
+*.env.*
+.envrc
+*.pem
+*.key
+
+# Build artifacts
+**/target/
+**/.rustc_info.json
+
+# Frontend generated assets
+frontend/vitest-report.json
+
+# Logs and reports
+log/
+logs/
+report/
+reports/
+**/log/
+**/logs/
+**/report/
+**/reports/
+
+# Legacy ignores
 backend/target/
 target

@@ -14,3 +14,7 @@ CREATE TABLE IF NOT EXISTS egress_block_events (
 CREATE INDEX IF NOT EXISTS idx_egress_blocks_wf_created
   ON egress_block_events (workflow_id, created_at DESC);
 
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_egress_blocks_wf_created;
+--   DROP TABLE IF EXISTS egress_block_events;
+

@@ -8,3 +8,6 @@ CREATE TABLE IF NOT EXISTS workspace_member_audit (
     reason TEXT,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Rollback:
+--   DROP TABLE IF EXISTS workspace_member_audit;

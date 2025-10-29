@@ -35,3 +35,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_organization_owner_unique
     ON organization_members (organization_id)
     WHERE role = 'owner'::organization_role;
 
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_organization_owner_unique;
+--   DROP INDEX IF EXISTS idx_workspace_owner_unique;
+--   -- Removing the 'owner' enum value requires recreating workspace_role and organization_role
+--   -- types without the value and updating dependent columns. Plan that work as a follow-up
+--   -- migration before attempting to revert this file.
+

@@ -15,3 +15,8 @@ CREATE INDEX IF NOT EXISTS idx_workflow_run_events_run_recorded
 CREATE INDEX IF NOT EXISTS idx_workflow_run_events_workflow_recorded
   ON workflow_run_events (workflow_id, recorded_at DESC);
 
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_workflow_run_events_workflow_recorded;
+--   DROP INDEX IF EXISTS idx_workflow_run_events_run_recorded;
+--   DROP TABLE IF EXISTS workflow_run_events;
+

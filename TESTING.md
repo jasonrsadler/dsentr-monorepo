@@ -2,9 +2,19 @@
 
 Follow these steps to exercise the Google Sheets action end-to-end using the dsentr UI and a real spreadsheet.
 
+> **Security reminder:** Manual verification **must** be performed with disposable or sandbox Google accounts and fully scrubbed test data. Never authenticate with production or customer-owned identities, and never point to sheets that contain live customer data. Review the repository-wide [secret handling policy](SECURITY.md) and broader QA guidance in [`docs/README.md`](docs/README.md) before starting so you understand the mandatory controls around credentials and testing fixtures.
+
+## 0. Create sanitized test assets
+
+1. Provision a new Google account dedicated to testing (e.g., `dsentr-sheets-e2e+<date>@example.com`) or reuse an approved sandbox identity.
+2. Create a new Google Sheet owned by that account. Do **not** reuse any sheet that contains or once contained production data.
+3. Populate the sheet with synthetic headers and sample rows that mimic the required schema while remaining free of customer-identifiable information.
+4. If you need to share the sheet with teammates, restrict access to the smallest group necessary and clearly label it as **Test Data Only**.
+5. Document the sheet URL in your test notes to aid post-run cleanup.
+
 ## 1. Prepare Google resources
 
-1. Create or choose a Google Sheet you can edit.
+1. Using the sanitized sheet prepared above, confirm you retain edit permissions.
 2. Copy the spreadsheet ID from the Sheet URL. It is the value between `/d/` and `/edit` (for example, `1AbCDefGhIj...`).
 3. Inside the Sheet, create or confirm the name of the worksheet tab you want to write to (e.g., `Sheet1`). The name is case-sensitive.
 4. Make note of the column letters (A, B, C, …) that correspond to the cells you want to populate. Column mappings must use these letters rather than header text.
@@ -39,3 +49,10 @@ Follow these steps to exercise the Google Sheets action end-to-end using the dse
 - If the row is added to the wrong worksheet, double-check the worksheet name for typos or trailing spaces.
 - When using templated values, use the preview context to confirm the rendered output before executing the workflow.
 - Validation errors such as "column exceeds the Google Sheets column limit" or "duplicate column" indicate the **Column** field needs attention. Ensure the key is a literal column letter (A–ZZZ) with no template syntax and that each letter is used only once.
+
+## 6. Post-test cleanup
+
+1. Remove any rows created during testing or archive the sheet if it is no longer needed.
+2. Revoke access that was temporarily granted to collaborators or service accounts.
+3. Log disposal of test data in your QA notes to demonstrate compliance with our data-handling requirements.
+4. If any secrets or accounts were rotated for the exercise, update the relevant records following the procedures in [SECURITY.md](SECURITY.md).

@@ -10,7 +10,10 @@ use crate::services::oauth::{
 };
 use crate::services::smtp_mailer::Mailer;
 use crate::services::stripe::StripeService;
-use crate::utils::plan_limits::NormalizedPlanTier;
+use crate::utils::{
+    jwt::{JwtKeyProvider, JwtKeys},
+    plan_limits::NormalizedPlanTier,
+};
 use reqwest::Client;
 use std::sync::Arc;
 use tracing::error;
@@ -32,6 +35,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub worker_id: Arc<String>,
     pub worker_lease_seconds: i32,
+    pub jwt_keys: Arc<JwtKeys>,
 }
 
 impl AppState {
@@ -121,6 +125,20 @@ impl AppState {
         }
 
         db_tier
+    }
+}
+
+impl JwtKeyProvider for AppState {
+    fn jwt_keys(&self) -> &JwtKeys {
+        self.jwt_keys.as_ref()
+    }
+
+    fn jwt_issuer(&self) -> &str {
+        &self.config.jwt_issuer
+    }
+
+    fn jwt_audience(&self) -> &str {
+        &self.config.jwt_audience
     }
 }
 
@@ -222,8 +240,12 @@ mod tests {
             stripe: crate::config::StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
-                webhook_secret: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         });
 
         let state = AppState {
@@ -241,6 +263,10 @@ mod tests {
             config,
             worker_id: Arc::new("test-worker".into()),
             worker_lease_seconds: 30,
+            jwt_keys: Arc::new(
+                JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                    .expect("test JWT secret should be valid"),
+            ),
         };
 
         (state, user_id)

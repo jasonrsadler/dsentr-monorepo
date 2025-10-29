@@ -10,6 +10,8 @@ use uuid::Uuid;
 
 use crate::db::oauth_token_repository::UserOAuthTokenRepository;
 #[cfg(test)]
+use crate::db::workspace_connection_repository::StaleWorkspaceConnection;
+#[cfg(test)]
 use crate::db::workspace_connection_repository::WorkspaceConnectionListing;
 use crate::db::workspace_connection_repository::{
     NewWorkspaceAuditEvent, NewWorkspaceConnection, WorkspaceConnectionRepository,
@@ -299,12 +301,12 @@ impl WorkspaceOAuthService {
             .delete_connection(connection_id)
             .await?;
 
-        match self
+        let personal_token_missing = match self
             .user_tokens
             .mark_shared(record.created_by, record.provider, false)
             .await
         {
-            Ok(_) => {}
+            Ok(_) => false,
             Err(sqlx::Error::RowNotFound) => {
                 warn!(
                     connection_id = %connection_id,
@@ -313,9 +315,20 @@ impl WorkspaceOAuthService {
                     provider = ?record.provider,
                     "workspace connection creator missing personal token while handling revocation"
                 );
+                true
             }
             Err(err) => return Err(WorkspaceOAuthError::Database(err)),
-        }
+        };
+
+        warn!(
+            connection_id = %connection_id,
+            workspace_id = %workspace_id,
+            created_by = %record.created_by,
+            provider = ?record.provider,
+            account_email = %record.account_email,
+            personal_token_missing,
+            "workspace connection revoked and shared credentials purged"
+        );
 
         Ok(())
     }
@@ -474,8 +487,8 @@ impl WorkspaceOAuthService {
                 &self,
                 _creator_id: Uuid,
                 _provider: ConnectedOAuthProvider,
-            ) -> Result<(), sqlx::Error> {
-                Ok(())
+            ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
+                Ok(Vec::new())
             }
 
             async fn record_audit_event(
@@ -500,6 +513,7 @@ impl WorkspaceOAuthService {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::io::Write;
     use std::sync::{Arc, Mutex};
     use std::time::Duration as StdDuration;
     use time::Duration;
@@ -507,6 +521,49 @@ mod tests {
 
     use crate::db::oauth_token_repository::NewUserOAuthToken;
     use crate::utils::encryption::encrypt_secret;
+
+    #[derive(Clone)]
+    struct BufferingMakeWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl BufferingMakeWriter {
+        fn new() -> Self {
+            Self {
+                buffer: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn buffer(&self) -> Arc<Mutex<Vec<u8>>> {
+            Arc::clone(&self.buffer)
+        }
+    }
+
+    struct BufferWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BufferingMakeWriter {
+        type Writer = BufferWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            BufferWriter {
+                buffer: Arc::clone(&self.buffer),
+            }
+        }
+    }
+
+    impl Write for BufferWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut guard = self.buffer.lock().unwrap();
+            guard.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     struct InMemoryUserRepo {
         token: Mutex<Option<UserOAuthToken>>,
@@ -731,15 +788,20 @@ mod tests {
             &self,
             creator_id: Uuid,
             provider: ConnectedOAuthProvider,
-        ) -> Result<(), sqlx::Error> {
+        ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
             let mut guard = self.connection.lock().unwrap();
+            let mut affected = Vec::new();
             if let Some(conn) = guard.as_mut() {
                 if conn.created_by == creator_id && conn.provider == provider {
                     conn.expires_at = OffsetDateTime::now_utc() - Duration::minutes(5);
                     conn.updated_at = OffsetDateTime::now_utc();
+                    affected.push(StaleWorkspaceConnection {
+                        connection_id: conn.id,
+                        workspace_id: conn.workspace_id,
+                    });
                 }
             }
-            Ok(())
+            Ok(affected)
         }
 
         async fn record_audit_event(
@@ -1032,10 +1094,21 @@ mod tests {
         let service =
             WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
 
+        let make_writer = BufferingMakeWriter::new();
+        let captured = make_writer.buffer();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(make_writer.clone())
+            .without_time()
+            .finish();
+        let guard = tracing::subscriber::set_default(subscriber);
+
         service
             .remove_connection(workspace_id, user_id, connection_id)
             .await
             .expect("removal succeeds even without personal token");
+
+        drop(guard);
 
         assert!(workspace_repo.connection.lock().unwrap().is_none());
         let shared = *user_repo.shared_flag.lock().unwrap();
@@ -1050,6 +1123,17 @@ mod tests {
             events[0].event_type,
             WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED
         );
+
+        let logs = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains(&workspace_id.to_string()));
+        assert!(logs.contains(&connection_id.to_string()));
+        let alert_logged = logs
+            .contains("workspace connection revoked and shared credentials purged")
+            || logs.contains(
+                "workspace connection creator missing personal token while handling revocation",
+            )
+            || logs.contains("personal oauth token missing while unsharing workspace connection");
+        assert!(alert_logged);
     }
 
     #[tokio::test]

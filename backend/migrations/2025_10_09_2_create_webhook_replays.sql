@@ -10,3 +10,7 @@ CREATE TABLE IF NOT EXISTS webhook_replays (
 CREATE INDEX IF NOT EXISTS idx_webhook_replays_created
   ON webhook_replays (created_at DESC);
 
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_webhook_replays_created;
+--   DROP TABLE IF EXISTS webhook_replays;
+

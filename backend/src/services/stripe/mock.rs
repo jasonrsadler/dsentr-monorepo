@@ -126,15 +126,13 @@ impl StripeService for MockStripeService {
         cancel_at_period_end: bool,
     ) -> Result<SubscriptionInfo, StripeServiceError> {
         let mut guard = self.active_subscription.lock().unwrap();
-        let mut sub = guard
-            .clone()
-            .unwrap_or(SubscriptionInfo {
-                id: subscription_id.to_string(),
-                status: "active".into(),
-                current_period_end: 0,
-                cancel_at: None,
-                cancel_at_period_end: false,
-            });
+        let mut sub = guard.clone().unwrap_or(SubscriptionInfo {
+            id: subscription_id.to_string(),
+            status: "active".into(),
+            current_period_end: 0,
+            cancel_at: None,
+            cancel_at_period_end: false,
+        });
         sub.cancel_at_period_end = cancel_at_period_end;
         if cancel_at_period_end && sub.cancel_at.is_none() && sub.current_period_end > 0 {
             sub.cancel_at = Some(sub.current_period_end);

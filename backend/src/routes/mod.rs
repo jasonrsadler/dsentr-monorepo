@@ -1,11 +1,11 @@
 pub mod admin;
 pub mod auth;
+pub mod billing;
 pub mod dashboard;
 pub mod early_access;
 pub mod microsoft;
 pub mod oauth;
 pub mod options;
+pub mod stripe;
 pub mod workflows;
 pub mod workspaces;
-pub mod billing;
-pub mod stripe;

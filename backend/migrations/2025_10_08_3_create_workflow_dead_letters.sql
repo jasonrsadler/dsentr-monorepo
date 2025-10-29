@@ -12,3 +12,7 @@ CREATE TABLE IF NOT EXISTS workflow_dead_letters (
 CREATE INDEX IF NOT EXISTS idx_dead_letters_wf_created
   ON workflow_dead_letters (workflow_id, created_at DESC);
 
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_dead_letters_wf_created;
+--   DROP TABLE IF EXISTS workflow_dead_letters;
+

@@ -75,3 +75,23 @@ DROP INDEX IF EXISTS idx_workflows_user_lower_name_unique;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workflows_owner_scope_lower_name_unique
     ON workflows (COALESCE(workspace_id, user_id), lower(name));
 
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_workflows_owner_scope_lower_name_unique;
+--   ALTER TABLE workflow_schedules DROP COLUMN IF EXISTS workspace_id;
+--   ALTER TABLE workflow_dead_letters DROP COLUMN IF EXISTS workspace_id;
+--   ALTER TABLE workflow_node_runs DROP COLUMN IF EXISTS workspace_id;
+--   ALTER TABLE workflow_runs DROP COLUMN IF EXISTS workspace_id;
+--   ALTER TABLE workflow_logs DROP COLUMN IF EXISTS workspace_id;
+--   ALTER TABLE workflows DROP COLUMN IF EXISTS workspace_id;
+--   ALTER TABLE webhook_replays DROP COLUMN IF EXISTS workspace_id;
+--   ALTER TABLE egress_block_events DROP COLUMN IF EXISTS workspace_id;
+--   DROP TABLE IF EXISTS team_workflow_shares;
+--   DROP TABLE IF EXISTS team_members;
+--   DROP TABLE IF EXISTS teams;
+--   DROP TABLE IF EXISTS workspace_members;
+--   DROP TABLE IF EXISTS workspaces;
+--   ALTER TABLE users DROP COLUMN IF EXISTS onboarded_at;
+--   DROP TYPE IF EXISTS workspace_role;
+--   CREATE UNIQUE INDEX IF NOT EXISTS idx_workflows_user_lower_name_unique
+--     ON workflows (user_id, lower(name));
+

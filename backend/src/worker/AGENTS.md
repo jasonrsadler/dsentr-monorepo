@@ -16,3 +16,7 @@
 - Adjust cadence and batch sizes via env vars or constants (`MAX_SCHEDULES`) rather than hard-coding multiple loops elsewhere.
 - The worker clones `AppState`; ensure any new state fields are `Arc`-backed so they remain inexpensive to clone.
 - When adding new periodic maintenance tasks, append them inside the loop with a clear timer guard similar to `last_cleanup`.
+
+## Change Reasons
+- Swapped ad-hoc stderr logging for structured tracing so worker diagnostics include worker and schedule identifiers and play nicely with the global subscriber.
+- Updated slow-run worker test harness to fully own mocked node run fields and reuse shared completion trackers without moving them, fixing compile-time lifetime and move errors.

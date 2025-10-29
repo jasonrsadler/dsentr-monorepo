@@ -4,7 +4,7 @@ use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
-use tracing::warn;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::config::{OAuthProviderConfig, OAuthSettings};
@@ -60,6 +60,8 @@ pub enum OAuthAccountError {
     InvalidResponse(String),
     #[error("refresh token missing in response")]
     MissingRefreshToken,
+    #[error("{provider:?} account email is not verified")]
+    EmailNotVerified { provider: ConnectedOAuthProvider },
     #[error("oauth token revoked for {provider:?}")]
     TokenRevoked { provider: ConnectedOAuthProvider },
 }
@@ -77,6 +79,8 @@ pub struct OAuthAccountService {
     refresh_override: Option<Arc<RefreshOverride>>,
     #[cfg(test)]
     revocation_override: Option<Arc<RevocationOverride>>,
+    #[cfg(test)]
+    endpoint_overrides: TestEndpointOverrides,
 }
 
 impl OAuthAccountService {
@@ -99,7 +103,48 @@ impl OAuthAccountService {
             refresh_override: None,
             #[cfg(test)]
             revocation_override: None,
+            #[cfg(test)]
+            endpoint_overrides: TestEndpointOverrides::default(),
         }
+    }
+
+    #[cfg(test)]
+    fn google_token_url(&self) -> &str {
+        self.endpoint_overrides
+            .google_token_url
+            .as_deref()
+            .unwrap_or(GOOGLE_TOKEN_URL)
+    }
+
+    #[cfg(not(test))]
+    fn google_token_url(&self) -> &str {
+        GOOGLE_TOKEN_URL
+    }
+
+    #[cfg(test)]
+    fn google_userinfo_url(&self) -> &str {
+        self.endpoint_overrides
+            .google_userinfo_url
+            .as_deref()
+            .unwrap_or(GOOGLE_USERINFO_URL)
+    }
+
+    #[cfg(not(test))]
+    fn google_userinfo_url(&self) -> &str {
+        GOOGLE_USERINFO_URL
+    }
+
+    #[cfg(test)]
+    fn google_revocation_url(&self) -> &str {
+        self.endpoint_overrides
+            .google_revocation_url
+            .as_deref()
+            .unwrap_or(GOOGLE_REVOCATION_URL)
+    }
+
+    #[cfg(not(test))]
+    fn google_revocation_url(&self) -> &str {
+        GOOGLE_REVOCATION_URL
     }
 
     #[cfg(test)]
@@ -127,11 +172,29 @@ impl OAuthAccountService {
         self.revocation_override = override_fn.map(|func| func as Arc<RevocationOverride>);
     }
 
+    #[cfg(test)]
+    pub fn set_google_endpoint_overrides(
+        &mut self,
+        token_url: impl Into<String>,
+        userinfo_url: impl Into<String>,
+        revocation_url: Option<&str>,
+    ) {
+        self.endpoint_overrides.google_token_url = Some(token_url.into());
+        self.endpoint_overrides.google_userinfo_url = Some(userinfo_url.into());
+        self.endpoint_overrides.google_revocation_url = revocation_url.map(|url| url.to_string());
+    }
+
     pub fn google_scopes(&self) -> &'static str {
-        "openid email profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/spreadsheets"
+        // `openid email` lets us call the Google OpenID Connect userinfo endpoint and confirm the
+        // caller's verified email address. The Sheets scope is required by workflow actions that
+        // append rows via the Google Sheets API.
+        "openid email https://www.googleapis.com/auth/spreadsheets"
     }
 
     pub fn microsoft_scopes(&self) -> &'static str {
+        // `offline_access` gives refresh tokens, `User.Read` satisfies Microsoft Graph sign-in,
+        // and the Teams scopes cover listing joined teams, channels, channel members, and sending
+        // delegated channel messages from workflow actions.
         "offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMember.Read.All ChannelMessage.Send"
     }
 
@@ -286,9 +349,35 @@ impl OAuthAccountService {
         provider: ConnectedOAuthProvider,
     ) -> Result<(), OAuthAccountError> {
         self.repo.delete_token(user_id, provider).await?;
-        self.workspace_connections
+        let stale_connections = self
+            .workspace_connections
             .mark_connections_stale_for_creator(user_id, provider)
             .await?;
+
+        if stale_connections.is_empty() {
+            info!(
+                %user_id,
+                ?provider,
+                "oauth token revoked with no shared workspace connections to update"
+            );
+        } else {
+            let workspace_ids: Vec<Uuid> = stale_connections
+                .iter()
+                .map(|conn| conn.workspace_id)
+                .collect();
+            let connection_ids: Vec<Uuid> = stale_connections
+                .iter()
+                .map(|conn| conn.connection_id)
+                .collect();
+            warn!(
+                %user_id,
+                ?provider,
+                workspace_ids = ?workspace_ids,
+                connection_ids = ?connection_ids,
+                connection_count = stale_connections.len(),
+                "shared workspace oauth connections marked stale after personal token revocation"
+            );
+        }
         Ok(())
     }
 
@@ -319,11 +408,13 @@ impl OAuthAccountService {
         #[derive(Deserialize)]
         struct UserInfoResponse {
             email: Option<String>,
+            #[serde(default)]
+            email_verified: Option<bool>,
         }
 
         let response: TokenResponse = self
             .client
-            .post(GOOGLE_TOKEN_URL)
+            .post(self.google_token_url())
             .form(&[
                 ("code", code),
                 ("client_id", self.google.client_id.as_str()),
@@ -340,12 +431,14 @@ impl OAuthAccountService {
         let refresh_token = response
             .refresh_token
             .ok_or(OAuthAccountError::MissingRefreshToken)?;
-        let expires_in = response.expires_in.unwrap_or(3600);
+        let expires_in = response.expires_in.ok_or_else(|| {
+            OAuthAccountError::InvalidResponse("Google response missing expires_in".into())
+        })?;
         let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
 
         let user_info: UserInfoResponse = self
             .client
-            .get(GOOGLE_USERINFO_URL)
+            .get(self.google_userinfo_url())
             .bearer_auth(&response.access_token)
             .send()
             .await?
@@ -356,6 +449,12 @@ impl OAuthAccountService {
         let email = user_info
             .email
             .ok_or_else(|| OAuthAccountError::InvalidResponse("Missing email".into()))?;
+
+        if !user_info.email_verified.unwrap_or(false) {
+            return Err(OAuthAccountError::EmailNotVerified {
+                provider: ConnectedOAuthProvider::Google,
+            });
+        }
 
         Ok(AuthorizationTokens {
             access_token: response.access_token,
@@ -404,7 +503,9 @@ impl OAuthAccountService {
         let refresh_token = response
             .refresh_token
             .ok_or(OAuthAccountError::MissingRefreshToken)?;
-        let expires_in = response.expires_in.unwrap_or(3600);
+        let expires_in = response.expires_in.ok_or_else(|| {
+            OAuthAccountError::InvalidResponse("Microsoft response missing expires_in".into())
+        })?;
         let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
 
         let user_info: UserInfoResponse = self
@@ -581,7 +682,9 @@ impl OAuthAccountService {
         let new_refresh = response
             .refresh_token
             .unwrap_or_else(|| refresh_token.to_string());
-        let expires_in = response.expires_in.unwrap_or(3600);
+        let expires_in = response.expires_in.ok_or_else(|| {
+            OAuthAccountError::InvalidResponse("Google refresh missing expires_in".into())
+        })?;
         let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
 
         Ok(AuthorizationTokens {
@@ -641,7 +744,9 @@ impl OAuthAccountService {
         let new_refresh = response
             .refresh_token
             .unwrap_or_else(|| refresh_token.to_string());
-        let expires_in = response.expires_in.unwrap_or(3600);
+        let expires_in = response.expires_in.ok_or_else(|| {
+            OAuthAccountError::InvalidResponse("Microsoft refresh missing expires_in".into())
+        })?;
         let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
 
         Ok(AuthorizationTokens {
@@ -795,7 +900,7 @@ impl OAuthAccountService {
             ConnectedOAuthProvider::Google => {
                 let response = self
                     .client
-                    .post(GOOGLE_REVOCATION_URL)
+                    .post(self.google_revocation_url())
                     .form(&[("token", token)])
                     .send()
                     .await?;
@@ -1065,8 +1170,11 @@ impl OAuthAccountService {
                 &self,
                 _creator_id: Uuid,
                 _provider: ConnectedOAuthProvider,
-            ) -> Result<(), sqlx::Error> {
-                Ok(())
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::StaleWorkspaceConnection>,
+                sqlx::Error,
+            > {
+                Ok(Vec::new())
             }
 
             async fn record_audit_event(
@@ -1124,7 +1232,9 @@ fn slack_expiration(
         });
     }
 
-    Ok(OffsetDateTime::now_utc() + Duration::hours(1))
+    Err(OAuthAccountError::InvalidResponse(
+        "Slack response missing expiration".into(),
+    ))
 }
 
 pub(crate) fn is_revocation_signal(status: Option<StatusCode>, body: &str) -> bool {
@@ -1153,13 +1263,67 @@ type RevocationOverride =
     dyn for<'a> Fn(ConnectedOAuthProvider, &'a str) -> Result<(), OAuthAccountError> + Send + Sync;
 
 #[cfg(test)]
+#[derive(Default, Clone)]
+struct TestEndpointOverrides {
+    google_token_url: Option<String>,
+    google_userinfo_url: Option<String>,
+    google_revocation_url: Option<String>,
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository};
-    use crate::db::workspace_connection_repository::WorkspaceConnectionRepository;
+    use crate::db::workspace_connection_repository::{
+        StaleWorkspaceConnection, WorkspaceConnectionRepository,
+    };
     use async_trait::async_trait;
     use sqlx::Error;
-    use std::sync::Mutex;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct BufferingMakeWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl BufferingMakeWriter {
+        fn new() -> Self {
+            Self {
+                buffer: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn buffer(&self) -> Arc<Mutex<Vec<u8>>> {
+            Arc::clone(&self.buffer)
+        }
+    }
+
+    struct BufferWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BufferingMakeWriter {
+        type Writer = BufferWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            BufferWriter {
+                buffer: Arc::clone(&self.buffer),
+            }
+        }
+    }
+
+    impl Write for BufferWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut guard = self.buffer.lock().unwrap();
+            guard.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     struct InMemoryRepo;
 
@@ -1281,8 +1445,11 @@ mod tests {
             &self,
             _creator_id: Uuid,
             _provider: ConnectedOAuthProvider,
-        ) -> Result<(), sqlx::Error> {
-            Ok(())
+        ) -> Result<
+            Vec<crate::db::workspace_connection_repository::StaleWorkspaceConnection>,
+            sqlx::Error,
+        > {
+            Ok(Vec::new())
         }
 
         async fn record_audit_event(
@@ -1296,8 +1463,8 @@ mod tests {
     #[tokio::test]
     async fn scopes_are_exposed() {
         let client = Arc::new(Client::new());
-        let repo = Arc::new(InMemoryRepo);
-        let workspace_repo = Arc::new(NoopWorkspaceRepo);
+        let repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(InMemoryRepo);
+        let workspace_repo: Arc<dyn WorkspaceConnectionRepository> = Arc::new(NoopWorkspaceRepo);
         let key = Arc::new(vec![0u8; 32]);
         let settings = OAuthSettings {
             google: OAuthProviderConfig {
@@ -1318,11 +1485,161 @@ mod tests {
             token_encryption_key: vec![0u8; 32],
         };
         let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
-        let scopes = service.google_scopes();
-        assert!(scopes.contains("email"));
-        assert!(scopes.contains("https://www.googleapis.com/auth/spreadsheets"));
-        assert!(service.microsoft_scopes().contains("offline_access"));
-        assert!(service.slack_scopes().contains("users:read"));
+        assert_eq!(
+            service.google_scopes(),
+            "openid email https://www.googleapis.com/auth/spreadsheets"
+        );
+        assert_eq!(
+            service.microsoft_scopes(),
+            "offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMember.Read.All ChannelMessage.Send"
+        );
+        assert_eq!(
+            service.slack_scopes(),
+            "chat:write,channels:read,groups:read,users:read,users:read.email"
+        );
+    }
+
+    #[tokio::test]
+    async fn google_exchange_rejects_unverified_email() {
+        let token_server = httpmock::MockServer::start();
+        let userinfo_server = httpmock::MockServer::start();
+
+        let _token_mock = token_server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/token");
+            then.status(200).json_body(serde_json::json!({
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "expires_in": 3600
+            }));
+        });
+
+        let _userinfo_mock = userinfo_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/v1/userinfo");
+            then.status(200).json_body(serde_json::json!({
+                "email": "user@example.com",
+                "email_verified": false
+            }));
+        });
+
+        let client = Arc::new(Client::new());
+
+        let repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(InMemoryRepo);
+        let workspace_repo: Arc<dyn WorkspaceConnectionRepository> = Arc::new(NoopWorkspaceRepo);
+        let key = Arc::new(vec![0u8; 32]);
+        let settings = OAuthSettings {
+            google: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/google".into(),
+            },
+            microsoft: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/microsoft".into(),
+            },
+            slack: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/slack".into(),
+            },
+            token_encryption_key: vec![0u8; 32],
+        };
+
+        let mut service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
+        service.set_google_endpoint_overrides(
+            token_server.url("/token"),
+            userinfo_server.url("/v1/userinfo"),
+            None,
+        );
+
+        let err = service
+            .exchange_authorization_code(ConnectedOAuthProvider::Google, "auth-code")
+            .await
+            .expect_err("unverified email should fail");
+
+        match err {
+            OAuthAccountError::EmailNotVerified { provider } => {
+                assert_eq!(provider, ConnectedOAuthProvider::Google);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn google_exchange_requires_expires_in() {
+        let token_server = httpmock::MockServer::start();
+        let userinfo_server = httpmock::MockServer::start();
+
+        let _token_mock = token_server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/token");
+            then.status(200).json_body(serde_json::json!({
+                "access_token": "access",
+                "refresh_token": "refresh"
+            }));
+        });
+
+        let _userinfo_mock = userinfo_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/v1/userinfo");
+            then.status(200).json_body(serde_json::json!({
+                "email": "user@example.com",
+                "email_verified": true
+            }));
+        });
+
+        let client = Arc::new(Client::new());
+
+        let repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(InMemoryRepo);
+        let workspace_repo: Arc<dyn WorkspaceConnectionRepository> = Arc::new(NoopWorkspaceRepo);
+        let key = Arc::new(vec![0u8; 32]);
+        let settings = OAuthSettings {
+            google: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/google".into(),
+            },
+            microsoft: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/microsoft".into(),
+            },
+            slack: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/slack".into(),
+            },
+            token_encryption_key: vec![0u8; 32],
+        };
+
+        let mut service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
+        service.set_google_endpoint_overrides(
+            token_server.url("/token"),
+            userinfo_server.url("/v1/userinfo"),
+            None,
+        );
+
+        let err = service
+            .exchange_authorization_code(ConnectedOAuthProvider::Google, "auth-code")
+            .await
+            .expect_err("missing expires_in should be treated as invalid response");
+
+        match err {
+            OAuthAccountError::InvalidResponse(msg) => {
+                assert!(msg.contains("Google response missing expires_in"), "{msg}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn slack_expiration_requires_metadata() {
+        let err = slack_expiration(None, None)
+            .expect_err("missing expiration metadata should return error");
+        match err {
+            OAuthAccountError::InvalidResponse(msg) => {
+                assert!(msg.contains("Slack response missing expiration"), "{msg}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[derive(Default)]
@@ -1518,11 +1835,16 @@ mod tests {
     #[derive(Default)]
     struct RecordingWorkspaceRepo {
         stale_calls: Mutex<Vec<(Uuid, ConnectedOAuthProvider)>>,
+        stale_return: Mutex<Vec<StaleWorkspaceConnection>>,
     }
 
     impl RecordingWorkspaceRepo {
         fn stale_calls(&self) -> Vec<(Uuid, ConnectedOAuthProvider)> {
             self.stale_calls.lock().unwrap().clone()
+        }
+
+        fn set_stale_connections(&self, connections: Vec<StaleWorkspaceConnection>) {
+            *self.stale_return.lock().unwrap() = connections;
         }
     }
 
@@ -1600,12 +1922,12 @@ mod tests {
             &self,
             creator_id: Uuid,
             provider: ConnectedOAuthProvider,
-        ) -> Result<(), sqlx::Error> {
+        ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
             self.stale_calls
                 .lock()
                 .unwrap()
                 .push((creator_id, provider));
-            Ok(())
+            Ok(self.stale_return.lock().unwrap().clone())
         }
 
         async fn record_audit_event(
@@ -1705,6 +2027,8 @@ mod tests {
     async fn handle_revoked_token_removes_personal_credentials_and_marks_workspace() {
         let user_id = Uuid::new_v4();
         let token_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
         let now = OffsetDateTime::now_utc();
         let key = Arc::new(vec![7u8; 32]);
 
@@ -1723,6 +2047,10 @@ mod tests {
 
         let token_repo = Arc::new(RecordingTokenRepo::new(stored_token));
         let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        workspace_repo.set_stale_connections(vec![StaleWorkspaceConnection {
+            connection_id,
+            workspace_id,
+        }]);
         let service = OAuthAccountService::new(
             token_repo.clone(),
             workspace_repo.clone(),
@@ -1748,10 +2076,21 @@ mod tests {
             },
         );
 
+        let make_writer = BufferingMakeWriter::new();
+        let captured = make_writer.buffer();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(make_writer.clone())
+            .without_time()
+            .finish();
+        let guard = tracing::subscriber::set_default(subscriber);
+
         service
             .handle_revoked_token(user_id, ConnectedOAuthProvider::Microsoft)
             .await
             .expect("revoked cleanup should succeed");
+
+        drop(guard);
 
         assert_eq!(
             token_repo.delete_calls(),
@@ -1761,6 +2100,11 @@ mod tests {
             workspace_repo.stale_calls(),
             vec![(user_id, ConnectedOAuthProvider::Microsoft)]
         );
+
+        let logs = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains(&workspace_id.to_string()));
+        assert!(logs.contains(&connection_id.to_string()));
+        assert!(logs.contains("shared workspace oauth connections marked stale"));
     }
 
     #[tokio::test]

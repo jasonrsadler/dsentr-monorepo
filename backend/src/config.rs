@@ -1,6 +1,21 @@
-use std::env;
+use std::{collections::HashSet, env};
 
 use crate::utils::encryption::{decode_key, EncryptionError};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("missing required environment variable: {name}")]
+    MissingEnvVar { name: &'static str },
+    #[error("failed to decode secret for {name}: {source}")]
+    SecretDecode {
+        name: &'static str,
+        #[source]
+        source: EncryptionError,
+    },
+    #[error("{name} is too weak: {reason}")]
+    WeakSecret { name: &'static str, reason: String },
+}
 
 #[derive(Clone)]
 pub struct OAuthProviderConfig {
@@ -32,62 +47,80 @@ pub struct Config {
     pub oauth: OAuthSettings,
     #[allow(dead_code)]
     pub stripe: StripeSettings,
+    pub auth_cookie_secure: bool,
+    pub webhook_secret: String,
+    pub jwt_issuer: String,
+    pub jwt_audience: String,
 }
 
 impl Config {
-    pub fn from_env() -> Self {
-        dotenv::dotenv().ok();
+    pub fn from_env() -> Result<Self, ConfigError> {
+        let dotenv_disabled = env::var("DOTENV_DISABLE")
+            .ok()
+            .map(|value| {
+                let normalized = value.to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true")
+            })
+            .unwrap_or(false);
 
-        let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-        let frontend_origin = env::var("FRONTEND_ORIGIN").expect("FRONTEND_ORIGIN must be set");
+        if !dotenv_disabled {
+            dotenv::dotenv().ok();
+        }
+
+        fn require_env(name: &'static str) -> Result<String, ConfigError> {
+            env::var(name).map_err(|_| ConfigError::MissingEnvVar { name })
+        }
+
+        let database_url = require_env("DATABASE_URL")?;
+        let frontend_origin = require_env("FRONTEND_ORIGIN")?;
 
         let google = OAuthProviderConfig {
-            client_id: env::var("GOOGLE_INTEGRATIONS_CLIENT_ID")
-                .expect("GOOGLE_INTEGRATIONS_CLIENT_ID must be set"),
-            client_secret: env::var("GOOGLE_INTEGRATIONS_CLIENT_SECRET")
-                .expect("GOOGLE_INTEGRATIONS_CLIENT_SECRET must be set"),
-            redirect_uri: env::var("GOOGLE_INTEGRATIONS_REDIRECT_URI")
-                .expect("GOOGLE_INTEGRATIONS_REDIRECT_URI must be set"),
+            client_id: require_env("GOOGLE_INTEGRATIONS_CLIENT_ID")?,
+            client_secret: require_env("GOOGLE_INTEGRATIONS_CLIENT_SECRET")?,
+            redirect_uri: require_env("GOOGLE_INTEGRATIONS_REDIRECT_URI")?,
         };
 
         let microsoft = OAuthProviderConfig {
-            client_id: env::var("MICROSOFT_INTEGRATIONS_CLIENT_ID")
-                .expect("MICROSOFT_INTEGRATIONS_CLIENT_ID must be set"),
-            client_secret: env::var("MICROSOFT_INTEGRATIONS_CLIENT_SECRET")
-                .expect("MICROSOFT_INTEGRATIONS_CLIENT_SECRET must be set"),
-            redirect_uri: env::var("MICROSOFT_INTEGRATIONS_REDIRECT_URI")
-                .expect("MICROSOFT_INTEGRATIONS_REDIRECT_URI must be set"),
+            client_id: require_env("MICROSOFT_INTEGRATIONS_CLIENT_ID")?,
+            client_secret: require_env("MICROSOFT_INTEGRATIONS_CLIENT_SECRET")?,
+            redirect_uri: require_env("MICROSOFT_INTEGRATIONS_REDIRECT_URI")?,
         };
 
         let slack = OAuthProviderConfig {
-            client_id: env::var("SLACK_INTEGRATIONS_CLIENT_ID")
-                .expect("SLACK_INTEGRATIONS_CLIENT_ID must be set"),
-            client_secret: env::var("SLACK_INTEGRATIONS_CLIENT_SECRET")
-                .expect("SLACK_INTEGRATIONS_CLIENT_SECRET must be set"),
-            redirect_uri: env::var("SLACK_INTEGRATIONS_REDIRECT_URI")
-                .expect("SLACK_INTEGRATIONS_REDIRECT_URI must be set"),
+            client_id: require_env("SLACK_INTEGRATIONS_CLIENT_ID")?,
+            client_secret: require_env("SLACK_INTEGRATIONS_CLIENT_SECRET")?,
+            redirect_uri: require_env("SLACK_INTEGRATIONS_REDIRECT_URI")?,
         };
 
-        let encryption_key_b64 =
-            env::var("OAUTH_TOKEN_ENCRYPTION_KEY").expect("OAUTH_TOKEN_ENCRYPTION_KEY must be set");
+        let encryption_key_b64 = require_env("OAUTH_TOKEN_ENCRYPTION_KEY")?;
         let token_encryption_key =
-            decode_key(&encryption_key_b64).unwrap_or_else(|err| match err {
-                EncryptionError::InvalidKeyLength => {
-                    panic!("OAUTH_TOKEN_ENCRYPTION_KEY must decode to 32 bytes")
-                }
-                _ => panic!("OAUTH_TOKEN_ENCRYPTION_KEY must be valid base64"),
-            });
+            decode_key(&encryption_key_b64).map_err(|source| ConfigError::SecretDecode {
+                name: "OAUTH_TOKEN_ENCRYPTION_KEY",
+                source,
+            })?;
 
         let stripe = StripeSettings {
-            client_id: env::var("STRIPE_CLIENT_ID")
-                .expect("STRIPE_CLIENT_ID must be set to configure Stripe OAuth"),
-            secret_key: env::var("STRIPE_SECRET_KEY")
-                .expect("STRIPE_SECRET_KEY must be set to sign Stripe API requests"),
-            webhook_secret: env::var("STRIPE_WEBHOOK_SECRET")
-                .expect("STRIPE_WEBHOOK_SECRET must be set to validate Stripe webhooks"),
+            client_id: require_env("STRIPE_CLIENT_ID")?,
+            secret_key: require_env("STRIPE_SECRET_KEY")?,
+            webhook_secret: require_env("STRIPE_WEBHOOK_SECRET")?,
         };
 
-        Config {
+        let webhook_secret = require_env("WEBHOOK_SECRET")?;
+        validate_webhook_secret(&webhook_secret)?;
+
+        let auth_cookie_secure = env::var("AUTH_COOKIE_SECURE")
+            .ok()
+            .map(|value| match value.to_ascii_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => true,
+            })
+            .unwrap_or(true);
+
+        let jwt_issuer = require_env("JWT_ISSUER")?;
+        let jwt_audience = require_env("JWT_AUDIENCE")?;
+
+        Ok(Config {
             database_url,
             frontend_origin,
             oauth: OAuthSettings {
@@ -97,6 +130,234 @@ impl Config {
                 token_encryption_key,
             },
             stripe,
+            auth_cookie_secure,
+            webhook_secret,
+            jwt_issuer,
+            jwt_audience,
+        })
+    }
+}
+
+pub(crate) const MIN_WEBHOOK_SECRET_LENGTH: usize = 32;
+
+fn validate_webhook_secret(secret: &str) -> Result<(), ConfigError> {
+    if secret.len() < MIN_WEBHOOK_SECRET_LENGTH {
+        return Err(ConfigError::WeakSecret {
+            name: "WEBHOOK_SECRET",
+            reason: format!("must be at least {MIN_WEBHOOK_SECRET_LENGTH} characters long"),
+        });
+    }
+
+    let unique_chars = secret.chars().collect::<HashSet<_>>().len();
+    if unique_chars < 8 {
+        return Err(ConfigError::WeakSecret {
+            name: "WEBHOOK_SECRET",
+            reason: "must contain at least 8 unique characters".into(),
+        });
+    }
+
+    let lowered = secret.to_ascii_lowercase();
+    if lowered.contains("changeme") || lowered == "dev-secret" {
+        return Err(ConfigError::WeakSecret {
+            name: "WEBHOOK_SECRET",
+            reason: "placeholder values are not allowed".into(),
+        });
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Config, ConfigError};
+    use base64::Engine as _;
+    use std::env;
+    use std::sync::Mutex;
+    use std::{panic, panic::UnwindSafe};
+
+    const REQUIRED_VARS: [&str; 18] = [
+        "DATABASE_URL",
+        "FRONTEND_ORIGIN",
+        "GOOGLE_INTEGRATIONS_CLIENT_ID",
+        "GOOGLE_INTEGRATIONS_CLIENT_SECRET",
+        "GOOGLE_INTEGRATIONS_REDIRECT_URI",
+        "MICROSOFT_INTEGRATIONS_CLIENT_ID",
+        "MICROSOFT_INTEGRATIONS_CLIENT_SECRET",
+        "MICROSOFT_INTEGRATIONS_REDIRECT_URI",
+        "SLACK_INTEGRATIONS_CLIENT_ID",
+        "SLACK_INTEGRATIONS_CLIENT_SECRET",
+        "SLACK_INTEGRATIONS_REDIRECT_URI",
+        "OAUTH_TOKEN_ENCRYPTION_KEY",
+        "STRIPE_CLIENT_ID",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "WEBHOOK_SECRET",
+        "JWT_ISSUER",
+        "JWT_AUDIENCE",
+    ];
+
+    const OPTIONAL_VARS: [&str; 1] = ["AUTH_COOKIE_SECURE"]; // allow tests to run without ambient overrides
+
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn with_env<F, R>(f: F) -> R
+    where
+        F: FnOnce() -> R + UnwindSafe,
+    {
+        let guard = ENV_MUTEX.lock().unwrap();
+        let snapshot: Vec<(&'static str, Option<String>)> = REQUIRED_VARS
+            .iter()
+            .map(|&key| (key, env::var(key).ok()))
+            .collect();
+        let optional_snapshot: Vec<(&'static str, Option<String>)> = OPTIONAL_VARS
+            .iter()
+            .map(|&key| (key, env::var(key).ok()))
+            .collect();
+        let dotenv_disable_snapshot = env::var("DOTENV_DISABLE").ok();
+
+        env::set_var("DOTENV_DISABLE", "1");
+        for key in REQUIRED_VARS.iter() {
+            env::remove_var(key);
         }
+        for key in OPTIONAL_VARS.iter() {
+            env::remove_var(key);
+        }
+
+        let result = panic::catch_unwind(f);
+
+        for (key, value) in snapshot {
+            if let Some(v) = value {
+                env::set_var(key, v);
+            } else {
+                env::remove_var(key);
+            }
+        }
+        for (key, value) in optional_snapshot {
+            if let Some(v) = value {
+                env::set_var(key, v);
+            } else {
+                env::remove_var(key);
+            }
+        }
+        match dotenv_disable_snapshot {
+            Some(value) => env::set_var("DOTENV_DISABLE", value),
+            None => env::remove_var("DOTENV_DISABLE"),
+        }
+
+        drop(guard);
+
+        match result {
+            Ok(value) => value,
+            Err(payload) => panic::resume_unwind(payload),
+        }
+    }
+
+    fn populate_defaults() {
+        env::set_var("DATABASE_URL", "postgres://localhost/db");
+        env::set_var("FRONTEND_ORIGIN", "http://localhost:3000");
+        env::set_var("GOOGLE_INTEGRATIONS_CLIENT_ID", "google-client-id");
+        env::set_var("GOOGLE_INTEGRATIONS_CLIENT_SECRET", "google-client-secret");
+        env::set_var(
+            "GOOGLE_INTEGRATIONS_REDIRECT_URI",
+            "http://localhost/google",
+        );
+        env::set_var("MICROSOFT_INTEGRATIONS_CLIENT_ID", "microsoft-client-id");
+        env::set_var(
+            "MICROSOFT_INTEGRATIONS_CLIENT_SECRET",
+            "microsoft-client-secret",
+        );
+        env::set_var(
+            "MICROSOFT_INTEGRATIONS_REDIRECT_URI",
+            "http://localhost/microsoft",
+        );
+        env::set_var("SLACK_INTEGRATIONS_CLIENT_ID", "slack-client-id");
+        env::set_var("SLACK_INTEGRATIONS_CLIENT_SECRET", "slack-client-secret");
+        env::set_var("SLACK_INTEGRATIONS_REDIRECT_URI", "http://localhost/slack");
+        let key = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+        env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", key);
+        env::set_var("STRIPE_CLIENT_ID", "stripe-client-id");
+        env::set_var("STRIPE_SECRET_KEY", "stripe-secret");
+        env::set_var("STRIPE_WEBHOOK_SECRET", "stripe-webhook");
+        env::set_var("WEBHOOK_SECRET", "0123456789abcdef0123456789ABCDEF");
+        env::set_var("JWT_ISSUER", "dsentr.test");
+        env::set_var("JWT_AUDIENCE", "dsentr.api");
+    }
+
+    #[test]
+    fn reports_missing_environment_variables() {
+        with_env(|| match Config::from_env() {
+            Err(ConfigError::MissingEnvVar { name }) => {
+                assert_eq!(name, "DATABASE_URL");
+            }
+            Err(other) => panic!("expected missing env var error, got {other:?}"),
+            Ok(_) => panic!("expected missing env var error, got Ok"),
+        });
+    }
+
+    #[test]
+    fn loads_configuration_from_environment() {
+        with_env(|| {
+            populate_defaults();
+            let config = Config::from_env().expect("config should load");
+            assert_eq!(config.database_url, "postgres://localhost/db");
+            assert_eq!(config.frontend_origin, "http://localhost:3000");
+            assert_eq!(config.oauth.google.client_id, "google-client-id");
+            assert_eq!(config.oauth.token_encryption_key.len(), 32);
+            assert!(config.auth_cookie_secure);
+            assert_eq!(config.jwt_issuer, "dsentr.test");
+            assert_eq!(config.jwt_audience, "dsentr.api");
+        });
+    }
+
+    #[test]
+    fn cookie_secure_respects_false_override() {
+        with_env(|| {
+            populate_defaults();
+            env::set_var("AUTH_COOKIE_SECURE", "false");
+            let config = Config::from_env().expect("config should load");
+            assert!(!config.auth_cookie_secure);
+        });
+    }
+
+    #[test]
+    fn surfaces_token_decode_errors() {
+        with_env(|| {
+            populate_defaults();
+            env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", "not-base64");
+            match Config::from_env() {
+                Err(ConfigError::SecretDecode { name, .. }) => {
+                    assert_eq!(name, "OAUTH_TOKEN_ENCRYPTION_KEY");
+                }
+                Err(other) => panic!("expected decode error, got {other:?}"),
+                Ok(_) => panic!("expected decode error, got Ok"),
+            }
+        });
+    }
+
+    #[test]
+    fn rejects_weak_webhook_secret() {
+        with_env(|| {
+            populate_defaults();
+            env::set_var("WEBHOOK_SECRET", "short");
+            match Config::from_env() {
+                Err(ConfigError::WeakSecret { name, .. }) => {
+                    assert_eq!(name, "WEBHOOK_SECRET");
+                }
+                Err(other) => panic!("expected weak secret error, got {other:?}"),
+                Ok(_) => panic!("expected weak secret error, got Ok"),
+            }
+        });
+
+        with_env(|| {
+            populate_defaults();
+            env::set_var("WEBHOOK_SECRET", "changeme-change-me-change-me-change");
+            match Config::from_env() {
+                Err(ConfigError::WeakSecret { name, .. }) => {
+                    assert_eq!(name, "WEBHOOK_SECRET");
+                }
+                Err(other) => panic!("expected weak secret error, got {other:?}"),
+                Ok(_) => panic!("expected weak secret error, got Ok"),
+            }
+        });
     }
 }

@@ -21,5 +21,16 @@
   - `workspace_invitations.status` constrained to `pending`, `accepted`, `revoked`, or `declined`, with `token` enforced as globally unique.
   - `workspace_member_audit` rows capturing `workspace_id`, `member_id`, `actor_id`, normalized `action` text, optional `reason`, and an automatic `recorded_at` timestamp for membership changes.
 
+## Rollback Template
+- Every forward migration **must** close with a guidance block that starts with `-- Rollback:`. List the exact statements (or referenced prior files) needed to undo the change and call out irreversible data loss when relevant.
+- Example snippet to copy into new files:
+  ```sql
+  -- Rollback:
+  --   DROP INDEX IF EXISTS example_idx;
+  --   ALTER TABLE example DROP COLUMN IF EXISTS new_column;
+  --   -- If the change cannot be reversed cleanly, note the manual steps or follow-up migrations required.
+  ```
+- Keep the notes concise but explicit enough that an on-call engineer can execute the steps without reading surrounding git history.
+
 ## Change Reasons
 - Added workspace connection and audit event migration to back shared OAuth token promotion.

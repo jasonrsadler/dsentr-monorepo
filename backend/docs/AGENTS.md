@@ -14,3 +14,4 @@
 
 ## Change Reasons
 - Documented Stripe OAuth and webhook secrets alongside existing provider guidance so billing setup stays aligned with backend config.
+- Added egress allowlist enforcement notes so engineers understand how snapshot metadata interacts with environment policies and audit logging.

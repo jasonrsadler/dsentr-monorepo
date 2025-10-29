@@ -19,7 +19,10 @@ use crate::db::{
 use crate::models::oauth_token::{UserOAuthToken, WorkspaceAuditEvent, WorkspaceConnection};
 use crate::models::user::UserRole;
 use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
-use crate::routes::auth::{claims::Claims, session::AuthSession};
+use crate::routes::auth::{
+    claims::{Claims, TokenUse},
+    session::AuthSession,
+};
 use crate::services::{
     oauth::{
         account_service::{AuthorizationTokens, OAuthAccountError, OAuthAccountService},
@@ -31,6 +34,7 @@ use crate::services::{
 };
 use crate::state::AppState;
 use crate::utils::encryption::encrypt_secret;
+use crate::utils::jwt::JwtKeys;
 use serde_json::Value;
 use sqlx::Error;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
@@ -72,8 +76,12 @@ fn stub_config() -> Arc<Config> {
         stripe: StripeSettings {
             client_id: "stub".into(),
             secret_key: "stub".into(),
-            webhook_secret: "stub".into(),
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
         },
+        auth_cookie_secure: true,
+        webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+        jwt_issuer: "test-issuer".into(),
+        jwt_audience: "test-audience".into(),
     })
 }
 
@@ -93,7 +101,15 @@ fn stub_state(config: Arc<Config>) -> AppState {
         config,
         worker_id: Arc::new("test-worker".into()),
         worker_lease_seconds: 30,
+        jwt_keys: test_jwt_keys(),
     }
+}
+
+fn test_jwt_keys() -> Arc<JwtKeys> {
+    Arc::new(
+        JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+            .expect("test JWT secret should be valid"),
+    )
 }
 
 fn stub_state_with_workspace_repo(
@@ -281,8 +297,11 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
         &self,
         _creator_id: Uuid,
         _provider: ConnectedOAuthProvider,
-    ) -> Result<(), sqlx::Error> {
-        Ok(())
+    ) -> Result<
+        Vec<crate::db::workspace_connection_repository::StaleWorkspaceConnection>,
+        sqlx::Error,
+    > {
+        Ok(Vec::new())
     }
 
     async fn record_audit_event(
@@ -905,6 +924,9 @@ fn stub_claims() -> Claims {
         role: Some(UserRole::User),
         plan: None,
         company_name: None,
+        iss: String::new(),
+        aud: String::new(),
+        token_use: TokenUse::Access,
     }
 }
 

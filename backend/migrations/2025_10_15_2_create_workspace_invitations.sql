@@ -22,3 +22,8 @@ WHERE accepted_at IS NULL AND revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_workspace_invites_token
 ON workspace_invitations (token);
 
+-- Rollback:
+--   DROP INDEX IF EXISTS idx_workspace_invites_token;
+--   DROP INDEX IF EXISTS idx_workspace_invites_unique;
+--   DROP TABLE IF EXISTS workspace_invitations;
+

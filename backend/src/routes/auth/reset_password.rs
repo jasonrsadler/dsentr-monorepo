@@ -103,6 +103,7 @@ mod tests {
             google::mock_google_oauth::MockGoogleOAuth, workspace_service::WorkspaceOAuthService,
         },
         state::AppState,
+        utils::jwt::JwtKeys,
     };
     use reqwest::Client;
 
@@ -131,8 +132,12 @@ mod tests {
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
-                webhook_secret: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
         })
     }
 
@@ -277,18 +282,11 @@ mod tests {
             Ok(())
         }
 
-        async fn get_user_stripe_customer_id(
-            &self,
-            _: Uuid,
-        ) -> Result<Option<String>, Error> {
+        async fn get_user_stripe_customer_id(&self, _: Uuid) -> Result<Option<String>, Error> {
             Ok(None)
         }
 
-        async fn set_user_stripe_customer_id(
-            &self,
-            _: Uuid,
-            _: &str,
-        ) -> Result<(), Error> {
+        async fn set_user_stripe_customer_id(&self, _: Uuid, _: &str) -> Result<(), Error> {
             Ok(())
         }
 
@@ -325,12 +323,20 @@ mod tests {
             config: test_config(),
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
         };
 
         Router::new()
             .route("/reset-password", post(handle_reset_password))
             .route("/reset-password/{token}", get(handle_verify_token))
             .with_state(state)
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
     }
 
     #[tokio::test]

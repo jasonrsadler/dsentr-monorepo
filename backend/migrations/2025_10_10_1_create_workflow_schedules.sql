@@ -30,3 +30,10 @@ CREATE TRIGGER set_workflow_schedules_updated_at
 BEFORE UPDATE ON workflow_schedules
 FOR EACH ROW
 EXECUTE PROCEDURE set_workflow_schedules_updated_at();
+
+-- Rollback:
+--   DROP TRIGGER IF EXISTS set_workflow_schedules_updated_at ON workflow_schedules;
+--   DROP FUNCTION IF EXISTS set_workflow_schedules_updated_at();
+--   DROP INDEX IF EXISTS idx_workflow_schedules_next_run;
+--   DROP INDEX IF EXISTS idx_workflow_schedules_workflow_id;
+--   DROP TABLE IF EXISTS workflow_schedules;

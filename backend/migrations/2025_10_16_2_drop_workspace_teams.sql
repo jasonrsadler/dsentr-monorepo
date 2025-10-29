@@ -65,3 +65,9 @@ DROP TABLE IF EXISTS team_members;
 DROP TABLE IF EXISTS teams;
 
 COMMIT;
+
+-- Rollback:
+--   Recreate teams, team_members, team_workflow_shares, and team_invite_links using
+--   migrations 2025_10_14_1_create_workspaces.sql and 2025_10_15_3_create_team_invite_links.sql,
+--   add the team_id column back to workspace_invitations, reload historical data from
+--   team_removal_audit or backups, and drop team_removal_audit once reconciliation is done.
