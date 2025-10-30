@@ -18,6 +18,7 @@ import ResetPassword from './ResetPassword'
 import NotFound from '@/components/NotFound'
 import Dashboard from './layouts/DashboardLayouts/Dashboard'
 import WorkspaceOnboarding from './WorkspaceOnboarding'
+import ConfirmAccountDeletion from '@/ConfirmAccountDeletion'
 
 export default function App() {
   const { isLoading, checkAuth } = useAuth()
@@ -53,6 +54,10 @@ export default function App() {
         <Route path="/logout" element={<LogoutHandler />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password/:token" element={<ResetPassword />} />
+        <Route
+          path="/delete-account/:token"
+          element={<ConfirmAccountDeletion />}
+        />
       </Route>
 
       <Route

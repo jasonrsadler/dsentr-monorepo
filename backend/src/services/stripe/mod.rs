@@ -114,6 +114,11 @@ pub trait StripeService: Send + Sync {
         subscription_id: &str,
         cancel_at_period_end: bool,
     ) -> Result<SubscriptionInfo, StripeServiceError>;
+
+    async fn cancel_subscription_immediately(
+        &self,
+        subscription_id: &str,
+    ) -> Result<(), StripeServiceError>;
 }
 
 mod live;

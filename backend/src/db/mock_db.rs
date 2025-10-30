@@ -239,6 +239,37 @@ impl UserRepository for MockDb {
         }
         Ok(())
     }
+
+    async fn upsert_account_deletion_token(
+        &self,
+        _user_id: Uuid,
+        _token: &str,
+        _expires_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn get_account_deletion_context(
+        &self,
+        _token: &str,
+    ) -> Result<Option<crate::models::account_deletion::AccountDeletionContext>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn collect_account_deletion_counts(
+        &self,
+        _user_id: Uuid,
+    ) -> Result<crate::models::account_deletion::AccountDeletionCounts, sqlx::Error> {
+        Ok(Default::default())
+    }
+
+    async fn finalize_account_deletion(
+        &self,
+        _token: &str,
+        _audit: crate::models::account_deletion::AccountDeletionAuditInsert,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]

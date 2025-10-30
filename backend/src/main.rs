@@ -30,6 +30,7 @@ use reqwest::Client;
 use responses::JsonResponse;
 use routes::auth::{handle_login, handle_refresh, handle_signup, verify_email};
 use routes::{
+    account::{confirm_account_deletion, get_account_deletion_summary, request_account_deletion},
     admin::purge_runs,
     auth::{
         forgot_password::handle_forgot_password,
@@ -330,6 +331,15 @@ async fn main() -> Result<()> {
             config: auth_governor_conf.clone(),
         });
 
+    let account_routes = Router::new()
+        .route("/delete/request", post(request_account_deletion))
+        .route("/delete/confirm", post(confirm_account_deletion))
+        .route("/delete/summary/{token}", get(get_account_deletion_summary))
+        .layer(csrf_layer.clone())
+        .layer(GovernorLayer {
+            config: auth_governor_conf.clone(),
+        });
+
     // Protected workflow routes (CSRF layer applied)
     let workflow_routes = Router::new()
         .route("/", post(create_workflow).get(list_workflows))
@@ -543,6 +553,7 @@ async fn main() -> Result<()> {
         // New consolidated Stripe webhook path
         .route("/api/stripe/webhook", post(routes::stripe::webhook))
         .nest("/api/auth", auth_routes) // <-- your auth routes with CSRF selectively applied
+        .nest("/api/account", account_routes)
         .nest(
             "/api/workflows",
             workflow_routes.merge(public_workflow_routes),

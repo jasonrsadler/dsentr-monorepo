@@ -140,4 +140,17 @@ impl StripeService for MockStripeService {
         *guard = Some(sub.clone());
         Ok(sub)
     }
+
+    async fn cancel_subscription_immediately(
+        &self,
+        subscription_id: &str,
+    ) -> Result<(), StripeServiceError> {
+        let mut guard = self.active_subscription.lock().unwrap();
+        if let Some(sub) = guard.as_ref() {
+            if sub.id == subscription_id {
+                *guard = None;
+            }
+        }
+        Ok(())
+    }
 }

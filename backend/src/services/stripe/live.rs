@@ -185,4 +185,15 @@ impl StripeService for LiveStripeService {
             cancel_at_period_end: sub.cancel_at_period_end,
         })
     }
+
+    async fn cancel_subscription_immediately(
+        &self,
+        subscription_id: &str,
+    ) -> Result<(), StripeServiceError> {
+        let sub_id = subscription_id
+            .parse::<stripe::SubscriptionId>()
+            .map_err(|e| StripeServiceError::Other(e.to_string()))?;
+        stripe::Subscription::cancel(&self.client, &sub_id, Default::default()).await?;
+        Ok(())
+    }
 }

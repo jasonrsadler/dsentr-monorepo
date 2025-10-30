@@ -16,6 +16,7 @@ pub struct RecordedSmtpEmail {
 pub struct MockMailer {
     pub sent_verification_emails: Mutex<Vec<(String, String)>>,
     pub sent_reset_emails: Mutex<Vec<(String, String)>>,
+    pub sent_generic_emails: Mutex<Vec<(String, String, String)>>,
     pub sent_smtp_emails: Mutex<Vec<RecordedSmtpEmail>>,
     pub fail_send: bool,
 }
@@ -47,15 +48,21 @@ impl Mailer for MockMailer {
 
     async fn send_email_generic(
         &self,
-        _to: &str,
-        _subject: &str,
-        _body: &str,
+        to: &str,
+        subject: &str,
+        body: &str,
     ) -> Result<(), MailError> {
         if self.fail_send {
-            Err(MailError::Other("mock fail".into()))
-        } else {
-            Ok(())
+            return Err(MailError::Other("mock fail".into()));
         }
+
+        self.sent_generic_emails.lock().unwrap().push((
+            to.to_string(),
+            subject.to_string(),
+            body.to_string(),
+        ));
+
+        Ok(())
     }
 
     async fn send_email_with_config(

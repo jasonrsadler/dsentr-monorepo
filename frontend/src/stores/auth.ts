@@ -36,7 +36,7 @@ type AuthState = {
     memberships?: WorkspaceSummary[],
     requiresOnboarding?: boolean
   ) => void
-  logout: () => void
+  logout: () => Promise<void>
   checkAuth: (options?: CheckAuthOptions) => Promise<void>
   setCurrentWorkspaceId: (workspaceId: string) => void
   refreshMemberships: () => Promise<WorkspaceSummary[]>

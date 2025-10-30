@@ -3,6 +3,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::models::{
+    account_deletion::{AccountDeletionAuditInsert, AccountDeletionContext, AccountDeletionCounts},
     signup::SignupPayload,
     user::{OauthProvider, PublicUser, User},
 };
@@ -97,5 +98,28 @@ pub trait UserRepository: Send + Sync {
         &self,
         user_id: Uuid,
         message: &str,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn upsert_account_deletion_token(
+        &self,
+        user_id: Uuid,
+        token: &str,
+        expires_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn get_account_deletion_context(
+        &self,
+        token: &str,
+    ) -> Result<Option<AccountDeletionContext>, sqlx::Error>;
+
+    async fn collect_account_deletion_counts(
+        &self,
+        user_id: Uuid,
+    ) -> Result<AccountDeletionCounts, sqlx::Error>;
+
+    async fn finalize_account_deletion(
+        &self,
+        token: &str,
+        audit: AccountDeletionAuditInsert,
     ) -> Result<(), sqlx::Error>;
 }

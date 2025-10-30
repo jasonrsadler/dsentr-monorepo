@@ -16,6 +16,7 @@ import IntegrationsTab, {
 } from '@/components/settings/tabs/IntegrationsTab'
 import PlanTab from '@/components/settings/tabs/PlanTab'
 import MembersTab from '@/components/settings/tabs/MembersTab'
+import DangerZoneTab from '@/components/settings/tabs/DangerZoneTab'
 import { DsentrLogo } from '@/components/DsentrLogo'
 import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
@@ -142,7 +143,8 @@ export default function DashboardLayout() {
       { key: 'webhooks', label: 'Webhooks' },
       { key: 'options', label: 'Secrets & API Keys' },
       { key: 'integrations', label: 'Integrations' },
-      { key: 'workflows', label: 'Workflows' }
+      { key: 'workflows', label: 'Workflows' },
+      { key: 'danger', label: 'Danger Zone' }
     ],
     []
   )
@@ -293,6 +295,7 @@ export default function DashboardLayout() {
               )
             }
             if (key === 'workflows') return <WorkflowsTab />
+            if (key === 'danger') return <DangerZoneTab />
             return <div />
           }}
         />
