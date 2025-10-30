@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::models::workspace::WorkspaceRole;
+use crate::models::workspace::{Workspace, WorkspaceRole, WORKSPACE_PLAN_SOLO};
 use crate::responses::JsonResponse;
 use crate::state::AppState;
 
@@ -202,25 +202,97 @@ pub async fn webhook(
                 }
             }
 
-            // Create personal workspace at workspace tier and assign owner
-            let workspace = match app_state
+            let mut reused_existing_workspace = false;
+            let mut workspace: Option<Workspace> = None;
+            if let Ok(memberships) = app_state
                 .workspace_repo
-                .create_workspace(&workspace_name, user_id, "workspace")
+                .list_memberships_for_user(user_id)
                 .await
             {
-                Ok(ws) => ws,
-                Err(err) => {
-                    error!(?err, %user_id, workspace_name, "failed to create workspace on checkout completion");
-                    return Json(serde_json::json!({ "received": true })).into_response();
+                let owned: Vec<_> = memberships
+                    .into_iter()
+                    .filter(|m| m.workspace.owner_id == user_id)
+                    .collect();
+
+                let personal = owned
+                    .iter()
+                    .find(|m| m.workspace.plan == WORKSPACE_PLAN_SOLO)
+                    .cloned()
+                    .or_else(|| owned.into_iter().next());
+
+                if let Some(summary) = personal {
+                    let workspace_id = summary.workspace.id;
+                    let mut current = summary.workspace.clone();
+                    let mut reuse_candidate = true;
+
+                    if current.plan != "workspace" {
+                        match app_state
+                            .workspace_repo
+                            .update_workspace_plan(workspace_id, "workspace")
+                            .await
+                        {
+                            Ok(updated) => current = updated,
+                            Err(err) => {
+                                reuse_candidate = false;
+                                warn!(
+                                    ?err,
+                                    %user_id,
+                                    %workspace_id,
+                                    "failed to promote existing workspace plan during checkout completion"
+                                );
+                            }
+                        }
+                    }
+
+                    if reuse_candidate && current.name != workspace_name {
+                        match app_state
+                            .workspace_repo
+                            .update_workspace_name(workspace_id, &workspace_name)
+                            .await
+                        {
+                            Ok(updated) => current = updated,
+                            Err(err) => warn!(
+                                ?err,
+                                %user_id,
+                                %workspace_id,
+                                "failed to update workspace name during checkout completion"
+                            ),
+                        }
+                    }
+
+                    if reuse_candidate {
+                        reused_existing_workspace = true;
+                        workspace = Some(current);
+                    }
                 }
+            }
+
+            let workspace = match workspace {
+                Some(ws) => ws,
+                None => match app_state
+                    .workspace_repo
+                    .create_workspace(&workspace_name, user_id, "workspace")
+                    .await
+                {
+                    Ok(ws) => {
+                        reused_existing_workspace = false;
+                        ws
+                    }
+                    Err(err) => {
+                        error!(?err, %user_id, workspace_name, "failed to create workspace on checkout completion");
+                        return Json(serde_json::json!({ "received": true })).into_response();
+                    }
+                },
             };
 
-            if let Err(err) = app_state
-                .workspace_repo
-                .add_member(workspace.id, user_id, WorkspaceRole::Owner)
-                .await
-            {
-                warn!(?err, %user_id, workspace_id=%workspace.id, "failed to add owner membership (may already exist)");
+            if !reused_existing_workspace {
+                if let Err(err) = app_state
+                    .workspace_repo
+                    .add_member(workspace.id, user_id, WorkspaceRole::Owner)
+                    .await
+                {
+                    warn!(?err, %user_id, workspace_id=%workspace.id, "failed to add owner membership (may already exist)");
+                }
             }
 
             // Promote personal plan to workspace
@@ -435,6 +507,7 @@ mod tests {
         added_members: Arc<Mutex<Vec<(Uuid, Uuid, WorkspaceRole)>>>,
         memberships: Arc<Mutex<Vec<WorkspaceMembershipSummary>>>,
         plan_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
+        name_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
     }
 
     #[async_trait::async_trait]
@@ -463,10 +536,37 @@ mod tests {
 
         async fn update_workspace_name(
             &self,
-            _workspace_id: Uuid,
-            _name: &str,
+            workspace_id: Uuid,
+            name: &str,
         ) -> Result<Workspace, sqlx::Error> {
-            unimplemented!()
+            let mut list = self.workspaces.lock().unwrap();
+            if let Some(ws) = list.iter_mut().find(|w| w.id == workspace_id) {
+                ws.name = name.to_string();
+                ws.updated_at = OffsetDateTime::now_utc();
+                self.name_updates
+                    .lock()
+                    .unwrap()
+                    .push((workspace_id, name.to_string()));
+                Ok(ws.clone())
+            } else {
+                let now = OffsetDateTime::now_utc();
+                let ws = Workspace {
+                    id: workspace_id,
+                    name: name.to_string(),
+                    created_by: Uuid::nil(),
+                    owner_id: Uuid::nil(),
+                    plan: "workspace".into(),
+                    created_at: now,
+                    updated_at: now,
+                    deleted_at: None,
+                };
+                list.push(ws.clone());
+                self.name_updates
+                    .lock()
+                    .unwrap()
+                    .push((workspace_id, name.to_string()));
+                Ok(ws)
+            }
         }
 
         async fn update_workspace_plan(
@@ -656,9 +756,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn webhook_checkout_session_completed_creates_workspace_and_clears_pending() {
+    async fn webhook_checkout_session_completed_promotes_existing_workspace_and_clears_pending() {
         let user_id = Uuid::new_v4();
         let session_id = "cs_test_123";
+        let now = OffsetDateTime::now_utc();
+        let personal_workspace = Workspace {
+            id: Uuid::new_v4(),
+            name: "Owner's Workspace".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: WORKSPACE_PLAN_SOLO.into(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
         let db = Arc::new(MockDb {
             find_user_result: Some(User {
                 id: user_id,
@@ -677,6 +788,21 @@ mod tests {
             ..Default::default()
         });
 
+        let workspace_repo = Arc::new(TestWorkspaceRepo::default());
+        workspace_repo
+            .workspaces
+            .lock()
+            .unwrap()
+            .push(personal_workspace.clone());
+        workspace_repo
+            .memberships
+            .lock()
+            .unwrap()
+            .push(WorkspaceMembershipSummary {
+                workspace: personal_workspace.clone(),
+                role: WorkspaceRole::Owner,
+            });
+
         // Seed pending checkout
         {
             let mut settings = db.user_settings.lock().unwrap();
@@ -691,7 +817,6 @@ mod tests {
             });
         }
 
-        let workspace_repo = Arc::new(TestWorkspaceRepo::default());
         let stripe = Arc::new(MockStripeService::new());
         let state = AppState {
             db: db.clone(),
@@ -743,9 +868,121 @@ mod tests {
         let settings = db.user_settings.lock().unwrap().clone();
         assert!(settings["billing"]["pending_checkout"].is_null());
 
-        // Workspace created and owner membership added
+        // Workspace was promoted rather than recreated
+        let created = workspace_repo.created.lock().unwrap().clone();
+        assert!(created.is_empty());
+        let added = workspace_repo.added_members.lock().unwrap().clone();
+        assert!(added.is_empty());
+
+        let plan_updates = workspace_repo.plan_updates.lock().unwrap().clone();
+        assert_eq!(plan_updates.len(), 1);
+        assert_eq!(plan_updates[0].0, personal_workspace.id);
+        assert_eq!(plan_updates[0].1, "workspace");
+
+        let name_updates = workspace_repo.name_updates.lock().unwrap().clone();
+        assert_eq!(name_updates.len(), 1);
+        assert_eq!(name_updates[0].0, personal_workspace.id);
+        assert_eq!(name_updates[0].1, "Acme Co");
+
+        let stored = workspace_repo.workspaces.lock().unwrap().clone();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, personal_workspace.id);
+        assert_eq!(stored[0].plan, "workspace");
+        assert_eq!(stored[0].name, "Acme Co");
+    }
+
+    #[tokio::test]
+    async fn webhook_checkout_session_completed_creates_workspace_when_missing_personal() {
+        let user_id = Uuid::new_v4();
+        let session_id = "cs_test_missing";
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                stripe_customer_id: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: None,
+                created_at: OffsetDateTime::now_utc(),
+            }),
+            ..Default::default()
+        });
+
+        {
+            let mut settings = db.user_settings.lock().unwrap();
+            *settings = serde_json::json!({
+                "billing": {
+                    "pending_checkout": {
+                        "session_id": session_id,
+                        "plan_tier": "workspace",
+                        "workspace_name": "New Co"
+                    }
+                }
+            });
+        }
+
+        let workspace_repo = Arc::new(TestWorkspaceRepo::default());
+        let stripe = Arc::new(MockStripeService::new());
+        let state = AppState {
+            db: db.clone(),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: workspace_repo.clone(),
+            workspace_connection_repo: Arc::new(
+                crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
+            ),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(
+                crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),
+            ),
+            github_oauth: Arc::new(
+                crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth::default(),
+            ),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(
+            ),
+            workspace_oauth:
+                crate::services::oauth::workspace_service::WorkspaceOAuthService::test_stub(),
+            stripe: stripe.clone(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
+            worker_id: Arc::new("test-worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        };
+
+        let body = serde_json::json!({
+            "id": "evt_123",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": session_id,
+                    "client_reference_id": user_id.to_string(),
+                    "metadata": {"workspace_name": "New Co"}
+                }
+            }
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert("Stripe-Signature", HeaderValue::from_static("t=1,v1=stub"));
+
+        let resp = webhook(
+            AxumState(state),
+            headers,
+            axum::body::Bytes::from(serde_json::to_vec(&body).unwrap()),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let settings = db.user_settings.lock().unwrap().clone();
+        assert!(settings["billing"]["pending_checkout"].is_null());
+
         let created = workspace_repo.created.lock().unwrap().clone();
         assert_eq!(created.len(), 1);
+        assert_eq!(created[0].name, "New Co");
+
         let added = workspace_repo.added_members.lock().unwrap().clone();
         assert_eq!(added.len(), 1);
         assert_eq!(added[0].1, user_id);
