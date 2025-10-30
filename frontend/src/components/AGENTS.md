@@ -7,6 +7,7 @@
 - SMTPAction: Improved accessibility of TLS radio options by marking helper text as `aria-hidden` and adding `aria-label` to radio inputs so `getByLabelText` works under jsdom. Also compute validation on each field change and include `hasValidationErrors` in the same `updateNodeData` payload to keep store state in sync with UI.
 - Signup form: Excluded the required asterisk from accessible labels (`aria-hidden`) so tests can select the `Password` field by its exact label.
 - Members tab: Added an ownership transfer confirmation modal so current owners are warned they'll lose the role and must rely on the new owner to regain it before promoting another member.
+- Members tab: Removed the ability to transfer ownership to another member so each user can retain ownership of only their own workspace.
 
 ## Affected Areas
 - Settings > LogsTab: change history list

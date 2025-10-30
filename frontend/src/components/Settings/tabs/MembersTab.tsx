@@ -38,7 +38,6 @@ const filterPendingInvitations = (
 
 export default function MembersTab() {
   const user = useAuth((state) => state.user)
-  const currentUserId = user?.id ?? null
   const checkAuth = useAuth((state) => state.checkAuth)
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const refreshMemberships = useAuth((state) => state.refreshMemberships)
@@ -64,8 +63,6 @@ export default function MembersTab() {
     member: WorkspaceMember
     secrets: WorkspaceSecretOwnershipEntry[]
   } | null>(null)
-  const [ownershipTransferTarget, setOwnershipTransferTarget] =
-    useState<WorkspaceMember | null>(null)
 
   const planTier = useMemo(
     () =>
@@ -311,29 +308,10 @@ export default function MembersTab() {
 
   const requestRoleChange = useCallback(
     (member: WorkspaceMember, role: WorkspaceMember['role']) => {
-      if (
-        role === 'owner' &&
-        isWorkspaceOwner &&
-        member.role !== 'owner' &&
-        member.user_id !== currentUserId
-      ) {
-        setOwnershipTransferTarget(member)
-        return
-      }
       void applyRoleChange(member.user_id, role)
     },
-    [applyRoleChange, currentUserId, isWorkspaceOwner]
+    [applyRoleChange]
   )
-
-  const confirmOwnershipTransfer = useCallback(async () => {
-    if (!ownershipTransferTarget) return
-    await applyRoleChange(ownershipTransferTarget.user_id, 'owner')
-    setOwnershipTransferTarget(null)
-  }, [applyRoleChange, ownershipTransferTarget])
-
-  const cancelOwnershipTransfer = useCallback(() => {
-    setOwnershipTransferTarget(null)
-  }, [])
 
   const confirmPendingRemoval = useCallback(async () => {
     if (!pendingRemoval) return
@@ -407,41 +385,6 @@ export default function MembersTab() {
 
   return (
     <div className="relative">
-      {ownershipTransferTarget ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-              Transfer workspace ownership?
-            </h3>
-            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-              Assigning ownership to{' '}
-              {resolveMemberIdentity(ownershipTransferTarget).primary} will make
-              them the new workspace owner. You will become an admin, and only
-              the new owner can assign ownership back to you.
-            </p>
-            <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
-              To regain ownership later, the new owner must transfer it back to
-              you.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={cancelOwnershipTransfer}
-                className="rounded border border-zinc-300 px-3 py-1 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmOwnershipTransfer}
-                disabled={busy}
-                className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {busy ? 'Assigning…' : 'Yes, transfer ownership'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {pendingRemoval ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
           <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900">
@@ -689,7 +632,7 @@ export default function MembersTab() {
                   'admin'
                 ]
                 const roleOptions =
-                  isWorkspaceOwner || m.role === 'owner'
+                  m.role === 'owner'
                     ? [...baseRoles, 'owner' as WorkspaceMember['role']]
                     : baseRoles
                 const disableSelect =
