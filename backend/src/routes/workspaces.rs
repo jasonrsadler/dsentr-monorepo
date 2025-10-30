@@ -108,9 +108,9 @@ async fn process_plan_change(
     now: OffsetDateTime,
     mark_onboarded: bool,
 ) -> Result<serde_json::Value, Response> {
-    let created_workspace: Option<Workspace> = None;
+    let mut created_workspace: Option<Workspace> = None;
     let mut updated_workflows: Vec<Workflow> = Vec::new();
-    let workspace_id: Option<Uuid> = None;
+    let mut workspace_id: Option<Uuid> = None;
 
     match payload.plan_tier {
         PlanTier::Solo => {
@@ -224,6 +224,88 @@ async fn process_plan_change(
                             .into_response());
                     }
                 }
+            }
+
+            let owned_membership = existing_memberships
+                .into_iter()
+                .find(|membership| membership.workspace.owner_id == user_id);
+
+            if let Some(membership) = owned_membership {
+                if membership.role != WorkspaceRole::Owner {
+                    if let Err(err) = app_state
+                        .workspace_repo
+                        .set_member_role(membership.workspace.id, user_id, WorkspaceRole::Owner)
+                        .await
+                    {
+                        tracing::error!(
+                            "failed to promote workspace membership during plan change: {:?}",
+                            err
+                        );
+                        return Err(JsonResponse::server_error(
+                            "Failed to update workspace membership",
+                        )
+                        .into_response());
+                    }
+                }
+
+                workspace_id = Some(membership.workspace.id);
+            } else {
+                let user = match app_state.db.find_public_user_by_id(user_id).await {
+                    Ok(Some(user)) => user,
+                    Ok(None) => {
+                        return Err(JsonResponse::not_found("User not found").into_response())
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            "failed to load user for solo workspace provisioning: {:?}",
+                            err
+                        );
+                        return Err(JsonResponse::server_error("Failed to provision workspace")
+                            .into_response());
+                    }
+                };
+
+                let name = payload
+                    .workspace_name
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| solo_workspace_name(&user));
+
+                let workspace = match app_state
+                    .workspace_repo
+                    .create_workspace(&name, user.id, PlanTier::Solo.as_str())
+                    .await
+                {
+                    Ok(workspace) => workspace,
+                    Err(err) => {
+                        tracing::error!(
+                            "failed to create solo workspace during plan change: {:?}",
+                            err
+                        );
+                        return Err(JsonResponse::server_error("Failed to create workspace")
+                            .into_response());
+                    }
+                };
+
+                if let Err(err) = app_state
+                    .workspace_repo
+                    .add_member(workspace.id, user.id, WorkspaceRole::Owner)
+                    .await
+                {
+                    tracing::error!(
+                        "failed to attach owner membership during plan change: {:?}",
+                        err
+                    );
+                    return Err(JsonResponse::server_error(
+                        "Failed to create workspace membership",
+                    )
+                    .into_response());
+                }
+
+                workspace_id = Some(workspace.id);
+                created_workspace = Some(workspace);
             }
         }
         PlanTier::Workspace => {
@@ -1763,8 +1845,8 @@ pub async fn remove_workspace_connection(
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_invitation, build_invite_accept_url, change_plan, decline_invitation,
-        leave_workspace, preview_invitation, promote_workspace_connection,
+        accept_invitation, build_invite_accept_url, change_plan, complete_onboarding,
+        decline_invitation, leave_workspace, preview_invitation, promote_workspace_connection,
         remove_workspace_connection, revoke_workspace_member, CompleteOnboardingPayload,
         InvitationDecisionPayload, PromoteWorkspaceConnectionPayload, RevokeWorkspaceMemberPayload,
     };
@@ -3521,6 +3603,136 @@ mod tests {
 
         // Plan should not be mutated during initiation (only at webhook success)
         assert_eq!(*db.update_user_plan_calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn completing_solo_onboarding_creates_owner_membership_for_oauth_user() {
+        let user_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let repo = Arc::new(RecordingWorkspaceRepo::default());
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                stripe_customer_id: None,
+                oauth_provider: Some(OauthProvider::Google),
+                onboarded_at: Some(now),
+                created_at: now,
+            }),
+            ..Default::default()
+        });
+
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer) as Arc<dyn Mailer>,
+            db,
+        );
+
+        let payload = CompleteOnboardingPayload {
+            plan_tier: super::PlanTier::Solo,
+            workspace_name: Some("Personal Sandbox".into()),
+            shared_workflow_ids: Vec::new(),
+        };
+
+        let response = complete_onboarding(
+            State(state),
+            AuthSession(claims_fixture(user_id, "owner@example.com")),
+            Json(payload),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(repo.workspace_count(), 1);
+        assert_eq!(repo.membership_count(user_id), 1);
+
+        let memberships = repo.list_user_workspaces(user_id).await.unwrap();
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].role, WorkspaceRole::Owner);
+        assert_eq!(memberships[0].workspace.owner_id, user_id);
+        assert_eq!(
+            memberships[0].workspace.plan,
+            super::PlanTier::Solo.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn completing_solo_onboarding_promotes_existing_membership_to_owner() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Personal Automations".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: super::PlanTier::Solo.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let members = vec![WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::User,
+            joined_at: now,
+            email: "owner@example.com".into(),
+            first_name: "Owner".into(),
+            last_name: "User".into(),
+        }];
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                stripe_customer_id: None,
+                oauth_provider: Some(OauthProvider::Google),
+                onboarded_at: Some(now),
+                created_at: now,
+            }),
+            ..Default::default()
+        });
+
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer) as Arc<dyn Mailer>,
+            db,
+        );
+
+        let payload = CompleteOnboardingPayload {
+            plan_tier: super::PlanTier::Solo,
+            workspace_name: None,
+            shared_workflow_ids: Vec::new(),
+        };
+
+        let response = complete_onboarding(
+            State(state),
+            AuthSession(claims_fixture(user_id, "owner@example.com")),
+            Json(payload),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(repo.workspace_count(), 1);
+
+        let memberships = repo.list_user_workspaces(user_id).await.unwrap();
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].role, WorkspaceRole::Owner);
     }
 
     #[tokio::test]
