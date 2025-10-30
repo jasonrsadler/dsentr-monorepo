@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from '@/components/ThemeToggle'
-import { NavigateButton } from '@/components/ui/buttons/NavigateButton'
+import { NavigateButton } from '@/components/UI/Buttons/NavigateButton'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import SettingsButton from '@/components/settings/SettingsButton'
 import SettingsModal from '@/components/settings/SettingsModal'
@@ -22,6 +22,7 @@ import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
 import ProfileButton from '@/components/profile/ProfileButton'
 import ProfileModal from '@/components/profile/ProfileModal'
+import PendingInviteModal from '@/components/dashboard/PendingInviteModal'
 
 export default function DashboardLayout() {
   const user = useAuth((state) => state.user)
@@ -299,6 +300,7 @@ export default function DashboardLayout() {
             return <div />
           }}
         />
+        <PendingInviteModal />
       </div>
     </SecretsProvider>
   )

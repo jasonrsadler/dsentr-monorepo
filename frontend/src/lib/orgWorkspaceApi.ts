@@ -51,6 +51,7 @@ export type WorkspaceInvitation = {
   accepted_at?: string | null
   revoked_at?: string | null
   declined_at?: string | null
+  workspace_name?: string | null
 }
 
 export type Workspace = {
@@ -237,7 +238,27 @@ export async function listPendingInvites() {
   if (!res.ok || body?.success === false) {
     raiseForStatus(res, body, 'Failed to load invitations')
   }
-  return (body?.invitations ?? []) as WorkspaceInvitation[]
+  const invitations = Array.isArray(body?.invitations)
+    ? (body.invitations as any[])
+    : []
+
+  return invitations.map((entry) => {
+    const base = {
+      ...((entry as any)?.invitation ?? entry)
+    }
+    const workspaceName =
+      (entry as any)?.workspace_name ?? base?.workspace_name ?? undefined
+
+    return {
+      ...base,
+      workspace_name:
+        typeof workspaceName === 'string'
+          ? workspaceName
+          : workspaceName === null
+            ? null
+            : undefined
+    }
+  }) as WorkspaceInvitation[]
 }
 
 export async function revokeWorkspaceInvite(
