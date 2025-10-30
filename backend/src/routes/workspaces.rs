@@ -779,6 +779,14 @@ pub async fn change_plan(
 
 // --- Workspace members management ---
 
+#[derive(Debug, Serialize)]
+struct PendingInvitationWithWorkspaceName {
+    #[serde(flatten)]
+    invitation: WorkspaceInvitation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace_name: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AddWorkspaceMemberPayload {
     pub user_id: Uuid,
@@ -821,7 +829,49 @@ pub async fn list_pending_invites(
         .list_pending_invitations_for_email(email)
         .await
     {
-        Ok(invites) => Json(json!({ "success": true, "invitations": invites })).into_response(),
+        Ok(invites) => {
+            let mut workspace_names: BTreeMap<Uuid, Option<String>> = BTreeMap::new();
+
+            for invite in &invites {
+                if workspace_names.contains_key(&invite.workspace_id) {
+                    continue;
+                }
+
+                match app_state
+                    .workspace_repo
+                    .find_workspace(invite.workspace_id)
+                    .await
+                {
+                    Ok(Some(workspace)) => {
+                        workspace_names.insert(invite.workspace_id, Some(workspace.name));
+                    }
+                    Ok(None) => {
+                        workspace_names.insert(invite.workspace_id, None);
+                    }
+                    Err(err) => {
+                        error!(
+                            ?err,
+                            workspace_id = %invite.workspace_id,
+                            "failed to load workspace for invitation"
+                        );
+                        return JsonResponse::server_error("Failed to load invitations")
+                            .into_response();
+                    }
+                }
+            }
+
+            let invitations = invites
+                .into_iter()
+                .map(|invite| PendingInvitationWithWorkspaceName {
+                    workspace_name: workspace_names
+                        .get(&invite.workspace_id)
+                        .and_then(|name| name.clone()),
+                    invitation: invite,
+                })
+                .collect::<Vec<_>>();
+
+            Json(json!({ "success": true, "invitations": invitations })).into_response()
+        }
         Err(err) => {
             error!(?err, email, "failed to list pending invites");
             JsonResponse::server_error("Failed to load invitations").into_response()
@@ -1846,9 +1896,10 @@ pub async fn remove_workspace_connection(
 mod tests {
     use super::{
         accept_invitation, build_invite_accept_url, change_plan, complete_onboarding,
-        decline_invitation, leave_workspace, preview_invitation, promote_workspace_connection,
-        remove_workspace_connection, revoke_workspace_member, CompleteOnboardingPayload,
-        InvitationDecisionPayload, PromoteWorkspaceConnectionPayload, RevokeWorkspaceMemberPayload,
+        decline_invitation, leave_workspace, list_pending_invites, preview_invitation,
+        promote_workspace_connection, remove_workspace_connection, revoke_workspace_member,
+        CompleteOnboardingPayload, InvitationDecisionPayload, PromoteWorkspaceConnectionPayload,
+        RevokeWorkspaceMemberPayload,
     };
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::{
@@ -2487,9 +2538,19 @@ mod tests {
 
         async fn list_pending_invitations_for_email(
             &self,
-            _: &str,
+            email: &str,
         ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
-            Ok(Vec::new())
+            Ok(self
+                .invitation
+                .lock()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .filter(|invite| {
+                    invite.email == email
+                        && invite.status == crate::models::workspace::INVITATION_STATUS_PENDING
+                })
+                .collect())
         }
     }
 
@@ -3378,6 +3439,54 @@ mod tests {
             signup_url,
             "https://app.example.com/signup?invite=abc%2B%2F%3D%3F"
         );
+    }
+
+    #[tokio::test]
+    async fn list_pending_invites_returns_workspace_name_when_available() {
+        let email = "member@example.com";
+        let invite = invite_fixture(email);
+        let workspace_id = invite.workspace_id;
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Growth Team".into(),
+            created_by: invite.created_by,
+            owner_id: invite.created_by,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let repo = Arc::new(TestWorkspaceRepo::with_workspace(
+            invite.clone(),
+            workspace.clone(),
+        ));
+        let state = test_state(repo);
+        let claims = claims_fixture(Uuid::new_v4(), email);
+
+        let response = list_pending_invites(State(state), AuthSession(claims)).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(json["success"], Value::Bool(true));
+        let invitations = json["invitations"].as_array().expect("array of invites");
+        assert_eq!(invitations.len(), 1);
+
+        let first = &invitations[0];
+        assert_eq!(
+            first["workspace_name"],
+            Value::String(workspace.name.clone())
+        );
+        assert_eq!(
+            first["workspace_id"],
+            Value::String(workspace_id.to_string())
+        );
+        assert_eq!(first["email"], Value::String(invite.email.clone()));
+        assert_eq!(first["id"], Value::String(invite.id.to_string()));
     }
 
     #[tokio::test]
