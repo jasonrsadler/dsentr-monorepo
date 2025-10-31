@@ -1,4 +1,4 @@
-# Getting Started with Dsentr
+# Getting Started with DSentr
 
 Use this guide to go from first visit to an active workspace. It walks through account creation, verification, invite handling, and the onboarding wizard that prepares your workspace.
 
@@ -6,13 +6,13 @@ Use this guide to go from first visit to an active workspace. It walks through a
 
 1. Navigate to **Get Started → Sign Up**. The signup screen accepts first/last name, email, password, and optional company details. Inline validation enforces alphabetic names, standard email formatting, and an 8+ character password with strength feedback before submission.【F:src/Signup.tsx†L37-L87】【F:src/Signup.tsx†L102-L149】
 2. Choose a signup method:
-   - **Email & password** – Complete the form and submit. Dsentr will create the account and send a verification message.
+   - **Email & password** – Complete the form and submit. DSentr will create the account and send a verification message.
    - **Google or GitHub** – Use the OAuth buttons to authenticate with those providers. OAuth signups skip manual password entry.【F:src/Signup.tsx†L6-L13】【F:src/Signup.tsx†L150-L169】
 3. If you arrived via an invitation link, the signup page automatically looks up the token, displays workspace details, and asks whether you want to join that workspace during account creation. Invalid or expired invites are surfaced immediately so you can request a new link.【F:src/Signup.tsx†L39-L106】【F:src/Signup.tsx†L170-L232】
 
 ## Verify Your Email
 
-After submitting the signup form, Dsentr directs you to the **Check Email** screen and waits for verification. Clicking the link in your inbox calls the `/verify-email` route, which confirms the token and signs you in when successful.【F:src/CheckEmail.tsx†L8-L48】【F:src/VerifyEmail.tsx†L12-L86】
+After submitting the signup form, DSentr directs you to the **Check Email** screen and waits for verification. Clicking the link in your inbox calls the `/verify-email` route, which confirms the token and signs you in when successful.【F:src/CheckEmail.tsx†L8-L48】【F:src/VerifyEmail.tsx†L12-L86】
 
 If the verification link expires, return to the login screen and request a fresh message using the resend action.
 
@@ -31,7 +31,7 @@ Forgot your password? Use the **Forgot Password** link on the login screen to re
 First-time users land in the onboarding wizard after verification or login. The wizard pulls personalized context from the API, including recommended plan tiers and any personal workflows you might want to share.【F:src/WorkspaceOnboarding.tsx†L1-L88】
 
 1. **Pick a plan** – Choose between the Solo plan (personal workspace) and the Workspace plan (shared team space). The wizard normalizes backend plan tiers and defaults to the plan associated with your invite or account.【F:src/WorkspaceOnboarding.tsx†L31-L88】【F:src/WorkspaceOnboarding.tsx†L118-L150】
-2. **Name your workspace** – For Workspace plans, provide the shared workspace name. Dsentr suggests a company-based default when available.【F:src/WorkspaceOnboarding.tsx†L19-L29】【F:src/WorkspaceOnboarding.tsx†L90-L118】
+2. **Name your workspace** – For Workspace plans, provide the shared workspace name. DSentr suggests a company-based default when available.【F:src/WorkspaceOnboarding.tsx†L19-L29】【F:src/WorkspaceOnboarding.tsx†L90-L118】
 3. **Share starter workflows** – Toggle which of your personal workflows become shared assets in the new workspace. This step is optional for Solo plans.【F:src/WorkspaceOnboarding.tsx†L52-L87】【F:src/WorkspaceOnboarding.tsx†L150-L178】
 4. **Submit** – The wizard posts your selections with CSRF protection, creates or updates the workspace, and redirects you into the dashboard once complete.【F:src/WorkspaceOnboarding.tsx†L178-L238】
 

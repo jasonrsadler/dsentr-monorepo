@@ -21,7 +21,7 @@ describe('Home', () => {
 
   it('renders intro paragraph', () => {
     expect(
-      screen.getByText(/Dsentr is a modular no-code automation platform/i)
+      screen.getByText(/DSentr is a modular no-code automation platform/i)
     ).toBeInTheDocument()
   })
 

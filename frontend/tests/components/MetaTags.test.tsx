@@ -11,15 +11,15 @@ describe('MetaTags', () => {
   test('sets document title and meta tags with default props', () => {
     render(<MetaTags />)
 
-    expect(document.title).toBe('Dsentr – Visual Automation for Everyone')
+    expect(document.title).toBe('DSentr – Visual Automation for Everyone')
     expect(
       (document.querySelector('meta[name="description"]') as HTMLMetaElement)
         ?.content
-    ).toBe('Build and run powerful no-code workflows with Dsentr.')
+    ).toBe('Build and run powerful no-code workflows with DSentr.')
     expect(
       (document.querySelector('meta[property="og:title"]') as HTMLMetaElement)
         ?.content
-    ).toBe('Dsentr – Visual Automation for Everyone')
+    ).toBe('DSentr – Visual Automation for Everyone')
     expect(
       (document.querySelector('meta[name="twitter:card"]') as HTMLMetaElement)
         ?.content

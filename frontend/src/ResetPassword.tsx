@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { FormButton } from './components/ui/buttons/FormButton'
 import LockIcon from '@/assets/svg-components/LockIcon'
@@ -119,10 +119,10 @@ export default function ResetPassword() {
   return (
     <>
       <MetaTags
-        title="Reset password – Dsentr"
-        description="Set a new password to regain access to your Dsentr account."
+        title="Reset password - DSentr"
+        description="Set a new password to regain access to your DSentr account."
       />
-      <MarketingShell maxWidthClassName="max-w-4xl">
+      <MarketingShell compact maxWidthClassName="max-w-4xl">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start">
           <div className="space-y-8">
             <BrandHero
@@ -203,13 +203,12 @@ export default function ResetPassword() {
                     <div className="mt-3 space-y-1">
                       <div className="h-1 rounded bg-zinc-300 dark:bg-zinc-700">
                         <div
-                          className={`h-1 rounded transition-all duration-300 ease-in-out ${
-                            strength.label === 'Weak'
-                              ? 'bg-red-500 w-1/3'
-                              : strength.label === 'Moderate'
-                                ? 'bg-yellow-500 w-2/3'
-                                : 'bg-green-500 w-full'
-                          }`}
+                          className={`h-1 rounded transition-all duration-300 ease-in-out ${strength.label === 'Weak'
+                            ? 'bg-red-500 w-1/3'
+                            : strength.label === 'Moderate'
+                              ? 'bg-yellow-500 w-2/3'
+                              : 'bg-green-500 w-full'
+                            }`}
                         />
                       </div>
                       <p className={`text-xs ${strength.color}`}>
@@ -253,7 +252,7 @@ export default function ResetPassword() {
                   disabled={loading}
                   className="w-full justify-center"
                 >
-                  {loading ? 'Resetting…' : 'Reset password'}
+                  {loading ? 'Resetting...' : 'Reset password'}
                 </FormButton>
 
                 {error && (

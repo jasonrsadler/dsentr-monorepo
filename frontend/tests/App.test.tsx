@@ -16,8 +16,8 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/components/ProtectedRoute', () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
-vi.mock('@/components/DsentrLogo', () => ({
-  DsentrLogo: () => <div data-testid="logo" />
+vi.mock('@/components/DSentrLogo', () => ({
+  DSentrLogo: () => <div data-testid="logo" />
 }))
 
 describe('App', () => {
@@ -28,7 +28,7 @@ describe('App', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('Dsentr')).toBeInTheDocument()
+    expect(screen.getByText('DSentr')).toBeInTheDocument()
     expect(screen.getByText(/all rights reserved/i)).toBeInTheDocument()
   })
 

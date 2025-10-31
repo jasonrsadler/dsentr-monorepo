@@ -382,7 +382,7 @@ describe('DashboardLayout profile modal', () => {
           last_name: 'User',
           plan: 'solo',
           role: 'owner',
-          companyName: 'Dsentr',
+          companyName: 'DSentr',
           oauthProvider: null
         },
         memberships: [],

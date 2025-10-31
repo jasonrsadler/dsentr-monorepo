@@ -2,7 +2,7 @@ interface Props {
   className?: string
 }
 
-export const DsentrLogo: React.FC<Props> = ({ className }) => {
+export const DSentrLogo: React.FC<Props> = ({ className }) => {
   return (
     <div className="text-zinc-900 dark:text-zinc-100">
       <svg

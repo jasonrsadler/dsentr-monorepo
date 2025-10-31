@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+﻿import type { ReactNode } from 'react'
 
 import PlugIcon from '@/assets/svg-components/PlugIcon'
 import ClockIcon from '@/assets/svg-components/ClockIcon'
@@ -12,18 +12,18 @@ import { NavigateButton } from './components/ui/buttons/NavigateButton'
 
 export default function Home() {
   usePageMeta({
-    title: 'Dsentr - Visual Automation for Everyone',
-    description: 'Build and run powerful no-code workflows with Dsentr',
+    title: 'DSentr - Visual Automation for Everyone',
+    description: 'Build and run powerful no-code workflows with DSentr',
     url: 'https://dsentr.com/',
     image: 'https://dsentr.com/og-dsentr.svg' // Add a real image path here
   })
   return (
     <>
       <MetaTags
-        title="Dsentr - Visual Automation for Everyone"
-        description="Build and run powerful no-code workflows with Dsentr"
+        title="DSentr - Visual Automation for Everyone"
+        description="Build and run powerful no-code workflows with DSentr"
       />
-      <MarketingShell panelClassName="relative overflow-hidden">
+      <MarketingShell compact panelClassName="relative overflow-hidden">
         <div className="absolute inset-0 -z-10 opacity-60">
           <ModularAnimation />
         </div>
@@ -31,7 +31,7 @@ export default function Home() {
         <div className="relative space-y-16">
           <BrandHero
             title="Automate your work with modular logic"
-            description="Dsentr is a modular no-code automation platform that lets you assemble workflows using plug-and-play components."
+            description="DSentr is a modular no-code automation platform that lets you assemble workflows using plug-and-play components."
             kicker="Get started"
             actions={
               <NavigateButton to="/signup" className="px-6 py-3 text-base">

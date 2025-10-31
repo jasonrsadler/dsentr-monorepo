@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+﻿import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '@/stores/auth'
@@ -23,10 +23,10 @@ export default function LogoutHandler() {
   return (
     <>
       <MetaTags
-        title="Logging out – Dsentr"
-        description="Signing you out of Dsentr."
+        title="Logging out - DSentr"
+        description="Signing you out of DSentr."
       />
-      <MarketingShell maxWidthClassName="max-w-3xl">
+      <MarketingShell compact maxWidthClassName="max-w-3xl">
         <div className="space-y-10 text-center">
           <BrandHero
             title="Signing you out"

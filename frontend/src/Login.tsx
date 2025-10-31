@@ -271,8 +271,8 @@ export default function Login() {
   return (
     <>
       <MetaTags
-        title="Log in – Dsentr"
-        description="Sign in to Dsentr to build, launch, and manage your automated workflows."
+        title="Log in – DSentr"
+        description="Sign in to DSentr to build, launch, and manage your automated workflows."
       />
       {showInviteModal && invitation && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
@@ -339,9 +339,9 @@ export default function Login() {
       )}
 
       {!user && (
-        <MarketingShell maxWidthClassName="max-w-6xl">
+        <MarketingShell compact maxWidthClassName="max-w-6xl">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start">
-            <div className="space-y-8">
+            <div className="hidden space-y-8 lg:block">
               <BrandHero
                 title="Welcome back"
                 description="Sign in to continue orchestrating your workflows, monitoring run history, and collaborating with your team."
@@ -351,7 +351,7 @@ export default function Login() {
 
               <div className="grid gap-4 rounded-2xl border border-zinc-200/60 bg-white/70 p-6 text-left text-sm leading-relaxed text-zinc-600 shadow-sm dark:border-white/10 dark:bg-zinc-900/70 dark:text-zinc-300">
                 <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                  Inside Dsentr you can:
+                  Inside DSentr you can:
                 </p>
                 <ul className="grid gap-3">
                   <li className="flex items-start gap-3">
@@ -384,7 +384,7 @@ export default function Login() {
                   <LoginIcon />
                 </span>
                 <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-                  Log in to Dsentr
+                  Log in to DSentr
                 </h1>
               </div>
 

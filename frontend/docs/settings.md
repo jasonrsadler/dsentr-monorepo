@@ -4,7 +4,7 @@ Open the Settings button in the dashboard header to manage plans, people, and pl
 
 ## Plan & Billing
 
-- Review available plan tiers (Solo and Workspace) with descriptions, prices, and the currently active selection. Dsentr fetches live plan options from the onboarding API but falls back to sensible defaults if unavailable.【F:src/components/settings/tabs/PlanTab.tsx†L1-L89】
+- Review available plan tiers (Solo and Workspace) with descriptions, prices, and the currently active selection. DSentr fetches live plan options from the onboarding API but falls back to sensible defaults if unavailable.【F:src/components/settings/tabs/PlanTab.tsx†L1-L89】
 - Owners can upgrade or downgrade between plans, rename the workspace for team plans, and see status messages after changes. Solo plans require only a confirmation, while Workspace plans prompt for a workspace name before submission.【F:src/components/settings/tabs/PlanTab.tsx†L91-L187】【F:src/components/settings/tabs/PlanTab.tsx†L189-L268】
 - Submissions send CSRF-protected requests to the `/api/workspaces/onboarding` endpoint and refresh memberships so the rest of the UI reflects the new plan immediately.【F:src/components/settings/tabs/PlanTab.tsx†L214-L309】【F:src/components/settings/tabs/PlanTab.tsx†L311-L378】
 
@@ -22,7 +22,7 @@ Open the Settings button in the dashboard header to manage plans, people, and pl
 
 ## Secrets & API Keys
 
-- Organize service credentials across categories such as Email, Messaging, Webhooks, and HTTP. Dsentr merges stored secrets with predefined descriptors so new entries automatically gain a labeled form.【F:src/components/settings/tabs/OptionsTab.tsx†L1-L86】【F:src/components/settings/tabs/OptionsTab.tsx†L88-L179】
+- Organize service credentials across categories such as Email, Messaging, Webhooks, and HTTP. DSentr merges stored secrets with predefined descriptors so new entries automatically gain a labeled form.【F:src/components/settings/tabs/OptionsTab.tsx†L1-L86】【F:src/components/settings/tabs/OptionsTab.tsx†L88-L179】
 - Create or update secrets inline with validation and optimistic UI states. Owners and admins can delete any secret, while other roles can only remove entries they created.【F:src/components/settings/tabs/OptionsTab.tsx†L181-L261】【F:src/components/settings/tabs/OptionsTab.tsx†L263-L357】
 - Deleting a secret triggers a confirmation dialog and respects role-based permissions before removing it from the store.【F:src/components/settings/tabs/OptionsTab.tsx†L359-L469】
 
@@ -44,4 +44,4 @@ Open the Settings button in the dashboard header to manage plans, people, and pl
 ## Workflow Management
 
 - Select any workflow in the workspace, confirm deletions by retyping the workflow name, and remove it after acknowledging the confirmation dialog.【F:src/components/settings/tabs/WorkflowsTab.tsx†L1-L120】
-- When a workflow is deleted, Dsentr emits a global `workflow-deleted` event so other parts of the app can refresh state without reloading.【F:src/components/settings/tabs/WorkflowsTab.tsx†L120-L158】
+- When a workflow is deleted, DSentr emits a global `workflow-deleted` event so other parts of the app can refresh state without reloading.【F:src/components/settings/tabs/WorkflowsTab.tsx†L120-L158】

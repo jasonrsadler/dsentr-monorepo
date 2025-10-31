@@ -1,4 +1,4 @@
-import { NavigateButton } from './components/ui/buttons/NavigateButton'
+﻿import { NavigateButton } from './components/ui/buttons/NavigateButton'
 import { MarketingShell } from '@/components/marketing/MarketingShell'
 import { BrandHero } from '@/components/marketing/BrandHero'
 import { MetaTags } from '@/components/MetaTags'
@@ -74,14 +74,14 @@ export default function HowItWorks() {
   return (
     <>
       <MetaTags
-        title="How Dsentr works"
-        description="Understand the Dsentr workflow engine from modular plugins to visual orchestration."
+        title="How DSentr works"
+        description="Understand the DSentr workflow engine from modular plugins to visual orchestration."
       />
-      <MarketingShell>
+      <MarketingShell compact>
         <div className="space-y-16">
           <BrandHero
-            title="How Dsentr works"
-            description="A modular platform that brings structure to automation. Here’s how each layer comes together to power your workflows."
+            title="How DSentr works"
+            description="A modular platform that brings structure to automation. Here's how each layer comes together to power your workflows."
             kicker="Platform overview"
           />
 
@@ -107,7 +107,7 @@ export default function HowItWorks() {
           <div className="flex flex-col items-center gap-4 rounded-2xl border border-indigo-200/40 bg-indigo-500/5 p-8 text-center shadow-inner dark:border-indigo-400/30 dark:bg-indigo-500/10">
             <p className="max-w-2xl text-base text-zinc-700 dark:text-zinc-200">
               Ready to orchestrate your next workflow? Join the waitlist to
-              access Dsentr as soon as it opens to early teams.
+              access DSentr as soon as it opens to early teams.
             </p>
             <NavigateButton to="/signup" className="px-6 py-3 text-base">
               Try Now

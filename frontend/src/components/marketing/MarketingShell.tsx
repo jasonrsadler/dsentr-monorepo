@@ -1,16 +1,22 @@
-import type { ReactNode } from 'react'
+﻿import type { ReactNode } from 'react'
 
 interface MarketingShellProps {
   children: ReactNode
   maxWidthClassName?: string
   panelClassName?: string
+  compact?: boolean
 }
 
 export function MarketingShell({
   children,
   maxWidthClassName = 'max-w-5xl',
-  panelClassName
+  panelClassName,
+  compact = false
 }: MarketingShellProps) {
+  const outerPadding = compact
+    ? 'py-10 sm:py-12 lg:py-16'
+    : 'py-20 sm:py-24 lg:py-28'
+  const innerPadding = compact ? 'p-6 sm:p-8' : 'p-10 sm:p-12'
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-zinc-50 via-white to-zinc-100 dark:from-zinc-950 dark:via-zinc-950 dark:to-black">
       <div className="pointer-events-none absolute inset-0">
@@ -19,10 +25,10 @@ export function MarketingShell({
         <div className="absolute left-[-12%] bottom-[-18%] h-[360px] w-[360px] rounded-full bg-sky-500/10 blur-[140px]" />
       </div>
       <div
-        className={`relative z-10 mx-auto w-full ${maxWidthClassName} px-6 py-20 sm:py-24 lg:py-28`}
+        className={`relative z-10 mx-auto w-full ${maxWidthClassName} px-6 ${outerPadding}`}
       >
         <div
-          className={`rounded-3xl border border-white/60 bg-white/80 p-10 shadow-2xl shadow-indigo-500/10 backdrop-blur-2xl transition-colors dark:border-white/10 dark:bg-zinc-900/80 sm:p-12 ${panelClassName ?? ''}`}
+          className={`rounded-3xl border border-white/60 bg-white/80 ${innerPadding} shadow-2xl shadow-indigo-500/10 backdrop-blur-2xl transition-colors dark:border-white/10 dark:bg-zinc-900/80 ${panelClassName ?? ''}`}
         >
           {children}
         </div>

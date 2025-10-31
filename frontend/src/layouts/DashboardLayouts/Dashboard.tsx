@@ -398,16 +398,16 @@ export default function Dashboard() {
         const visible =
           planTier === 'solo'
             ? [...data]
-                .sort((a, b) => {
-                  const aDate = a.created_at
-                    ? new Date(a.created_at).getTime()
-                    : 0
-                  const bDate = b.created_at
-                    ? new Date(b.created_at).getTime()
-                    : 0
-                  return aDate - bDate
-                })
-                .slice(0, 3)
+              .sort((a, b) => {
+                const aDate = a.created_at
+                  ? new Date(a.created_at).getTime()
+                  : 0
+                const bDate = b.created_at
+                  ? new Date(b.created_at).getTime()
+                  : 0
+                return aDate - bDate
+              })
+              .slice(0, 3)
             : data
         setHiddenWorkflowCount(Math.max(data.length - visible.length, 0))
         setWorkflows(visible)
@@ -448,26 +448,26 @@ export default function Dashboard() {
       setCurrentWorkflowId(id)
       setError(null)
 
-      // Always try to fetch fresh data for the selected workflow to avoid shared references/stale state
-      ;(async () => {
-        try {
-          const fresh = await getWorkflow(id, activeWorkspaceId)
-          // Update list cache with fresh record
-          setWorkflows((prev) =>
-            prev.map((w) => (w.id === fresh.id ? fresh : w))
-          )
-          const normalized = normalizeWorkflowData(fresh.data)
-          pushGraphToStore(normalized, false)
-        } catch (e) {
-          // Fallback to local cache if fetch fails
-          if (nextWorkflow) {
-            const normalized = normalizeWorkflowData(nextWorkflow.data)
+        // Always try to fetch fresh data for the selected workflow to avoid shared references/stale state
+        ; (async () => {
+          try {
+            const fresh = await getWorkflow(id, activeWorkspaceId)
+            // Update list cache with fresh record
+            setWorkflows((prev) =>
+              prev.map((w) => (w.id === fresh.id ? fresh : w))
+            )
+            const normalized = normalizeWorkflowData(fresh.data)
             pushGraphToStore(normalized, false)
-          } else {
-            pushGraphToStore({ nodes: [], edges: [] }, false)
+          } catch (e) {
+            // Fallback to local cache if fetch fails
+            if (nextWorkflow) {
+              const normalized = normalizeWorkflowData(nextWorkflow.data)
+              pushGraphToStore(normalized, false)
+            } else {
+              pushGraphToStore({ nodes: [], edges: [] }, false)
+            }
           }
-        }
-      })()
+        })()
     },
     [workflows, normalizeWorkflowData, activeWorkspaceId, pushGraphToStore]
   )
@@ -1187,8 +1187,7 @@ export default function Dashboard() {
         role="button"
         aria-label={`Add ${label}`}
         className={[
-          `group relative overflow-hidden rounded-xl border shadow-sm select-none${
-            allowDrag ? ' cursor-grab active:cursor-grabbing' : ''
+          `group relative overflow-hidden rounded-xl border shadow-sm select-none${allowDrag ? ' cursor-grab active:cursor-grabbing' : ''
           }`,
           'bg-gradient-to-br',
           gradient,
@@ -1392,11 +1391,10 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={() => setTemplatesOpen((v) => !v)}
-                className={`w-full text-left px-3 py-2 rounded-lg border shadow-sm flex items-center justify-between ${
-                  isGraphEmpty
+                className={`w-full text-left px-3 py-2 rounded-lg border shadow-sm flex items-center justify-between ${isGraphEmpty
                     ? 'bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700'
                     : 'bg-zinc-100 dark:bg-zinc-800/60 text-zinc-400'
-                }`}
+                  }`}
                 title={
                   isGraphEmpty
                     ? 'Browse templates'
@@ -1512,8 +1510,8 @@ export default function Dashboard() {
                               service: 'SMTP',
                               from: '',
                               to: '',
-                              subject: 'Welcome to Dsentr',
-                              body: 'This is a sample email from Dsentr.'
+                              subject: 'Welcome to DSentr',
+                              body: 'This is a sample email from DSentr.'
                             },
                             timeout: 5000,
                             retries: 0,
@@ -1566,8 +1564,8 @@ export default function Dashboard() {
                               service: 'SendGrid',
                               from: '',
                               to: '',
-                              subject: 'Welcome to Dsentr',
-                              body: 'This is a sample email from Dsentr.'
+                              subject: 'Welcome to DSentr',
+                              body: 'This is a sample email from DSentr.'
                             },
                             timeout: 5000,
                             retries: 0,
@@ -1621,8 +1619,8 @@ export default function Dashboard() {
                               region: 'us-east-1',
                               from: '',
                               to: '',
-                              subject: 'Welcome to Dsentr',
-                              body: 'This is a sample email from Dsentr.'
+                              subject: 'Welcome to DSentr',
+                              body: 'This is a sample email from DSentr.'
                             },
                             timeout: 5000,
                             retries: 0,
@@ -1676,8 +1674,8 @@ export default function Dashboard() {
                               region: 'US (api.mailgun.net)',
                               from: '',
                               to: '',
-                              subject: 'Welcome to Dsentr',
-                              body: 'This is a sample email from Dsentr.'
+                              subject: 'Welcome to DSentr',
+                              body: 'This is a sample email from DSentr.'
                             },
                             timeout: 5000,
                             retries: 0,
@@ -1728,7 +1726,7 @@ export default function Dashboard() {
                             actionType: 'slack',
                             params: {
                               channel: '#general',
-                              message: 'Hello from Dsentr!',
+                              message: 'Hello from DSentr!',
                               token: '',
                               connectionScope: '',
                               connectionId: '',
@@ -2233,10 +2231,10 @@ export default function Dashboard() {
               </button>
             </div>
             {!activeRun ||
-            (currentWorkflow && activeRun.workflow_id !== currentWorkflow.id) ||
-            (activeRun &&
-              activeRun.status !== 'running' &&
-              activeRun.status !== 'queued') ? (
+              (currentWorkflow && activeRun.workflow_id !== currentWorkflow.id) ||
+              (activeRun &&
+                activeRun.status !== 'running' &&
+                activeRun.status !== 'queued') ? (
               <p className="text-sm text-zinc-600 dark:text-zinc-300">
                 No active run for selected workflow.
               </p>

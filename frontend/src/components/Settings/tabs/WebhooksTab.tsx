@@ -40,7 +40,7 @@ export default function WebhooksTab() {
           return ws[0]?.id ?? ''
         })
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [activeWorkspaceId])
 
   useEffect(() => {
@@ -67,7 +67,7 @@ export default function WebhooksTab() {
         setReplayWindow(cfg.replay_window_sec)
         setSigningKey(cfg.signing_key)
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [workflowId])
 
   const selected = useMemo(
@@ -387,7 +387,7 @@ export default function WebhooksTab() {
         </div>
         <div className="text-xs text-zinc-600 dark:text-zinc-400 space-y-1">
           <div>Client should send headers:</div>
-          <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded text-[11px] overflow-auto themed-scroll">{`X-Dsentr-Timestamp: <unix-seconds>\nX-Dsentr-Signature: v1=<hex(hmac_sha256(signing_key, ts + '.' + raw_json_body))>`}</pre>
+          <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded text-[11px] overflow-auto themed-scroll">{`X-DSentr-Timestamp: <unix-seconds>\nX-DSentr-Signature: v1=<hex(hmac_sha256(signing_key, ts + '.' + raw_json_body))>`}</pre>
         </div>
       </div>
 

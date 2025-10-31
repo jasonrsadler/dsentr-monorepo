@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FormButton } from './components/ui/buttons/FormButton'
 import ForgotPasswordIcon from './assets/svg-components/ForgotPasswordIcon'
@@ -40,15 +40,15 @@ export default function ForgotPassword() {
   return (
     <>
       <MetaTags
-        title="Forgot password – Dsentr"
-        description="Request a secure link to reset your Dsentr password."
+        title="Forgot password - DSentr"
+        description="Request a secure link to reset your DSentr password."
       />
-      <MarketingShell maxWidthClassName="max-w-4xl">
+      <MarketingShell compact maxWidthClassName="max-w-4xl">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start">
           <div className="space-y-8">
             <BrandHero
               title="Reset your access"
-              description="Enter the email you use for Dsentr and we’ll send you a secure link to create a new password."
+              description="Enter the email you use for DSentr and we'll send you a secure link to create a new password."
               kicker="Password reset"
               align="left"
             />
@@ -63,8 +63,8 @@ export default function ForgotPassword() {
                 <span className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
                   2
                 </span>
-                Check your inbox for a Dsentr message titled “Reset your
-                password”.
+                Check your inbox for a DSentr message titled "Reset your
+                password".
               </li>
               <li className="flex items-start gap-3">
                 <span className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
@@ -91,7 +91,7 @@ export default function ForgotPassword() {
 
             {success ? (
               <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/80 p-4 text-sm font-medium text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-900/20 dark:text-emerald-200">
-                ✅ Reset link sent! Please check your email.
+                - Reset link sent! Please check your email.
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-5">

@@ -639,7 +639,7 @@ async fn main() -> Result<()> {
 }
 /// A simple root route.
 async fn root() -> Response {
-    JsonResponse::success("Hello, Dsentr!").into_response()
+    JsonResponse::success("Hello, DSentr!").into_response()
 }
 
 /// Establish a connection to the database and verify it.

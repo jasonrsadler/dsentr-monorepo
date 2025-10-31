@@ -8,8 +8,8 @@ type MetaTagsProps = {
 }
 
 export function MetaTags({
-  title = 'Dsentr – Visual Automation for Everyone',
-  description = 'Build and run powerful no-code workflows with Dsentr.',
+  title = 'DSentr – Visual Automation for Everyone',
+  description = 'Build and run powerful no-code workflows with DSentr.',
   image = '/og-preview.svg',
   url = 'https://dsentr.com'
 }: MetaTagsProps) {

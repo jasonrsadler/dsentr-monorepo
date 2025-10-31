@@ -64,10 +64,10 @@ export default function CookieBanner() {
         className={`pointer-events-auto mx-auto flex w-full max-w-3xl flex-col gap-4 rounded-lg border border-zinc-200 bg-white/90 p-4 text-sm shadow-lg backdrop-blur transition-all duration-200 ease-out dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-100 sm:flex-row sm:items-center sm:justify-between ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'}`}
       >
         <p className="text-left text-zinc-800 dark:text-zinc-200">
-          Dsentr uses cookies for essential site functionality and analytics. By
+          DSentr uses cookies for essential site functionality and analytics. By
           using this site, you agree to our{' '}
           <Link
-            to="/privacy"
+            to="/privacy-policy"
             className="font-medium text-indigo-600 underline-offset-2 transition hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
           >
             Privacy Policy

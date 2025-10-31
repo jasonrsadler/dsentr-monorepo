@@ -24,8 +24,8 @@
   <line x1="260" y1="132" x2="292" y2="132" class="line"/>
   <line x1="132" y1="164" x2="132" y2="196" class="line"/>
 
-  <!-- Dsentr Text -->
-  <text x="400" y="180" class="text">Dsentr</text>
+  <!-- DSentr Text -->
+  <text x="400" y="180" class="text">DSentr</text>
   <text x="400" y="260" font-size="32" fill="#aaaaaa" font-family="sans-serif">
     Modular automation, no code required
   </text>

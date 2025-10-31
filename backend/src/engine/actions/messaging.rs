@@ -2865,7 +2865,7 @@ mod tests {
             "deliveryMethod": "Delegated OAuth (Post as user)",
             "messageType": "Card",
             "cardMode": "Simple card builder",
-            "cardTitle": "Hello from Dsentr",
+            "cardTitle": "Hello from DSentr",
             "cardBody": "Automation ran",
             "cardJson": "{\"type\":\"AdaptiveCard\"}",
             "message": "legacy"
@@ -2884,7 +2884,7 @@ mod tests {
         );
         assert_eq!(
             map.get("cardTitle").and_then(|v| v.as_str()).unwrap(),
-            "Hello from Dsentr"
+            "Hello from DSentr"
         );
         assert_eq!(
             map.get("cardBody").and_then(|v| v.as_str()).unwrap(),

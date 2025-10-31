@@ -46,14 +46,14 @@ const PROVIDERS: ProviderMeta[] = [
     key: 'microsoft',
     name: 'Microsoft',
     description:
-      'Connect your Microsoft 365 account to run Outlook and Teams actions with delegated permissions managed by Dsentr.',
+      'Connect your Microsoft 365 account to run Outlook and Teams actions with delegated permissions managed by DSentr.',
     scopes: 'offline_access User.Read'
   },
   {
     key: 'slack',
     name: 'Slack',
     description:
-      'Connect your Slack workspace to post messages, manage channels, and automate collaboration from Dsentr workflows.',
+      'Connect your Slack workspace to post messages, manage channels, and automate collaboration from DSentr workflows.',
     scopes: 'chat:write channels:read users:read'
   }
 ]
@@ -189,32 +189,32 @@ export default function IntegrationsTab({
 
   useEffect(() => {
     let active = true
-    ;(async () => {
-      setLoading(true)
-      // Ensure a clean slate between mounts or workspace switches
-      // so prior in-memory state from other renders/tests cannot
-      // leak into this view.
-      setStatuses(buildInitialStatuses())
-      try {
-        const data = await fetchConnections({ workspaceId })
-        if (!active) return
-        const normalized = {} as Record<OAuthProvider, ProviderConnectionSet>
-        PROVIDERS.forEach((provider) => {
-          normalized[provider.key] = cloneProviderState(data[provider.key])
-        })
-        setStatuses(normalized)
-        setError(null)
-      } catch (err) {
-        if (!active) return
-        setError(
-          err instanceof Error ? err.message : 'Failed to load connections'
-        )
-      } finally {
-        if (active) {
-          setLoading(false)
+      ; (async () => {
+        setLoading(true)
+        // Ensure a clean slate between mounts or workspace switches
+        // so prior in-memory state from other renders/tests cannot
+        // leak into this view.
+        setStatuses(buildInitialStatuses())
+        try {
+          const data = await fetchConnections({ workspaceId })
+          if (!active) return
+          const normalized = {} as Record<OAuthProvider, ProviderConnectionSet>
+          PROVIDERS.forEach((provider) => {
+            normalized[provider.key] = cloneProviderState(data[provider.key])
+          })
+          setStatuses(normalized)
+          setError(null)
+        } catch (err) {
+          if (!active) return
+          setError(
+            err instanceof Error ? err.message : 'Failed to load connections'
+          )
+        } finally {
+          if (active) {
+            setLoading(false)
+          }
         }
-      }
-    })()
+      })()
 
     return () => {
       active = false
@@ -395,7 +395,7 @@ export default function IntegrationsTab({
         </h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Connect OAuth accounts that workflows can use for delegated access.
-          Dsentr manages the client credentials and refreshes access tokens
+          DSentr manages the client credentials and refreshes access tokens
           automatically.
         </p>
       </header>
@@ -612,11 +612,10 @@ export default function IntegrationsTab({
                       {workspaceConnections.map((entry) => (
                         <li
                           key={entry.id}
-                          className={`rounded border px-3 py-2 text-xs ${
-                            entry.requiresReconnect
+                          className={`rounded border px-3 py-2 text-xs ${entry.requiresReconnect
                               ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-500/70 dark:bg-red-500/10 dark:text-red-200'
                               : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-                          }`}
+                            }`}
                         >
                           <div className="font-medium text-zinc-700 dark:text-zinc-100">
                             {entry.workspaceName}
@@ -700,8 +699,8 @@ export default function IntegrationsTab({
             const sharedByName =
               currentUser?.first_name || currentUser?.last_name
                 ? [currentUser?.first_name, currentUser?.last_name]
-                    .filter((part) => part && part.trim().length > 0)
-                    .join(' ')
+                  .filter((part) => part && part.trim().length > 0)
+                  .join(' ')
                 : undefined
             const sharedByEmail = currentUser?.email?.trim() || undefined
 
@@ -884,9 +883,8 @@ export default function IntegrationsTab({
               ? 'your workspace'
               : workspaces.length === 1
                 ? workspaces[0]
-                : `${workspaces.slice(0, -1).join(', ')} and ${
-                    workspaces[workspaces.length - 1]
-                  }`
+                : `${workspaces.slice(0, -1).join(', ')} and ${workspaces[workspaces.length - 1]
+                }`
           return `Disconnecting this ${providerName} credential will also remove the shared connection from ${workspaceText}. Existing workflows may stop working if they rely on it. Do you want to continue?`
         })()}
         confirmText="Remove credential"

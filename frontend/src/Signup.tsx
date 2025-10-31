@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+﻿import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import PlugIcon from '@/assets/svg-components/PlugIcon'
 import ClockIcon from '@/assets/svg-components/ClockIcon'
@@ -364,14 +364,14 @@ export default function SignupPage() {
         <TermsOfServiceModal onClose={() => setTermsModalOpen(false)} />
       ) : null}
       <MetaTags
-        title="Sign up – Dsentr"
-        description="Create a Dsentr account to design and automate workflows without code."
+        title="Sign up - DSentr"
+        description="Create a DSentr account to design and automate workflows without code."
       />
-      <MarketingShell maxWidthClassName="max-w-6xl">
+      <MarketingShell compact maxWidthClassName="max-w-6xl">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,520px)] lg:items-start">
-          <div className="space-y-8">
+          <div className="hidden space-y-8 lg:flex lg:flex-col">
             <BrandHero
-              title="Create your Dsentr account"
+              title="Create your DSentr account"
               description="Build sophisticated automations, manage workspaces, and keep every run transparent."
               kicker="Get started"
               align="left"
@@ -383,7 +383,7 @@ export default function SignupPage() {
 
             <div className="grid gap-4 rounded-2xl border border-zinc-200/60 bg-white/70 p-6 text-left text-sm leading-relaxed text-zinc-600 shadow-sm dark:border-white/10 dark:bg-zinc-900/70 dark:text-zinc-300">
               <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                Why teams choose Dsentr
+                Why teams choose DSentr
               </p>
               <FeatureBullet
                 icon={<PlugIcon className="h-4 w-4" />}
@@ -401,17 +401,6 @@ export default function SignupPage() {
                 description="Manage roles, credentials, and compliance with confidence."
               />
             </div>
-
-            {errors.length > 0 && (
-              <div className="rounded-2xl border border-red-200/60 bg-red-50/80 p-6 text-sm text-red-700 shadow-sm dark:border-red-400/30 dark:bg-red-950/20 dark:text-red-200">
-                <h3 className="font-semibold">Please fix:</h3>
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {errors.map((err, i) => (
-                    <li key={i}>{err}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </div>
 
           <div className="rounded-2xl border border-zinc-200/60 bg-white/80 p-8 shadow-lg shadow-indigo-500/5 dark:border-white/10 dark:bg-zinc-900/80">
@@ -452,7 +441,7 @@ export default function SignupPage() {
 
             {inviteStatus === 'loading' && (
               <p className="mb-4 rounded-lg border border-zinc-200/60 bg-zinc-100/80 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-                Verifying invite link…
+                Verifying invite link...
               </p>
             )}
 
@@ -462,6 +451,16 @@ export default function SignupPage() {
               </p>
             )}
 
+            {errors.length > 0 && (
+              <div className="mb-4 rounded-2xl border border-red-200/60 bg-red-50/80 p-4 text-sm text-red-700 shadow-sm dark:border-red-400/30 dark:bg-red-950/20 dark:text-red-200">
+                <h3 className="font-semibold">Please fix:</h3>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {errors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="space-y-3">
               <GoogleSignupButton onClick={() => handleOAuthSignup('google')} />
               <GithubSignupButton onClick={() => handleOAuthSignup('github')} />
@@ -603,7 +602,7 @@ export default function SignupPage() {
               </div>
 
               <FormButton disabled={loading} className="w-full justify-center">
-                {loading ? 'Signing up…' : submitLabel}
+                {loading ? 'Signing up...' : submitLabel}
               </FormButton>
               {message &&
                 (serverError ? (

@@ -34,13 +34,13 @@ const sections: Section[] = [
       {
         heading: 'Subscription and Billing Information',
         paragraphs: [
-          'We use third-party payment processors (e.g., Stripe) to handle billing. Payment details are processed directly by Stripe under their security and privacy policies. Dsentr does not store credit card numbers or other payment card data.'
+          'We use third-party payment processors (e.g., Stripe) to handle billing. Payment details are processed directly by Stripe under their security and privacy policies. DSentr does not store credit card numbers or other payment card data.'
         ]
       },
       {
         heading: 'Workflow and Integration Data',
         paragraphs: [
-          'When you connect integrations or run workflows, Dsentr processes configuration details, trigger inputs, and output data as part of normal operation. This data is retained as necessary to execute and log workflows.'
+          'When you connect integrations or run workflows, DSentr processes configuration details, trigger inputs, and output data as part of normal operation. This data is retained as necessary to execute and log workflows.'
         ]
       },
       {
@@ -78,7 +78,7 @@ const sections: Section[] = [
     bullets: [
       'Service Providers: We use trusted vendors for hosting, email delivery, analytics, and payment processing.',
       'Legal Compliance: We may disclose data if required by law or to protect our legal rights.',
-      'Business Transfers: If Dsentr is acquired or merged, data may transfer as part of that transaction, subject to the same privacy commitments.'
+      'Business Transfers: If DSentr is acquired or merged, data may transfer as part of that transaction, subject to the same privacy commitments.'
     ],
     closing: [
       'We do not share personal data with advertisers or unrelated third parties.'
@@ -112,7 +112,7 @@ const sections: Section[] = [
     number: 6,
     title: 'International Transfers',
     intro: [
-      'Dsentr is based in the United States, and all data is processed and stored on U.S. servers. If you access the Service from outside the U.S., you consent to your information being transferred and processed there under U.S. law.'
+      'DSentr is based in the United States, and all data is processed and stored on U.S. servers. If you access the Service from outside the U.S., you consent to your information being transferred and processed there under U.S. law.'
     ]
   },
   {
@@ -180,7 +180,7 @@ export function PrivacyPolicyContent({
       </header>
 
       <p>
-        This Privacy Policy explains how Dsentr (“we,” “our,” or “us”) collects,
+        This Privacy Policy explains how DSentr (“we,” “our,” or “us”) collects,
         uses, and protects your personal information when you use our
         application, website, and related services (“the Service”). By using the
         Service, you agree to the collection and use of information in

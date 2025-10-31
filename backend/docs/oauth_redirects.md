@@ -1,6 +1,6 @@
 # OAuth Redirect URIs
 
-The Dsentr backend hosts the OAuth callbacks that Google and Microsoft send users to after they authorize the Dsentr app. Configure the provider dashboards so their redirect URIs match these backend endpoints, and set the same values in your environment when running the server.
+The DSentr backend hosts the OAuth callbacks that Google and Microsoft send users to after they authorize the DSentr app. Configure the provider dashboards so their redirect URIs match these backend endpoints, and set the same values in your environment when running the server.
 
 | Provider   | Redirect URI value                                              |
 | ---------- | ---------------------------------------------------------------- |
@@ -41,4 +41,4 @@ STRIPE_SECRET_KEY=<stripe-api-secret-key>
 STRIPE_WEBHOOK_SECRET=<stripe-webhook-signing-secret>
 ```
 
-The Dsentr backend reads these values during startup to initialize the Stripe SDK, authenticate API calls, and verify incoming webhook signatures.
+The DSentr backend reads these values during startup to initialize the Stripe SDK, authenticate API calls, and verify incoming webhook signatures.

@@ -1,6 +1,6 @@
 # Hybrid OAuth Connections Walkthrough
 
-This guide demonstrates how to validate the hybrid (user + workspace) OAuth connection flow end-to-end in a local Dsentr environment.
+This guide demonstrates how to validate the hybrid (user + workspace) OAuth connection flow end-to-end in a local DSentr environment.
 
 ## Prerequisites
 - Local development stack running (backend API, worker, and frontend web app).

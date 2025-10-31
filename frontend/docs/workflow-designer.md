@@ -18,7 +18,7 @@ The workflow designer combines a canvas, toolbar, and run console so you can bui
 ## Saving and Version Safety
 
 - Saving writes the sanitized node and edge graph back to the API, normalizes the server response, and clears the dirty flag. Validation violations (such as using a premium feature on a Solo plan) display inline errors and keep unsaved changes on the canvas for correction.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L820-L920】
-- Switching workflows with unsaved changes triggers a confirmation dialog; Dsentr delays the switch until the current graph is clean to prevent accidental loss.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L336-L388】
+- Switching workflows with unsaved changes triggers a confirmation dialog; DSentr delays the switch until the current graph is clean to prevent accidental loss.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L336-L388】
 - Closing the browser tab while unsaved changes exist prompts a standard “are you sure” dialog, reducing the risk of losing edits.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L388-L420】
 
 ## Running Workflows

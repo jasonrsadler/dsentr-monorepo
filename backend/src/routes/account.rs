@@ -25,7 +25,7 @@ use crate::{
 
 const ACCOUNT_DELETION_TOKEN_HOURS: i64 = 24;
 const ACCOUNT_DELETION_COMPLIANCE_NOTICE: &str =
-    "Dsentr retains a non-public audit of this deletion for regulatory compliance.";
+    "DSentr retains a non-public audit of this deletion for regulatory compliance.";
 
 const ADDITIONAL_DATA_POINTS: &[&str] = &[
     "Workflow run history, execution logs, and queued jobs",
@@ -177,7 +177,7 @@ pub async fn request_account_deletion(
     let system_impacts = system_impact_items();
 
     let email_body = format!(
-        r#"You requested to permanently delete your Dsentr account.
+        r#"You requested to permanently delete your DSentr account.
 
 This action will remove:
 - {workflow_count} workflow(s) you own
@@ -214,7 +214,7 @@ If you did not initiate this request, you can ignore this email and your account
         .mailer
         .send_email_generic(
             &user.email,
-            "Confirm your Dsentr account deletion",
+            "Confirm your DSentr account deletion",
             &email_body,
         )
         .await
@@ -486,7 +486,7 @@ pub async fn confirm_account_deletion(
     }
 
     let confirmation_email_body = format!(
-        "We have started deleting your Dsentr account and associated data. Stripe subscriptions have been cancelled when applicable.\n\n{}",
+        "We have started deleting your DSentr account and associated data. Stripe subscriptions have been cancelled when applicable.\n\n{}",
         ACCOUNT_DELETION_COMPLIANCE_NOTICE,
     );
 
@@ -494,7 +494,7 @@ pub async fn confirm_account_deletion(
         .mailer
         .send_email_generic(
             &context.user.email,
-            "Your Dsentr account deletion has been confirmed",
+            "Your DSentr account deletion has been confirmed",
             &confirmation_email_body,
         )
         .await

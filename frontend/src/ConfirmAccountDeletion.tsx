@@ -42,23 +42,23 @@ export default function ConfirmAccountDeletion() {
     }
 
     let cancelled = false
-    ;(async () => {
-      try {
-        const data = await getAccountDeletionSummary(token)
-        if (cancelled) return
-        setSummary(data)
-        setEmail(data.email)
-        setSummaryState('ready')
-      } catch (err) {
-        if (cancelled) return
-        setSummaryState('error')
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to load deletion details.'
-        )
-      }
-    })()
+      ; (async () => {
+        try {
+          const data = await getAccountDeletionSummary(token)
+          if (cancelled) return
+          setSummary(data)
+          setEmail(data.email)
+          setSummaryState('ready')
+        } catch (err) {
+          if (cancelled) return
+          setSummaryState('error')
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to load deletion details.'
+          )
+        }
+      })()
 
     return () => {
       cancelled = true
@@ -155,7 +155,7 @@ export default function ConfirmAccountDeletion() {
             Confirm account deletion
           </h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-300">
-            This action permanently removes your Dsentr account and all related
+            This action permanently removes your DSentr account and all related
             data.
             <span className="block">
               Stripe subscriptions will be cancelled and collaborators lose

@@ -26,13 +26,13 @@ export default function NotFound() {
             to="/about"
             className="block text-lg text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-600"
           >
-            Learn more about Dsentr
+            Learn more about DSentr
           </Link>
           <Link
             to="/how-it-works"
             className="block text-lg text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-600"
           >
-            Discover how Dsentr works
+            Discover how DSentr works
           </Link>
         </div>
       </div>

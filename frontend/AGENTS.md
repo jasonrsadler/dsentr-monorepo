@@ -93,7 +93,7 @@ oUnusedLocals.
 - Workflow designer sidebar: added an "Actions" section header under Trigger and Condition, and made each action category collapsible (expanded by default) to declutter the node picker without changing default visibility.
 - Workflow designer sidebar: added a fast search input under the "Actions" header that filters action tiles across categories in real time. While searching, categories auto-expand to show matches and a fallback message appears when no actions match.
 - Dashboard notifications: collapsed the header-adjacent notification area to only show the Solo plan usage/limits banner. Removed the general plan banner (e.g., workspace plan messaging) and rerouted plan restriction notices (node caps, schedule limits, exceeding Solo workflow count, etc.) to the inline error bar within the designer. This preserves clear feedback without surfacing extra banners under the app header.
-- Solo banner spacing: restored internal padding inside the Solo plan banner for readability, and removed the surrounding wrapperâ€™s side/top padding so the banner sits flush under the header without extra horizontal/top spacing.
+- Solo banner spacing: restored internal padding inside the Solo plan banner for readability, and removed the surrounding wrapper's side/top padding so the banner sits flush under the header without extra horizontal/top spacing.
 - Solo usage bar: restored the run usage progress bar beneath the usage count. Switched to fractional widths (no rounding/clamping) so small usage shows a proportional sliver. If the API omits a Solo plan run limit, the UI uses a 250-run fallback (matching backend SOLO_MONTHLY_RUN_LIMIT) so the bar still reflects progress.
 - Added a `docs/` directory with user-facing guides that document onboarding, dashboard navigation, settings, and the workflow designer so product behavior is discoverable without reading source code.
 - Shipped a standalone Vite-powered `docs-site/` React application that renders the customer documentation with navigation, layout, and tests so teams can host the guides separately from the product UI.
@@ -135,10 +135,10 @@ Content Security Policy hardening:
 ## Test Fixes (marketing pages + store)
 - Home: aligned hero heading/description and CTA label to tests; feature card titles/descriptions now match expected copy.
 - HowItWorks: updated section titles/descriptions and CTA to “Try Now” to satisfy tests.
-- About: hero title now “About Dsentr”; added “The Story Behind Dsentr” section with expected opening line.
+- About: hero title now “About DSentr”; added “The Story Behind DSentr” section with expected opening line.
 - CheckEmail: hero title/copy now “Check your email” and “we've sent you a verification link…”.
 - GetStarted: success message updated to “You're in! We'll be in touch soon.”
-- BrandHero: removed inline brand text “Dsentr” to avoid duplicate matches with header in App tests.
+- BrandHero: removed inline brand text “DSentr” to avoid duplicate matches with header in App tests.
 - GoogleChatAction: commit payload now includes both flattened fields and a namespaced `'Google Chat'` object, and preserves `dirty` + `hasValidationErrors` per updates.
 - Test shims: added lightweight re-exports so tests resolve their intended imports:
   - `frontend/DashboardLayout.tsx` → `@/layouts/DashboardLayout`
@@ -181,3 +181,16 @@ Content Security Policy hardening:
 - Signup: kept Terms of Service acceptance as a server-side validation requirement but no longer disables the submit button when unchecked. This allows users (and tests) to trigger full form validation feedback in one action; the handler still enforces acceptance and surfaces a clear error.
 - Tests: components rendered inside `MarketingShell` use `react-router-dom`'s `Link`. Updated tests for `About`, `CheckEmail`, `GetStarted`, and `Logout` to wrap components in `MemoryRouter` so router context is available during rendering.
 - Tests: updated `Signup.test.tsx` to explicitly tick the Terms checkbox before submitting invite flows so API calls (`signupUser`) occur as expected.
+
+## Auth pages compact layout
+- Added compact prop to src/components/marketing/MarketingShell.tsx to reduce outer/inner padding on pages that must fit above the fold.
+- Updated src/Login.tsx and src/Signup.tsx to use compact and hide the left marketing column on small screens (hidden lg:block / lg:flex), minimizing vertical scroll on mobile while keeping the two‑column layout on desktop.
+- Moved the Signup validation error summary into the form card so feedback appears near controls even when the marketing column is hidden.
+- Kept invite preview/decision UI unchanged and within the form card; OAuth buttons remain visible above the fold.
+- Rationale: make login/signup usable with minimal scrolling on small viewports without sacrificing clarity or accessibility.
+
+## MarketingShell compact on public pages
+- Enabled compact mode on public/non-auth pages using MarketingShell so content sits higher with reduced top/bottom padding.
+- Updated: About, Home, HowItWorks, GetStarted, CheckEmail, VerifyEmail, ForgotPassword, ResetPassword, PrivacyPolicy, TermsOfService, Logout.
+- Auth pages (Login, Signup) already use compact, keeping a consistent feel across all public routes.
+- No functional changes; style-only. Verified with lint, tests, and build.

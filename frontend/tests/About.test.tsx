@@ -4,14 +4,14 @@ import { MemoryRouter } from 'react-router-dom'
 import About from '@/About'
 
 describe('About page', () => {
-  it('renders the main heading with Dsentr', () => {
+  it('renders the main heading with DSentr', () => {
     render(
       <MemoryRouter>
         <About />
       </MemoryRouter>
     )
     expect(
-      screen.getByRole('heading', { name: /About Dsentr/i })
+      screen.getByRole('heading', { name: /About DSentr/i })
     ).toBeInTheDocument()
   })
 
@@ -41,10 +41,10 @@ describe('About page', () => {
     )
 
     expect(
-      screen.getByRole('heading', { name: /The Story Behind Dsentr/i })
+      screen.getByRole('heading', { name: /The Story Behind DSentr/i })
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/Dsentr began as a personal frustration/i)
+      screen.getByText(/DSentr began as a personal frustration/i)
     ).toBeInTheDocument()
   })
 })

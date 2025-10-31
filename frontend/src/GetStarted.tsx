@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+﻿import { useState, type ReactNode } from 'react'
 
 import { joinWaitlist } from '@/lib/waitlistApi' // adjust path if needed
 import { FormButton } from './components/ui/buttons/FormButton'
@@ -25,15 +25,15 @@ export default function GetStarted() {
   return (
     <>
       <MetaTags
-        title="Get started – Dsentr"
-        description="Join the Dsentr waitlist to receive early access and launch updates."
+        title="Get started - DSentr"
+        description="Join the DSentr waitlist to receive early access and launch updates."
       />
-      <MarketingShell maxWidthClassName="max-w-4xl">
+      <MarketingShell compact maxWidthClassName="max-w-4xl">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] lg:items-start">
           <div className="space-y-10">
             <BrandHero
               title="Be first to build without boundaries"
-              description="Join the waitlist for product updates, launch invites, and opportunities to help shape the future of Dsentr."
+              description="Join the waitlist for product updates, launch invites, and opportunities to help shape the future of DSentr."
               kicker="Early access"
               align="left"
             />
@@ -95,7 +95,7 @@ export default function GetStarted() {
 
             <p className="mt-8 text-center text-xs text-zinc-500 dark:text-zinc-400">
               By joining the waitlist you agree to receive occasional emails
-              about Dsentr. You can unsubscribe at any time.
+              about DSentr. You can unsubscribe at any time.
             </p>
           </div>
         </div>

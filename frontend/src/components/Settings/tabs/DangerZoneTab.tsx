@@ -73,12 +73,12 @@ export default function DangerZoneTab() {
       <div className="rounded-lg border border-red-400 bg-red-50 p-6 text-red-900">
         <h2 className="text-lg font-semibold">Danger zone</h2>
         <p className="mt-2 text-sm leading-relaxed">
-          Deleting your Dsentr account is permanent. All workflows, data, and
+          Deleting your DSentr account is permanent. All workflows, data, and
           workspace memberships you own will be removed immediately. Stripe
           subscriptions are cancelled right away.
         </p>
         <p className="mt-2 text-sm leading-relaxed">
-          Although we delete operational data, Dsentr retains a minimal,
+          Although we delete operational data, DSentr retains a minimal,
           non-public audit record to satisfy regulatory and legal requests.
         </p>
       </div>

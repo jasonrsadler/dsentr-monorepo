@@ -28,11 +28,11 @@ describe('NotFound', () => {
     expect(homeLink).toBeInTheDocument()
     expect(homeLink).toHaveAttribute('href', '/')
 
-    const aboutLink = screen.getByText('Learn more about Dsentr')
+    const aboutLink = screen.getByText('Learn more about DSentr')
     expect(aboutLink).toBeInTheDocument()
     expect(aboutLink).toHaveAttribute('href', '/about')
 
-    const howItWorksLink = screen.getByText('Discover how Dsentr works')
+    const howItWorksLink = screen.getByText('Discover how DSentr works')
     expect(howItWorksLink).toBeInTheDocument()
     expect(howItWorksLink).toHaveAttribute('href', '/how-it-works')
   })

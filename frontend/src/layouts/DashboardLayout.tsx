@@ -17,7 +17,7 @@ import IntegrationsTab, {
 import PlanTab from '@/components/settings/tabs/PlanTab'
 import MembersTab from '@/components/settings/tabs/MembersTab'
 import DangerZoneTab from '@/components/settings/tabs/DangerZoneTab'
-import { DsentrLogo } from '@/components/DsentrLogo'
+import { DSentrLogo } from '@/components/DSentrLogo'
 import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
 import ProfileButton from '@/components/profile/ProfileButton'
@@ -158,8 +158,8 @@ export default function DashboardLayout() {
     const providerParamRaw = params.get('provider')
     const providerParam: OAuthProvider | undefined =
       providerParamRaw === 'google' ||
-      providerParamRaw === 'microsoft' ||
-      providerParamRaw === 'slack'
+        providerParamRaw === 'microsoft' ||
+        providerParamRaw === 'slack'
         ? (providerParamRaw as OAuthProvider)
         : undefined
     const error = params.get('error') || undefined
@@ -203,12 +203,12 @@ export default function DashboardLayout() {
       <div className="min-h-screen flex flex-col">
         <header className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
           <div className="flex items-center gap-1 font-bold tracking-tight text-xl text-zinc-900 dark:text-zinc-100">
-            <span className="leading-none">Dsentr</span>
+            <span className="leading-none">DSentr</span>
             <span
               className="inline-block align-middle"
               style={{ height: '1em' }}
             >
-              <DsentrLogo className="w-[1.5em] h-[1.5em]" />
+              <DSentrLogo className="w-[1.5em] h-[1.5em]" />
             </span>
           </div>
           {user && (

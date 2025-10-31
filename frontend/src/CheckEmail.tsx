@@ -1,4 +1,4 @@
-import EmailIcon from '@/assets/svg-components/EmailIcon'
+﻿import EmailIcon from '@/assets/svg-components/EmailIcon'
 import { MetaTags } from '@/components/MetaTags'
 import { MarketingShell } from '@/components/marketing/MarketingShell'
 import { BrandHero } from '@/components/marketing/BrandHero'
@@ -7,10 +7,10 @@ export default function CheckEmail() {
   return (
     <>
       <MetaTags
-        title="Check your inbox – Dsentr"
-        description="We sent you a secure link to finish setting up your Dsentr account."
+        title="Check your inbox - DSentr"
+        description="We sent you a secure link to finish setting up your DSentr account."
       />
-      <MarketingShell maxWidthClassName="max-w-3xl">
+      <MarketingShell compact maxWidthClassName="max-w-3xl">
         <div className="space-y-12 text-center">
           <BrandHero
             title="Check your email"

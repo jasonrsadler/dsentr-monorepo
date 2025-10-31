@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { DsentrLogo } from '@/components/DsentrLogo'
+import { DSentrLogo } from '@/components/DSentrLogo'
 
 interface BrandHeroProps {
   title: string
@@ -29,7 +29,7 @@ export function BrandHero({
         className={`flex items-center gap-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 ${brandAlignment}`}
       >
         <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-          <DsentrLogo className="h-7 w-7" />
+          <DSentrLogo className="h-7 w-7" />
         </span>
       </div>
       {kicker ? (
