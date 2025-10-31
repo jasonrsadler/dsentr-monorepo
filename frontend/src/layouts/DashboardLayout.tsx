@@ -22,6 +22,7 @@ import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
 import ProfileButton from '@/components/profile/ProfileButton'
 import ProfileModal from '@/components/profile/ProfileModal'
+import PendingInviteModal from '@/components/dashboard/PendingInviteModal'
 
 export default function DashboardLayout() {
   const user = useAuth((state) => state.user)
@@ -299,6 +300,7 @@ export default function DashboardLayout() {
             return <div />
           }}
         />
+        <PendingInviteModal />
       </div>
     </SecretsProvider>
   )

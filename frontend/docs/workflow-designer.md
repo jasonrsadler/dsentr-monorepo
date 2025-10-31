@@ -25,7 +25,7 @@ The workflow designer combines a canvas, toolbar, and run console so you can bui
 
 - Start runs from the toolbar. The run overlay displays live node-by-node execution status, failed steps, and success indicators, updating via server-sent events and falling back to polling if needed.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L520-L744】【F:src/layouts/DashboardLayouts/Dashboard.tsx†L744-L844】
 - A global runs stream feeds the toolbar status pill so you can see when any workflow is queued or running across the workspace.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L744-L820】
-- Cancelling or retrying runs is managed from the Settings → Engine tab; the overlay focuses on visibility while heavy operations live in the administration surface.【F:src/components/Settings/tabs/EngineTab.tsx†L106-L188】
+- Cancelling or retrying runs is managed from the Settings → Engine tab; the overlay focuses on visibility while heavy operations live in the administration surface.【F:src/components/settings/tabs/EngineTab.tsx†L106-L188】
 
 ## Locking and Collaboration
 
