@@ -19,9 +19,12 @@ vi.mock('@/components/GoogleSignupButton', () => ({
   )
 }))
 
-vi.mock('@/components/GithubLoginButton', () => ({
+// Mock the GitHub signup button to avoid an extra "Sign up"-named button
+// (its SVG contains the text "Sign up with GitHub" which collides with the
+// primary form submit button when querying by name /sign up/i)
+vi.mock('@/components/GithubSignupButton', () => ({
   default: ({ onClick }: { onClick: () => void }) => (
-    <button onClick={onClick} data-testid="github-login">
+    <button onClick={onClick} data-testid="github-signup">
       Mock GitHub
     </button>
   )

@@ -1,4 +1,4 @@
-export default function SignupWithGitHubImageDark(
+export default function SignupWithGithubImageDark(
   props: React.SVGProps<SVGSVGElement>
 ) {
   return (

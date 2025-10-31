@@ -1,9 +1,9 @@
-import LoginWithGithubImageDark from '@/assets/svg-components/LoginWithGithubImageDark'
-import LoginWithGithubImageLight from '@/assets/svg-components/LoginWithGithubImageLight'
-interface GithubLoginButtonProps {
+import SignupWithGithubImageDark from '@/assets/svg-components/SignupWithGithubImageDark'
+import SignupWithGithubImageLight from '@/assets/svg-components/SignupWithGithubImageLight'
+
+interface GithubSignupButtonProps {
   onClick?: () => void
   className?: string
-  text?: string
 }
 
 const baseButtonClasses =
@@ -11,7 +11,7 @@ const baseButtonClasses =
 
 const svgClasses = 'h-[42px] w-full'
 
-const GithubLoginButton = (props: GithubLoginButtonProps) => {
+const GithubSignupButton = (props: GithubSignupButtonProps) => {
   const { onClick, className } = props
   return (
     <button
@@ -22,17 +22,13 @@ const GithubLoginButton = (props: GithubLoginButtonProps) => {
       }
     >
       <span className="hidden w-full dark:block">
-        <LoginWithGithubImageDark className={svgClasses}>
-          {props.text}
-        </LoginWithGithubImageDark>
+        <SignupWithGithubImageDark className={svgClasses} />
       </span>
       <span className="block w-full dark:hidden">
-        <LoginWithGithubImageLight className={svgClasses}>
-          {props.text}
-        </LoginWithGithubImageLight>
+        <SignupWithGithubImageLight className={svgClasses} />
       </span>
     </button>
   )
 }
 
-export default GithubLoginButton
+export default GithubSignupButton

@@ -7,7 +7,6 @@ import { WorkflowIllustration } from '@/assets/svg-components/WorkflowIllustrati
 import { API_BASE_URL, parseInviteQuery, signupUser } from '@/lib'
 import { FormButton } from './components/ui/buttons/FormButton'
 import GoogleSignupButton from './components/GoogleSignupButton'
-import GithubLoginButton from './components/GithubLoginButton'
 import { MarketingShell } from '@/components/marketing/MarketingShell'
 import { BrandHero } from '@/components/marketing/BrandHero'
 import { MetaTags } from '@/components/MetaTags'
@@ -16,8 +15,11 @@ import {
   TERMS_OF_SERVICE_TITLE,
   TERMS_OF_SERVICE_VERSION
 } from '@/constants/legal'
+import GithubSignupButton from './components/GithubSignupButton'
 
 const INVITE_ERROR_MESSAGE = 'Invalid or expired invite link'
+const TERMS_ERROR_MESSAGE =
+  'You must accept the Terms of Service to create an account.'
 
 type InvitePreviewResponse = {
   success: boolean
@@ -102,6 +104,47 @@ export default function SignupPage() {
     useState<InvitePreviewResponse | null>(null)
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [inviteDecision, setInviteDecision] = useState<'join' | 'solo'>('join')
+
+  const markTermsError = () => {
+    setFieldErrors((prev) => {
+      if (prev.termsAccepted) {
+        return prev
+      }
+      return {
+        ...prev,
+        termsAccepted: true
+      }
+    })
+    setErrors((prev) => {
+      if (prev.includes(TERMS_ERROR_MESSAGE)) {
+        return prev
+      }
+      return [TERMS_ERROR_MESSAGE, ...prev]
+    })
+  }
+
+  const clearTermsError = () => {
+    setFieldErrors((prev) => {
+      if (!prev.termsAccepted) {
+        return prev
+      }
+      const { termsAccepted: _ignored, ...rest } = prev
+      return rest
+    })
+    setErrors((prev) => {
+      const next = prev.filter((err) => err !== TERMS_ERROR_MESSAGE)
+      return next.length === prev.length ? prev : next
+    })
+  }
+
+  const ensureTermsAccepted = () => {
+    if (termsAccepted) {
+      clearTermsError()
+      return true
+    }
+    markTermsError()
+    return false
+  }
 
   useEffect(() => {
     const result = parseInviteQuery(location.search)
@@ -240,9 +283,7 @@ export default function SignupPage() {
     }
 
     if (!termsAccepted) {
-      validationErrors.push(
-        'You must accept the Terms of Service to create an account.'
-      )
+      validationErrors.push(TERMS_ERROR_MESSAGE)
       newFieldErrors.termsAccepted = true
     }
 
@@ -290,6 +331,19 @@ export default function SignupPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleOAuthSignup = (provider: 'google' | 'github') => {
+    if (!ensureTermsAccepted()) {
+      return
+    }
+
+    const targetUrl =
+      provider === 'google'
+        ? `${API_BASE_URL}/api/auth/google-login`
+        : `${API_BASE_URL}/api/auth/github-login`
+
+    window.location.href = targetUrl
   }
 
   const passwordStrength = evaluatePasswordStrength(form.password)
@@ -375,22 +429,20 @@ export default function SignupPage() {
                   <button
                     type="button"
                     onClick={() => setInviteDecision('join')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                      inviteDecision === 'join'
-                        ? 'border-indigo-500 bg-indigo-500 text-white shadow'
-                        : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
-                    }`}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${inviteDecision === 'join'
+                      ? 'border-indigo-500 bg-indigo-500 text-white shadow'
+                      : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
+                      }`}
                   >
                     Join workspace
                   </button>
                   <button
                     type="button"
                     onClick={() => setInviteDecision('solo')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                      inviteDecision === 'solo'
-                        ? 'border-indigo-500 bg-indigo-500 text-white shadow'
-                        : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
-                    }`}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${inviteDecision === 'solo'
+                      ? 'border-indigo-500 bg-indigo-500 text-white shadow'
+                      : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
+                      }`}
                   >
                     Create my own workspace
                   </button>
@@ -411,18 +463,8 @@ export default function SignupPage() {
             )}
 
             <div className="space-y-3">
-              <GoogleSignupButton
-                className="w-full"
-                onClick={() => {
-                  window.location.href = `${API_BASE_URL}/api/auth/google-login`
-                }}
-              />
-              <GithubLoginButton
-                className="w-full"
-                onClick={() => {
-                  window.location.href = `${API_BASE_URL}/api/auth/github-login`
-                }}
-              />
+              <GoogleSignupButton onClick={() => handleOAuthSignup('google')} />
+              <GithubSignupButton onClick={() => handleOAuthSignup('github')} />
               <div className="relative text-center">
                 <span className="relative z-10 bg-white/80 px-2 text-xs text-zinc-500 dark:bg-zinc-900/80 dark:text-zinc-400">
                   or
@@ -482,23 +524,21 @@ export default function SignupPage() {
                         value={value}
                         onChange={handleChange}
                         readOnly={isReadOnly}
-                        className={`mt-2 w-full rounded-xl border bg-white px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:bg-zinc-800 dark:text-zinc-100 ${
-                          hasError
-                            ? 'border-red-500/80 focus:ring-red-200'
-                            : 'border-zinc-300/70 dark:border-zinc-600'
-                        } ${isReadOnly ? 'cursor-not-allowed bg-zinc-100 dark:bg-zinc-800' : ''}`}
+                        className={`mt-2 w-full rounded-xl border bg-white px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:bg-zinc-800 dark:text-zinc-100 ${hasError
+                          ? 'border-red-500/80 focus:ring-red-200'
+                          : 'border-zinc-300/70 dark:border-zinc-600'
+                          } ${isReadOnly ? 'cursor-not-allowed bg-zinc-100 dark:bg-zinc-800' : ''}`}
                       />
                       {name === 'password' && form.password && (
                         <div className="mt-2 space-y-1">
                           <div className="h-1 rounded bg-zinc-300 dark:bg-zinc-700">
                             <div
-                              className={`h-1 rounded transition-all duration-300 ease-in-out ${
-                                passwordStrength.label === 'Weak'
-                                  ? 'bg-red-500 w-1/3'
-                                  : passwordStrength.label === 'Moderate'
-                                    ? 'bg-yellow-500 w-2/3'
-                                    : 'bg-green-500 w-full'
-                              }`}
+                              className={`h-1 rounded transition-all duration-300 ease-in-out ${passwordStrength.label === 'Weak'
+                                ? 'bg-red-500 w-1/3'
+                                : passwordStrength.label === 'Moderate'
+                                  ? 'bg-yellow-500 w-2/3'
+                                  : 'bg-green-500 w-full'
+                                }`}
                             />
                           </div>
                           <p className={`text-xs ${passwordStrength.color}`}>
@@ -512,11 +552,10 @@ export default function SignupPage() {
               </div>
 
               <div
-                className={`rounded-2xl border p-4 text-sm transition ${
-                  fieldErrors.termsAccepted
-                    ? 'border-red-500/70 bg-red-50/70 dark:border-red-500/50 dark:bg-red-500/10'
-                    : 'border-zinc-200/60 bg-white/70 dark:border-white/10 dark:bg-zinc-900/70'
-                }`}
+                className={`rounded-2xl border p-4 text-sm transition ${fieldErrors.termsAccepted
+                  ? 'border-red-500/70 bg-red-50/70 dark:border-red-500/50 dark:bg-red-500/10'
+                  : 'border-zinc-200/60 bg-white/70 dark:border-white/10 dark:bg-zinc-900/70'
+                  }`}
               >
                 <label
                   className="flex items-start gap-3"
@@ -528,12 +567,10 @@ export default function SignupPage() {
                     type="checkbox"
                     checked={termsAccepted}
                     onChange={(event) => {
-                      setTermsAccepted(event.target.checked)
-                      if (event.target.checked) {
-                        setFieldErrors((prev) => ({
-                          ...prev,
-                          termsAccepted: false
-                        }))
+                      const checked = event.target.checked
+                      setTermsAccepted(checked)
+                      if (checked) {
+                        clearTermsError()
                       }
                     }}
                     className="mt-1 h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-600"
@@ -560,7 +597,7 @@ export default function SignupPage() {
                     id="terms-acceptance-error"
                     className="mt-2 text-xs text-red-600 dark:text-red-300"
                   >
-                    You must accept the Terms of Service to create an account.
+                    {TERMS_ERROR_MESSAGE}
                   </p>
                 ) : null}
               </div>

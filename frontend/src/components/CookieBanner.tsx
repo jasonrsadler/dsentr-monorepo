@@ -10,7 +10,7 @@ const isBrowser = () =>
 export default function CookieBanner() {
   const [shouldRender, setShouldRender] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
-  const hideTimeoutRef = useRef<number>()
+  const hideTimeoutRef = useRef<number>(null)
 
   useEffect(() => {
     if (!isBrowser()) {
