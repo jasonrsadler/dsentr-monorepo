@@ -47,6 +47,12 @@ pub trait UserRepository: Send + Sync {
         password_hash: &str,
         provider: OauthProvider,
     ) -> Result<Uuid, sqlx::Error>;
+    async fn record_terms_acceptance(
+        &self,
+        user_id: Uuid,
+        terms_version: &str,
+        accepted_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error>;
     async fn insert_verification_token(
         &self,
         user_id: Uuid,

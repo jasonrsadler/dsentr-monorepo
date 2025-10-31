@@ -18,6 +18,9 @@ use crate::{
 };
 
 const INVALID_INVITE_MESSAGE: &str = "Invalid or expired invite link";
+const TERMS_OF_SERVICE_VERSION: &str = "1.0";
+const TERMS_ACCEPTANCE_REQUIRED_MESSAGE: &str =
+    "You must accept the latest Terms of Service to create an account.";
 
 fn default_workspace_name(payload: &SignupPayload) -> String {
     if let Some(company) = payload
@@ -47,6 +50,19 @@ pub async fn handle_signup(
 
     let mut payload = payload;
     payload.email = payload.email.trim().to_lowercase();
+
+    let accepted_terms_version = payload
+        .accepted_terms_version
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    if accepted_terms_version.as_deref() != Some(TERMS_OF_SERVICE_VERSION) {
+        return JsonResponse::bad_request(TERMS_ACCEPTANCE_REQUIRED_MESSAGE).into_response();
+    }
+
+    payload.accepted_terms_version = accepted_terms_version;
 
     if let Ok(true) = repo.is_email_taken(&payload.email).await {
         return JsonResponse::conflict("User already registered").into_response();
@@ -112,7 +128,17 @@ pub async fn handle_signup(
         .map(char::from)
         .collect();
 
-    let expires_at = OffsetDateTime::now_utc() + Duration::hours(24);
+    let terms_accepted_at = OffsetDateTime::now_utc();
+    if let Err(err) = repo
+        .record_terms_acceptance(user_id, TERMS_OF_SERVICE_VERSION, terms_accepted_at)
+        .await
+    {
+        eprintln!("Failed to record terms acceptance: {:?}", err);
+        let _ = repo.cleanup_user_and_token(user_id, &token).await;
+        return JsonResponse::server_error("Could not record terms acceptance").into_response();
+    }
+
+    let expires_at = terms_accepted_at + Duration::hours(24);
 
     if invite_record.is_none() || matches!(invite_decision, SignupInviteDecision::Decline) {
         let workspace_name = default_workspace_name(&payload);
@@ -266,7 +292,9 @@ mod tests {
         email_taken: bool,
         fail_create_user: bool,
         fail_insert_token: bool,
+        fail_record_terms: bool,
         cleaned_up: Arc<Mutex<bool>>,
+        terms_recorded: Arc<Mutex<bool>>,
     }
 
     #[async_trait]
@@ -297,6 +325,20 @@ mod tests {
             if self.fail_insert_token {
                 Err(sqlx::Error::RowNotFound)
             } else {
+                Ok(())
+            }
+        }
+
+        async fn record_terms_acceptance(
+            &self,
+            _user_id: Uuid,
+            _terms_version: &str,
+            _accepted_at: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            if self.fail_record_terms {
+                Err(sqlx::Error::RowNotFound)
+            } else {
+                *self.terms_recorded.lock().unwrap() = true;
                 Ok(())
             }
         }
@@ -735,6 +777,7 @@ mod tests {
             tax_id: None,
             invite_token: None,
             invite_decision: None,
+            accepted_terms_version: Some(TERMS_OF_SERVICE_VERSION.to_string()),
         }
     }
 
@@ -804,7 +847,9 @@ mod tests {
             email_taken: true,
             fail_create_user: false,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
 
         let mailer = MockMailer::default();
@@ -827,7 +872,9 @@ mod tests {
             email_taken: false,
             fail_create_user: false,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
 
         let mailer = MockMailer::default();
@@ -841,7 +888,9 @@ mod tests {
             email_taken: false,
             fail_create_user: true,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
 
         let mailer = MockMailer::default();
@@ -856,12 +905,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_terms_must_be_accepted() {
+        let repo = MockRepo {
+            email_taken: false,
+            fail_create_user: false,
+            fail_insert_token: false,
+            fail_record_terms: false,
+            cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
+        };
+
+        let mailer = MockMailer::default();
+        let mut payload = test_payload();
+        payload.accepted_terms_version = Some("0.9".into());
+
+        let res = run_signup(repo, Arc::new(NoopWorkspaceRepository), mailer, payload).await;
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_record_terms_failure_triggers_cleanup() {
+        let cleaned_up = Arc::new(Mutex::new(false));
+
+        let repo = MockRepo {
+            email_taken: false,
+            fail_create_user: false,
+            fail_insert_token: false,
+            fail_record_terms: true,
+            cleaned_up: Arc::clone(&cleaned_up),
+            terms_recorded: Arc::new(Mutex::new(false)),
+        };
+
+        let mailer = MockMailer::default();
+        let res = run_signup(
+            repo,
+            Arc::new(NoopWorkspaceRepository),
+            mailer,
+            test_payload(),
+        )
+        .await;
+
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(*cleaned_up.lock().unwrap());
+    }
+
+    #[tokio::test]
     async fn test_insert_token_fails() {
         let repo = MockRepo {
             email_taken: false,
             fail_create_user: false,
             fail_insert_token: true,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
 
         let mailer = MockMailer::default();
@@ -883,7 +980,9 @@ mod tests {
             email_taken: false,
             fail_create_user: false,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::clone(&cleaned_up),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
 
         let mailer = MockMailer {
@@ -908,7 +1007,9 @@ mod tests {
             email_taken: false,
             fail_create_user: false,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
 
         let mailer = MockMailer::default();
@@ -945,7 +1046,9 @@ mod tests {
             email_taken: false,
             fail_create_user: false,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
         let invite = invite_fixture(
             "join-token",
@@ -982,7 +1085,9 @@ mod tests {
             email_taken: false,
             fail_create_user: false,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
         let invite = invite_fixture(
             "decline-token",
@@ -1019,7 +1124,9 @@ mod tests {
             email_taken: false,
             fail_create_user: false,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
         let invite = invite_fixture(
             "mismatch-token",
@@ -1054,7 +1161,9 @@ mod tests {
             email_taken: false,
             fail_create_user: false,
             fail_insert_token: false,
+            fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
+            terms_recorded: Arc::new(Mutex::new(false)),
         };
         let invite = invite_fixture(
             "expired-token",

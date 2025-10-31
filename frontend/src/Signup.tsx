@@ -11,6 +11,11 @@ import GithubLoginButton from './components/GithubLoginButton'
 import { MarketingShell } from '@/components/marketing/MarketingShell'
 import { BrandHero } from '@/components/marketing/BrandHero'
 import { MetaTags } from '@/components/MetaTags'
+import { TermsOfServiceContent } from '@/components/legal/TermsOfServiceContent'
+import {
+  TERMS_OF_SERVICE_TITLE,
+  TERMS_OF_SERVICE_VERSION
+} from '@/constants/legal'
 
 const INVITE_ERROR_MESSAGE = 'Invalid or expired invite link'
 
@@ -88,6 +93,8 @@ export default function SignupPage() {
   const [fieldErrors, setFieldErrors] = useState<{ [key: string]: boolean }>({})
   const [loading, setLoading] = useState(false)
   const [serverError, setServerError] = useState<boolean>(false)
+  const [termsAccepted, setTermsAccepted] = useState(false)
+  const [termsModalOpen, setTermsModalOpen] = useState(false)
 
   const [inviteToken, setInviteToken] = useState<string | null>(null)
   const [inviteStatus, setInviteStatus] = useState<InviteStatus>('none')
@@ -232,6 +239,13 @@ export default function SignupPage() {
       newFieldErrors.confirmPassword = true
     }
 
+    if (!termsAccepted) {
+      validationErrors.push(
+        'You must accept the Terms of Service to create an account.'
+      )
+      newFieldErrors.termsAccepted = true
+    }
+
     setFieldErrors(newFieldErrors)
 
     if (validationErrors.length > 0) {
@@ -259,7 +273,8 @@ export default function SignupPage() {
             ? inviteDecision === 'join'
               ? 'join'
               : 'decline'
-            : undefined
+            : undefined,
+        accepted_terms_version: TERMS_OF_SERVICE_VERSION
       } as SignupRequest
 
       const result = await signupUser(request)
@@ -291,6 +306,9 @@ export default function SignupPage() {
 
   return (
     <>
+      {termsModalOpen ? (
+        <TermsOfServiceModal onClose={() => setTermsModalOpen(false)} />
+      ) : null}
       <MetaTags
         title="Sign up – Dsentr"
         description="Create a Dsentr account to design and automate workflows without code."
@@ -493,7 +511,64 @@ export default function SignupPage() {
                 })}
               </div>
 
-              <FormButton disabled={loading} className="w-full justify-center">
+              <div
+                className={`rounded-2xl border p-4 text-sm transition ${
+                  fieldErrors.termsAccepted
+                    ? 'border-red-500/70 bg-red-50/70 dark:border-red-500/50 dark:bg-red-500/10'
+                    : 'border-zinc-200/60 bg-white/70 dark:border-white/10 dark:bg-zinc-900/70'
+                }`}
+              >
+                <label
+                  className="flex items-start gap-3"
+                  htmlFor="termsAccepted"
+                >
+                  <input
+                    id="termsAccepted"
+                    name="termsAccepted"
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(event) => {
+                      setTermsAccepted(event.target.checked)
+                      if (event.target.checked) {
+                        setFieldErrors((prev) => ({
+                          ...prev,
+                          termsAccepted: false
+                        }))
+                      }
+                    }}
+                    className="mt-1 h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-600"
+                    aria-describedby={
+                      fieldErrors.termsAccepted
+                        ? 'terms-acceptance-error'
+                        : undefined
+                    }
+                  />
+                  <span className="text-left text-zinc-600 dark:text-zinc-300">
+                    I agree to the{' '}
+                    <button
+                      type="button"
+                      onClick={() => setTermsModalOpen(true)}
+                      className="font-medium text-indigo-600 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-300"
+                    >
+                      Terms of Service
+                    </button>
+                    .
+                  </span>
+                </label>
+                {fieldErrors.termsAccepted ? (
+                  <p
+                    id="terms-acceptance-error"
+                    className="mt-2 text-xs text-red-600 dark:text-red-300"
+                  >
+                    You must accept the Terms of Service to create an account.
+                  </p>
+                ) : null}
+              </div>
+
+              <FormButton
+                disabled={loading || !termsAccepted}
+                className="w-full justify-center"
+              >
                 {loading ? 'Signing up…' : submitLabel}
               </FormButton>
               {message &&
@@ -515,6 +590,57 @@ export default function SignupPage() {
         </div>
       </MarketingShell>
     </>
+  )
+}
+
+function TermsOfServiceModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      <div
+        className="absolute inset-0 bg-black/40"
+        aria-hidden="true"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="terms-of-service-modal-title"
+        className="relative max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-zinc-200/70 bg-white shadow-xl shadow-indigo-500/20 dark:border-white/10 dark:bg-zinc-900"
+      >
+        <div className="flex items-center justify-between border-b border-zinc-200/70 bg-white/80 px-6 py-4 dark:border-white/10 dark:bg-zinc-900/80">
+          <h2
+            id="terms-of-service-modal-title"
+            className="text-lg font-semibold text-zinc-900 dark:text-zinc-100"
+          >
+            {TERMS_OF_SERVICE_TITLE}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-zinc-500 transition hover:text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-zinc-400 dark:hover:text-zinc-200"
+            aria-label="Close terms of service"
+          >
+            <span className="text-xl leading-none">&times;</span>
+          </button>
+        </div>
+        <div className="themed-scroll max-h-[70vh] overflow-y-auto px-6 py-4 pr-8 text-sm text-zinc-700 dark:text-zinc-200">
+          <TermsOfServiceContent />
+        </div>
+      </div>
+    </div>
   )
 }
 

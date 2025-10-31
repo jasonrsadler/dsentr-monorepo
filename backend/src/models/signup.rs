@@ -24,4 +24,6 @@ pub struct SignupPayload {
     pub invite_token: Option<String>,
     #[serde(default)]
     pub invite_decision: Option<SignupInviteDecision>,
+    #[serde(default)]
+    pub accepted_terms_version: Option<String>,
 }

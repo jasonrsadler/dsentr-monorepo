@@ -35,6 +35,7 @@ pub struct MockDb {
     pub user_settings: Mutex<Value>,
     pub stripe_customer_id: Mutex<Option<String>>,
     pub update_user_plan_calls: Mutex<usize>,
+    pub terms_acceptances: Mutex<Vec<(Uuid, String, OffsetDateTime)>>,
 }
 
 impl Default for MockDb {
@@ -49,6 +50,7 @@ impl Default for MockDb {
             user_settings: Mutex::new(Value::Object(Default::default())),
             stripe_customer_id: Mutex::new(None),
             update_user_plan_calls: Mutex::new(0),
+            terms_acceptances: Mutex::new(vec![]),
         }
     }
 }
@@ -133,6 +135,19 @@ impl UserRepository for MockDb {
         _: OauthProvider,
     ) -> Result<Uuid, sqlx::Error> {
         todo!()
+    }
+    async fn record_terms_acceptance(
+        &self,
+        user_id: Uuid,
+        terms_version: &str,
+        accepted_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        self.terms_acceptances.lock().unwrap().push((
+            user_id,
+            terms_version.to_string(),
+            accepted_at,
+        ));
+        Ok(())
     }
     async fn insert_verification_token(
         &self,

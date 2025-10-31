@@ -13,6 +13,7 @@ type SignupRequest = {
   settings?: Record<string, any>
   invite_token?: string
   invite_decision?: 'join' | 'decline'
+  accepted_terms_version: string
 }
 
 export async function signupUser(

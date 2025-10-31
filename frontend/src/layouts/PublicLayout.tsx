@@ -1,5 +1,5 @@
 // src/layouts/PublicLayout.tsx
-import { Outlet } from 'react-router-dom'
+import { Link, Outlet } from 'react-router-dom'
 import { NavLinks } from '@/components/NavLinks'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { MobileNav } from '@/components/MobileNav'
@@ -62,7 +62,18 @@ export default function PublicLayout() {
       </main>
 
       <footer className="text-center py-6 text-sm text-zinc-500 dark:text-zinc-400 border-t border-zinc-200 dark:border-zinc-700">
-        &copy; {new Date().getFullYear()} Dsentr. All rights reserved.
+        <div className="space-x-2">
+          <span>
+            &copy; {new Date().getFullYear()} Dsentr. All rights reserved.
+          </span>
+          <span aria-hidden="true">•</span>
+          <Link
+            to="/terms-of-service"
+            className="font-medium text-indigo-600 transition hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
+          >
+            Terms of Service
+          </Link>
+        </div>
       </footer>
     </div>
   )

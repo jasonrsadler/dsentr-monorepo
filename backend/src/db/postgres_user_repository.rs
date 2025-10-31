@@ -228,6 +228,26 @@ impl UserRepository for PostgresUserRepository {
         .await
     }
 
+    async fn record_terms_acceptance(
+        &self,
+        user_id: Uuid,
+        terms_version: &str,
+        accepted_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            INSERT INTO user_terms_acceptances (user_id, terms_version, accepted_at)
+            VALUES ($1, $2, $3)
+            "#,
+            user_id,
+            terms_version,
+            accepted_at
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
     async fn insert_verification_token(
         &self,
         user_id: Uuid,

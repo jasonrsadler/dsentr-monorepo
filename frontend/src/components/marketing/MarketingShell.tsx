@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 
 interface MarketingShellProps {
   children: ReactNode
@@ -25,6 +26,14 @@ export function MarketingShell({
           className={`rounded-3xl border border-white/60 bg-white/80 p-10 shadow-2xl shadow-indigo-500/10 backdrop-blur-2xl transition-colors dark:border-white/10 dark:bg-zinc-900/80 sm:p-12 ${panelClassName ?? ''}`}
         >
           {children}
+        </div>
+        <div className="mt-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
+          <Link
+            to="/terms-of-service"
+            className="font-medium text-indigo-600 transition hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
+          >
+            Terms of Service
+          </Link>
         </div>
       </div>
     </div>

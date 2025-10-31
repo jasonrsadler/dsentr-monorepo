@@ -208,6 +208,15 @@ mod tests {
             Ok(Uuid::new_v4())
         }
 
+        async fn record_terms_acceptance(
+            &self,
+            _: Uuid,
+            _: &str,
+            _: OffsetDateTime,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
+
         async fn insert_verification_token(
             &self,
             _: Uuid,

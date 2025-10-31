@@ -19,6 +19,7 @@ import NotFound from '@/components/NotFound'
 import Dashboard from './layouts/DashboardLayouts/Dashboard'
 import WorkspaceOnboarding from './WorkspaceOnboarding'
 import ConfirmAccountDeletion from '@/ConfirmAccountDeletion'
+import TermsOfServicePage from '@/TermsOfService'
 
 export default function App() {
   const { isLoading, checkAuth } = useAuth()
@@ -58,6 +59,7 @@ export default function App() {
           path="/delete-account/:token"
           element={<ConfirmAccountDeletion />}
         />
+        <Route path="/terms-of-service" element={<TermsOfServicePage />} />
       </Route>
 
       <Route
