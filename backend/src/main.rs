@@ -322,7 +322,8 @@ async fn main() -> Result<()> {
         .route("/github-login", get(github_login))
         .route("/google-callback", get(google_callback))
         .route("/github-callback", get(github_callback))
-        .route("/verify-reset-token/{token}", get(handle_verify_token));
+        .route("/verify-reset-token/{token}", get(handle_verify_token))
+        .route("/healthz", get(|| async { Json(json!({"status": "ok"})) }));
 
     // Nest them together
     let auth_routes = csrf_protected_routes
