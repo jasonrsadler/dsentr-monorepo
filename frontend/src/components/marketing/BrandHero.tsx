@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { DSentrLogo } from '@/components/DSentrLogo'
+import { DSentrLogo } from '@/assets/svg-components/DSentrLogo'
 
 interface BrandHeroProps {
   title: string

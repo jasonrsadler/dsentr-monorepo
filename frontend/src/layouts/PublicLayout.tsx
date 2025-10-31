@@ -4,7 +4,7 @@ import { NavLinks } from '@/components/NavLinks'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { MobileNav } from '@/components/MobileNav'
 import { NavigateButton } from '@/components/ui/buttons/NavigateButton'
-import { DSentrLogo } from '@/components/DSentrLogo'
+import { DSentrLogo } from '@/assets/svg-components/DSentrLogo'
 import { useAuth } from '@/stores/auth'
 
 export default function PublicLayout() {

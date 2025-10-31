@@ -17,7 +17,7 @@ import IntegrationsTab, {
 import PlanTab from '@/components/settings/tabs/PlanTab'
 import MembersTab from '@/components/settings/tabs/MembersTab'
 import DangerZoneTab from '@/components/settings/tabs/DangerZoneTab'
-import { DSentrLogo } from '@/components/DSentrLogo'
+import { DSentrLogo } from '@/assets/svg-components/DSentrLogo'
 import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
 import ProfileButton from '@/components/profile/ProfileButton'
