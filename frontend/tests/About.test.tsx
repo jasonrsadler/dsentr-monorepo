@@ -1,17 +1,26 @@
 // src/__tests__/About.test.tsx
 import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import About from '@/About'
 
 describe('About page', () => {
   it('renders the main heading with Dsentr', () => {
-    render(<About />)
+    render(
+      <MemoryRouter>
+        <About />
+      </MemoryRouter>
+    )
     expect(
       screen.getByRole('heading', { name: /About Dsentr/i })
     ).toBeInTheDocument()
   })
 
   it('renders all three sections', () => {
-    render(<About />)
+    render(
+      <MemoryRouter>
+        <About />
+      </MemoryRouter>
+    )
 
     expect(
       screen.getByRole('heading', { name: /Our Mission/i })
@@ -25,7 +34,11 @@ describe('About page', () => {
   })
 
   it('renders the story section', () => {
-    render(<About />)
+    render(
+      <MemoryRouter>
+        <About />
+      </MemoryRouter>
+    )
 
     expect(
       screen.getByRole('heading', { name: /The Story Behind Dsentr/i })

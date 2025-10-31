@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import LogoutHandler from '@/Logout'
 
 // Create manual mocks
@@ -25,7 +26,11 @@ describe('<LogoutHandler />', () => {
   })
 
   it('calls logout and navigates to /login', () => {
-    render(<LogoutHandler />)
+    render(
+      <MemoryRouter>
+        <LogoutHandler />
+      </MemoryRouter>
+    )
 
     expect(mockLogout).toHaveBeenCalledTimes(1)
     expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true })

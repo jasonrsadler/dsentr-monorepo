@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import GetStarted from '@/GetStarted'
 
 import { joinWaitlist } from '@/lib/waitlistApi'
@@ -15,7 +16,11 @@ describe('GetStarted', () => {
   })
 
   it('renders the form initially', () => {
-    render(<GetStarted />)
+    render(
+      <MemoryRouter>
+        <GetStarted />
+      </MemoryRouter>
+    )
     expect(
       screen.getByRole('heading', { name: /be first to build/i })
     ).toBeInTheDocument()
@@ -28,7 +33,11 @@ describe('GetStarted', () => {
   it('submits the form and shows success message', async () => {
     ;(joinWaitlist as Mock).mockResolvedValueOnce(undefined)
 
-    render(<GetStarted />)
+    render(
+      <MemoryRouter>
+        <GetStarted />
+      </MemoryRouter>
+    )
 
     fireEvent.change(screen.getByPlaceholderText(/you@example\.com/i), {
       target: { value: 'test@example.com' }
@@ -47,7 +56,11 @@ describe('GetStarted', () => {
       new Error('Something went wrong')
     )
 
-    render(<GetStarted />)
+    render(
+      <MemoryRouter>
+        <GetStarted />
+      </MemoryRouter>
+    )
 
     fireEvent.change(screen.getByPlaceholderText(/you@example\.com/i), {
       target: { value: 'fail@example.com' }

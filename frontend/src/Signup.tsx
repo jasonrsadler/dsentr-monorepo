@@ -565,10 +565,7 @@ export default function SignupPage() {
                 ) : null}
               </div>
 
-              <FormButton
-                disabled={loading || !termsAccepted}
-                className="w-full justify-center"
-              >
+              <FormButton disabled={loading} className="w-full justify-center">
                 {loading ? 'Signing up…' : submitLabel}
               </FormButton>
               {message &&

@@ -1,9 +1,14 @@
 import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import CheckEmail from '@/CheckEmail'
 
 describe('CheckEmail', () => {
   it('renders confirmation message', () => {
-    render(<CheckEmail />)
+    render(
+      <MemoryRouter>
+        <CheckEmail />
+      </MemoryRouter>
+    )
 
     expect(
       screen.getByRole('heading', { name: /check your email/i })

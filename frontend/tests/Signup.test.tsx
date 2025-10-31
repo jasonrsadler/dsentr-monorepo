@@ -137,6 +137,9 @@ describe('SignupPage', () => {
       target: { value: 'Password123!' }
     })
 
+    // Accept terms to enable submission
+    fireEvent.click(screen.getByRole('checkbox'))
+
     const joinButtons = screen.getAllByRole('button', {
       name: /join workspace/i
     })
@@ -200,6 +203,9 @@ describe('SignupPage', () => {
     fireEvent.change(screen.getByLabelText(/Verify Password/i), {
       target: { value: 'Password123!' }
     })
+
+    // Accept terms to enable submission
+    fireEvent.click(screen.getByRole('checkbox'))
 
     fireEvent.click(screen.getByRole('button', { name: /create account/i }))
 

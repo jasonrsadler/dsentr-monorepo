@@ -25,10 +25,10 @@ describe('Home', () => {
     ).toBeInTheDocument()
   })
 
-  it('has a Get Started button linking to /get-started', () => {
+  it('has a Get Started button linking to /signup', () => {
     const button = screen.getByRole('link', { name: /get started/i })
     expect(button).toBeInTheDocument()
-    expect(button).toHaveAttribute('href', '/get-started')
+    expect(button).toHaveAttribute('href', '/signup')
   })
 
   it('renders all three feature headings and descriptions', () => {

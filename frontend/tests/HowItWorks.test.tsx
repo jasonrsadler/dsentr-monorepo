@@ -51,9 +51,9 @@ describe('HowItWorks', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders the Try Now button linking to /get-started', () => {
+  it('renders the Try Now button linking to /signup', () => {
     const button = screen.getByRole('link', { name: /try now/i })
     expect(button).toBeInTheDocument()
-    expect(button).toHaveAttribute('href', '/get-started')
+    expect(button).toHaveAttribute('href', '/signup')
   })
 })

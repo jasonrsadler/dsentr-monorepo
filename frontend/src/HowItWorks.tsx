@@ -109,7 +109,7 @@ export default function HowItWorks() {
               Ready to orchestrate your next workflow? Join the waitlist to
               access Dsentr as soon as it opens to early teams.
             </p>
-            <NavigateButton to="/get-started" className="px-6 py-3 text-base">
+            <NavigateButton to="/signup" className="px-6 py-3 text-base">
               Try Now
             </NavigateButton>
           </div>

@@ -34,7 +34,7 @@ export default function Home() {
             description="Dsentr is a modular no-code automation platform that lets you assemble workflows using plug-and-play components."
             kicker="Get started"
             actions={
-              <NavigateButton to="/get-started" className="px-6 py-3 text-base">
+              <NavigateButton to="/signup" className="px-6 py-3 text-base">
                 Get Started
               </NavigateButton>
             }

@@ -176,3 +176,8 @@ Content Security Policy hardening:
   - The primary “Update plan” button stays disabled until the subscription actually expires.
   - The Workspace card shows an info message with the reversion date and a small “Continue subscription” button that calls `POST /api/workspaces/billing/subscription/resume` to clear the scheduled cancel.
   - Messages include an inline info icon; spacing uses `inline-flex` + `gap-1` to avoid layout jitter.
+
+## Test reliability and signup UX
+- Signup: kept Terms of Service acceptance as a server-side validation requirement but no longer disables the submit button when unchecked. This allows users (and tests) to trigger full form validation feedback in one action; the handler still enforces acceptance and surfaces a clear error.
+- Tests: components rendered inside `MarketingShell` use `react-router-dom`'s `Link`. Updated tests for `About`, `CheckEmail`, `GetStarted`, and `Logout` to wrap components in `MemoryRouter` so router context is available during rendering.
+- Tests: updated `Signup.test.tsx` to explicitly tick the Terms checkbox before submitting invite flows so API calls (`signupUser`) occur as expected.
