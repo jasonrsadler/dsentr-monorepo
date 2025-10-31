@@ -21,6 +21,7 @@ import WorkspaceOnboarding from './WorkspaceOnboarding'
 import ConfirmAccountDeletion from '@/ConfirmAccountDeletion'
 import TermsOfServicePage from '@/TermsOfService'
 import PrivacyPolicyPage from '@/PrivacyPolicy'
+import CookieBanner from './components/CookieBanner'
 
 export default function App() {
   const { isLoading, checkAuth } = useAuth()
@@ -42,49 +43,52 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      {/* Public pages use PublicLayout */}
-      <Route element={<PublicLayout />}>
-        <Route path="/" element={<Home />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/how-it-works" element={<HowItWorks />} />
-        <Route path="/signup" element={<Signup />} />
-        <Route path="/check-email" element={<CheckEmail />} />
-        <Route path="/verify-email" element={<VerifyEmail />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/logout" element={<LogoutHandler />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password/:token" element={<ResetPassword />} />
+    <>
+      <Routes>
+        {/* Public pages use PublicLayout */}
+        <Route element={<PublicLayout />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/how-it-works" element={<HowItWorks />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/check-email" element={<CheckEmail />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/logout" element={<LogoutHandler />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password/:token" element={<ResetPassword />} />
+          <Route
+            path="/delete-account/:token"
+            element={<ConfirmAccountDeletion />}
+          />
+          <Route path="/terms-of-service" element={<TermsOfServicePage />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+        </Route>
+
         <Route
-          path="/delete-account/:token"
-          element={<ConfirmAccountDeletion />}
+          path="/onboarding"
+          element={
+            <ProtectedRoute>
+              <WorkspaceOnboarding />
+            </ProtectedRoute>
+          }
         />
-        <Route path="/terms-of-service" element={<TermsOfServicePage />} />
-        <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
-      </Route>
 
-      <Route
-        path="/onboarding"
-        element={
-          <ProtectedRoute>
-            <WorkspaceOnboarding />
-          </ProtectedRoute>
-        }
-      />
+        {/* Dashboard pages use DashboardLayout */}
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Dashboard />} />
+        </Route>
 
-      {/* Dashboard pages use DashboardLayout */}
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <DashboardLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route index element={<Dashboard />} />
-      </Route>
-
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+      <CookieBanner />
+    </>
   )
 }
