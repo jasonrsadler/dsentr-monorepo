@@ -110,6 +110,7 @@ async fn process_plan_change(
 ) -> Result<serde_json::Value, Response> {
     let mut created_workspace: Option<Workspace> = None;
     let mut updated_workflows: Vec<Workflow> = Vec::new();
+    #[allow(unused_assignments)]
     let mut workspace_id: Option<Uuid> = None;
 
     match payload.plan_tier {
