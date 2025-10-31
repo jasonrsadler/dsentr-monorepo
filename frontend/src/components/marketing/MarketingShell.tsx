@@ -27,14 +27,6 @@ export function MarketingShell({
         >
           {children}
         </div>
-        <div className="mt-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
-          <Link
-            to="/terms-of-service"
-            className="font-medium text-indigo-600 transition hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
-          >
-            Terms of Service
-          </Link>
-        </div>
       </div>
     </div>
   )

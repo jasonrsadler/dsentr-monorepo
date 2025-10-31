@@ -73,6 +73,13 @@ export default function PublicLayout() {
           >
             Terms of Service
           </Link>
+          <span aria-hidden="true">•</span>
+          <Link
+            to="/privacy-policy"
+            className="font-medium text-indigo-600 transition hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
+          >
+            Privacy Policy
+          </Link>
         </div>
       </footer>
     </div>
