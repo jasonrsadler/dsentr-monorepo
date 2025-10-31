@@ -2,8 +2,8 @@ import { API_BASE_URL } from './config'
 
 let cachedCsrfToken: string | null = null
 
-export async function getCsrfToken(): Promise<string> {
-  if (cachedCsrfToken) {
+export async function getCsrfToken(forceRefresh = false): Promise<string> {
+  if (!forceRefresh && cachedCsrfToken) {
     return cachedCsrfToken
   }
 
@@ -18,4 +18,8 @@ export async function getCsrfToken(): Promise<string> {
   const token = await res.text()
   cachedCsrfToken = token
   return token
+}
+
+export function invalidateCsrfToken() {
+  cachedCsrfToken = null
 }

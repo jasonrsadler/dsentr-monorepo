@@ -1,6 +1,6 @@
 import { useAuth } from '@/stores/auth'
 import { API_BASE_URL } from './config'
-import { getCsrfToken } from './csrfCache'
+import { getCsrfToken, invalidateCsrfToken } from './csrfCache'
 
 type SignupRequest = {
   first_name: string
@@ -14,6 +14,14 @@ type SignupRequest = {
   invite_token?: string
   invite_decision?: 'join' | 'decline'
   accepted_terms_version: string
+}
+
+type LoginResponse = {
+  success?: boolean
+  message?: string
+  user?: any
+  memberships?: any[]
+  requires_onboarding?: boolean
 }
 
 export async function signupUser(
@@ -62,25 +70,64 @@ export async function loginWithEmail({
 }) {
   const { login } = useAuth.getState() // ✅ access Zustand store outside React
 
-  try {
-    const csrfToken = await getCsrfToken()
-    email = email.toLocaleLowerCase()
-    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+  const parseLoginResponse = (raw: string): LoginResponse | null => {
+    if (!raw) {
+      return null
+    }
+
+    try {
+      return JSON.parse(raw) as LoginResponse
+    } catch (err) {
+      console.warn('Failed to parse login response JSON', err)
+      return null
+    }
+  }
+
+  const normalizedEmail = email.toLocaleLowerCase()
+
+  const performLogin = async (forceRefresh = false) => {
+    const csrfToken = await getCsrfToken(forceRefresh)
+    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-csrf-token': csrfToken
       },
-      body: JSON.stringify({ email, password, remember }),
+      body: JSON.stringify({ email: normalizedEmail, password, remember }),
       credentials: 'include'
     })
 
-    const data = await res.json()
+    const raw = await response.text()
+    const data = parseLoginResponse(raw)
 
-    if (!res.ok || !data.success) {
+    return { response, data }
+  }
+
+  try {
+    let { response, data } = await performLogin(false)
+
+    const isEmptyResponse =
+      data == null ||
+      (typeof data === 'object' &&
+        !Array.isArray(data) &&
+        Object.keys(data as Record<string, unknown>).length === 0)
+
+    const shouldRetryWithFreshToken = response.status === 403 && isEmptyResponse
+
+    if (shouldRetryWithFreshToken) {
+      invalidateCsrfToken()
+      ;({ response, data } = await performLogin(true))
+    }
+
+    if (!response.ok || !data?.success) {
+      const message =
+        (data && typeof data === 'object' && typeof data.message === 'string'
+          ? data.message
+          : null) || 'Login failed'
+
       return {
         success: false,
-        message: data?.message || 'Login failed'
+        message
       }
     }
 

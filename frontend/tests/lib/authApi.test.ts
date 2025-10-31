@@ -9,6 +9,27 @@ describe('authApi', () => {
   // Mock fetch globally for all tests
   const globalFetch = global.fetch
 
+  const buildFetchResponse = <T>(
+    body: T,
+    init?: { ok?: boolean; status?: number }
+  ): Response => {
+    const ok = init?.ok ?? true
+    const status = init?.status ?? (ok ? 200 : 400)
+    const serialized =
+      body === undefined
+        ? ''
+        : typeof body === 'string'
+          ? body
+          : JSON.stringify(body)
+
+    return {
+      ok,
+      status,
+      json: vi.fn().mockResolvedValue(body),
+      text: vi.fn().mockResolvedValue(serialized)
+    } as unknown as Response
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -107,10 +128,11 @@ describe('authApi', () => {
         message: 'Logged in'
       }
 
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => responseData
-      } as Response)
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(
+          buildFetchResponse(responseData, { ok: true, status: 200 })
+        )
 
       const result = await authApi.loginWithEmail({
         email: 'USER@EXAMPLE.COM',
@@ -142,10 +164,14 @@ describe('authApi', () => {
       })
 
       // Case 1: res.ok = false
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        json: async () => ({ message: 'Invalid credentials' })
-      } as Response)
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(
+          buildFetchResponse(
+            { message: 'Invalid credentials' },
+            { ok: false, status: 403 }
+          )
+        )
 
       let result = await authApi.loginWithEmail({
         email: 'a@b.com',
@@ -156,10 +182,14 @@ describe('authApi', () => {
       expect(result.message).toBe('Invalid credentials')
 
       // Case 2: res.ok = true but data.success = false
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ success: false, message: 'Wrong password' })
-      } as Response)
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(
+          buildFetchResponse(
+            { success: false, message: 'Wrong password' },
+            { ok: true, status: 200 }
+          )
+        )
 
       result = await authApi.loginWithEmail({
         email: 'a@b.com',
@@ -189,6 +219,55 @@ describe('authApi', () => {
 
       expect(result.success).toBe(false)
       expect(result.message).toMatch(/Network fail/)
+    })
+
+    it('refreshes the CSRF token and retries when the first response is an empty 403', async () => {
+      const getCsrfTokenMock = vi
+        .spyOn(csrfCache, 'getCsrfToken')
+        .mockImplementation(async (forceRefresh?: boolean) =>
+          forceRefresh ? 'new-csrf' : 'old-csrf'
+        )
+      const invalidateSpy = vi.spyOn(csrfCache, 'invalidateCsrfToken')
+
+      const user = { id: 'user-123', email: 'user@example.com' }
+      const loginSpy = vi.fn()
+      vi.spyOn(useAuth, 'getState').mockReturnValue({
+        user: null,
+        isLoading: false,
+        login: loginSpy,
+        logout: vi.fn(),
+        checkAuth: vi.fn().mockResolvedValue(undefined)
+      })
+
+      const firstResponse: Response = {
+        ok: false,
+        status: 403,
+        json: vi.fn().mockResolvedValue(null),
+        text: vi.fn().mockResolvedValue('')
+      } as unknown as Response
+
+      const secondResponse = buildFetchResponse(
+        { success: true, user },
+        { ok: true, status: 200 }
+      )
+
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(firstResponse)
+        .mockResolvedValueOnce(secondResponse)
+      global.fetch = fetchMock
+
+      const result = await authApi.loginWithEmail({
+        email: 'user@example.com',
+        password: 'secret'
+      })
+
+      expect(result.success).toBe(true)
+      expect(loginSpy).toHaveBeenCalledWith(user)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(getCsrfTokenMock).toHaveBeenNthCalledWith(1, false)
+      expect(getCsrfTokenMock).toHaveBeenNthCalledWith(2, true)
+      expect(invalidateSpy).toHaveBeenCalledTimes(1)
     })
   })
 

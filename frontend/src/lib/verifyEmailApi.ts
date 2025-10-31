@@ -1,5 +1,5 @@
 import { API_BASE_URL } from './config'
-import { getCsrfToken } from './csrfCache'
+import { getCsrfToken, invalidateCsrfToken } from './csrfCache'
 
 export async function verifyEmail(token: string | null) {
   if (!token) {
@@ -27,6 +27,7 @@ export async function verifyEmail(token: string | null) {
       }
     }
 
+    invalidateCsrfToken()
     return { success: true }
   } catch (err: any) {
     return {
