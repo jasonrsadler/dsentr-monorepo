@@ -13,6 +13,7 @@ use anyhow::{anyhow, Context, Result};
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::HeaderValue;
 use axum::http::Method;
+use axum::Json;
 use axum::{
     http::HeaderName,
     response::{IntoResponse, Response},
@@ -323,7 +324,10 @@ async fn main() -> Result<()> {
         .route("/google-callback", get(google_callback))
         .route("/github-callback", get(github_callback))
         .route("/verify-reset-token/{token}", get(handle_verify_token))
-        .route("/healthz", get(|| async { Json(json!({"status": "ok"})) }));
+        .route(
+            "/healthz",
+            get(|| async { Json(serde_json::json!({"status": "ok"})) }),
+        );
 
     // Nest them together
     let auth_routes = csrf_protected_routes
