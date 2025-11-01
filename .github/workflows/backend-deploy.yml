@@ -41,7 +41,7 @@ jobs:
         run: sqlx migrate run
 
       - name: Trigger Render deploy
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/master'
         run: |
           echo "Triggering Render deploy..."
           curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
