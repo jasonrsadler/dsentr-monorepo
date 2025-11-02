@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM workspaces WHERE owner_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fcc0a9174e0b99e04c90fb28761e1aab4ef0e8dc39b3f1221f6c9583a0791df2"
+}

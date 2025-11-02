@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM workflows\n            WHERE user_id = $1\n               OR workspace_id IN (SELECT id FROM workspaces WHERE owner_id = $1)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e2ec128196212e0dec49fd0be11a174e53eba686655976ddb4b53f585567aeb4"
+}

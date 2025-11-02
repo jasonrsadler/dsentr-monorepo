@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*)::bigint\n            FROM workspace_members wm\n            JOIN workspaces w ON w.id = wm.workspace_id\n            WHERE wm.user_id = $1\n              AND w.owner_id <> $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7fcaaa7850eebb001059a35e86329733504ea481a0c64e12790ea1887722becc"
+}

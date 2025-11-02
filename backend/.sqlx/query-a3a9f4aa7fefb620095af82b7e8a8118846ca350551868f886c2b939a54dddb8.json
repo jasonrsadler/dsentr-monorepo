@@ -1,0 +1,140 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                t.token,\n                t.user_id AS token_user_id,\n                t.expires_at,\n                t.consumed_at,\n                t.created_at AS token_created_at,\n                u.id,\n                u.email,\n                u.password_hash,\n                u.first_name,\n                u.last_name,\n                u.role AS \"role: crate::models::user::UserRole\",\n                u.plan,\n                u.company_name,\n                u.stripe_customer_id,\n                u.oauth_provider AS \"oauth_provider: OauthProvider\",\n                u.onboarded_at,\n                u.created_at\n            FROM account_deletion_tokens t\n            JOIN users u ON u.id = t.user_id\n            WHERE t.token = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "token_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "consumed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "token_created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "password_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "first_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "role: crate::models::user::UserRole",
+        "type_info": {
+          "Custom": {
+            "name": "user_role",
+            "kind": {
+              "Enum": [
+                "user",
+                "admin"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "plan",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "company_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "stripe_customer_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "oauth_provider: OauthProvider",
+        "type_info": {
+          "Custom": {
+            "name": "oauth_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "github",
+                "apple",
+                "email"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "onboarded_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "a3a9f4aa7fefb620095af82b7e8a8118846ca350551868f886c2b939a54dddb8"
+}

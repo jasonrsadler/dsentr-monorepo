@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_deletion_tokens SET consumed_at = now() WHERE token = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db2b757dce3117a7fd18a944c4cc2f32f254c2b755b5680d8129326d669c7b53"
+}
