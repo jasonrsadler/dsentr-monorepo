@@ -42,6 +42,8 @@ jobs:
 
       - name: Trigger Render deploy
         if: github.ref == 'refs/heads/master'
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           echo "Triggering Render deploy..."
-          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
