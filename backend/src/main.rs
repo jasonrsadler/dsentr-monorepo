@@ -577,7 +577,8 @@ async fn main() -> Result<()> {
         .layer(cors);
 
     let make_service = app.into_make_service_with_connect_info::<SocketAddr>();
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let addr = format!("0.0.0.0:{}", port).parse().unwrap();
 
     // Start background workers (simple no-op executor for now)
     worker::start_background_workers(state_for_worker).await;
