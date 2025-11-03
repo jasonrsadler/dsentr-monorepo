@@ -35,11 +35,6 @@ jobs:
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features rustls,postgres
 
-      - name: Run database migrations
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: sqlx migrate run
-
       - name: Trigger Render deploy
         if: github.ref == 'refs/heads/master'
         env:
