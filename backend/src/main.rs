@@ -63,7 +63,7 @@ use services::oauth::github::client::GitHubOAuthClient;
 use services::oauth::google::client::GoogleOAuthClient;
 use services::oauth::workspace_service::{WorkspaceOAuthService, WorkspaceTokenRefresher};
 use sqlx::PgPool;
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 #[cfg(not(feature = "tls"))]
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
