@@ -579,7 +579,7 @@ async fn main() -> Result<()> {
     let make_service = app.into_make_service_with_connect_info::<SocketAddr>();
     use std::net::SocketAddr;
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let port = std::env::var("PORT").expect("PORT not set");
     let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
 
     // Start background workers (simple no-op executor for now)
