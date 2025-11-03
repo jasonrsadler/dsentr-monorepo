@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use serde_json::Value;
 use sqlx::{PgPool, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -333,7 +332,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             event.workspace_id,
             event.actor_id,
             event.event_type,
-            event.metadata as Value,
+            event.metadata as serde_json::Value,
         )
         .fetch_one(&self.pool)
         .await
