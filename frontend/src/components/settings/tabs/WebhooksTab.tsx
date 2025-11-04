@@ -40,7 +40,7 @@ export default function WebhooksTab() {
           return ws[0]?.id ?? ''
         })
       })
-      .catch(() => { })
+      .catch(() => {})
   }, [activeWorkspaceId])
 
   useEffect(() => {
@@ -67,7 +67,7 @@ export default function WebhooksTab() {
         setReplayWindow(cfg.replay_window_sec)
         setSigningKey(cfg.signing_key)
       })
-      .catch(() => { })
+      .catch(() => {})
   }, [workflowId])
 
   const selected = useMemo(

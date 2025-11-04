@@ -42,23 +42,23 @@ export default function ConfirmAccountDeletion() {
     }
 
     let cancelled = false
-      ; (async () => {
-        try {
-          const data = await getAccountDeletionSummary(token)
-          if (cancelled) return
-          setSummary(data)
-          setEmail(data.email)
-          setSummaryState('ready')
-        } catch (err) {
-          if (cancelled) return
-          setSummaryState('error')
-          setError(
-            err instanceof Error
-              ? err.message
-              : 'Failed to load deletion details.'
-          )
-        }
-      })()
+    ;(async () => {
+      try {
+        const data = await getAccountDeletionSummary(token)
+        if (cancelled) return
+        setSummary(data)
+        setEmail(data.email)
+        setSummaryState('ready')
+      } catch (err) {
+        if (cancelled) return
+        setSummaryState('error')
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load deletion details.'
+        )
+      }
+    })()
 
     return () => {
       cancelled = true

@@ -33,7 +33,7 @@ export default function VerifyEmail() {
           setMessage('Email verified! Redirecting...')
           const delay =
             typeof import.meta !== 'undefined' &&
-              import.meta.env?.MODE === 'test'
+            import.meta.env?.MODE === 'test'
               ? 0
               : 3000
           setTimeout(() => navigate('/dashboard'), delay)
@@ -70,12 +70,13 @@ export default function VerifyEmail() {
             kicker="Account confirmation"
           />
           <span
-            className={`mx-auto inline-flex h-20 w-20 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-500 dark:text-indigo-300 ${status === 'success'
-              ? 'text-emerald-500'
-              : status === 'error'
-                ? 'text-red-500'
-                : 'text-indigo-500'
-              }`}
+            className={`mx-auto inline-flex h-20 w-20 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-500 dark:text-indigo-300 ${
+              status === 'success'
+                ? 'text-emerald-500'
+                : status === 'error'
+                  ? 'text-red-500'
+                  : 'text-indigo-500'
+            }`}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"

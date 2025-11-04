@@ -20,11 +20,11 @@ const certPath = path.join(certDirectory, 'localhost+2.pem')
 const httpsConfig =
   !isTestEnv && fs.existsSync(keyPath) && fs.existsSync(certPath)
     ? {
-      https: {
-        key: fs.readFileSync(keyPath),
-        cert: fs.readFileSync(certPath)
+        https: {
+          key: fs.readFileSync(keyPath),
+          cert: fs.readFileSync(certPath)
+        }
       }
-    }
     : {}
 
 export default defineConfig({

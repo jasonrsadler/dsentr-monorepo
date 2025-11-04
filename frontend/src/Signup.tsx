@@ -418,20 +418,22 @@ export default function SignupPage() {
                   <button
                     type="button"
                     onClick={() => setInviteDecision('join')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${inviteDecision === 'join'
-                      ? 'border-indigo-500 bg-indigo-500 text-white shadow'
-                      : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
-                      }`}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      inviteDecision === 'join'
+                        ? 'border-indigo-500 bg-indigo-500 text-white shadow'
+                        : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
+                    }`}
                   >
                     Join workspace
                   </button>
                   <button
                     type="button"
                     onClick={() => setInviteDecision('solo')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${inviteDecision === 'solo'
-                      ? 'border-indigo-500 bg-indigo-500 text-white shadow'
-                      : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
-                      }`}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      inviteDecision === 'solo'
+                        ? 'border-indigo-500 bg-indigo-500 text-white shadow'
+                        : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
+                    }`}
                   >
                     Create my own workspace
                   </button>
@@ -523,21 +525,23 @@ export default function SignupPage() {
                         value={value}
                         onChange={handleChange}
                         readOnly={isReadOnly}
-                        className={`mt-2 w-full rounded-xl border bg-white px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:bg-zinc-800 dark:text-zinc-100 ${hasError
-                          ? 'border-red-500/80 focus:ring-red-200'
-                          : 'border-zinc-300/70 dark:border-zinc-600'
-                          } ${isReadOnly ? 'cursor-not-allowed bg-zinc-100 dark:bg-zinc-800' : ''}`}
+                        className={`mt-2 w-full rounded-xl border bg-white px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:bg-zinc-800 dark:text-zinc-100 ${
+                          hasError
+                            ? 'border-red-500/80 focus:ring-red-200'
+                            : 'border-zinc-300/70 dark:border-zinc-600'
+                        } ${isReadOnly ? 'cursor-not-allowed bg-zinc-100 dark:bg-zinc-800' : ''}`}
                       />
                       {name === 'password' && form.password && (
                         <div className="mt-2 space-y-1">
                           <div className="h-1 rounded bg-zinc-300 dark:bg-zinc-700">
                             <div
-                              className={`h-1 rounded transition-all duration-300 ease-in-out ${passwordStrength.label === 'Weak'
-                                ? 'bg-red-500 w-1/3'
-                                : passwordStrength.label === 'Moderate'
-                                  ? 'bg-yellow-500 w-2/3'
-                                  : 'bg-green-500 w-full'
-                                }`}
+                              className={`h-1 rounded transition-all duration-300 ease-in-out ${
+                                passwordStrength.label === 'Weak'
+                                  ? 'bg-red-500 w-1/3'
+                                  : passwordStrength.label === 'Moderate'
+                                    ? 'bg-yellow-500 w-2/3'
+                                    : 'bg-green-500 w-full'
+                              }`}
                             />
                           </div>
                           <p className={`text-xs ${passwordStrength.color}`}>
@@ -551,10 +555,11 @@ export default function SignupPage() {
               </div>
 
               <div
-                className={`rounded-2xl border p-4 text-sm transition ${fieldErrors.termsAccepted
-                  ? 'border-red-500/70 bg-red-50/70 dark:border-red-500/50 dark:bg-red-500/10'
-                  : 'border-zinc-200/60 bg-white/70 dark:border-white/10 dark:bg-zinc-900/70'
-                  }`}
+                className={`rounded-2xl border p-4 text-sm transition ${
+                  fieldErrors.termsAccepted
+                    ? 'border-red-500/70 bg-red-50/70 dark:border-red-500/50 dark:bg-red-500/10'
+                    : 'border-zinc-200/60 bg-white/70 dark:border-white/10 dark:bg-zinc-900/70'
+                }`}
               >
                 <label
                   className="flex items-start gap-3"

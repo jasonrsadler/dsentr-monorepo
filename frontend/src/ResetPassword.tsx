@@ -203,12 +203,13 @@ export default function ResetPassword() {
                     <div className="mt-3 space-y-1">
                       <div className="h-1 rounded bg-zinc-300 dark:bg-zinc-700">
                         <div
-                          className={`h-1 rounded transition-all duration-300 ease-in-out ${strength.label === 'Weak'
-                            ? 'bg-red-500 w-1/3'
-                            : strength.label === 'Moderate'
-                              ? 'bg-yellow-500 w-2/3'
-                              : 'bg-green-500 w-full'
-                            }`}
+                          className={`h-1 rounded transition-all duration-300 ease-in-out ${
+                            strength.label === 'Weak'
+                              ? 'bg-red-500 w-1/3'
+                              : strength.label === 'Moderate'
+                                ? 'bg-yellow-500 w-2/3'
+                                : 'bg-green-500 w-full'
+                          }`}
                         />
                       </div>
                       <p className={`text-xs ${strength.color}`}>
