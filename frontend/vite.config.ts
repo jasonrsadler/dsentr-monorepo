@@ -20,22 +20,22 @@ const certPath = path.join(certDirectory, 'localhost+2.pem')
 const httpsConfig =
   !isTestEnv && fs.existsSync(keyPath) && fs.existsSync(certPath)
     ? {
-        https: {
-          key: fs.readFileSync(keyPath),
-          cert: fs.readFileSync(certPath)
-        }
+      https: {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath)
       }
+    }
     : {}
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
-      '@assets': path.resolve(__dirname, 'src/assets'),
-      '@components': path.resolve(__dirname, 'src/components'),
-      '@hooks': path.resolve(__dirname, 'src/hooks'),
-      '@utils': path.resolve(__dirname, 'src/utils')
+      '@': path.resolve(__dirname, './src'),
+      '@assets': path.resolve(__dirname, './src/assets'),
+      '@components': path.resolve(__dirname, './src/components'),
+      '@hooks': path.resolve(__dirname, './src/hooks'),
+      '@utils': path.resolve(__dirname, './src/utils')
     },
     dedupe: ['react', 'react-dom']
   },
