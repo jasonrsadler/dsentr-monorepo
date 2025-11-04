@@ -323,11 +323,7 @@ async fn main() -> Result<()> {
         .route("/github-login", get(github_login))
         .route("/google-callback", get(google_callback))
         .route("/github-callback", get(github_callback))
-        .route("/verify-reset-token/{token}", get(handle_verify_token))
-        .route(
-            "/healthz",
-            get(|| async { Json(serde_json::json!({"status": "ok"})) }),
-        );
+        .route("/verify-reset-token/{token}", get(handle_verify_token));
 
     // Nest them together
     let auth_routes = csrf_protected_routes
@@ -548,6 +544,10 @@ async fn main() -> Result<()> {
         );
     let app = Router::new()
         .route("/", get(root))
+        .route(
+            "/healthz",
+            get(|| async { Json(serde_json::json!({"status": "ok"})) }),
+        )
         .route("/api/early-access", post(handle_early_access))
         .route("/api/dashboard", get(dashboard_handler))
         // Stripe webhook: public endpoint, no CSRF/auth
