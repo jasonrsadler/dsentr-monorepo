@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import viteCompression from 'vite-plugin-compression'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
@@ -20,15 +21,15 @@ const certPath = path.join(certDirectory, 'localhost+2.pem')
 const httpsConfig =
   !isTestEnv && fs.existsSync(keyPath) && fs.existsSync(certPath)
     ? {
-        https: {
-          key: fs.readFileSync(keyPath),
-          cert: fs.readFileSync(certPath)
-        }
+      https: {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath)
       }
+    }
     : {}
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), viteCompression()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -48,26 +49,13 @@ export default defineConfig({
     assetsInlineLimit: 4096,
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
+      preserveEntrySignatures: 'strict',
       treeshake: true,
       onwarn(warning, warn) {
         // Silence common non-actionable warnings to keep CI clean
         if (warning.code === 'CIRCULAR_DEPENDENCY') return
         if (warning.code === 'CHUNK_SIZE_LIMIT') return
         warn(warning)
-      },
-      output: {
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return undefined
-          if (id.includes('@xyflow/react')) return 'vendor-xyflow'
-          if (id.includes('react') || id.includes('react-dom'))
-            return 'vendor-react'
-          if (id.includes('framer-motion')) return 'vendor-motion'
-          if (id.includes('zustand')) return 'vendor-zustand'
-          if (id.includes('react-router')) return 'vendor-router'
-          if (id.includes('react-hook-form')) return 'vendor-hookform'
-          if (id.includes('lucide-react')) return 'vendor-icons'
-          return 'vendor'
-        }
       }
     }
   },
