@@ -194,4 +194,3 @@ Content Security Policy hardening:
 - Updated: About, Home, HowItWorks, GetStarted, CheckEmail, VerifyEmail, ForgotPassword, ResetPassword, PrivacyPolicy, TermsOfService, Logout.
 - Auth pages (Login, Signup) already use compact, keeping a consistent feel across all public routes.
 - No functional changes; style-only. Verified with lint, tests, and build.
-- Cloudflare setup test
