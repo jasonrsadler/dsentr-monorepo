@@ -130,3 +130,4 @@ pub trait UserRepository: Send + Sync {
         audit: AccountDeletionAuditInsert,
     ) -> Result<(), sqlx::Error>;
 }
+

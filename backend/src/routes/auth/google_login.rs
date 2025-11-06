@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use axum::{
     extract::{Query, State},
-    http::header,
     response::{IntoResponse, Redirect, Response},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -18,7 +17,11 @@ use crate::{
     services::oauth::google::errors::GoogleAuthError,
 };
 
-pub async fn google_login(State(app_state): State<AppState>) -> impl IntoResponse {
+pub async fn google_login(
+    State(app_state): State<AppState>,
+    jar: CookieJar,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
     let client_id = std::env::var("GOOGLE_CLIENT_ID").unwrap();
     let redirect_uri = std::env::var("GOOGLE_REDIRECT_URI").unwrap();
     let mut url = Url::parse(&std::env::var("GOOGLE_ACCOUNTS_OAUTH_API_BASE").unwrap()).unwrap();
@@ -42,10 +45,23 @@ pub async fn google_login(State(app_state): State<AppState>) -> impl IntoRespons
         .max_age(time::Duration::minutes(10))
         .build();
 
-    (
-        [(header::SET_COOKIE, oauth_state_cookie.to_string())],
-        Redirect::to(url.as_str()),
-    )
+    // If the caller provided an accepted_terms_version (from /signup),
+    // write a short-lived cookie so the callback can create the account.
+    let mut jar = jar.add(oauth_state_cookie);
+
+    if let Some(ver) = params.get("accepted_terms_version") {
+        if !ver.trim().is_empty() {
+            let tos_cookie = Cookie::build(("oauth_terms_version", ver.clone()))
+                .http_only(true)
+                .secure(secure_cookie)
+                .same_site(SameSite::Lax)
+                .path("/")
+                .max_age(time::Duration::minutes(10))
+                .build();
+            jar = jar.add(tos_cookie);
+        }
+    }
+    (jar, Redirect::to(url.as_str()))
 }
 
 pub async fn google_callback(
@@ -155,32 +171,65 @@ pub async fn google_callback(
         }
 
         Ok(None) => {
-            // No account found for this OAuth identity. Redirect to signup
-            // so the user can accept the Terms of Service before account creation.
-            let secure_cookie = app_state.config.auth_cookie_secure;
-            let clear_state_cookie = Cookie::build(("oauth_state", ""))
-                .path("/")
-                .secure(secure_cookie)
-                .max_age(time::Duration::seconds(0))
-                .build();
-
-            let frontend_url =
-                std::env::var("FRONTEND_ORIGIN").unwrap_or_else(|_| "https://localhost:5173".to_string());
-
-            let redirect_url = format!(
-                "{}/signup?oauth={}&email={}&first_name={}&last_name={}&notice={}",
-                frontend_url,
-                "google",
-                urlencoding::encode(email),
-                urlencoding::encode(&first_name),
-                urlencoding::encode(&last_name),
-                urlencoding::encode(
-                    "Finish signup by accepting the Terms, then continue with Google",
-                ),
-            );
-
-            let jar = CookieJar::new().add(clear_state_cookie);
-            return (jar, Redirect::to(&redirect_url)).into_response();
+            // If Terms were accepted on /signup, create the user now; otherwise return to /signup.
+            let tos_cookie_opt = jar.get("oauth_terms_version").map(|c| c.value().to_string());
+            if let Some(ver) = tos_cookie_opt {
+                if !ver.trim().is_empty() {
+                    match app_state
+                        .db
+                        .create_user_with_oauth(email, &first_name, &last_name, OauthProvider::Google)
+                        .await
+                    {
+                        Ok(new_user) => new_user,
+                        Err(e) => {
+                            eprintln!("DB create error: {:?}", e);
+                            return JsonResponse::redirect_to_login_with_error(
+                                "Failed to create account via Google",
+                            )
+                            .into_response();
+                        }
+                    }
+                } else {
+                    // invalid value — treat as not accepted
+                    let secure_cookie = app_state.config.auth_cookie_secure;
+                    let clear_state_cookie = Cookie::build(("oauth_state", ""))
+                        .path("/")
+                        .secure(secure_cookie)
+                        .max_age(time::Duration::seconds(0))
+                        .build();
+                    let frontend_url = std::env::var("FRONTEND_ORIGIN")
+                        .unwrap_or_else(|_| "https://localhost:5173".to_string());
+                    let redirect_url = format!(
+                        "{}/signup?oauth={}&notice={}",
+                        frontend_url,
+                        "google",
+                        urlencoding::encode(
+                            "Finish signup by accepting the Terms, then continue with Google",
+                        ),
+                    );
+                    let jar = CookieJar::new().add(clear_state_cookie);
+                    return (jar, Redirect::to(&redirect_url)).into_response();
+                }
+            } else {
+                let secure_cookie = app_state.config.auth_cookie_secure;
+                let clear_state_cookie = Cookie::build(("oauth_state", ""))
+                    .path("/")
+                    .secure(secure_cookie)
+                    .max_age(time::Duration::seconds(0))
+                    .build();
+                let frontend_url = std::env::var("FRONTEND_ORIGIN")
+                    .unwrap_or_else(|_| "https://localhost:5173".to_string());
+                let redirect_url = format!(
+                    "{}/signup?oauth={}&notice={}",
+                    frontend_url,
+                    "google",
+                    urlencoding::encode(
+                        "Finish signup by accepting the Terms, then continue with Google",
+                    ),
+                );
+                let jar = CookieJar::new().add(clear_state_cookie);
+                return (jar, Redirect::to(&redirect_url)).into_response();
+            }
         }
 
         Err(e) => {
@@ -276,11 +325,17 @@ pub async fn google_callback(
         .secure(secure_cookie)
         .max_age(time::Duration::seconds(0))
         .build();
+    let clear_tos_cookie = Cookie::build(("oauth_terms_version", ""))
+        .path("/")
+        .secure(secure_cookie)
+        .max_age(time::Duration::seconds(0))
+        .build();
 
     let jar = CookieJar::new()
         .add(auth_cookie)
         .add(refresh_cookie)
-        .add(clear_state_cookie);
+        .add(clear_state_cookie)
+        .add(clear_tos_cookie);
     (jar, Redirect::to(&format!("{}/dashboard", frontend_url))).into_response()
 }
 

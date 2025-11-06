@@ -16,7 +16,11 @@ use crate::{
 };
 
 /// Redirects to GitHub's OAuth authorization page with CSRF protection
-pub async fn github_login(State(app_state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+pub async fn github_login(
+    State(app_state): State<AppState>,
+    jar: CookieJar,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
     let mut csrf_bytes = [0u8; 32];
     OsRng.fill_bytes(&mut csrf_bytes);
     let csrf_token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(csrf_bytes);
@@ -39,7 +43,22 @@ pub async fn github_login(State(app_state): State<AppState>, jar: CookieJar) -> 
         client_id, redirect_uri, scope, csrf_token,
     );
 
-    (jar.add(state_cookie), Redirect::to(&github_url))
+    // Persist state and (optionally) ToS version for short-lived account creation.
+    let mut jar = jar.add(state_cookie);
+    if let Some(ver) = params.get("accepted_terms_version") {
+        if !ver.trim().is_empty() {
+            let tos_cookie = Cookie::build(("oauth_terms_version", ver.clone()))
+                .http_only(true)
+                .secure(secure_cookie)
+                .same_site(SameSite::Lax)
+                .path("/")
+                .max_age(time::Duration::minutes(10))
+                .build();
+            jar = jar.add(tos_cookie);
+        }
+    }
+
+    (jar, Redirect::to(&github_url))
 }
 
 /// Handles the GitHub OAuth callback, validates state, and logs in/creates user
@@ -116,32 +135,64 @@ pub async fn github_callback(
         },
 
         Ok(None) => {
-            // No account found for this OAuth identity. Redirect to signup
-            // so the user can accept the Terms of Service before account creation.
-            let secure_cookie = app_state.config.auth_cookie_secure;
-            let clear_state_cookie = Cookie::build(("oauth_state", ""))
-                .path("/")
-                .secure(secure_cookie)
-                .max_age(time::Duration::seconds(0))
-                .build();
-
-            let frontend_url =
-                std::env::var("FRONTEND_ORIGIN").unwrap_or_else(|_| "https://localhost:5173".to_string());
-
-            let redirect_url = format!(
-                "{}/signup?oauth={}&email={}&first_name={}&last_name={}&notice={}",
-                frontend_url,
-                "github",
-                urlencoding::encode(&email),
-                urlencoding::encode(&first_name),
-                urlencoding::encode(&last_name),
-                urlencoding::encode(
-                    "Finish signup by accepting the Terms, then continue with GitHub",
-                ),
-            );
-
-            let jar = CookieJar::new().add(clear_state_cookie);
-            return (jar, Redirect::to(&redirect_url)).into_response();
+            // If Terms were accepted on /signup, create the user now; otherwise return to /signup.
+            let tos_cookie_opt = jar.get("oauth_terms_version").map(|c| c.value().to_string());
+            if let Some(ver) = tos_cookie_opt {
+                if !ver.trim().is_empty() {
+                    match app_state
+                        .db
+                        .create_user_with_oauth(&email, &first_name, &last_name, OauthProvider::Github)
+                        .await
+                    {
+                        Ok(new_user) => new_user,
+                        Err(e) => {
+                            eprintln!("DB user creation error: {:?}", e);
+                            return JsonResponse::redirect_to_login_with_error(
+                                "Failed to create account via GitHub",
+                            )
+                            .into_response();
+                        }
+                    }
+                } else {
+                    let secure_cookie = app_state.config.auth_cookie_secure;
+                    let clear_state_cookie = Cookie::build(("oauth_state", ""))
+                        .path("/")
+                        .secure(secure_cookie)
+                        .max_age(time::Duration::seconds(0))
+                        .build();
+                    let frontend_url = std::env::var("FRONTEND_ORIGIN")
+                        .unwrap_or_else(|_| "https://localhost:5173".to_string());
+                    let redirect_url = format!(
+                        "{}/signup?oauth={}&notice={}",
+                        frontend_url,
+                        "github",
+                        urlencoding::encode(
+                            "Finish signup by accepting the Terms, then continue with GitHub",
+                        ),
+                    );
+                    let jar = CookieJar::new().add(clear_state_cookie);
+                    return (jar, Redirect::to(&redirect_url)).into_response();
+                }
+            } else {
+                let secure_cookie = app_state.config.auth_cookie_secure;
+                let clear_state_cookie = Cookie::build(("oauth_state", ""))
+                    .path("/")
+                    .secure(secure_cookie)
+                    .max_age(time::Duration::seconds(0))
+                    .build();
+                let frontend_url = std::env::var("FRONTEND_ORIGIN")
+                    .unwrap_or_else(|_| "https://localhost:5173".to_string());
+                let redirect_url = format!(
+                    "{}/signup?oauth={}&notice={}",
+                    frontend_url,
+                    "github",
+                    urlencoding::encode(
+                        "Finish signup by accepting the Terms, then continue with GitHub",
+                    ),
+                );
+                let jar = CookieJar::new().add(clear_state_cookie);
+                return (jar, Redirect::to(&redirect_url)).into_response();
+            }
         }
 
         Err(e) => {
@@ -236,11 +287,17 @@ pub async fn github_callback(
         .secure(secure_cookie)
         .max_age(time::Duration::seconds(0))
         .build();
+    let clear_tos_cookie = Cookie::build(("oauth_terms_version", ""))
+        .path("/")
+        .secure(secure_cookie)
+        .max_age(time::Duration::seconds(0))
+        .build();
 
     let jar = CookieJar::new()
         .add(auth_cookie)
         .add(refresh_cookie)
-        .add(clear_state_cookie);
+        .add(clear_state_cookie)
+        .add(clear_tos_cookie);
 
     let frontend_url =
         std::env::var("FRONTEND_ORIGIN").unwrap_or_else(|_| "https://localhost:5173".to_string());

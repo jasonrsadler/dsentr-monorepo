@@ -358,8 +358,8 @@ export default function SignupPage() {
 
     const targetUrl =
       provider === 'google'
-        ? `${API_BASE_URL}/api/auth/google-login`
-        : `${API_BASE_URL}/api/auth/github-login`
+        ? `${API_BASE_URL}/api/auth/google-login?accepted_terms_version=${encodeURIComponent(TERMS_OF_SERVICE_VERSION)}`
+        : `${API_BASE_URL}/api/auth/github-login?accepted_terms_version=${encodeURIComponent(TERMS_OF_SERVICE_VERSION)}`
 
     window.location.href = targetUrl
   }
