@@ -81,7 +81,7 @@ use crate::db::{
     workspace_connection_repository::WorkspaceConnectionRepository,
     workspace_repository::WorkspaceRepository,
 };
-use crate::services::smtp_mailer::SmtpMailer;
+use crate::services::pluggable_mailer::PluggableMailer;
 use crate::services::stripe::{LiveStripeService, StripeService};
 use crate::state::AppState;
 
@@ -209,16 +209,16 @@ async fn main() -> Result<()> {
         pool: pg_pool.clone(),
     }) as Arc<dyn WorkspaceRepository>;
 
-    // Initialize mailer
+    // Initialize HTTP client and pluggable mailer (SMTP or SendGrid for app emails)
+    let http_client = Client::new();
     let mailer = Arc::new(
-        SmtpMailer::new()
+        PluggableMailer::from_env(&http_client)
             .map_err(|error| {
-                tracing::error!(error = ?error, "Failed to initialize SMTP mailer");
+                tracing::error!(error = ?error, "Failed to initialize mailer");
                 error
             })
-            .context("failed to initialize SMTP mailer")?,
+            .context("failed to initialize mailer from environment")?,
     );
-    let http_client = Client::new();
     let http_client_arc = Arc::new(http_client.clone());
 
     let google_oauth = Arc::new(GoogleOAuthClient {
