@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
+import * as acorn from 'acorn'
 
 import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
 import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
@@ -92,7 +93,7 @@ export default function RunCustomCodeAction({
     const trimmed = params.code?.trim()
     if (!trimmed) return false
     try {
-      new Function(trimmed)
+      acorn.parse(`function _temp() { ${trimmed} }`, { ecmaVersion: 'latest' })
       return false
     } catch {
       return true
