@@ -12,7 +12,6 @@ pub enum GitHubAuthError {
     InvalidUserInfo,
     EmailFetchFailed,
     NoVerifiedEmail,
-    UserCreationFailed,
     JwtCreationFailed,
     DbError(sqlx::Error),
 }
@@ -32,7 +31,6 @@ impl fmt::Display for GitHubAuthError {
             InvalidUserInfo => write!(f, "Invalid GitHub user info"),
             EmailFetchFailed => write!(f, "Failed to fetch GitHub email"),
             NoVerifiedEmail => write!(f, "No verified GitHub email found"),
-            UserCreationFailed => write!(f, "User creation failed"),
             JwtCreationFailed => write!(f, "JWT generation failed"),
             DbError(err) => write!(f, "Database error: {}", err),
         }

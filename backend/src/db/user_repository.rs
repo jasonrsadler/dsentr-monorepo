@@ -22,6 +22,7 @@ pub trait UserRepository: Send + Sync {
         expires_at: OffsetDateTime,
     ) -> Result<(), sqlx::Error>;
     async fn find_user_by_email(&self, email: &str) -> Result<Option<User>, sqlx::Error>;
+    #[allow(dead_code)]
     async fn create_user_with_oauth(
         &self,
         email: &str,

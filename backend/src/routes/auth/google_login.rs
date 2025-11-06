@@ -155,21 +155,32 @@ pub async fn google_callback(
         }
 
         Ok(None) => {
-            // First-time login, create user with Google as oauth_provider
-            match app_state
-                .db
-                .create_user_with_oauth(email, &first_name, &last_name, OauthProvider::Google)
-                .await
-            {
-                Ok(new_user) => new_user,
-                Err(e) => {
-                    eprintln!("DB create error: {:?}", e);
-                    return JsonResponse::redirect_to_login_with_error(
-                        &GoogleAuthError::UserCreationFailed.to_string(),
-                    )
-                    .into_response();
-                }
-            }
+            // No account found for this OAuth identity. Redirect to signup
+            // so the user can accept the Terms of Service before account creation.
+            let secure_cookie = app_state.config.auth_cookie_secure;
+            let clear_state_cookie = Cookie::build(("oauth_state", ""))
+                .path("/")
+                .secure(secure_cookie)
+                .max_age(time::Duration::seconds(0))
+                .build();
+
+            let frontend_url =
+                std::env::var("FRONTEND_ORIGIN").unwrap_or_else(|_| "https://localhost:5173".to_string());
+
+            let redirect_url = format!(
+                "{}/signup?oauth={}&email={}&first_name={}&last_name={}&notice={}",
+                frontend_url,
+                "google",
+                urlencoding::encode(email),
+                urlencoding::encode(&first_name),
+                urlencoding::encode(&last_name),
+                urlencoding::encode(
+                    "Finish signup by accepting the Terms, then continue with Google",
+                ),
+            );
+
+            let jar = CookieJar::new().add(clear_state_cookie);
+            return (jar, Redirect::to(&redirect_url)).into_response();
         }
 
         Err(e) => {

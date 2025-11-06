@@ -198,3 +198,6 @@ Content Security Policy hardening:
 - Auth pages (Login, Signup) already use compact, keeping a consistent feel across all public routes.
 - No functional changes; style-only. Verified with lint, tests, and build.
 - Cloudflare setup test
+
+## OAuth login UX
+- When a user attempts OAuth login (Google/GitHub) without an existing DSentr account, the backend now redirects them to `/signup?oauth=…` with provider/email/name hints. The Signup page parses these params to prefill fields and shows a non-error notice, ensuring users accept the Terms of Service before starting OAuth signup via the provider button.

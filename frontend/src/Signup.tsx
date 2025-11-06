@@ -177,6 +177,24 @@ export default function SignupPage() {
     }
   }, [location.search, navigate])
 
+  // Show a notice when redirected from OAuth login without an existing account
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const provider = params.get('oauth')
+    if (provider === 'google' || provider === 'github') {
+      const notice = params.get('notice')
+      if (notice) {
+        setMessage(decodeURIComponent(notice))
+        setServerError(false)
+      } else {
+        setMessage(
+          `No account found. Accept Terms and continue with ${provider}.`
+        )
+        setServerError(false)
+      }
+    }
+  }, [location.search])
+
   useEffect(() => {
     if (!inviteToken) {
       return

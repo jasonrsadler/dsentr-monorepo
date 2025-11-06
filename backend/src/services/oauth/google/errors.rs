@@ -10,7 +10,6 @@ pub enum GoogleAuthError {
     UserInfoFetchFailed,
     InvalidUserInfo,
     NoEmailFound,
-    UserCreationFailed,
     JwtCreationFailed,
     DbError(sqlx::Error),
 }
@@ -29,7 +28,6 @@ impl fmt::Display for GoogleAuthError {
             UserInfoFetchFailed => write!(f, "Failed to fetch Google user info"),
             InvalidUserInfo => write!(f, "Invalid user info"),
             NoEmailFound => write!(f, "No email found in user info"),
-            UserCreationFailed => write!(f, "Failed to create user"),
             JwtCreationFailed => write!(f, "Failed to create JWT"),
             DbError(err) => write!(f, "Database error: {}", err),
         }
