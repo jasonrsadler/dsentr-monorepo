@@ -548,6 +548,9 @@ export default function FlowCanvas({
   // Track which node's details flyout is open for (independent of selection)
   const [flyoutNodeId, setFlyoutNodeId] = useState<string | null>(null)
   const syncSelectionToStore = useCallback((nextSelectedId: string | null) => {
+    // Only sync node selection into the store for flyout logic.
+    // Do not touch edge selection here; React Flow manages it and
+    // clearing it here prevents edge menus from appearing.
     const state = useWorkflowStore.getState()
     const currentNodes = state.nodes
     let nodeChanged = false
@@ -564,19 +567,6 @@ export default function FlowCanvas({
     })
     if (nodeChanged) {
       state.setNodes(nextNodes)
-    }
-
-    const currentEdges = state.edges
-    let edgeChanged = false
-    const nextEdges = currentEdges.map<WorkflowEdge>((edge) => {
-      if (!edge.selected) {
-        return edge
-      }
-      edgeChanged = true
-      return { ...edge, selected: false }
-    })
-    if (edgeChanged) {
-      state.setEdges(nextEdges)
     }
   }, [])
   const normalizedPlanTier = useMemo(
@@ -1070,9 +1060,7 @@ export default function FlowCanvas({
   }, [])
 
   const handleSelectionChange = useCallback(
-    ({
-      nodes: selectedNodes
-    }: OnSelectionChangeParams<WorkflowNode, WorkflowEdge>) => {
+    ({ nodes: selectedNodes }: OnSelectionChangeParams<WorkflowNode, WorkflowEdge>) => {
       const lastSelected =
         selectedNodes && selectedNodes.length > 0
           ? selectedNodes[selectedNodes.length - 1]
@@ -1080,6 +1068,7 @@ export default function FlowCanvas({
       const nextId = lastSelected?.id ?? null
       syncSelectionToStore(nextId)
       // Do NOT open the flyout on selection; only the arrow button should open it.
+      // Edge selection is intentionally left to React Flow so custom edge menus work.
     },
     [syncSelectionToStore]
   )
@@ -1198,6 +1187,14 @@ export default function FlowCanvas({
   >(
     () => ({
       nodeEdge: (edgeProps: WorkflowEdgeRendererProps) => (
+        <NodeEdge
+          {...edgeProps}
+          onDelete={handleEdgeDelete}
+          onChangeType={handleEdgeTypeChange}
+        />
+      ),
+      // Map legacy/default edges to our custom edge so the context menu appears
+      default: (edgeProps: WorkflowEdgeRendererProps) => (
         <NodeEdge
           {...edgeProps}
           onDelete={handleEdgeDelete}

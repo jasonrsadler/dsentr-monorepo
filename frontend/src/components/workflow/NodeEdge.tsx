@@ -45,12 +45,14 @@ export default function NodeEdge({
   return (
     <>
       <BaseEdge
+        id={id}
         path={edgePath}
         style={{
           ...style,
           strokeWidth: edgeType === 'bold' ? 3 : 1,
           strokeDasharray: edgeType === 'dashed' ? '4 4' : '0'
         }}
+        interactionWidth={24}
         markerEnd={markerEnd}
       />
       {selected && (
