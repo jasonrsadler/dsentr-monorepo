@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as acorn from 'acorn'
 
 import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
@@ -8,6 +8,7 @@ import {
   useActionParams
 } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { HelpCircle } from 'lucide-react'
 
 type KeyValueEntry = { key: string; value: string }
 
@@ -117,8 +118,59 @@ export default function RunCustomCodeAction({
     updateNodeData(nodeId, { hasValidationErrors })
   }, [hasValidationErrors, nodeId, updateNodeData])
 
+  const [showHelp, setShowHelp] = useState(false)
+  const toggleHelp = useCallback(() => setShowHelp((v) => !v), [])
+
   return (
     <div className="flex flex-col gap-2">
+      <div className="relative self-end">
+        <button
+          type="button"
+          aria-label="Run Code help"
+          title="How inputs and outputs work"
+          className="nodrag p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
+          onClick={toggleHelp}
+        >
+          <HelpCircle size={14} />
+        </button>
+        {showHelp && (
+          <div
+            role="dialog"
+            aria-label="Run Code quick tips"
+            className="absolute right-0 z-20 mt-1 w-80 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md p-2"
+          >
+            <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 mb-1">
+              Custom Code • Quick Tips
+            </p>
+            <ul className="list-disc pl-4 text-[11px] leading-4 text-zinc-700 dark:text-zinc-300 space-y-1">
+              <li>
+                Inputs: reference values with JS template strings via the{' '}
+                <span className="font-mono">inputs</span> object. Example:{' '}
+                <span className="font-mono">{'${inputs.name}'}</span>. Inputs
+                resolve to strings.
+              </li>
+              <li>
+                Outputs: create key/value pairs. Key can be anything; value must
+                be a named property from the JSON object you return. Example:{' '}
+                <span className="font-mono">
+                  return {'{'} greeting: 'Hello' {'}'}
+                </span>
+                , then set output value to{' '}
+                <span className="font-mono">greeting</span>.
+              </li>
+              <li>
+                Primitive return: if you{' '}
+                <span className="font-mono">return 'Hello'</span> (not an
+                object), do not create outputs. Reference later as{' '}
+                <span className="font-mono">
+                  {'${{<run code node name>.result}}'}
+                </span>
+                .
+              </li>
+            </ul>
+          </div>
+        )}
+      </div>
       <NodeTextAreaField
         value={params.code || ''}
         placeholder="Enter custom JavaScript code"

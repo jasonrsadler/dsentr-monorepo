@@ -8,6 +8,7 @@
 - Signup form: Excluded the required asterisk from accessible labels (`aria-hidden`) so tests can select the `Password` field by its exact label.
 - Members tab: Added an ownership transfer confirmation modal so current owners are warned they'll lose the role and must rely on the new owner to regain it before promoting another member.
 - Members tab: Removed the ability to transfer ownership to another member so each user can retain ownership of only their own workspace.
+- RunCustomCodeAction: Added a lightweight help tooltip ("?") with concise guidance on how to reference inputs in code using `${inputs.*}`, how to map outputs to properties of a returned JSON object, and how to reference a primitive return via `${{<run code node name>.result}}`. Implemented with local state only to avoid unnecessary store writes and prevent canvas re-render loops.
 
 ## Affected Areas
 - Settings > LogsTab: change history list
