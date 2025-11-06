@@ -1060,7 +1060,9 @@ export default function FlowCanvas({
   }, [])
 
   const handleSelectionChange = useCallback(
-    ({ nodes: selectedNodes }: OnSelectionChangeParams<WorkflowNode, WorkflowEdge>) => {
+    ({
+      nodes: selectedNodes
+    }: OnSelectionChangeParams<WorkflowNode, WorkflowEdge>) => {
       const lastSelected =
         selectedNodes && selectedNodes.length > 0
           ? selectedNodes[selectedNodes.length - 1]
