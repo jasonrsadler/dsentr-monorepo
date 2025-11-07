@@ -3,8 +3,14 @@ name: Deploy Backend
 on:
   push:
     branches: [master]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-deploy.yml"
   pull_request:
     branches: [master]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-deploy.yml"
 
 permissions:
   contents: read
