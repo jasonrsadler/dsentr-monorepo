@@ -395,6 +395,10 @@ async fn main() -> Result<()> {
             post(regenerate_webhook_token),
         )
         .route(
+            "/{workflow_id}/webhook/signing-key/regenerate",
+            post(routes::workflows::regenerate_webhook_signing_key),
+        )
+        .route(
             "/{workflow_id}/egress",
             get(get_egress_allowlist).post(set_egress_allowlist),
         )

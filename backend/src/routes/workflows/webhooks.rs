@@ -1,8 +1,8 @@
 use super::prelude::*;
 use crate::config::MIN_WEBHOOK_SECRET_LENGTH;
-use tracing::error;
-use axum::http::HeaderMap;
 use crate::utils::plan_limits::NormalizedPlanTier;
+use axum::http::HeaderMap;
+use tracing::error;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -288,7 +288,9 @@ pub async fn set_webhook_config(
             let is_solo_plan = match wf.workspace_id {
                 None => true,
                 Some(ws_id) => match app_state.workspace_repo.find_workspace(ws_id).await {
-                    Ok(Some(ws)) => NormalizedPlanTier::from_option(Some(ws.plan.as_str())).is_solo(),
+                    Ok(Some(ws)) => {
+                        NormalizedPlanTier::from_option(Some(ws.plan.as_str())).is_solo()
+                    }
                     // If the workspace cannot be loaded, fail closed (treat as solo)
                     Ok(None) => true,
                     Err(_) => true,
@@ -342,8 +344,14 @@ pub async fn regenerate_webhook_token(
                         None => return missing_webhook_secret_response(),
                     };
                     let token = compute_webhook_token(&secret, w.user_id, w.id, new_salt);
+                    let signing_key =
+                        compute_webhook_signing_key(&secret, w.user_id, w.id, new_salt);
                     let url = format!("/api/workflows/{}/trigger/{}", w.id, token);
-                    (StatusCode::OK, Json(json!({"success": true, "url": url}))).into_response()
+                    (
+                        StatusCode::OK,
+                        Json(json!({"success": true, "url": url, "signing_key": signing_key})),
+                    )
+                        .into_response()
                 }
                 Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
                 Err(e) => {
@@ -358,4 +366,60 @@ pub async fn regenerate_webhook_token(
             JsonResponse::server_error("Failed to regenerate").into_response()
         }
     }
+}
+
+pub async fn regenerate_webhook_signing_key(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    let wf = match app_state
+        .workflow_repo
+        .find_workflow_by_id(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(wf)) => wf,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error: {:?}", e);
+            return JsonResponse::server_error("Failed to regenerate").into_response();
+        }
+    };
+
+    let new_salt = match app_state
+        .workflow_repo
+        .rotate_webhook_salt(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(salt)) => salt,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(e) => {
+            eprintln!("DB error rotating salt: {:?}", e);
+            return JsonResponse::server_error("Failed to regenerate").into_response();
+        }
+    };
+
+    let secret = match webhook_secret(app_state.config.as_ref()) {
+        Some(secret) => secret,
+        None => return missing_webhook_secret_response(),
+    };
+
+    let url_token = compute_webhook_token(&secret, wf.user_id, wf.id, new_salt);
+    let signing_key = compute_webhook_signing_key(&secret, wf.user_id, wf.id, new_salt);
+    let url = format!("/api/workflows/{}/trigger/{}", wf.id, url_token);
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "success": true,
+            "signing_key": signing_key,
+            "url": url
+        })),
+    )
+        .into_response()
 }

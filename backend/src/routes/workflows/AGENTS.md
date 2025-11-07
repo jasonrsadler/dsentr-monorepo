@@ -23,6 +23,7 @@
   - Preferred (recommended): headers `X-DSentr-Timestamp` and `X-DSentr-Signature: v1=<hex>` are accepted. The server verifies `HMAC_SHA256(signing_key, "<ts>.<canonical_json_body>")` where `canonical_json_body` is the minified body as parsed by `serde_json`.
   - Legacy compatibility: if headers are absent, the server will read `_dsentr_ts`/`_dsentr_sig` from the JSON body and verify the same payload, but it will first remove `_dsentr_ts` and `_dsentr_sig` keys from the body before computing the signature.
   - Replay protection and window enforcement remain unchanged.
+- Added `POST /api/workflows/:id/webhook/signing-key/regenerate` so admins can rotate the derived signing key (and webhook token) without visiting the token endpoint explicitly. Response returns both the new key and URL for UI refreshes.
 
 Operational notes:
 - Token validation is still required and occurs before HMAC verification.

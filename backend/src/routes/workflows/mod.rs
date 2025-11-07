@@ -28,6 +28,6 @@ pub use runs::{
 };
 pub use sse::{sse_global_runs, sse_run_events, sse_workflow_runs};
 pub use webhooks::{
-    get_webhook_config, get_webhook_url, regenerate_webhook_token, set_webhook_config,
-    webhook_trigger,
+    get_webhook_config, get_webhook_url, regenerate_webhook_signing_key, regenerate_webhook_token,
+    set_webhook_config, webhook_trigger,
 };

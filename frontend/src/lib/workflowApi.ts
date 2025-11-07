@@ -312,7 +312,7 @@ export async function getWebhookUrl(workflowId: string): Promise<string> {
 
 export async function regenerateWebhookUrl(
   workflowId: string
-): Promise<string> {
+): Promise<{ url: string; signing_key?: string }> {
   const csrfToken = await getCsrfToken()
   const res = await fetch(
     `${API_BASE_URL}/api/workflows/${workflowId}/webhook/regenerate`,
@@ -323,7 +323,32 @@ export async function regenerateWebhookUrl(
     }
   )
   const data = await handleJsonResponse(res)
-  return data.url as string
+  return {
+    url: data.url as string,
+    signing_key:
+      typeof data.signing_key === 'string'
+        ? (data.signing_key as string)
+        : undefined
+  }
+}
+
+export async function regenerateWebhookSigningKey(
+  workflowId: string
+): Promise<{ signing_key: string; url?: string }> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/${workflowId}/webhook/signing-key/regenerate`,
+    {
+      method: 'POST',
+      headers: { 'x-csrf-token': csrfToken },
+      credentials: 'include'
+    }
+  )
+  const data = await handleJsonResponse(res)
+  return {
+    signing_key: data.signing_key as string,
+    url: typeof data.url === 'string' ? (data.url as string) : undefined
+  }
 }
 
 export async function cancelRun(
