@@ -214,3 +214,6 @@ CSP automation:
 - Frontend CI workflow patches rontend/index.html before build to remove localhost development hosts from the CSP meta tag. This keeps dev convenient while ensuring production builds enforce the stricter, approved CSP (ASVS 14.1.2/STIG 5.10).
 - Step name: "Patch CSP to production-only (strip localhost)" in .github/workflows/frontend-deploy.yml.
 - Approved domains explicitly included: https://js.stripe.com, https://fonts.googleapis.com, https://fonts.gstatic.com, https://api.dsentr.com, ws://app.dsentr.com, wss://app.dsentr.com.
+
+Secrets & API Keys autofill hardening:
+- Disabled browser/password-manager autofill on the Settings → Secrets & API Keys inputs by setting `autoComplete="off"` for the name field and `autoComplete="new-password"` for the secret value field, while also disabling spellcheck/autocapitalize/autocorrect. Added `data-lpignore` and `data-1p-ignore` to hint common managers (LastPass/1Password) to ignore these fields. This prevents unintended autofill (e.g., username/password injection into the Mailgun card) and reduces accidental secret leakage during demos.

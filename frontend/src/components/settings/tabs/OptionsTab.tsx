@@ -447,6 +447,14 @@ export default function OptionsTab() {
           <input
             className="w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-sm"
             placeholder="Secret name"
+            name="secretName"
+            autoComplete="off"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            inputMode="text"
+            data-lpignore="true"
+            data-1p-ignore="true"
             value={draft.name}
             onChange={(e) =>
               setDrafts((prev) => ({
@@ -459,6 +467,14 @@ export default function OptionsTab() {
             className="w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-sm"
             placeholder={descriptor.valueLabel}
             type="password"
+            name="secretValue"
+            autoComplete="new-password"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            inputMode="text"
+            data-lpignore="true"
+            data-1p-ignore="true"
             value={draft.value}
             onChange={(e) =>
               setDrafts((prev) => ({
