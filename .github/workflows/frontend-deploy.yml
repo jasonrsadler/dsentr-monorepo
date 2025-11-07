@@ -1,4 +1,4 @@
-name: Frontend Build Check
+﻿name: Frontend Build Check
 
 on:
   push:
@@ -38,6 +38,12 @@ jobs:
         run: |
           cd frontend
           npm test -- --watch=false
+
+      - name: Patch CSP to production-only (strip localhost)
+        run: |
+          sed -i 's| https://localhost:3000||g' frontend/index.html
+          sed -i 's| ws://localhost:5173||g' frontend/index.html
+          sed -i 's| wss://localhost:5173||g' frontend/index.html
 
       - name: Build
         run: |
