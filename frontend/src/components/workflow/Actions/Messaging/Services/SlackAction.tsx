@@ -607,21 +607,19 @@ export default function SlackAction({
         </p>
       )}
 
-      <NodeSecretDropdown
-        group="messaging"
-        service="slack"
-        value={slackParams.token || ''}
-        onChange={handleTokenChange}
-        placeholder="Select Slack token"
-        disabled={usingConnection}
-      />
-      {!usingConnection && validationErrors.token && (
-        <p className={errorClass}>{validationErrors.token}</p>
-      )}
-      {usingConnection && (
-        <p className="text-xs text-slate-500">
-          Manual tokens are disabled while an OAuth connection is selected.
-        </p>
+      {!usingConnection && (
+        <>
+          <NodeSecretDropdown
+            group="messaging"
+            service="slack"
+            value={slackParams.token || ''}
+            onChange={handleTokenChange}
+            placeholder="Select Slack token"
+          />
+          {validationErrors.token && (
+            <p className={errorClass}>{validationErrors.token}</p>
+          )}
+        </>
       )}
 
       <NodeInputField

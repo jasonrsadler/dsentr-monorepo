@@ -1,3 +1,4 @@
+﻿/* eslint-disable prettier/prettier */
 import { useEffect, useMemo, useState } from 'react'
 import {
   listWorkflows,
@@ -26,6 +27,9 @@ export default function WebhooksTab() {
   const [signingKey, setSigningKey] = useState('')
   const [saveBusy, setSaveBusy] = useState(false)
   const [justSaved, setJustSaved] = useState(false)
+  const [copiedCurl, setCopiedCurl] = useState(false)
+  const [copiedPS, setCopiedPS] = useState(false)
+  const [copiedJS, setCopiedJS] = useState(false)
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const activeWorkspaceId = currentWorkspace?.workspace.id ?? null
@@ -87,6 +91,9 @@ export default function WebhooksTab() {
   const fullUrl = url ? `${base}${url}` : url
   useEffect(() => {
     setCopied(false)
+    setCopiedCurl(false)
+    setCopiedPS(false)
+    setCopiedJS(false)
   }, [fullUrl])
 
   return (
@@ -168,6 +175,116 @@ export default function WebhooksTab() {
             You have read-only access. {manageWebhooksPermissionMessage}
           </p>
         )}
+
+        {/* Examples (basic, no HMAC) */}
+        <div className="mt-3 space-y-2">
+          <div className="font-medium text-xs">Examples</div>
+
+          {/* curl */}
+          <div className="relative">
+            <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
+              curl
+            </span>
+            <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
+              <code>
+                {fullUrl
+                  ? `curl -X POST \\
+  -H "Content-Type: application/json" \\
+  -d '{"price":"123"}' \\
+  ${fullUrl}`
+                  : ''}
+              </code>
+            </pre>
+            <div className="text-right mt-1">
+              <button
+                className="text-[10px] px-2 py-0.5 rounded border"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(
+                      fullUrl
+                        ? `curl -X POST -H "Content-Type: application/json" -d '{"price":"123"}' ${fullUrl}`
+                        : ''
+                    )
+                  } catch (e) {
+                    console.error(errorMessage(e))
+                  }
+                  setCopiedCurl(true)
+                  setTimeout(() => setCopiedCurl(false), 1500)
+                }}
+              >
+                {copiedCurl ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+
+          {/* PowerShell */}
+          <div className="relative">
+            <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
+              powershell
+            </span>
+            <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
+              <code>
+                {fullUrl
+                  ? `Invoke-RestMethod -Method POST \`\n  -Uri "${fullUrl}" \`\n  -ContentType "application/json" \`\n  -Body '{"price":"123"}'`
+                  : ''}
+              </code>
+            </pre>
+            <div className="text-right mt-1">
+              <button
+                className="text-[10px] px-2 py-0.5 rounded border"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(
+                      fullUrl
+                        ? `Invoke-RestMethod -Method POST -Uri "${fullUrl}" -ContentType "application/json" -Body '{"price":"123"}'`
+                        : ''
+                    )
+                  } catch (e) {
+                    console.error(errorMessage(e))
+                  }
+                  setCopiedPS(true)
+                  setTimeout(() => setCopiedPS(false), 1500)
+                }}
+              >
+                {copiedPS ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+
+          {/* JavaScript */}
+          <div className="relative">
+            <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
+              javascript
+            </span>
+            <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
+              <code>
+                {fullUrl
+                  ? `await fetch("${fullUrl}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ price: "123" })\n});`
+                  : ''}
+              </code>
+            </pre>
+            <div className="text-right mt-1">
+              <button
+                className="text-[10px] px-2 py-0.5 rounded border"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(
+                      fullUrl
+                        ? `await fetch("${fullUrl}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ price: "123" })\n});`
+                        : ''
+                    )
+                  } catch (e) {
+                    console.error(errorMessage(e))
+                  }
+                  setCopiedJS(true)
+                  setTimeout(() => setCopiedJS(false), 1500)
+                }}
+              >
+                {copiedJS ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-3">
@@ -251,28 +368,135 @@ export default function WebhooksTab() {
             {saveBusy ? 'Saving…' : justSaved ? 'Saved!' : 'Save'}
           </button>
         </div>
-        <div className="mb-2">
-          <div className="text-xs text-zinc-600 dark:text-zinc-400">
-            Signing key (base64url):
+        {!isSoloPlan && (
+          <div className="mb-2">
+            <div className="text-xs text-zinc-600 dark:text-zinc-400">
+              Signing key (base64url):
+            </div>
+            <div className="flex items-center gap-2">
+              <code className="text-xs px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 break-all">
+                {signingKey || '(unavailable)'}
+              </code>
+              <button
+                className="text-xs px-2 py-1 rounded border"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(signingKey)
+                  } catch (e) {
+                    console.error(errorMessage(e))
+                  }
+                }}
+              >
+                Copy
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <code className="text-xs px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 break-all">
-              {signingKey || '(unavailable)'}
-            </code>
-            <button
-              className="text-xs px-2 py-1 rounded border"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(signingKey)
-                } catch (e) {
-                  console.error(errorMessage(e))
-                }
-              }}
-            >
-              Copy
-            </button>
+        )}
+
+        {/* HMAC client guidance (headers/legacy) */}
+        {!isSoloPlan && (
+          <div className="text-xs text-zinc-600 dark:text-zinc-400 space-y-2">
+            <div>Client should send headers (preferred):</div>
+            <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded text-[11px] overflow-auto themed-scroll">
+              {`X-DSentr-Timestamp: <unix-seconds>\nX-DSentr-Signature: v1=<hex(hmac_sha256(base64url_decode(signing_key), ts + '.' + canonical_json_body))>`}
+            </pre>
+            <div className="text-xs text-zinc-500">
+              canonical_json_body is the minified JSON string (no whitespace).{' '}
+              The server verifies the HMAC over{' '}
+              <code>ts + '.' + canonical_json_body</code>.
+            </div>
+            <div className="text-xs text-zinc-500">
+              Legacy: if headers aren't used, include <code>_dsentr_ts</code>{' '}
+              and <code>_dsentr_sig</code> in the body and sign{' '}
+              <code>ts + '.' + body_without(_dsentr_ts,_dsentr_sig)</code>.
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* HMAC Examples (only when enabled and not on Solo) */}
+        {!isSoloPlan && requireHmac && fullUrl && signingKey && (
+          <div className="mt-3 space-y-2">
+            <div className="font-medium text-xs">HMAC Examples</div>
+
+            {/* curl (bash) */}
+            <div className="relative">
+              <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
+                curl (bash)
+              </span>
+              <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
+                <code>{`export SIGNING_KEY_B64URL='${signingKey}'
+export URL='${fullUrl}'
+body='{"price":"123"}'
+ts=$(date +%s)
+canonical=$(python3 - <<'PY' "$body"
+import json,sys; print(json.dumps(json.loads(sys.argv[1]), separators=(",",":")))
+PY
+)
+sig=$(python3 - <<'PY' "$SIGNING_KEY_B64URL" "$ts.$canonical"
+import base64,hmac,hashlib,sys
+k=sys.argv[1]; k+= '='*((4-len(k)%4)%4)
+print(hmac.new(base64.urlsafe_b64decode(k), sys.argv[2].encode(), hashlib.sha256).hexdigest())
+PY
+)
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-DSentr-Timestamp: $ts" \
+  -H "X-DSentr-Signature: v1=$sig" \
+  -d "$canonical" \
+  "$URL"`}</code>
+              </pre>
+            </div>
+
+            {/* PowerShell */}
+            <div className="relative">
+              <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
+                powershell
+              </span>
+              <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
+                <code>{`$SIGNING_KEY_B64URL = '${signingKey}'
+$URL = '${fullUrl}'
+$body = '{"price":"123"}'
+$canonical = ($body | ConvertFrom-Json) | ConvertTo-Json -Compress
+$ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()
+function Decode-Base64Url([string]$s){ $pad=(4-($s.Length%4))%4; $s+=('='*$pad); $s=$s.Replace('-','+').Replace('_','/'); [Convert]::FromBase64String($s) }
+$keyBytes = Decode-Base64Url $SIGNING_KEY_B64URL
+$hmac = New-Object System.Security.Cryptography.HMACSHA256($keyBytes)
+$payload = [Text.Encoding]::UTF8.GetBytes($ts + '.' + $canonical)
+$sigHex = -join ($hmac.ComputeHash($payload) | ForEach-Object { $_.ToString('x2') })
+$headers = @{ 'Content-Type'='application/json'; 'X-DSentr-Timestamp'=$ts; 'X-DSentr-Signature'='v1=' + $sigHex }
+Invoke-RestMethod -Method POST -Uri $URL -Headers $headers -Body $canonical`}</code>
+              </pre>
+            </div>
+
+            {/* JavaScript (Node) */}
+            <div className="relative">
+              <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
+                javascript (node)
+              </span>
+              <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
+                <code>{`// Node 18+ (global fetch). Replace signing key and URL.
+const keyB64Url = '${signingKey}';
+const url = '${fullUrl}';
+const body = { price: '123' };
+const ts = Math.floor(Date.now()/1000).toString();
+const canonical = JSON.stringify(body);
+const pad = '='.repeat((4 - (keyB64Url.length % 4)) % 4);
+const key = Buffer.from(keyB64Url.replace(/-/g,'+').replace(/_/g,'/') + pad, 'base64');
+import crypto from 'node:crypto';
+const sigHex = crypto.createHmac('sha256', key).update(ts + '.' + canonical).digest('hex');
+await fetch(url, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-DSentr-Timestamp': ts,
+    'X-DSentr-Signature': 'v1=' + sigHex
+  },
+  body: canonical
+});`}</code>
+              </pre>
+            </div>
+          </div>
+        )}
       </div>
 
       {confirming && (

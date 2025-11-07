@@ -204,3 +204,6 @@ Content Security Policy hardening:
 
 ## Change Reasons
 - Webhooks tab gating: HMAC verification controls are disabled for Solo plan workspaces, with an upgrade CTA linking to the Plan tab. This keeps paid features restricted to workspace plans and aligns UI with backend enforcement.
+
+Slack action UX:
+- When an OAuth connection is selected in the Slack action node, the manual token selector ("Select Slack token") and its helper text are hidden. Selecting "Use manual Slack token" reveals the selector again. This avoids confusing, disabled controls and clarifies which auth mode is active.
