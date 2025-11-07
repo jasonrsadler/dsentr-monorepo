@@ -602,7 +602,7 @@ await fetch(url, {
       </div>
 
       {confirming && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl shadow-xl w-96 border border-zinc-200 dark:border-zinc-700">
             <h4 className="font-semibold mb-2 text-sm">
               Regenerate webhook token?

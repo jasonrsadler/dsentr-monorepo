@@ -205,5 +205,7 @@ Content Security Policy hardening:
 ## Change Reasons
 - Webhooks tab gating: HMAC verification controls are disabled for Solo plan workspaces, with an upgrade CTA linking to the Plan tab. This keeps paid features restricted to workspace plans and aligns UI with backend enforcement.
 
+- Webhook regenerate modal visibility: the confirm modal in `src/components/settings/tabs/WebhooksTab.tsx` is now rendered with a fixed, viewport-level overlay (`fixed inset-0 z-50`) instead of being absolutely positioned inside the tab content. This ensures the modal appears centered and visible without scrolling on tall settings pages, particularly for workspace plans with longer content.
+
 Slack action UX:
 - When an OAuth connection is selected in the Slack action node, the manual token selector ("Select Slack token") and its helper text are hidden. Selecting "Use manual Slack token" reveals the selector again. This avoids confusing, disabled controls and clarifies which auth mode is active.
