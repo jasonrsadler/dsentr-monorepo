@@ -19,6 +19,8 @@ pub struct SignupPayload {
     pub country: Option<String>,
     pub tax_id: Option<String>,
     #[serde(default)]
+    pub settings: Option<serde_json::Value>,
+    #[serde(default)]
     pub provider: Option<OauthProvider>,
     #[serde(default)]
     pub invite_token: Option<String>,

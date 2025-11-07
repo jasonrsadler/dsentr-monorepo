@@ -7,6 +7,7 @@ import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import SettingsButton from '@/components/settings/SettingsButton'
 import SettingsModal from '@/components/settings/SettingsModal'
 import WorkflowsTab from '@/components/settings/tabs/WorkflowsTab'
+import PrivacyTab from '@/components/settings/tabs/PrivacyTab'
 import EngineTab from '@/components/settings/tabs/EngineTab'
 import LogsTab from '@/components/settings/tabs/LogsTab'
 import WebhooksTab from '@/components/settings/tabs/WebhooksTab'
@@ -143,6 +144,7 @@ export default function DashboardLayout() {
       { key: 'logs', label: 'Logs' },
       { key: 'webhooks', label: 'Webhooks' },
       { key: 'options', label: 'Secrets & API Keys' },
+      { key: 'privacy', label: 'Privacy' },
       { key: 'integrations', label: 'Integrations' },
       { key: 'workflows', label: 'Workflows' },
       { key: 'danger', label: 'Danger Zone' }
@@ -287,6 +289,7 @@ export default function DashboardLayout() {
             if (key === 'logs') return <LogsTab />
             if (key === 'webhooks') return <WebhooksTab />
             if (key === 'options') return <OptionsTab />
+            if (key === 'privacy') return <PrivacyTab />
             if (key === 'integrations') {
               return (
                 <IntegrationsTab

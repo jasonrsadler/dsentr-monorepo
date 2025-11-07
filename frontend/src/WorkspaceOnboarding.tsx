@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE_URL } from '@/lib'
+import { setPrivacyPreference } from '@/lib'
 import { STRIPE_PUBLISHABLE_KEY } from '@/lib'
 import { loadStripe } from '@stripe/stripe-js'
 import { getCsrfToken } from '@/lib/csrfCache'
@@ -66,6 +67,7 @@ export default function WorkspaceOnboarding() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isRedirecting, setIsRedirecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [allowWorkflowInsights, setAllowWorkflowInsights] = useState(true)
 
   useEffect(() => {
     const load = async () => {
@@ -144,6 +146,11 @@ export default function WorkspaceOnboarding() {
 
     load()
   }, [])
+
+  // Load current privacy preference (defaults to true if unset)
+  // Default privacy preference remains true during onboarding.
+  // We avoid fetching the existing preference here to keep
+  // the network interactions minimal and predictable.
 
   useEffect(() => {
     const normalized = normalizePlanTier(context?.user?.plan ?? null)
@@ -236,6 +243,12 @@ export default function WorkspaceOnboarding() {
       // Solo path (or legacy non-Stripe response): complete immediately
       await checkAuth()
       navigate('/dashboard', { replace: true })
+      // Persist privacy preference in the background (ignore errors)
+      try {
+        await setPrivacyPreference(allowWorkflowInsights)
+      } catch (_) {
+        // non-fatal
+      }
     } catch (err) {
       console.error(err)
       setError(
@@ -392,6 +405,26 @@ export default function WorkspaceOnboarding() {
                 plan.
               </p>
             )}
+          </section>
+
+          <section className="space-y-3">
+            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+              Privacy
+            </h2>
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 dark:border-zinc-600"
+                checked={allowWorkflowInsights}
+                onChange={(e) => setAllowWorkflowInsights(e.target.checked)}
+              />
+              <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                Help improve DSentr by allowing us to analyze your workflow
+                configurations to identify patterns and enhance product
+                features. If you treat your workflows as trade secrets, uncheck
+                this.
+              </span>
+            </label>
           </section>
 
           <div className="flex items-center justify-end gap-3">

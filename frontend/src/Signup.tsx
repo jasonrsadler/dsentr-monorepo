@@ -510,9 +510,7 @@ export default function SignupPage() {
                     label: 'Verify password',
                     required: true,
                     type: 'password'
-                  },
-                  { name: 'country', label: 'Country' },
-                  { name: 'tax_id', label: 'Tax ID' }
+                  }
                 ].map(({ name, label, required, type }) => {
                   const rawVal = (form as any)[name]
                   const value = typeof rawVal === 'string' ? rawVal : ''

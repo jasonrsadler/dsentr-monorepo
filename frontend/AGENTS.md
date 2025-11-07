@@ -108,6 +108,8 @@ oUnusedLocals.
 - TeamsAction: prevented duplicate store writes on no-op input changes by tracking the last committed params in a  and comparing against it before dispatch.
 - SMTPAction: improved accessibility by marking helper text as  and labeling radio inputs via  so  works in jsdom; also compute validation on each field emit and include  in the same  call to keep store state in sync with UI.
 - Signup: excluded the required asterisk from the accessible label () so tests can match  exactly via .
+- Privacy preference: added onboarding checkbox (default checked) in Workspace Onboarding allowing users to let DSentr analyze workflow configurations to improve the service. Wording clarifies that users treating workflows as trade secrets should uncheck the box. Preference persists via `/api/account/privacy` and defaults to true when unset.
+ - Settings: introduced a new "Privacy" tab where users can view/change the same preference. The tab uses `/api/account/privacy` (GET/PUT) and defaults to `true` if unset.
 
 ## Additional Changes (test fixes + tooling alignment)
 - Downgraded  to  to satisfy  peer constraints and unblock installs/tests without .
@@ -217,3 +219,8 @@ CSP automation:
 
 Secrets & API Keys autofill hardening:
 - Disabled browser/password-manager autofill on the Settings → Secrets & API Keys inputs by setting `autoComplete="off"` for the name field and `autoComplete="new-password"` for the secret value field, while also disabling spellcheck/autocapitalize/autocorrect. Added `data-lpignore` and `data-1p-ignore` to hint common managers (LastPass/1Password) to ignore these fields. This prevents unintended autofill (e.g., username/password injection into the Mailgun card) and reduces accidental secret leakage during demos.
+
+WorkspaceOnboarding checkout flow (network calls simplification):
+- Removed the initial `getPrivacyPreference()` fetch from `src/WorkspaceOnboarding.tsx` and kept the default (`allowWorkflowInsights=true`). This avoids an extra GET during mount that interfered with test fetch ordering and can introduce subtle race conditions.
+- Deferred persisting the privacy preference (`setPrivacyPreference`) to only the Solo path, after navigation completes. For the Workspace (Stripe) path, we no longer issue this extra request before redirecting to Checkout. Result: the upgrade flow performs exactly three calls in order (GET onboarding context → GET CSRF → POST onboarding) and immediately transitions to the “Redirecting…” state.
+- Rationale: keeps the checkout flow snappy and deterministic in tests and production, and prevents redundant background calls right before leaving the page.

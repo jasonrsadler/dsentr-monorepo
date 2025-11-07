@@ -106,7 +106,9 @@ impl PluggableMailer {
                 .tls(Tls::Wrapper(tls)),
         };
 
-        if let (Some(username), Some(password)) = (config.username.as_ref(), config.password.as_ref()) {
+        if let (Some(username), Some(password)) =
+            (config.username.as_ref(), config.password.as_ref())
+        {
             builder = builder.credentials(Credentials::new(username.clone(), password.clone()));
         }
 
@@ -119,28 +121,28 @@ impl PluggableMailer {
         }
         let email = msg_builder.subject(subject).body(body.to_string())?;
 
-        transport
-            .send(email)
-            .await
-            .map(|_| ())
-            .map_err(|error| {
-                tracing::error!(
-                    error = %error,
-                    host = %config.host,
-                    port = config.port,
-                    tls_mode = %config.tls_mode,
-                    auth_configured = config.username.is_some(),
-                    "Failed to send SMTP email with dynamic configuration"
-                );
-                MailError::SendError(format!(
-                    "{} (host: {}:{}, tls: {}, auth: {})",
-                    error,
-                    config.host,
-                    config.port,
-                    config.tls_mode,
-                    if config.username.is_some() { "set" } else { "not set" }
-                ))
-            })
+        transport.send(email).await.map(|_| ()).map_err(|error| {
+            tracing::error!(
+                error = %error,
+                host = %config.host,
+                port = config.port,
+                tls_mode = %config.tls_mode,
+                auth_configured = config.username.is_some(),
+                "Failed to send SMTP email with dynamic configuration"
+            );
+            MailError::SendError(format!(
+                "{} (host: {}:{}, tls: {}, auth: {})",
+                error,
+                config.host,
+                config.port,
+                config.tls_mode,
+                if config.username.is_some() {
+                    "set"
+                } else {
+                    "not set"
+                }
+            ))
+        })
     }
 }
 
@@ -179,8 +181,7 @@ impl Mailer for PluggableMailer {
         subject: &str,
         body: &str,
     ) -> Result<(), MailError> {
-        self
-            .send_runtime_smtp(config, recipients, subject, body)
+        self.send_runtime_smtp(config, recipients, subject, body)
             .await
     }
 
@@ -188,4 +189,3 @@ impl Mailer for PluggableMailer {
         self
     }
 }
-

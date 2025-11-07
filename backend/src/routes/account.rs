@@ -539,3 +539,106 @@ fn format_bullet_list(items: &[String]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+// --- Privacy preference (share workflows for improvement) ---
+
+#[derive(serde::Deserialize)]
+pub struct UpdatePrivacyPayload {
+    pub allow: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct PrivacyResponse {
+    pub success: bool,
+    pub allow: bool,
+}
+
+pub async fn get_privacy_preference(
+    axum::extract::State(state): axum::extract::State<crate::state::AppState>,
+    crate::routes::auth::session::AuthSession(claims): crate::routes::auth::session::AuthSession,
+) -> axum::response::Response {
+    let user_id = match uuid::Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => {
+            return crate::responses::JsonResponse::unauthorized("Invalid user ID").into_response()
+        }
+    };
+
+    let Ok(settings) = state.db.get_user_settings(user_id).await else {
+        // Default to true if settings are unavailable
+        return (
+            axum::http::StatusCode::OK,
+            axum::Json(PrivacyResponse {
+                success: true,
+                allow: true,
+            }),
+        )
+            .into_response();
+    };
+
+    let allow = settings
+        .get("privacy")
+        .and_then(|p| p.get("share_workflows_for_improvement"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    (
+        axum::http::StatusCode::OK,
+        axum::Json(PrivacyResponse {
+            success: true,
+            allow,
+        }),
+    )
+        .into_response()
+}
+
+pub async fn update_privacy_preference(
+    axum::extract::State(state): axum::extract::State<crate::state::AppState>,
+    crate::routes::auth::session::AuthSession(claims): crate::routes::auth::session::AuthSession,
+    axum::extract::Json(payload): axum::extract::Json<UpdatePrivacyPayload>,
+) -> axum::response::Response {
+    let user_id = match uuid::Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => {
+            return crate::responses::JsonResponse::unauthorized("Invalid user ID").into_response()
+        }
+    };
+
+    let Ok(mut settings) = state.db.get_user_settings(user_id).await else {
+        return crate::responses::JsonResponse::server_error("Failed to load settings")
+            .into_response();
+    };
+
+    // Ensure nested object exists and set value
+    let root = if let Some(obj) = settings.as_object_mut() {
+        obj
+    } else {
+        settings = serde_json::Value::Object(serde_json::Map::new());
+        settings.as_object_mut().unwrap()
+    };
+
+    let privacy = root
+        .entry("privacy")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .unwrap();
+    privacy.insert(
+        "share_workflows_for_improvement".to_string(),
+        serde_json::Value::Bool(payload.allow),
+    );
+
+    if let Err(err) = state.db.update_user_settings(user_id, settings).await {
+        tracing::error!(?err, %user_id, "failed to update privacy preference");
+        return crate::responses::JsonResponse::server_error("Failed to update preference")
+            .into_response();
+    }
+
+    (
+        axum::http::StatusCode::OK,
+        axum::Json(PrivacyResponse {
+            success: true,
+            allow: payload.allow,
+        }),
+    )
+        .into_response()
+}

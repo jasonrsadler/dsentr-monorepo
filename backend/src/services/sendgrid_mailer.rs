@@ -105,4 +105,3 @@ impl Mailer for SendgridMailer {
         self
     }
 }
-

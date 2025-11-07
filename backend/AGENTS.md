@@ -25,6 +25,12 @@ itly coordinated.
 
 - Webhooks HMAC plan gating: The `/api/workflows/:id/webhook/config` POST now enforces that HMAC can only be enabled on workspace plans. Attempts to enable HMAC from Solo plan contexts receive `403 Forbidden` with a clear message. This matches frontend gating in Settings → Webhooks and prevents paid features on free plans.
 
+- Privacy preference and signup settings:
+  - Added `/api/account/privacy` (GET/PUT) to read/update `users.settings.privacy.share_workflows_for_improvement`.
+  - Default behavior is opt-in: if the key is missing, the API returns `allow: true`.
+  - Signup now accepts an optional `settings` JSON object so onboarding can persist the initial preference.
+  - Migration `202511071_1_user_privacy_default.sql` backfills the default `true` for existing users where the key is absent.
+
 ## App Email Delivery
 - Environment variables:
   - `EMAIL_PROVIDER`: `smtp` (default) or `sendgrid`.

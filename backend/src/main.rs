@@ -69,8 +69,9 @@ use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::info;
+use tracing_subscriber::{prelude::*, EnvFilter};
+
 use utils::{
     csrf::{get_csrf_token, validate_csrf},
     jwt::JwtKeys,
@@ -90,9 +91,20 @@ use axum_server::tls_rustls::RustlsConfig;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .finish();
+    let _guard = sentry::init(("https://a94598e7b27ba11a160c9576b24e3f6f@o4510324922449920.ingest.us.sentry.io/4510324924874752", sentry::ClientOptions {
+    release: sentry::release_name!(),
+    // Capture user IPs and potentially sensitive headers when using HTTP server integrations
+    // see https://docs.sentry.io/platforms/rust/data-management/data-collected for more info
+    send_default_pii: true,
+    ..Default::default()
+  }));
+    let sentry_layer = sentry_tracing::layer();
+
+    let subscriber = tracing_subscriber::registry()
+        .with(EnvFilter::new("info")) // or "warn" if you want peace
+        .with(tracing_subscriber::fmt::layer())
+        .with(sentry_layer);
+
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|error| {
             tracing::error!(error = ?error, "Failed to set global tracing subscriber");
@@ -336,6 +348,11 @@ async fn main() -> Result<()> {
         .route("/delete/request", post(request_account_deletion))
         .route("/delete/confirm", post(confirm_account_deletion))
         .route("/delete/summary/{token}", get(get_account_deletion_summary))
+        .route(
+            "/privacy",
+            get(routes::account::get_privacy_preference)
+                .put(routes::account::update_privacy_preference),
+        )
         .layer(csrf_layer.clone())
         .layer(GovernorLayer {
             config: auth_governor_conf.clone(),
@@ -646,7 +663,6 @@ async fn main() -> Result<()> {
             })
             .context("server encountered an error")?;
     }
-
     Ok(())
 }
 /// A simple root route.

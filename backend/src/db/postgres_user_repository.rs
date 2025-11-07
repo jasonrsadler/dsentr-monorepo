@@ -203,6 +203,11 @@ impl UserRepository for PostgresUserRepository {
         password_hash: &str,
         provider: OauthProvider,
     ) -> Result<Uuid, sqlx::Error> {
+        let settings = payload
+            .settings
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
+
         sqlx::query_scalar!(
             r#"
             INSERT INTO users (
@@ -211,7 +216,7 @@ impl UserRepository for PostgresUserRepository {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7,
-                false, false, '{}', now(), now(), $8::oauth_provider
+                false, false, $8, now(), now(), $9::oauth_provider
             )
             RETURNING id
             "#,
@@ -222,6 +227,7 @@ impl UserRepository for PostgresUserRepository {
             payload.company_name,
             payload.country,
             payload.tax_id,
+            settings,
             provider as OauthProvider
         )
         .fetch_one(&self.pool)

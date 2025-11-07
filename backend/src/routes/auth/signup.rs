@@ -771,6 +771,7 @@ mod tests {
             password: "password123".into(),
             first_name: "Test".into(),
             last_name: "User".into(),
+            settings: None,
             provider: None,
             company_name: None,
             country: None,

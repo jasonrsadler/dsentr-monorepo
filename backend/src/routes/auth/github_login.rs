@@ -136,12 +136,19 @@ pub async fn github_callback(
 
         Ok(None) => {
             // If Terms were accepted on /signup, create the user now; otherwise return to /signup.
-            let tos_cookie_opt = jar.get("oauth_terms_version").map(|c| c.value().to_string());
+            let tos_cookie_opt = jar
+                .get("oauth_terms_version")
+                .map(|c| c.value().to_string());
             if let Some(ver) = tos_cookie_opt {
                 if !ver.trim().is_empty() {
                     match app_state
                         .db
-                        .create_user_with_oauth(&email, &first_name, &last_name, OauthProvider::Github)
+                        .create_user_with_oauth(
+                            &email,
+                            &first_name,
+                            &last_name,
+                            OauthProvider::Github,
+                        )
                         .await
                     {
                         Ok(new_user) => new_user,
