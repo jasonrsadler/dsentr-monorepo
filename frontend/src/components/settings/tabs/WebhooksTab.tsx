@@ -10,6 +10,7 @@ import {
 import { API_BASE_URL } from '@/lib/config'
 import { errorMessage } from '@/lib/errorMessage'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
+import { normalizePlanTier } from '@/lib/planTiers'
 
 export default function WebhooksTab() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
@@ -19,30 +20,36 @@ export default function WebhooksTab() {
   const [copied, setCopied] = useState(false)
   const [regenBusy, setRegenBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
+
   const [requireHmac, setRequireHmac] = useState(false)
   const [replayWindow, setReplayWindow] = useState(300)
   const [signingKey, setSigningKey] = useState('')
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
+
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const activeWorkspaceId = currentWorkspace?.workspace.id ?? null
   const canManageWebhooks =
     currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'admin'
   const manageWebhooksPermissionMessage =
     'Only workspace admins or owners can manage webhook settings.'
+  const planTier = normalizePlanTier(currentWorkspace?.workspace.plan ?? null)
+  const isSoloPlan = planTier === 'solo'
 
+  // Load available workflows for the active workspace (or personal)
   useEffect(() => {
     listWorkflows(activeWorkspaceId)
       .then((ws) => {
         setWorkflows(ws)
         setWorkflowId((prev) => {
-          if (prev && ws.some((w) => w.id === prev)) {
-            return prev
-          }
+          if (prev && ws.some((w) => w.id === prev)) return prev
           return ws[0]?.id ?? ''
         })
       })
       .catch(() => {})
   }, [activeWorkspaceId])
 
+  // Fetch webhook URL for selected workflow
   useEffect(() => {
     if (!workflowId) {
       setUrl('')
@@ -54,6 +61,7 @@ export default function WebhooksTab() {
       .finally(() => setLoading(false))
   }, [workflowId])
 
+  // Fetch HMAC config
   useEffect(() => {
     if (!workflowId) {
       setRequireHmac(false)
@@ -63,9 +71,9 @@ export default function WebhooksTab() {
     }
     getWebhookConfig(workflowId)
       .then((cfg) => {
-        setRequireHmac(cfg.require_hmac)
-        setReplayWindow(cfg.replay_window_sec)
-        setSigningKey(cfg.signing_key)
+        setRequireHmac(!!cfg.require_hmac)
+        setReplayWindow(Number(cfg.replay_window_sec) || 300)
+        setSigningKey(cfg.signing_key || '')
       })
       .catch(() => {})
   }, [workflowId])
@@ -74,34 +82,11 @@ export default function WebhooksTab() {
     () => workflows.find((w) => w.id === workflowId) ?? null,
     [workflows, workflowId]
   )
+
   const base = (API_BASE_URL || '').replace(/\/$/, '')
   const fullUrl = url ? `${base}${url}` : url
   useEffect(() => {
     setCopied(false)
-  }, [fullUrl])
-  const curlDisplay = fullUrl
-    ? `curl -X POST \\\n+  -H "Content-Type: application/json" \\\n+  -d '{"price":"123"}' \\\n+  ${fullUrl}`
-    : ''
-  const curlCopy = fullUrl
-    ? `curl -X POST -H "Content-Type: application/json" -d '{"price":"123"}' ${fullUrl}`
-    : ''
-  const psDisplay = fullUrl
-    ? `Invoke-RestMethod -Method POST \`\n  -Uri "${fullUrl}" \`\n  -ContentType "application/json" \`\n  -Body '{"price":"123"}'`
-    : ''
-  const psCopy = fullUrl
-    ? `Invoke-RestMethod -Method POST -Uri "${fullUrl}" -ContentType "application/json" -Body '{"price":"123"}'`
-    : ''
-  const jsDisplay = fullUrl
-    ? `await fetch("${fullUrl}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ price: "123" })\n});`
-    : ''
-  const jsCopy = jsDisplay
-  const [copiedCurl, setCopiedCurl] = useState(false)
-  const [copiedPS, setCopiedPS] = useState(false)
-  const [copiedJS, setCopiedJS] = useState(false)
-  useEffect(() => {
-    setCopiedCurl(false)
-    setCopiedPS(false)
-    setCopiedJS(false)
   }, [fullUrl])
 
   return (
@@ -183,135 +168,6 @@ export default function WebhooksTab() {
             You have read-only access. {manageWebhooksPermissionMessage}
           </p>
         )}
-        <div className="mt-4 text-xs text-zinc-600 dark:text-zinc-300 space-y-2">
-          <div>
-            <span className="font-medium">Payload</span>: POST JSON
-            (Content-Type: application/json). The body becomes trigger context
-            and is available in templating (e.g., <code>{'{{price}}'}</code>).
-          </div>
-          <div>
-            <span className="font-medium">Response</span>: 202 Accepted →{' '}
-            <code>{'{ run: { id, ... } }'}</code>. Poll GET{' '}
-            <code>/api/workflows/&lt;id&gt;/runs/&lt;run_id&gt;</code> for
-            status.
-          </div>
-          <div className="space-y-2 hidden">
-            <div className="font-medium">Examples</div>
-            <div className="relative">
-              <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
-                curl
-              </span>
-              <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll">
-                <code>{`curl -X POST -H "Content-Type: application/json" -d '{"price":"123"}' ${fullUrl}`}</code>
-              </pre>
-            </div>
-            <div className="relative">
-              <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
-                powershell
-              </span>
-              <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll">
-                <code>{`Invoke-RestMethod -Method POST -Uri "${fullUrl}" -ContentType "application/json" -Body '{"price":"123"}'`}</code>
-              </pre>
-            </div>
-            <div className="relative">
-              <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
-                javascript
-              </span>
-              <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll">
-                <code>{`await fetch("${fullUrl}", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ price: "123" })
-});`}</code>
-              </pre>
-            </div>
-          </div>
-        </div>
-
-        {/* Wrapped examples with copy buttons */}
-        <div className="mt-3 space-y-2">
-          <div className="font-medium text-xs">Examples</div>
-          <div className="relative">
-            <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
-              curl
-            </span>
-            <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
-              <code>{curlDisplay}</code>
-            </pre>
-            <div className="text-right mt-1">
-              <button
-                className="text-[10px] px-2 py-0.5 rounded border"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(curlCopy)
-                  } catch (e) {
-                    console.error(errorMessage(e))
-                  }
-                  setCopiedCurl(true)
-                  setTimeout(() => setCopiedCurl(false), 1500)
-                }}
-              >
-                {copiedCurl ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
-          </div>
-
-          <div className="relative">
-            <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
-              powershell
-            </span>
-            <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
-              <code>{psDisplay}</code>
-            </pre>
-            <div className="text-right mt-1">
-              <button
-                className="text-[10px] px-2 py-0.5 rounded border"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(psCopy)
-                  } catch (e) {
-                    console.error(errorMessage(e))
-                  }
-                  setCopiedPS(true)
-                  setTimeout(() => setCopiedPS(false), 1500)
-                }}
-              >
-                {copiedPS ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
-          </div>
-
-          <div className="relative">
-            <span className="absolute right-2 top-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
-              javascript
-            </span>
-            <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
-              <code>{jsDisplay}</code>
-            </pre>
-            <div className="text-right mt-1">
-              <button
-                className="text-[10px] px-2 py-0.5 rounded border"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(jsCopy)
-                  } catch (e) {
-                    console.error(errorMessage(e))
-                  }
-                  setCopiedJS(true)
-                  setTimeout(() => setCopiedJS(false), 1500)
-                }}
-              >
-                {copiedJS ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <p className="text-xs text-zinc-500 mt-2">
-          Send a POST with JSON payload to this URL to start the workflow. The
-          request body becomes the trigger context (available in templating as{' '}
-          <code>{'{{key}}'}</code>).
-        </p>
       </div>
 
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-3">
@@ -321,13 +177,40 @@ export default function WebhooksTab() {
             You have read-only access. {manageWebhooksPermissionMessage}
           </p>
         )}
+        {isSoloPlan && (
+          /* eslint-disable prettier/prettier */
+          <div className="text-xs text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-2">
+            <span>
+              HMAC verification is available on workspace plans. Upgrade your plan
+              to enable it.
+            </span>
+            <button
+              type="button"
+              className="px-2 py-0.5 text-[10px] rounded border"
+              onClick={() => {
+                try {
+                  window.dispatchEvent(
+                    new CustomEvent('open-plan-settings', {
+                      detail: { tab: 'plan' }
+                    })
+                  )
+                } catch (err) {
+                  console.error(errorMessage(err))
+                }
+              }}
+            >
+              Upgrade
+            </button>
+          </div>
+          /* eslint-enable prettier/prettier */
+        )}
         <div className="flex items-center gap-3 mb-2">
           <label className="text-sm inline-flex items-center gap-2">
             <input
               type="checkbox"
               checked={requireHmac}
               onChange={(e) => setRequireHmac(e.target.checked)}
-              disabled={!canManageWebhooks}
+              disabled={!canManageWebhooks || isSoloPlan}
             />
             Require HMAC signature
           </label>
@@ -342,25 +225,30 @@ export default function WebhooksTab() {
                 setReplayWindow(parseInt(e.target.value || '300', 10))
               }
               className="w-24 px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700"
-              disabled={!canManageWebhooks}
+              disabled={!canManageWebhooks || isSoloPlan}
             />
           </label>
           <button
             className="text-xs px-2 py-1 rounded border"
-            disabled={!canManageWebhooks}
+            disabled={!canManageWebhooks || isSoloPlan || saveBusy}
             onClick={async () => {
-              if (!canManageWebhooks) return
+              if (!canManageWebhooks || !workflowId) return
               try {
+                setSaveBusy(true)
                 await setWebhookConfig(workflowId, {
                   require_hmac: requireHmac,
                   replay_window_sec: replayWindow
                 })
+                setJustSaved(true)
+                setTimeout(() => setJustSaved(false), 1500)
               } catch (e) {
                 console.error(errorMessage(e))
+              } finally {
+                setSaveBusy(false)
               }
             }}
           >
-            Save
+            {saveBusy ? 'Saving…' : justSaved ? 'Saved!' : 'Save'}
           </button>
         </div>
         <div className="mb-2">
@@ -384,10 +272,6 @@ export default function WebhooksTab() {
               Copy
             </button>
           </div>
-        </div>
-        <div className="text-xs text-zinc-600 dark:text-zinc-400 space-y-1">
-          <div>Client should send headers:</div>
-          <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded text-[11px] overflow-auto themed-scroll">{`X-DSentr-Timestamp: <unix-seconds>\nX-DSentr-Signature: v1=<hex(hmac_sha256(signing_key, ts + '.' + raw_json_body))>`}</pre>
         </div>
       </div>
 

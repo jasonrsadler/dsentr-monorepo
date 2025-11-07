@@ -17,6 +17,18 @@
 - `sse.rs`: Server-sent-event endpoints streaming run updates (global, per workflow, per run).
 - `webhooks.rs`: Public webhook trigger endpoint plus helper APIs to rotate tokens or toggle webhook security settings.
 
+### 2025-11-07 — HMAC verification update
+- Reason: Previous verification logic required `_dsentr_ts`/`_dsentr_sig` in the JSON body and computed the HMAC over a payload that included the signature itself, making client-side signing impractical. This also diverged from the Settings note that recommends header-based auth.
+- Change: `webhook_trigger` now supports header-based HMAC and fixes JSON-body verification.
+  - Preferred (recommended): headers `X-DSentr-Timestamp` and `X-DSentr-Signature: v1=<hex>` are accepted. The server verifies `HMAC_SHA256(signing_key, "<ts>.<canonical_json_body>")` where `canonical_json_body` is the minified body as parsed by `serde_json`.
+  - Legacy compatibility: if headers are absent, the server will read `_dsentr_ts`/`_dsentr_sig` from the JSON body and verify the same payload, but it will first remove `_dsentr_ts` and `_dsentr_sig` keys from the body before computing the signature.
+  - Replay protection and window enforcement remain unchanged.
+
+Operational notes:
+- Token validation is still required and occurs before HMAC verification.
+- The allowlist injection into the run snapshot is unchanged.
+- Keep the Settings help text aligned with the header-based flow above.
+
 ## Usage Tips
 - Always call `AppState::resolve_plan_tier` before performing plan-gated operations; helpers assume it was run.
 - Responses use `JsonResponse` for errors; return structured JSON (`success`, payload) for success cases.

@@ -201,3 +201,6 @@ Content Security Policy hardening:
 
 ## OAuth login UX
 - When a user attempts OAuth login (Google/GitHub) without an existing DSentr account, the backend now redirects them to `/signup?oauth=…` with provider/email/name hints. The Signup page parses these params to prefill fields and shows a non-error notice, ensuring users accept the Terms of Service before starting OAuth signup via the provider button.
+
+## Change Reasons
+- Webhooks tab gating: HMAC verification controls are disabled for Solo plan workspaces, with an upgrade CTA linking to the Plan tab. This keeps paid features restricted to workspace plans and aligns UI with backend enforcement.

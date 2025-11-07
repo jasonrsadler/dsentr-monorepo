@@ -1,6 +1,8 @@
 use super::prelude::*;
 use crate::config::MIN_WEBHOOK_SECRET_LENGTH;
 use tracing::error;
+use axum::http::HeaderMap;
+use crate::utils::plan_limits::NormalizedPlanTier;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -78,6 +80,7 @@ pub async fn get_webhook_url(
 pub async fn webhook_trigger(
     State(app_state): State<AppState>,
     Path((workflow_id, token)): Path<(Uuid, String)>,
+    headers: HeaderMap,
     body: Option<Json<serde_json::Value>>,
 ) -> Response {
     let wf = match app_state
@@ -107,25 +110,39 @@ pub async fn webhook_trigger(
         let signing_key_b64 =
             compute_webhook_signing_key(&secret, wf.user_id, wf.id, wf.webhook_salt);
 
-        let (ts_str, sig_str) = {
-            let ts = std::env::var("X_DSENTR_TS_OVERRIDE").ok();
-            let sg = std::env::var("X_DSENTR_SIG_OVERRIDE").ok();
-            if let (Some(ts), Some(sg)) = (ts, sg) {
-                (ts, sg)
-            } else if let Some(Json(ref b)) = body {
-                let ts_v = b
-                    .get("_dsentr_ts")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let sg_v = b
-                    .get("_dsentr_sig")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                (ts_v, sg_v)
+        // Prefer explicit overrides (testing), then headers, then legacy JSON fields.
+        let (ts_str, sig_str, used_headers) = {
+            if let (Ok(ts), Ok(sg)) = (
+                std::env::var("X_DSENTR_TS_OVERRIDE"),
+                std::env::var("X_DSENTR_SIG_OVERRIDE"),
+            ) {
+                (ts, sg, true)
             } else {
-                (String::new(), String::new())
+                let ts_h = headers
+                    .get("X-DSentr-Timestamp")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let sg_h = headers
+                    .get("X-DSentr-Signature")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                if let (Some(ts), Some(sg)) = (ts_h, sg_h) {
+                    (ts, sg, true)
+                } else if let Some(Json(ref b)) = body {
+                    let ts_v = b
+                        .get("_dsentr_ts")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let sg_v = b
+                        .get("_dsentr_sig")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    (ts_v, sg_v, false)
+                } else {
+                    (String::new(), String::new(), false)
+                }
             }
         };
 
@@ -137,10 +154,23 @@ pub async fn webhook_trigger(
             return JsonResponse::unauthorized("Stale or invalid timestamp").into_response();
         }
 
-        let raw_body = body
-            .as_ref()
-            .map(|Json(v)| v.to_string())
-            .unwrap_or_else(|| String::from(""));
+        // For header-based auth, sign the canonical JSON body as sent by client.
+        // For legacy body fields, exclude _dsentr_ts/_dsentr_sig keys from the
+        // signed payload to make the signature computable by clients.
+        let raw_body = if let Some(Json(ref v)) = body {
+            if used_headers {
+                v.to_string()
+            } else {
+                let mut cloned = v.clone();
+                if let Some(obj) = cloned.as_object_mut() {
+                    obj.remove("_dsentr_sig");
+                    obj.remove("_dsentr_ts");
+                }
+                cloned.to_string()
+            }
+        } else {
+            String::new()
+        };
         let payload = format!("{}.{}", ts_str, raw_body);
         let key_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(signing_key_b64.as_bytes())
@@ -246,6 +276,35 @@ pub async fn set_webhook_config(
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
     let replay = body.replay_window_sec.clamp(60, 3600);
+
+    // Enforce plan gating: HMAC is only available on workspace plans
+    match app_state
+        .workflow_repo
+        .find_workflow_by_id(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(wf)) => {
+            // Determine effective plan tier: personal (no workspace) is Solo
+            let is_solo_plan = match wf.workspace_id {
+                None => true,
+                Some(ws_id) => match app_state.workspace_repo.find_workspace(ws_id).await {
+                    Ok(Some(ws)) => NormalizedPlanTier::from_option(Some(ws.plan.as_str())).is_solo(),
+                    // If the workspace cannot be loaded, fail closed (treat as solo)
+                    Ok(None) => true,
+                    Err(_) => true,
+                },
+            };
+
+            if is_solo_plan && body.require_hmac {
+                return JsonResponse::forbidden(
+                    "HMAC verification is available on workspace plans. Upgrade your plan to enable it.",
+                )
+                .into_response();
+            }
+        }
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(_) => return JsonResponse::server_error("Failed to update").into_response(),
+    }
     match app_state
         .workflow_repo
         .update_webhook_config(user_id, workflow_id, body.require_hmac, replay)
