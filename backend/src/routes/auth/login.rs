@@ -1,8 +1,9 @@
 use crate::routes::auth::claims::{Claims, TokenUse};
 use crate::{
     responses::JsonResponse,
+    session,
     state::AppState,
-    utils::{jwt::create_jwt, password::verify_password, plan_limits::NormalizedPlanTier},
+    utils::{password::verify_password, plan_limits::NormalizedPlanTier},
 };
 
 use axum::{
@@ -15,6 +16,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, to_value};
 use time::Duration as TimeDuration;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use super::session::AuthSession;
@@ -53,17 +55,13 @@ pub async fn handle_login(
     }
     match verify_password(&payload.password, &user.password_hash) {
         Ok(true) => {
-            let access_duration = Duration::minutes(45);
-            let refresh_duration = if payload.remember {
-                Duration::days(30)
-            } else {
-                Duration::days(7)
-            };
+            let session_ttl_hours = if payload.remember { 24 * 30 } else { 24 * 7 };
+            let expires_at = Utc::now() + Duration::hours(session_ttl_hours);
 
-            let access_claims = Claims {
+            let claims = Claims {
                 id: user.id.to_string(),
                 email: user.email.clone(),
-                exp: (Utc::now() + access_duration).timestamp() as usize,
+                exp: expires_at.timestamp() as usize,
                 first_name: user.first_name.clone(),
                 last_name: user.last_name.clone(),
                 role: user.role,
@@ -72,20 +70,6 @@ pub async fn handle_login(
                 iss: String::new(),
                 aud: String::new(),
                 token_use: TokenUse::Access,
-            };
-
-            let refresh_claims = Claims {
-                id: user.id.to_string(),
-                email: user.email.clone(),
-                exp: (Utc::now() + refresh_duration).timestamp() as usize,
-                first_name: user.first_name.clone(),
-                last_name: user.last_name.clone(),
-                role: user.role,
-                plan: user.plan.clone(),
-                company_name: user.company_name.clone(),
-                iss: String::new(),
-                aud: String::new(),
-                token_use: TokenUse::Refresh,
             };
 
             let requires_onboarding = user.onboarded_at.is_none()
@@ -108,67 +92,59 @@ pub async fn handle_login(
                 }
             };
 
-            match (
-                create_jwt(
-                    access_claims,
-                    app_state.jwt_keys.as_ref(),
-                    &app_state.config.jwt_issuer,
-                    &app_state.config.jwt_audience,
-                ),
-                create_jwt(
-                    refresh_claims,
-                    app_state.jwt_keys.as_ref(),
-                    &app_state.config.jwt_issuer,
-                    &app_state.config.jwt_audience,
-                ),
-            ) {
-                (Ok(access_token), Ok(refresh_token)) => {
-                    let secure_cookie = app_state.config.auth_cookie_secure;
-                    let access_cookie = Cookie::build(("auth_token", access_token))
-                        .http_only(true)
-                        .secure(secure_cookie)
-                        .same_site(SameSite::Lax)
-                        .path("/")
-                        .max_age(TimeDuration::seconds(access_duration.num_seconds()))
-                        .build();
-
-                    let refresh_cookie = Cookie::build(("auth_refresh_token", refresh_token))
-                        .http_only(true)
-                        .secure(secure_cookie)
-                        .same_site(SameSite::Lax)
-                        .path("/")
-                        .max_age(TimeDuration::seconds(refresh_duration.num_seconds()))
-                        .build();
-
-                    let mut headers = HeaderMap::new();
-                    headers.insert(
-                        header::SET_COOKIE,
-                        HeaderValue::from_str(&access_cookie.to_string()).unwrap(),
-                    );
-                    headers.append(
-                        header::SET_COOKIE,
-                        HeaderValue::from_str(&refresh_cookie.to_string()).unwrap(),
-                    );
-                    let user_json = to_value(&user).expect("User serialization failed");
-                    let memberships_json =
-                        to_value(&memberships).expect("Membership serialization failed");
-                    (
-                        StatusCode::OK,
-                        headers,
-                        Json(json!({
-                            "success": true,
-                            "user": user_json,
-                            "memberships": memberships_json,
-                            "requires_onboarding": requires_onboarding
-                        })),
-                    )
-                        .into_response()
+            let session_value = match serde_json::to_value(&claims) {
+                Ok(value) => value,
+                Err(err) => {
+                    error!(?err, user_id=%user.id, "failed to serialize claims for session");
+                    return JsonResponse::server_error("Failed to create session").into_response();
                 }
-                (Err(e), _) | (_, Err(e)) => {
-                    eprintln!("JWT error: {:?}", e);
-                    JsonResponse::server_error("Token generation failed").into_response()
+            };
+
+            let (session_id, _) = match session::create_session(
+                app_state.db_pool.as_ref(),
+                user.id,
+                session_value,
+                session_ttl_hours,
+            )
+            .await
+            {
+                Ok((session_id, session)) => {
+                    info!(%session_id, user_id=%user.id, "session created for login");
+                    (session_id, session)
                 }
-            }
+                Err(err) => {
+                    error!(?err, user_id=%user.id, "failed to create session during login");
+                    return JsonResponse::server_error("Failed to create session").into_response();
+                }
+            };
+
+            let secure_cookie = app_state.config.auth_cookie_secure;
+            let session_cookie = Cookie::build(("dsentr_session", session_id.to_string()))
+                .http_only(true)
+                .secure(secure_cookie)
+                .same_site(SameSite::Lax)
+                .path("/")
+                .max_age(TimeDuration::hours(session_ttl_hours))
+                .build();
+
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::SET_COOKIE,
+                HeaderValue::from_str(&session_cookie.to_string()).unwrap(),
+            );
+            let user_json = to_value(&user).expect("User serialization failed");
+            let memberships_json = to_value(&memberships).expect("Membership serialization failed");
+            (
+                StatusCode::OK,
+                headers,
+                Json(json!({
+                    "success": true,
+                    "user": user_json,
+                    "memberships": memberships_json,
+                    "requires_onboarding": requires_onboarding
+                })),
+            )
+                .into_response()
         }
         Ok(false) => JsonResponse::unauthorized("Invalid credentials").into_response(),
         Err(e) => {
@@ -325,7 +301,7 @@ mod tests {
             },
             smtp_mailer::MockMailer,
         },
-        state::AppState,
+        state::{test_pg_pool, AppState},
         utils::jwt::JwtKeys,
     };
     use reqwest::Client;
@@ -402,6 +378,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()), // Not used in these tests
             google_oauth: Arc::new(MockGoogleOAuth::default()), // Not used in these tests
             github_oauth: Arc::new(MockGitHubOAuth::default()), // Not used in these tests
@@ -427,6 +404,7 @@ mod tests {
         let password = "password123";
         let (user, _) = test_user_with_password(password);
         eprintln!("User going into MockDb: {:?}", user.email);
+        crate::session::reset_test_sessions();
         let app = build_app(
             MockDb {
                 find_user_result: Some(user.clone()),
@@ -458,8 +436,9 @@ mod tests {
             .iter()
             .map(|v| v.to_str().unwrap().to_string())
             .collect();
-        assert!(cookies.iter().any(|c| c.contains("auth_token=")));
-        assert!(cookies.iter().any(|c| c.contains("auth_refresh_token=")));
+        assert!(cookies
+            .iter()
+            .any(|c| c.contains("dsentr_session=") && c.contains("HttpOnly")));
 
         let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -473,6 +452,7 @@ mod tests {
     async fn test_login_uses_secure_cookie_when_enabled() {
         let password = "password123";
         let (user, _) = test_user_with_password(password);
+        crate::session::reset_test_sessions();
         let app = build_app(
             MockDb {
                 find_user_result: Some(user.clone()),
@@ -503,13 +483,17 @@ mod tests {
             .iter()
             .map(|v| v.to_str().unwrap().to_string())
             .collect();
-        assert!(cookies.iter().all(|c| c.contains("Secure")));
+        assert!(cookies
+            .iter()
+            .filter(|c| c.contains("dsentr_session"))
+            .all(|c| c.contains("Secure")));
     }
 
     #[tokio::test]
     async fn test_login_uses_insecure_cookie_when_disabled() {
         let password = "password123";
         let (user, _) = test_user_with_password(password);
+        crate::session::reset_test_sessions();
         let app = build_app(
             MockDb {
                 find_user_result: Some(user.clone()),
@@ -540,7 +524,10 @@ mod tests {
             .iter()
             .map(|v| v.to_str().unwrap().to_string())
             .collect();
-        assert!(cookies.iter().all(|c| !c.contains("Secure")));
+        assert!(cookies
+            .iter()
+            .filter(|c| c.contains("dsentr_session"))
+            .all(|c| !c.contains("Secure")));
     }
 
     #[tokio::test]
@@ -550,6 +537,7 @@ mod tests {
         user.plan = None;
         user.onboarded_at = None;
 
+        crate::session::reset_test_sessions();
         let app = build_app(
             MockDb {
                 find_user_result: Some(user.clone()),
@@ -585,6 +573,7 @@ mod tests {
         let password = "password123";
         let (user, _) = test_user_with_password(password);
 
+        crate::session::reset_test_sessions();
         let app = build_app(
             MockDb {
                 find_user_result: Some(user.clone()),
@@ -614,6 +603,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_user_not_found() {
+        crate::session::reset_test_sessions();
         let app = build_app(
             MockDb {
                 find_user_result: None,
@@ -647,6 +637,7 @@ mod tests {
         let (mut user, _) = test_user_with_password(&password_hash);
         user.oauth_provider = Some(OauthProvider::Google);
 
+        crate::session::reset_test_sessions();
         let app = build_app(
             MockDb {
                 find_user_result: Some(user.clone()),
@@ -676,6 +667,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_db_error() {
+        crate::session::reset_test_sessions();
         let app = build_app(
             MockDb {
                 should_fail: true,

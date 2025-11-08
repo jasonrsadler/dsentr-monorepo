@@ -677,7 +677,7 @@ mod tests {
     use crate::services::oauth::workspace_service::WorkspaceOAuthService;
     use crate::services::smtp_mailer::MockMailer;
     use crate::services::stripe::MockStripeService;
-    use crate::state::AppState;
+    use crate::state::{test_pg_pool, AppState};
     use crate::utils::jwt::JwtKeys;
     use reqwest::Client;
     use serde_json::json;
@@ -732,6 +732,7 @@ mod tests {
             workflow_repo,
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

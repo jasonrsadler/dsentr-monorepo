@@ -1681,7 +1681,7 @@ mod tests {
             },
             smtp_mailer::MockMailer,
         },
-        state::AppState,
+        state::{test_pg_pool, AppState},
         utils::{encryption::encrypt_secret, jwt::JwtKeys},
     };
     use sqlx::Error as SqlxError;
@@ -2038,6 +2038,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

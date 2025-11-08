@@ -102,7 +102,7 @@ mod tests {
             account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
             google::mock_google_oauth::MockGoogleOAuth, workspace_service::WorkspaceOAuthService,
         },
-        state::AppState,
+        state::{test_pg_pool, AppState},
         utils::jwt::JwtKeys,
     };
     use reqwest::Client;
@@ -354,6 +354,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(crate::services::smtp_mailer::MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

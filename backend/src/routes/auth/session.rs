@@ -1,314 +1,323 @@
 use axum::{
-    extract::FromRequestParts,
-    http::{request::Parts, StatusCode},
+    body::Body,
+    extract::{FromRequestParts, State},
+    http::{header::AUTHORIZATION, request::Parts, HeaderMap, Request, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
 };
 use axum_extra::extract::cookie::CookieJar;
 
-use crate::routes::auth::claims::{Claims, TokenUse};
-use crate::utils::jwt::{decode_jwt, JwtKeyProvider};
+use crate::responses::JsonResponse;
+use crate::routes::auth::claims::Claims;
+use crate::session::{self, SessionData};
+use crate::state::AppState;
+use serde_json::from_value;
+use tracing::{debug, error, warn};
+use uuid::Uuid;
 
 #[derive(Debug, PartialEq)]
 pub struct AuthSession(pub Claims);
 
 impl<S> FromRequestParts<S> for AuthSession
 where
-    S: Send + Sync + JwtKeyProvider,
+    S: Send + Sync,
 {
     type Rejection = StatusCode;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let jar = CookieJar::from_headers(&parts.headers);
-        let token = jar.get("auth_token").ok_or(StatusCode::UNAUTHORIZED)?;
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let session = parts
+            .extensions
+            .get::<SessionData>()
+            .ok_or(StatusCode::UNAUTHORIZED)?;
 
-        let token_data = decode_jwt(
-            token.value(),
-            state.jwt_keys(),
-            state.jwt_issuer(),
-            state.jwt_audience(),
-        )
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let claims: Claims =
+            from_value(session.data.clone()).map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-        if token_data.claims.token_use != TokenUse::Access {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-
-        Ok(AuthSession(token_data.claims))
+        Ok(AuthSession(claims))
     }
+}
+
+pub async fn require_session(
+    State(state): State<AppState>,
+    mut request: Request<Body>,
+    next: Next,
+) -> Result<Response, Response> {
+    let session_id = match extract_session_id(request.headers()) {
+        Ok(id) => id,
+        Err(SessionIdError::Missing) => {
+            warn!("request missing session credentials");
+            return Err(JsonResponse::unauthorized("Session is required").into_response());
+        }
+        Err(SessionIdError::Invalid) => {
+            warn!("malformed session credentials provided");
+            return Err(JsonResponse::unauthorized("Invalid session token").into_response());
+        }
+    };
+
+    match session::get_session(state.db_pool.as_ref(), session_id).await {
+        Ok(Some(session)) => {
+            debug!(%session_id, user_id = %session.user_id, "authenticated session resolved");
+            request.extensions_mut().insert(session);
+            Ok(next.run(request).await)
+        }
+        Ok(None) => {
+            warn!(%session_id, "session not found or expired");
+            Err(JsonResponse::unauthorized("Session expired").into_response())
+        }
+        Err(error) => {
+            error!(?error, %session_id, "failed to load session from storage");
+            Err(JsonResponse::unauthorized("Failed to validate session").into_response())
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SessionIdError {
+    Missing,
+    Invalid,
+}
+
+pub fn extract_session_id(headers: &HeaderMap) -> Result<Uuid, SessionIdError> {
+    if let Some(value) = headers.get(AUTHORIZATION) {
+        let value = value.to_str().map_err(|_| SessionIdError::Invalid)?.trim();
+
+        let mut parts = value.split_whitespace();
+        let scheme = parts.next().unwrap_or_default();
+        if scheme.eq_ignore_ascii_case("bearer") {
+            if let Some(token) = parts.next() {
+                return Uuid::parse_str(token.trim()).map_err(|_| SessionIdError::Invalid);
+            } else {
+                return Err(SessionIdError::Invalid);
+            }
+        } else {
+            return Err(SessionIdError::Invalid);
+        }
+    }
+
+    let jar = CookieJar::from_headers(headers);
+    if let Some(cookie) = jar.get("dsentr_session") {
+        return Uuid::parse_str(cookie.value()).map_err(|_| SessionIdError::Invalid);
+    }
+
+    Err(SessionIdError::Missing)
 }
 
 #[cfg(test)]
 mod tests {
     use axum::{
+        body::Body,
         extract::FromRequestParts,
-        http::{header, HeaderMap, Method, Request, StatusCode},
+        http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode},
+        routing::get,
+        Router,
     };
     use axum_extra::extract::cookie::Cookie;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    use crate::routes::auth::claims::TokenUse;
-    use crate::routes::auth::session::AuthSession;
-    use crate::{
-        models::user::UserRole,
-        routes::auth::claims::Claims,
-        utils::jwt::{create_jwt, JwtKeyProvider, JwtKeys},
-    };
-
     use std::sync::Arc;
+    use tower::ServiceExt;
+    use uuid::Uuid;
 
-    #[derive(Clone)]
-    struct StubState {
-        keys: Arc<JwtKeys>,
-        issuer: String,
-        audience: String,
-    }
+    use super::{extract_session_id, require_session, AuthSession, SessionIdError};
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
+    use crate::db::{
+        mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+        workspace_connection_repository::NoopWorkspaceConnectionRepository,
+    };
+    use crate::models::user::UserRole;
+    use crate::responses::JsonResponse;
+    use crate::routes::auth::claims::{Claims, TokenUse};
+    use crate::services::{
+        oauth::{
+            account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
+            google::mock_google_oauth::MockGoogleOAuth, workspace_service::WorkspaceOAuthService,
+        },
+        smtp_mailer::MockMailer,
+    };
+    use crate::session::{self, SessionData};
+    use crate::state::{test_pg_pool, AppState};
+    use chrono::{Duration, Utc};
+    use reqwest::Client;
+    use serde_json::json;
 
-    impl StubState {
-        fn new(keys: Arc<JwtKeys>) -> Self {
-            Self {
-                keys,
-                issuer: "test-issuer".to_string(),
-                audience: "test-audience".to_string(),
-            }
+    fn test_state() -> AppState {
+        let config = Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+        });
+
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("test-worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: Arc::new(
+                crate::utils::jwt::JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                    .expect("test key"),
+            ),
         }
     }
 
-    impl JwtKeyProvider for StubState {
-        fn jwt_keys(&self) -> &JwtKeys {
-            self.keys.as_ref()
-        }
-
-        fn jwt_issuer(&self) -> &str {
-            &self.issuer
-        }
-
-        fn jwt_audience(&self) -> &str {
-            &self.audience
-        }
-    }
-
-    fn test_keys() -> Arc<JwtKeys> {
-        Arc::new(
-            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
-                .expect("test JWT secret should be valid"),
-        )
-    }
-
-    fn make_valid_jwt(keys: &JwtKeys, issuer: &str, audience: &str) -> String {
-        let claims = Claims {
-            id: "user_id_123".into(),
+    fn sample_claims() -> Claims {
+        Claims {
+            id: Uuid::new_v4().to_string(),
             email: "test@example.com".into(),
             first_name: "Test".into(),
             last_name: "User".into(),
             role: Some(UserRole::User),
             plan: Some("free".into()),
-            company_name: Some("Acme Inc".into()),
-            exp: (SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                + 3600) as usize,
+            company_name: Some("ACME".into()),
+            exp: (Utc::now() + Duration::hours(1)).timestamp() as usize,
             iss: String::new(),
             aud: String::new(),
             token_use: TokenUse::Access,
-        };
-        create_jwt(claims, keys, issuer, audience).expect("JWT should create successfully")
+        }
     }
 
     #[tokio::test]
-    async fn test_valid_token_extracted() {
-        let keys = test_keys();
-        let stub_state = StubState::new(keys.clone());
-        let jwt = make_valid_jwt(
-            keys.as_ref(),
-            stub_state.jwt_issuer(),
-            stub_state.jwt_audience(),
-        );
-        let cookie = Cookie::new("auth_token", jwt);
-
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::COOKIE,
-            header::HeaderValue::from_str(&cookie.to_string()).unwrap(),
-        );
-
-        let request = Request::builder()
+    async fn auth_session_reads_claims_from_extension() {
+        let mut request = Request::builder()
             .method(Method::GET)
             .uri("/")
-            .header(header::COOKIE, cookie.to_string())
-            .body(())
+            .body(Body::empty())
             .unwrap();
+        let claims = sample_claims();
+        let session = SessionData {
+            user_id: Uuid::parse_str(&claims.id).unwrap(),
+            data: serde_json::to_value(&claims).unwrap(),
+            expires_at: Utc::now() + Duration::hours(1),
+            created_at: Utc::now(),
+        };
+        request.extensions_mut().insert(session);
 
-        let mut parts = request.into_parts().0;
-        let state = stub_state;
-        let result = AuthSession::from_request_parts(&mut parts, &state).await;
-
+        let (mut parts, _) = request.into_parts();
+        let result = AuthSession::from_request_parts(&mut parts, &()).await;
         assert!(result.is_ok());
-        let session = result.unwrap();
-        assert_eq!(session.0.email, "test@example.com");
-        assert_eq!(session.0.role, Some(UserRole::User));
+        assert_eq!(result.unwrap().0.email, "test@example.com");
     }
 
     #[tokio::test]
-    async fn test_missing_cookie_returns_unauthorized() {
+    async fn auth_session_missing_extension_is_unauthorized() {
         let request = Request::builder()
             .method(Method::GET)
             .uri("/")
-            .body(())
+            .body(Body::empty())
             .unwrap();
-
-        let mut parts = request.into_parts().0;
-        let state = StubState::new(test_keys());
-        let result = AuthSession::from_request_parts(&mut parts, &state).await;
-
+        let (mut parts, _) = request.into_parts();
+        let result = AuthSession::from_request_parts(&mut parts, &()).await;
         assert_eq!(result, Err(StatusCode::UNAUTHORIZED));
     }
 
-    #[tokio::test]
-    async fn test_invalid_token_returns_unauthorized() {
-        let cookie = Cookie::new("auth_token", "invalid.token.here");
-
+    #[test]
+    fn extract_session_id_from_authorization_header() {
         let mut headers = HeaderMap::new();
+        let session_id = Uuid::new_v4();
         headers.insert(
-            header::COOKIE,
-            header::HeaderValue::from_str(&cookie.to_string()).unwrap(),
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", session_id)).unwrap(),
         );
 
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("/")
-            .header(header::COOKIE, cookie.to_string())
-            .body(())
-            .unwrap();
+        let parsed = extract_session_id(&headers).unwrap();
+        assert_eq!(parsed, session_id);
+    }
 
-        let mut parts = request.into_parts().0;
-        let state = StubState::new(test_keys());
-        let result = AuthSession::from_request_parts(&mut parts, &state).await;
+    #[test]
+    fn extract_session_id_from_cookie() {
+        let mut headers = HeaderMap::new();
+        let session_id = Uuid::new_v4();
+        let cookie = Cookie::new("dsentr_session", session_id.to_string());
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&cookie.to_string()).unwrap(),
+        );
 
-        assert_eq!(result, Err(StatusCode::UNAUTHORIZED));
+        let parsed = extract_session_id(&headers).unwrap();
+        assert_eq!(parsed, session_id);
+    }
+
+    #[test]
+    fn extract_session_id_rejects_bad_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Basic abc123"),
+        );
+        assert_eq!(extract_session_id(&headers), Err(SessionIdError::Invalid));
     }
 
     #[tokio::test]
-    async fn test_refresh_token_type_rejected() {
-        let keys = test_keys();
-        let claims = Claims {
-            id: "user_id_123".into(),
-            email: "test@example.com".into(),
-            first_name: "Test".into(),
-            last_name: "User".into(),
-            role: Some(UserRole::User),
-            plan: Some("free".into()),
-            company_name: None,
-            exp: (SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                + 3600) as usize,
-            iss: String::new(),
-            aud: String::new(),
-            token_use: TokenUse::Refresh,
-        };
-        let state = StubState::new(keys.clone());
-        let jwt = create_jwt(
-            claims,
-            keys.as_ref(),
-            state.jwt_issuer(),
-            state.jwt_audience(),
-        )
-        .expect("token");
+    async fn require_session_rejects_expired_sessions() {
+        session::reset_test_sessions();
+        let state = test_state();
+        let session_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let expires_at = Utc::now() - Duration::hours(1);
+        let data = json!({ "id": user_id.to_string(), "token_use": "access" });
+        session::insert_test_session(
+            session_id,
+            SessionData {
+                user_id,
+                data,
+                created_at: expires_at - Duration::hours(1),
+                expires_at,
+            },
+        );
 
-        let cookie = Cookie::new("auth_token", jwt);
+        let app = Router::new()
+            .route("/", get(|| async move { JsonResponse::success("ok") }))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                require_session,
+            ))
+            .with_state(state.clone());
 
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("/")
-            .header(header::COOKIE, cookie.to_string())
-            .body(())
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(header::COOKIE, format!("dsentr_session={}", session_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
             .unwrap();
 
-        let mut parts = request.into_parts().0;
-        let result = AuthSession::from_request_parts(&mut parts, &state).await;
-
-        assert_eq!(result, Err(StatusCode::UNAUTHORIZED));
-    }
-
-    #[tokio::test]
-    async fn test_expired_token_returns_unauthorized() {
-        let keys = test_keys();
-        let state = StubState::new(keys.clone());
-        let claims = Claims {
-            id: "user_id_123".into(),
-            email: "test@example.com".into(),
-            first_name: "Test".into(),
-            last_name: "User".into(),
-            role: Some(UserRole::User),
-            plan: None,
-            company_name: None,
-            exp: (SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                - 60) as usize,
-            iss: String::new(),
-            aud: String::new(),
-            token_use: TokenUse::Access,
-        };
-
-        let jwt = create_jwt(
-            claims,
-            keys.as_ref(),
-            state.jwt_issuer(),
-            state.jwt_audience(),
-        )
-        .expect("token");
-
-        let cookie = Cookie::new("auth_token", jwt);
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("/")
-            .header(header::COOKIE, cookie.to_string())
-            .body(())
-            .unwrap();
-
-        let mut parts = request.into_parts().0;
-        let result = AuthSession::from_request_parts(&mut parts, &state).await;
-        assert_eq!(result, Err(StatusCode::UNAUTHORIZED));
-    }
-
-    #[tokio::test]
-    async fn test_mismatched_issuer_returns_unauthorized() {
-        let keys = test_keys();
-        let state = StubState::new(keys.clone());
-        let jwt = make_valid_jwt(keys.as_ref(), "wrong-issuer", state.jwt_audience());
-        let cookie = Cookie::new("auth_token", jwt);
-
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("/")
-            .header(header::COOKIE, cookie.to_string())
-            .body(())
-            .unwrap();
-
-        let mut parts = request.into_parts().0;
-        let result = AuthSession::from_request_parts(&mut parts, &state).await;
-        assert_eq!(result, Err(StatusCode::UNAUTHORIZED));
-    }
-
-    #[tokio::test]
-    async fn test_mismatched_audience_returns_unauthorized() {
-        let keys = test_keys();
-        let state = StubState::new(keys.clone());
-        let jwt = make_valid_jwt(keys.as_ref(), state.jwt_issuer(), "other-aud");
-        let cookie = Cookie::new("auth_token", jwt);
-
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("/")
-            .header(header::COOKIE, cookie.to_string())
-            .body(())
-            .unwrap();
-
-        let mut parts = request.into_parts().0;
-        let result = AuthSession::from_request_parts(&mut parts, &state).await;
-        assert_eq!(result, Err(StatusCode::UNAUTHORIZED));
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

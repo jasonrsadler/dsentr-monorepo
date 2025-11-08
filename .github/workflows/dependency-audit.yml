@@ -2,7 +2,7 @@ name: Dependency Audit
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
             cache_dependency_path: frontend/package-lock.json
             install_script_allowlist: |
               {
-                "esbuild@0.25.3": "sha512-qKA6Pvai73+M2FtftpNKRxJ78GIjmFXFxd/1DVBqGo/qNhLSfv+G12n9pNoWdytJC8U00TrViOwpjT0zgqQS8Q==",
+                "esbuild@0.25.12": "sha512-bbPBYYrtZbkt6Os6FiTLCTFxvq4tt3JKall1vRwshA3fdVztsLAatFaZobhkBC8/BrPetoa0oksYoKXoG4ryJg==",
                 "fsevents@2.3.3": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="
               }
           - project: frontend-docs-site

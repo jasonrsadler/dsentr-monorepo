@@ -80,7 +80,7 @@ mod tests {
             },
             smtp_mailer::MockMailer,
         },
-        state::AppState,
+        state::{test_pg_pool, AppState},
         utils::jwt::JwtKeys,
     };
     use reqwest::Client;
@@ -328,6 +328,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer,
             google_oauth,
             github_oauth,
@@ -453,6 +454,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer,
             google_oauth,
             github_oauth,

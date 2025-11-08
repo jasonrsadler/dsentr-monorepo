@@ -1,7 +1,7 @@
 {
   "name": "dsentr-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.9.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,8 +12,8 @@
     "test:no-cov": "vitest run",
     "test": "vitest run",
     "dev:app": "vite",
-    "dev:api": "cargo run",
-    "dev:api:watch": "cargo watch -x run"
+    "dev:api": "cd ../backend && cargo run",
+    "dev:api:watch": "cd ../backend && cargo watch -x run"
   },
   "dependencies": {
     "@stripe/stripe-js": "^4.8.0",

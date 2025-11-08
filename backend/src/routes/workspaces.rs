@@ -1936,7 +1936,7 @@ mod tests {
         },
         smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig},
     };
-    use crate::state::AppState;
+    use crate::state::{test_pg_pool, AppState};
     use crate::utils::{encryption::encrypt_secret, jwt::JwtKeys};
     use async_trait::async_trait;
     use axum::{
@@ -2945,6 +2945,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo,
             workspace_connection_repo,
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -2965,6 +2966,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -2989,6 +2991,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -3645,7 +3648,7 @@ mod tests {
         use crate::db::mock_db::NoopWorkflowRepository;
         use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
         use crate::services::stripe::MockStripeService as StripeMock;
-        use crate::state::AppState;
+        use crate::state::{test_pg_pool, AppState};
 
         let user_id = Uuid::new_v4();
         let now = OffsetDateTime::now_utc();
@@ -3677,6 +3680,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(RecordingWorkspaceRepo::default()),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

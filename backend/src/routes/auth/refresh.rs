@@ -1,153 +1,111 @@
 use axum::{
     extract::State,
-    http::{header, HeaderMap, HeaderValue},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use chrono::{Duration, Utc};
+use serde_json::{from_value, to_value};
 use time::Duration as TimeDuration;
-use uuid::Uuid;
+use tracing::{error, info, warn};
 
 use crate::{
     responses::JsonResponse,
-    routes::auth::claims::{Claims, TokenUse},
+    routes::auth::{
+        claims::Claims,
+        session::{extract_session_id, SessionIdError},
+    },
+    session,
     state::AppState,
-    utils::jwt::{create_jwt, decode_jwt},
 };
 
-pub async fn handle_refresh(State(app_state): State<AppState>, jar: CookieJar) -> Response {
-    let Some(refresh_cookie) = jar.get("auth_refresh_token") else {
-        return JsonResponse::unauthorized("Refresh token missing").into_response();
-    };
-
-    let token_data = match decode_jwt(
-        refresh_cookie.value(),
-        app_state.jwt_keys.as_ref(),
-        &app_state.config.jwt_issuer,
-        &app_state.config.jwt_audience,
-    ) {
-        Ok(data) => data,
-        Err(_) => return JsonResponse::unauthorized("Invalid refresh token").into_response(),
-    };
-
-    if token_data.claims.token_use != TokenUse::Refresh {
-        return JsonResponse::unauthorized("Invalid refresh token").into_response();
-    }
-
-    let user_id = match Uuid::parse_str(&token_data.claims.id) {
+pub async fn handle_refresh(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> Response {
+    let session_id = match extract_session_id(&headers) {
         Ok(id) => id,
-        Err(_) => return JsonResponse::unauthorized("Invalid refresh token").into_response(),
+        Err(SessionIdError::Missing) => {
+            warn!("refresh attempted without session id");
+            return JsonResponse::unauthorized("Session is required").into_response();
+        }
+        Err(SessionIdError::Invalid) => {
+            warn!("refresh attempted with invalid session id");
+            return JsonResponse::unauthorized("Invalid session token").into_response();
+        }
     };
 
-    let user = match app_state.db.find_public_user_by_id(user_id).await {
-        Ok(Some(user)) => user,
-        Ok(None) => return JsonResponse::unauthorized("User not found").into_response(),
-        Err(err) => {
-            tracing::error!(?err, %user_id, "failed to load user during refresh");
+    let session = match session::get_session(app_state.db_pool.as_ref(), session_id).await {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            warn!(%session_id, "refresh requested for missing session");
+            return JsonResponse::unauthorized("Session expired").into_response();
+        }
+        Err(error) => {
+            error!(?error, %session_id, "failed to load session during refresh");
             return JsonResponse::server_error("Failed to refresh session").into_response();
         }
     };
 
-    let access_duration = Duration::minutes(45);
-
-    let access_claims = Claims {
-        id: user.id.to_string(),
-        email: user.email.clone(),
-        exp: (Utc::now() + access_duration).timestamp() as usize,
-        first_name: user.first_name.clone(),
-        last_name: user.last_name.clone(),
-        role: user.role,
-        plan: user.plan.clone(),
-        company_name: user.company_name.clone(),
-        iss: String::new(),
-        aud: String::new(),
-        token_use: TokenUse::Access,
+    let ttl_hours = (session.expires_at - session.created_at).num_hours().max(1);
+    let mut claims: Claims = match from_value(session.data.clone()) {
+        Ok(claims) => claims,
+        Err(error) => {
+            error!(?error, %session_id, "failed to deserialize session claims for refresh");
+            return JsonResponse::unauthorized("Invalid session token").into_response();
+        }
     };
 
-    let access_token = match create_jwt(
-        access_claims,
-        app_state.jwt_keys.as_ref(),
-        &app_state.config.jwt_issuer,
-        &app_state.config.jwt_audience,
-    ) {
-        Ok(token) => token,
-        Err(err) => {
-            tracing::error!(?err, %user_id, "failed to create access token during refresh");
+    let new_expiration = Utc::now() + Duration::hours(ttl_hours);
+    claims.exp = new_expiration.timestamp() as usize;
+
+    let updated_data = match to_value(&claims) {
+        Ok(value) => value,
+        Err(error) => {
+            error!(?error, %session_id, "failed to serialize session claims for refresh");
             return JsonResponse::server_error("Failed to refresh session").into_response();
         }
     };
 
-    let remaining_seconds = token_data.claims.exp as i64 - Utc::now().timestamp();
-    if remaining_seconds <= 0 {
-        return JsonResponse::unauthorized("Refresh token expired").into_response();
+    if let Err(error) = session::upsert_session(
+        app_state.db_pool.as_ref(),
+        session_id,
+        session.user_id,
+        updated_data,
+        ttl_hours,
+    )
+    .await
+    {
+        error!(?error, %session_id, "failed to extend session expiration");
+        return JsonResponse::server_error("Failed to refresh session").into_response();
     }
 
-    let refresh_duration = Duration::seconds(remaining_seconds);
-
-    let refresh_claims = Claims {
-        id: user.id.to_string(),
-        email: user.email.clone(),
-        exp: (Utc::now() + refresh_duration).timestamp() as usize,
-        first_name: user.first_name.clone(),
-        last_name: user.last_name.clone(),
-        role: user.role,
-        plan: user.plan.clone(),
-        company_name: user.company_name.clone(),
-        iss: String::new(),
-        aud: String::new(),
-        token_use: TokenUse::Refresh,
-    };
-
-    let refresh_token = match create_jwt(
-        refresh_claims,
-        app_state.jwt_keys.as_ref(),
-        &app_state.config.jwt_issuer,
-        &app_state.config.jwt_audience,
-    ) {
-        Ok(token) => token,
-        Err(err) => {
-            tracing::error!(?err, %user_id, "failed to rotate refresh token");
-            return JsonResponse::server_error("Failed to refresh session").into_response();
-        }
-    };
+    info!(%session_id, user_id = %session.user_id, "session refreshed");
 
     let secure_cookie = app_state.config.auth_cookie_secure;
-    let mut headers = HeaderMap::new();
-
-    let access_cookie = Cookie::build(("auth_token", access_token))
+    let refreshed_cookie = Cookie::build(("dsentr_session", session_id.to_string()))
         .http_only(true)
         .secure(secure_cookie)
         .same_site(SameSite::Lax)
         .path("/")
-        .max_age(TimeDuration::seconds(access_duration.num_seconds()))
+        .max_age(TimeDuration::hours(ttl_hours))
         .build();
 
-    headers.insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&access_cookie.to_string()).unwrap(),
-    );
-
-    let refresh_cookie = Cookie::build(("auth_refresh_token", refresh_token))
-        .http_only(true)
-        .secure(secure_cookie)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .max_age(TimeDuration::seconds(refresh_duration.num_seconds()))
-        .build();
-
-    headers.append(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&refresh_cookie.to_string()).unwrap(),
-    );
-
-    (headers, JsonResponse::success("Session refreshed")).into_response()
+    let jar = jar.add(refreshed_cookie);
+    (jar, JsonResponse::success("Session refreshed")).into_response()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use axum::{http::StatusCode, response::IntoResponse};
-    use axum_extra::extract::cookie::Cookie;
+    use super::handle_refresh;
+    use axum::{
+        extract::State,
+        http::{header, HeaderMap, HeaderValue, StatusCode},
+        response::IntoResponse,
+    };
+    use axum_extra::extract::cookie::{Cookie, CookieJar};
+    use chrono::{Duration, Utc};
     use reqwest::Client;
     use std::sync::Arc;
     use time::OffsetDateTime;
@@ -160,6 +118,7 @@ mod tests {
             workspace_connection_repository::NoopWorkspaceConnectionRepository,
         },
         models::user::{User, UserRole},
+        routes::auth::claims::{Claims, TokenUse},
         services::{
             oauth::{
                 account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
@@ -168,7 +127,8 @@ mod tests {
             },
             smtp_mailer::MockMailer,
         },
-        utils::jwt::JwtKeys,
+        session,
+        state::{test_pg_pool, AppState},
     };
 
     fn build_state(user: User) -> AppState {
@@ -214,6 +174,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -225,8 +186,8 @@ mod tests {
             worker_id: Arc::new("test-worker".into()),
             worker_lease_seconds: 30,
             jwt_keys: Arc::new(
-                JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
-                    .expect("test JWT secret should be valid"),
+                crate::utils::jwt::JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                    .expect("test jwt"),
             ),
         }
     }
@@ -248,11 +209,16 @@ mod tests {
         }
     }
 
-    fn encode_refresh_token(state: &AppState, user: &User, expires_in: Duration) -> String {
+    #[tokio::test]
+    async fn refresh_sets_new_cookies() {
+        let user = sample_user();
+        let state = build_state(user.clone());
+        crate::session::reset_test_sessions();
+
         let claims = Claims {
             id: user.id.to_string(),
             email: user.email.clone(),
-            exp: (Utc::now() + expires_in).timestamp() as usize,
+            exp: (Utc::now() + Duration::hours(24)).timestamp() as usize,
             first_name: user.first_name.clone(),
             last_name: user.last_name.clone(),
             role: user.role,
@@ -260,27 +226,26 @@ mod tests {
             company_name: user.company_name.clone(),
             iss: String::new(),
             aud: String::new(),
-            token_use: TokenUse::Refresh,
+            token_use: TokenUse::Access,
         };
 
-        create_jwt(
-            claims,
-            state.jwt_keys.as_ref(),
-            &state.config.jwt_issuer,
-            &state.config.jwt_audience,
+        let (session_id, _) = session::create_session(
+            state.db_pool.as_ref(),
+            user.id,
+            serde_json::to_value(&claims).unwrap(),
+            24,
         )
-        .expect("refresh token should encode")
-    }
+        .await
+        .unwrap();
 
-    #[tokio::test]
-    async fn refresh_sets_new_cookies() {
-        let user = sample_user();
-        let state = build_state(user.clone());
-        let refresh_token = encode_refresh_token(&state, &user, Duration::days(7));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("dsentr_session={}", session_id)).unwrap(),
+        );
+        let jar = CookieJar::new().add(Cookie::new("dsentr_session", session_id.to_string()));
 
-        let jar = CookieJar::new().add(Cookie::new("auth_refresh_token", refresh_token));
-
-        let response = handle_refresh(State(state.clone()), jar)
+        let response = handle_refresh(State(state.clone()), headers, jar)
             .await
             .into_response();
 
@@ -291,46 +256,32 @@ mod tests {
             .iter()
             .map(|v| v.to_str().unwrap().to_string())
             .collect();
-        assert!(cookies.iter().any(|c| c.contains("auth_token=")));
-        assert!(cookies.iter().any(|c| c.contains("auth_refresh_token=")));
+        assert!(cookies.iter().any(|c| c.contains("dsentr_session=")));
     }
 
     #[tokio::test]
     async fn missing_refresh_cookie_is_unauthorized() {
         let state = build_state(sample_user());
-        let response = handle_refresh(State(state), CookieJar::new())
+        let response = handle_refresh(State(state), HeaderMap::new(), CookieJar::new())
             .await
             .into_response();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
-    async fn refresh_rejects_wrong_token_type() {
+    async fn refresh_rejects_unknown_session() {
         let user = sample_user();
         let state = build_state(user.clone());
-        let claims = Claims {
-            id: user.id.to_string(),
-            email: user.email.clone(),
-            exp: (Utc::now() + Duration::minutes(10)).timestamp() as usize,
-            first_name: user.first_name.clone(),
-            last_name: user.last_name.clone(),
-            role: user.role,
-            plan: user.plan.clone(),
-            company_name: user.company_name.clone(),
-            iss: String::new(),
-            aud: String::new(),
-            token_use: TokenUse::Access,
-        };
-        let access_token = create_jwt(
-            claims,
-            state.jwt_keys.as_ref(),
-            &state.config.jwt_issuer,
-            &state.config.jwt_audience,
-        )
-        .expect("token");
+        crate::session::reset_test_sessions();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("dsentr_session={}", Uuid::new_v4())).unwrap(),
+        );
 
-        let jar = CookieJar::new().add(Cookie::new("auth_refresh_token", access_token));
-        let response = handle_refresh(State(state), jar).await.into_response();
+        let response = handle_refresh(State(state), headers, CookieJar::new())
+            .await
+            .into_response();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

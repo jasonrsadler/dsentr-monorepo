@@ -7,6 +7,8 @@ use crate::models::oauth_token::ConnectedOAuthProvider;
 use crate::models::workflow_run::WorkflowRun;
 use crate::services::oauth::account_service::{is_revocation_signal, OAuthAccountError};
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
+#[cfg(test)]
+use crate::state::test_pg_pool;
 use crate::state::AppState;
 use serde_json::{json, Map, Value};
 use tracing::warn;
@@ -831,6 +833,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()) as Arc<dyn Mailer>,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

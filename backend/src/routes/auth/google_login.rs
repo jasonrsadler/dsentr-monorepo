@@ -7,7 +7,7 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use reqwest::Url;
 
-use crate::utils::jwt::create_jwt;
+use crate::session;
 use crate::AppState;
 use crate::{
     models::user::OauthProvider, responses::JsonResponse, utils::csrf::generate_csrf_token,
@@ -16,6 +16,7 @@ use crate::{
     routes::auth::claims::{Claims, TokenUse},
     services::oauth::google::errors::GoogleAuthError,
 };
+use tracing::{error, info};
 
 pub async fn google_login(
     State(app_state): State<AppState>,
@@ -247,27 +248,11 @@ pub async fn google_callback(
             .into_response();
         }
     };
-    let access_duration = chrono::Duration::minutes(45);
-    let refresh_duration = chrono::Duration::days(30);
-
-    let access_claims = Claims {
+    let session_ttl_hours = 24 * 30;
+    let claims = Claims {
         id: user.id.to_string(),
         role: user.role,
-        exp: (chrono::Utc::now() + access_duration).timestamp() as usize,
-        email: email.to_string(),
-        first_name: first_name.clone(),
-        last_name: last_name.clone(),
-        plan: None,
-        company_name: None,
-        iss: String::new(),
-        aud: String::new(),
-        token_use: TokenUse::Access,
-    };
-
-    let refresh_claims = Claims {
-        id: user.id.to_string(),
-        role: user.role,
-        exp: (chrono::Utc::now() + refresh_duration).timestamp() as usize,
+        exp: (chrono::Utc::now() + chrono::Duration::hours(session_ttl_hours)).timestamp() as usize,
         email: email.to_string(),
         first_name,
         last_name,
@@ -275,54 +260,48 @@ pub async fn google_callback(
         company_name: None,
         iss: String::new(),
         aud: String::new(),
-        token_use: TokenUse::Refresh,
+        token_use: TokenUse::Access,
     };
 
-    let jwt = match create_jwt(
-        access_claims,
-        app_state.jwt_keys.as_ref(),
-        &app_state.config.jwt_issuer,
-        &app_state.config.jwt_audience,
-    ) {
-        Ok(token) => token,
-        Err(_) => {
+    let session_value = match serde_json::to_value(&claims) {
+        Ok(val) => val,
+        Err(err) => {
+            error!(?err, user_id=%user.id, "failed to serialize claims for Google session");
             return JsonResponse::redirect_to_login_with_error(
                 &GoogleAuthError::JwtCreationFailed.to_string(),
             )
-            .into_response()
+            .into_response();
         }
     };
 
-    let refresh_jwt = match create_jwt(
-        refresh_claims,
-        app_state.jwt_keys.as_ref(),
-        &app_state.config.jwt_issuer,
-        &app_state.config.jwt_audience,
-    ) {
-        Ok(token) => token,
-        Err(_) => {
+    let (session_id, _) = match session::create_session(
+        app_state.db_pool.as_ref(),
+        user.id,
+        session_value,
+        session_ttl_hours,
+    )
+    .await
+    {
+        Ok((session_id, session)) => {
+            info!(%session_id, user_id=%user.id, "google session created");
+            (session_id, session)
+        }
+        Err(err) => {
+            error!(?err, user_id=%user.id, "failed to create session for Google login");
             return JsonResponse::redirect_to_login_with_error(
                 &GoogleAuthError::JwtCreationFailed.to_string(),
             )
-            .into_response()
+            .into_response();
         }
     };
 
     let secure_cookie = app_state.config.auth_cookie_secure;
-    let auth_cookie = Cookie::build(("auth_token", jwt))
+    let auth_cookie = Cookie::build(("dsentr_session", session_id.to_string()))
         .http_only(true)
         .secure(secure_cookie)
         .same_site(SameSite::Lax)
         .path("/")
-        .max_age(time::Duration::seconds(access_duration.num_seconds()))
-        .build();
-
-    let refresh_cookie = Cookie::build(("auth_refresh_token", refresh_jwt))
-        .http_only(true)
-        .secure(secure_cookie)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .max_age(time::Duration::seconds(refresh_duration.num_seconds()))
+        .max_age(time::Duration::hours(session_ttl_hours))
         .build();
     let frontend_url =
         std::env::var("FRONTEND_ORIGIN").unwrap_or_else(|_| "https://localhost:5173".to_string());
@@ -340,7 +319,6 @@ pub async fn google_callback(
 
     let jar = CookieJar::new()
         .add(auth_cookie)
-        .add(refresh_cookie)
         .add(clear_state_cookie)
         .add(clear_tos_cookie);
     (jar, Redirect::to(&format!("{}/dashboard", frontend_url))).into_response()
@@ -380,7 +358,7 @@ mod tests {
             },
             smtp_mailer::MockMailer,
         },
-        state::AppState,
+        state::{test_pg_pool, AppState},
         utils::jwt::JwtKeys,
     }; // for `.oneshot()`
     use reqwest::Client;
@@ -432,6 +410,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -489,6 +468,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer,
             google_oauth,
             github_oauth,
@@ -568,6 +548,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(FailingGoogleOAuth),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

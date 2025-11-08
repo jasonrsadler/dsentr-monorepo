@@ -5,9 +5,12 @@ mod models;
 mod responses;
 mod routes;
 mod services;
+mod session;
 mod state;
 pub mod utils;
 mod worker;
+
+pub use session::{create_session, delete_session, get_session, SessionData};
 
 use anyhow::{anyhow, Context, Result};
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -20,6 +23,7 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
+use chrono::Utc;
 use config::Config;
 use db::oauth_token_repository::UserOAuthTokenRepository;
 use db::postgres_oauth_token_repository::PostgresUserOAuthTokenRepository;
@@ -29,7 +33,9 @@ use db::postgres_workspace_connection_repository::PostgresWorkspaceConnectionRep
 use db::postgres_workspace_repository::PostgresWorkspaceRepository;
 use reqwest::Client;
 use responses::JsonResponse;
-use routes::auth::{handle_login, handle_refresh, handle_signup, verify_email};
+use routes::auth::{
+    handle_login, handle_refresh, handle_signup, session::require_session, verify_email,
+};
 use routes::{
     account::{confirm_account_deletion, get_account_deletion_summary, request_account_deletion},
     admin::purge_runs,
@@ -84,6 +90,7 @@ use crate::db::{
 };
 use crate::services::pluggable_mailer::PluggableMailer;
 use crate::services::stripe::{LiveStripeService, StripeService};
+use crate::session::SESSION_CACHE;
 use crate::state::AppState;
 
 #[cfg(feature = "tls")]
@@ -209,6 +216,7 @@ async fn main() -> Result<()> {
     );
 
     let pg_pool = establish_connection(&config.database_url).await?;
+    let shared_pg_pool = Arc::new(pg_pool.clone());
     let user_repo = Arc::new(PostgresUserRepository {
         pool: pg_pool.clone(),
     }) as Arc<dyn UserRepository>;
@@ -271,6 +279,7 @@ async fn main() -> Result<()> {
         workflow_repo,
         workspace_repo,
         workspace_connection_repo,
+        db_pool: shared_pg_pool.clone(),
         mailer,
         google_oauth,
         github_oauth,
@@ -287,6 +296,8 @@ async fn main() -> Result<()> {
         jwt_keys: jwt_keys.clone(),
     };
     let state_for_worker = state.clone();
+    spawn_session_cleanup_task(shared_pg_pool.clone());
+    let session_guard = axum::middleware::from_fn_with_state(state.clone(), require_session);
 
     let frontend_origin = config
         .frontend_origin
@@ -328,8 +339,7 @@ async fn main() -> Result<()> {
         });
 
     // Routes that do NOT require CSRF (safe methods and OAuth)
-    let unprotected_routes = Router::new()
-        .route("/me", get(handle_me))
+    let auth_public_routes = Router::new()
         .route("/csrf-token", get(get_csrf_token))
         .route("/google-login", get(google_login))
         .route("/github-login", get(github_login))
@@ -337,9 +347,14 @@ async fn main() -> Result<()> {
         .route("/github-callback", get(github_callback))
         .route("/verify-reset-token/{token}", get(handle_verify_token));
 
+    let auth_safe_routes = Router::new()
+        .route("/me", get(handle_me))
+        .layer(session_guard.clone());
+
     // Nest them together
     let auth_routes = csrf_protected_routes
-        .merge(unprotected_routes)
+        .merge(auth_public_routes)
+        .merge(auth_safe_routes)
         .layer(GovernorLayer {
             config: auth_governor_conf.clone(),
         });
@@ -354,6 +369,7 @@ async fn main() -> Result<()> {
                 .put(routes::account::update_privacy_preference),
         )
         .layer(csrf_layer.clone())
+        .layer(session_guard.clone())
         .layer(GovernorLayer {
             config: auth_governor_conf.clone(),
         });
@@ -442,7 +458,8 @@ async fn main() -> Result<()> {
             "/{workflow_id}/logs/{log_id}",
             delete(routes::workflows::delete_workflow_log_entry),
         )
-        .layer(csrf_layer.clone());
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
 
     let workspace_routes = Router::new()
         .route("/", get(routes::workspaces::list_workspaces))
@@ -503,7 +520,8 @@ async fn main() -> Result<()> {
             "/{workspace_id}/connections/{connection_id}",
             delete(routes::workspaces::remove_workspace_connection),
         )
-        .layer(csrf_layer.clone());
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
 
     let options_routes = Router::new()
         .route("/secrets", get(list_secrets))
@@ -511,7 +529,8 @@ async fn main() -> Result<()> {
             "/secrets/{group}/{service}/{name}",
             put(upsert_secret).delete(delete_secret),
         )
-        .layer(csrf_layer.clone());
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
 
     let oauth_public_routes = Router::new()
         .route("/google/start", get(google_connect_start))
@@ -525,7 +544,8 @@ async fn main() -> Result<()> {
         .route("/connections", get(list_connections))
         .route("/{provider}/refresh", post(refresh_connection))
         .route("/{provider}/disconnect", delete(disconnect_connection))
-        .layer(csrf_layer.clone());
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
 
     let oauth_routes = oauth_public_routes.merge(oauth_private_routes);
 
@@ -536,12 +556,14 @@ async fn main() -> Result<()> {
             "/teams/{team_id}/channels/{channel_id}/members",
             get(list_channel_members),
         )
-        .layer(csrf_layer.clone());
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
 
     // Admin routes (CSRF + rate limit). Only Admin role may call these handlers.
     let admin_routes = Router::new()
         .route("/purge-runs", post(purge_runs))
         .layer(csrf_layer.clone())
+        .layer(session_guard.clone())
         .layer(GovernorLayer {
             config: global_governor_conf.clone(),
         });
@@ -549,12 +571,8 @@ async fn main() -> Result<()> {
     // Public webhook route (no CSRF, no auth)
     let public_workflow_routes =
         Router::new().route("/{workflow_id}/trigger/{token}", post(webhook_trigger));
-    let invite_routes = Router::new()
+    let invite_private_routes = Router::new()
         .route("/invites", get(routes::workspaces::list_pending_invites))
-        .route(
-            "/invites/{token}",
-            get(routes::workspaces::preview_invitation),
-        )
         .route(
             "/invites/accept",
             post(routes::workspaces::accept_invitation),
@@ -562,7 +580,19 @@ async fn main() -> Result<()> {
         .route(
             "/invites/decline",
             post(routes::workspaces::decline_invitation),
-        );
+        )
+        .layer(session_guard.clone());
+
+    let invite_public_routes = Router::new().route(
+        "/invites/{token}",
+        get(routes::workspaces::preview_invitation),
+    );
+
+    let invite_routes = invite_private_routes.merge(invite_public_routes);
+    let dashboard_routes = Router::new()
+        .route("/api/dashboard", get(dashboard_handler))
+        .layer(session_guard.clone());
+
     let app = Router::new()
         .route("/", get(root))
         .route(
@@ -570,7 +600,6 @@ async fn main() -> Result<()> {
             get(|| async { Json(serde_json::json!({"status": "ok"})) }),
         )
         .route("/api/early-access", post(handle_early_access))
-        .route("/api/dashboard", get(dashboard_handler))
         // Stripe webhook: public endpoint, no CSRF/auth
         .route(
             "/api/billing/stripe/webhook",
@@ -585,6 +614,7 @@ async fn main() -> Result<()> {
             workflow_routes.merge(public_workflow_routes),
         )
         .nest("/api/workspaces", workspace_routes)
+        .merge(dashboard_routes)
         .merge(Router::new().nest("/api", invite_routes))
         .nest("/api/oauth", oauth_routes)
         .nest("/api/microsoft", microsoft_routes)
@@ -668,6 +698,47 @@ async fn main() -> Result<()> {
 /// A simple root route.
 async fn root() -> Response {
     JsonResponse::success("Hello, DSentr!").into_response()
+}
+
+fn spawn_session_cleanup_task(db_pool: Arc<PgPool>) {
+    tokio::spawn(async move {
+        // Sessions expire when their `expires_at` column is in the past; this hourly sweep
+        // ensures both Postgres and the in-memory cache drop stale session records.
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(3600));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            ticker.tick().await;
+            let now = Utc::now();
+            let mut cache_evicted = 0usize;
+
+            SESSION_CACHE.retain(|_, session| {
+                if session.expires_at <= now {
+                    cache_evicted += 1;
+                    false
+                } else {
+                    true
+                }
+            });
+
+            match sqlx::query!("DELETE FROM user_sessions WHERE expires_at < now()")
+                .execute(db_pool.as_ref())
+                .await
+            {
+                Ok(result) => {
+                    let removed = result.rows_affected();
+                    tracing::info!(
+                        expired_rows = removed,
+                        cache_evicted,
+                        "purged expired user sessions"
+                    );
+                }
+                Err(error) => {
+                    tracing::error!(?error, "failed to purge expired user sessions");
+                }
+            }
+        }
+    });
 }
 
 /// Establish a connection to the database and verify it.

@@ -952,7 +952,10 @@ mod tests {
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
     use crate::services::oauth::workspace_service::WorkspaceOAuthService;
     use crate::services::smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig, TlsMode};
-    use crate::{state::AppState, utils::jwt::JwtKeys};
+    use crate::{
+        state::{test_pg_pool, AppState},
+        utils::jwt::JwtKeys,
+    };
     use async_trait::async_trait;
     use axum::body::{Body, Bytes};
     use axum::extract::State;
@@ -1054,6 +1057,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),

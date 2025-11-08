@@ -1,41 +1,39 @@
-use axum::{
-    extract::State,
-    http::{header::SET_COOKIE, HeaderMap, HeaderValue, StatusCode},
-    response::IntoResponse,
-};
-use axum_extra::extract::cookie::{Cookie, SameSite};
+use axum::{extract::State, http::HeaderMap, response::IntoResponse};
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use time::Duration as TimeDuration;
 
-use crate::{responses::JsonResponse, state::AppState};
+use crate::{
+    responses::JsonResponse, routes::auth::session::extract_session_id, session, state::AppState,
+};
 
-pub async fn handle_logout(State(app_state): State<AppState>) -> impl IntoResponse {
+pub async fn handle_logout(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> impl IntoResponse {
+    if let Ok(session_id) = extract_session_id(&headers) {
+        match session::delete_session(app_state.db_pool.as_ref(), session_id).await {
+            Ok(true) => tracing::info!(%session_id, "session deleted during logout"),
+            Ok(false) => tracing::warn!(%session_id, "session missing during logout"),
+            Err(err) => {
+                tracing::error!(?err, %session_id, "failed to delete session during logout")
+            }
+        }
+    } else {
+        tracing::debug!("no session id found while logging out");
+    }
+
     let secure_cookie = app_state.config.auth_cookie_secure;
-    let expired_cookie = Cookie::build(("auth_token", ""))
+    let cleared_cookie = Cookie::build(("dsentr_session", ""))
         .path("/")
         .http_only(true)
         .secure(secure_cookie)
         .same_site(SameSite::Lax)
         .max_age(TimeDuration::seconds(0))
         .build();
-    let expired_refresh = Cookie::build(("auth_refresh_token", ""))
-        .path("/")
-        .http_only(true)
-        .secure(secure_cookie)
-        .same_site(SameSite::Lax)
-        .max_age(TimeDuration::seconds(0))
-        .build();
-    // Set the Set-Cookie header
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        SET_COOKIE,
-        HeaderValue::from_str(&expired_cookie.to_string()).unwrap(),
-    );
-    headers.append(
-        SET_COOKIE,
-        HeaderValue::from_str(&expired_refresh.to_string()).unwrap(),
-    );
 
-    (StatusCode::OK, headers, JsonResponse::success("Logged out"))
+    let jar = jar.add(cleared_cookie);
+    (jar, JsonResponse::success("Logged out"))
 }
 
 #[cfg(test)]
@@ -50,6 +48,9 @@ mod tests {
     };
     use serde_json::Value;
     use tower::ServiceExt; // for `app.oneshot(...)`
+    use uuid::Uuid;
+
+    use sqlx::PgPool;
 
     use crate::{
         config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings},
@@ -57,6 +58,7 @@ mod tests {
             mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
             workspace_connection_repository::NoopWorkspaceConnectionRepository,
         },
+        routes::auth::claims::{Claims, TokenUse},
         routes::auth::logout::handle_logout,
         services::{
             oauth::{
@@ -66,7 +68,8 @@ mod tests {
             },
             smtp_mailer::MockMailer,
         },
-        state::AppState,
+        session,
+        state::{test_pg_pool, AppState},
         utils::jwt::JwtKeys,
     };
 
@@ -110,6 +113,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
@@ -127,21 +131,49 @@ mod tests {
         }
     }
 
-    fn build_app(secure_cookie: bool) -> Router {
-        Router::new()
+    fn build_app(secure_cookie: bool) -> (Router, Arc<PgPool>) {
+        let state = test_state(secure_cookie);
+        let pool = state.db_pool.clone();
+        let router = Router::new()
             .route("/logout", post(handle_logout))
-            .with_state(test_state(secure_cookie))
+            .with_state(state);
+
+        (router, pool)
     }
 
     #[tokio::test]
     async fn test_logout_clears_auth_cookie_and_returns_success() {
-        let app = build_app(true);
+        let (app, pool) = build_app(true);
+        session::reset_test_sessions();
+
+        let claims = Claims {
+            id: Uuid::new_v4().to_string(),
+            email: "logout@example.com".into(),
+            exp: 0,
+            first_name: "Test".into(),
+            last_name: "User".into(),
+            role: None,
+            plan: None,
+            company_name: None,
+            iss: String::new(),
+            aud: String::new(),
+            token_use: TokenUse::Access,
+        };
+        let (session_id, _) = session::create_session(
+            pool.as_ref(),
+            Uuid::new_v4(),
+            serde_json::to_value(&claims).unwrap(),
+            24,
+        )
+        .await
+        .unwrap();
 
         // Simulate the POST request
         let res = app
             .oneshot(
                 Request::post("/logout")
                     .header("Content-Type", "application/json")
+                    .header("Cookie", format!("dsentr_session={}", session_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -160,13 +192,15 @@ mod tests {
             .collect();
         assert!(cookies
             .iter()
-            .any(|c| c.contains("auth_token=") && c.contains("Max-Age=0")));
-        assert!(cookies
-            .iter()
-            .any(|c| c.contains("auth_refresh_token=") && c.contains("Max-Age=0")));
+            .any(|c| c.contains("dsentr_session=") && c.contains("Max-Age=0")));
         assert!(cookies.iter().all(|c| c.contains("HttpOnly")));
         assert!(cookies.iter().all(|c| c.contains("Secure")));
         assert!(cookies.iter().all(|c| c.contains("SameSite=Lax")));
+
+        let remaining = session::get_session(pool.as_ref(), session_id)
+            .await
+            .unwrap();
+        assert!(remaining.is_none());
 
         // Check body
         let body_bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
@@ -177,12 +211,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_logout_uses_non_secure_cookie_when_disabled() {
-        let app = build_app(false);
+        let (app, pool) = build_app(false);
+        session::reset_test_sessions();
+        let (session_id, _) = session::create_session(
+            pool.as_ref(),
+            Uuid::new_v4(),
+            serde_json::json!({"id": Uuid::new_v4().to_string()}),
+            24,
+        )
+        .await
+        .unwrap();
 
         let res = app
             .oneshot(
                 Request::post("/logout")
                     .header("Content-Type", "application/json")
+                    .header("Cookie", format!("dsentr_session={}", session_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -195,6 +239,9 @@ mod tests {
             .iter()
             .map(|v| v.to_str().unwrap().to_string())
             .collect();
-        assert!(cookies.iter().all(|c| !c.contains("Secure")));
+        assert!(cookies
+            .iter()
+            .filter(|c| c.contains("dsentr_session"))
+            .all(|c| !c.contains("Secure")));
     }
 }

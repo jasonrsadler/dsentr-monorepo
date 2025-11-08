@@ -491,7 +491,7 @@ mod tests {
     };
     use crate::services::smtp_mailer::MockMailer;
     use crate::services::stripe::MockStripeService;
-    use crate::state::AppState;
+    use crate::state::{test_pg_pool, AppState};
     use crate::utils::jwt::JwtKeys;
     use axum::extract::State as AxumState;
     use axum::http::{HeaderMap, HeaderValue};
@@ -825,6 +825,7 @@ mod tests {
             workspace_connection_repo: Arc::new(
                 crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
             ),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(
                 crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),
@@ -935,6 +936,7 @@ mod tests {
             workspace_connection_repo: Arc::new(
                 crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
             ),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(
                 crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),
@@ -1049,6 +1051,7 @@ mod tests {
             workspace_connection_repo: Arc::new(
                 crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
             ),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(
                 crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),

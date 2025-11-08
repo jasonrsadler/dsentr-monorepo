@@ -32,6 +32,7 @@ use crate::services::{
     },
     smtp_mailer::MockMailer,
 };
+use crate::state::test_pg_pool;
 use crate::state::AppState;
 use crate::utils::encryption::encrypt_secret;
 use crate::utils::jwt::JwtKeys;
@@ -91,6 +92,7 @@ fn stub_state(config: Arc<Config>) -> AppState {
         workflow_repo: Arc::new(NoopWorkflowRepository),
         workspace_repo: Arc::new(NoopWorkspaceRepository),
         workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+        db_pool: test_pg_pool(),
         mailer: Arc::new(MockMailer::default()),
         google_oauth: Arc::new(MockGoogleOAuth::default()),
         github_oauth: Arc::new(MockGitHubOAuth::default()),

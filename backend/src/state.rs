@@ -15,6 +15,7 @@ use crate::utils::{
     plan_limits::NormalizedPlanTier,
 };
 use reqwest::Client;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub workflow_repo: Arc<dyn WorkflowRepository>,
     pub workspace_repo: Arc<dyn WorkspaceRepository>,
     pub workspace_connection_repo: Arc<dyn WorkspaceConnectionRepository>,
+    pub db_pool: Arc<PgPool>,
     pub mailer: Arc<dyn Mailer>,
     pub google_oauth: Arc<dyn GoogleOAuthService>,
     pub github_oauth: Arc<dyn GitHubOAuthService + Send + Sync>,
@@ -147,6 +149,15 @@ impl JwtKeyProvider for AppState {
 pub use crate::services::stripe::{MockStripeService, StripeService as StripeServiceTrait};
 
 #[cfg(test)]
+pub fn test_pg_pool() -> Arc<PgPool> {
+    Arc::new(
+        sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://postgres:postgres@localhost/dsentr")
+            .expect("lazy pg pool for tests"),
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
@@ -253,6 +264,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
             mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
