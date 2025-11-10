@@ -4,7 +4,6 @@ import { vi } from 'vitest'
 import AmazonSESAction from '@/components/workflow/Actions/Email/Services/AmazonSESAction'
 import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunAction'
 import SendGridAction from '@/components/workflow/Actions/Email/Services/SendGridAction'
-import SMTPAction from '@/components/workflow/Actions/Email/Services/SMTPAction'
 
 vi.mock('@/components/ui/InputFields/NodeInputField', () => ({
   __esModule: true,
@@ -282,63 +281,6 @@ describe('SendGridAction', () => {
       expect.objectContaining({
         params: expect.objectContaining({
           substitutions: [{ key: 'name', value: 'Alice' }]
-        }),
-        dirty: true
-      })
-    )
-  })
-})
-
-describe('SMTPAction', () => {
-  it('dispatches updates for SMTP fields and validation flag', async () => {
-    paramsByNode['smtp-node'] = {
-      smtpHost: 'smtp.initial.com',
-      smtpPort: 587,
-      smtpUser: 'user',
-      smtpPassword: 'secret',
-      smtpTlsMode: 'starttls',
-      from: 'sender@example.com',
-      to: 'recipient@example.com',
-      subject: 'Subject',
-      body: 'Body',
-      dirty: false
-    }
-
-    render(<SMTPAction nodeId="smtp-node" />)
-
-    await waitFor(() => {
-      expect(updateNodeData).toHaveBeenCalledWith('smtp-node', {
-        hasValidationErrors: false
-      })
-    })
-
-    updateNodeData.mockClear()
-
-    fireEvent.change(screen.getByPlaceholderText('SMTP Host'), {
-      target: { value: 'smtp.updated.com' }
-    })
-
-    expect(updateNodeData).toHaveBeenCalledWith(
-      'smtp-node',
-      expect.objectContaining({
-        params: expect.objectContaining({ smtpHost: 'smtp.updated.com' }),
-        dirty: true
-      })
-    )
-
-    updateNodeData.mockClear()
-
-    fireEvent.click(
-      screen.getByLabelText(/Do not use TLS \(insecure - only if required\)/)
-    )
-
-    expect(updateNodeData).toHaveBeenCalledWith(
-      'smtp-node',
-      expect.objectContaining({
-        params: expect.objectContaining({
-          smtpTlsMode: 'none',
-          smtpTls: false,
-          smtpPort: 25
         }),
         dirty: true
       })

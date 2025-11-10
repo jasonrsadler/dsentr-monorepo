@@ -81,14 +81,6 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
         gradient: 'from-amber-500 to-yellow-500',
         icon: <ActionIcon />
       }
-      // {
-      //   id: 'action-email-smtp',
-      //   label: 'SMTP Email',
-      //   description: 'Connect with a custom SMTP server',
-      //   dragType: 'action:actionEmailSmtp',
-      //   gradient: 'from-slate-500 to-slate-700',
-      //   icon: <ActionIcon />
-      // }
     ]
   },
   {
@@ -129,27 +121,6 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
         description: 'Append a spreadsheet row',
         dragType: 'action:actionSheets',
         gradient: 'from-emerald-500 to-lime-500',
-        icon: <ActionIcon />
-      }
-    ]
-  },
-  {
-    heading: 'Webhooks & APIs',
-    tiles: [
-      {
-        id: 'action-webhook',
-        label: 'Webhook',
-        description: 'POST data to another service',
-        dragType: 'action:actionWebhook',
-        gradient: 'from-sky-500 to-cyan-600',
-        icon: <ActionIcon />
-      },
-      {
-        id: 'action-http',
-        label: 'HTTP Request',
-        description: 'Call an external API',
-        dragType: 'action:actionHttp',
-        gradient: 'from-amber-500 to-orange-600',
         icon: <ActionIcon />
       }
     ]
@@ -1415,125 +1386,6 @@ export default function Dashboard() {
                   className={`mt-2 max-h-64 overflow-auto themed-scroll pr-1 space-y-2 ${isGraphEmpty ? '' : 'opacity-60'}`}
                 >
                   <TemplateButton
-                    label="HTTP Trigger → Webhook"
-                    description="Send a webhook when triggered"
-                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 80, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'action-1',
-                          type: 'actionWebhook',
-                          position: { x: 320, y: 120 },
-                          data: {
-                            label: 'Webhook',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'webhook',
-                            params: {
-                              method: 'POST',
-                              url: 'https://example.com/webhook',
-                              headers: [
-                                {
-                                  key: 'Content-Type',
-                                  value: 'application/json'
-                                }
-                              ],
-                              queryParams: [],
-                              bodyType: 'json',
-                              body: '{"event":"example","value":123}',
-                              formBody: [],
-                              authType: 'none',
-                              authUsername: '',
-                              authPassword: '',
-                              authToken: ''
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'action-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
-                  />
-                  <TemplateButton
-                    label="Email on Trigger"
-                    description="Send an email via SMTP"
-                    disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 80, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'action-1',
-                          type: 'actionEmail',
-                          position: { x: 320, y: 120 },
-                          data: {
-                            label: 'Send Email',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'email',
-                            params: {
-                              service: 'SMTP',
-                              from: '',
-                              to: '',
-                              subject: 'Welcome to DSentr',
-                              body: 'This is a sample email from DSentr.'
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'action-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
-                  />
-                  <TemplateButton
                     label="SendGrid Email"
                     description="Send via SendGrid"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
@@ -1699,7 +1551,7 @@ export default function Dashboard() {
                   />
                   <TemplateButton
                     label="Messaging"
-                    description="Send a message (SMS/Chat)"
+                    description="Send a message (Chat)"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
                     onClick={() => {
                       if (!isGraphEmpty) return

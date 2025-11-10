@@ -30,8 +30,6 @@ import {
   SendGridActionNode,
   MailgunActionNode,
   AmazonSesActionNode,
-  SmtpActionNode,
-  WebhookActionNode,
   SlackActionNode,
   TeamsActionNode,
   GoogleChatActionNode,
@@ -79,8 +77,6 @@ import TriggerTypeDropdown from '@/components/workflow/TriggerTypeDropdown'
 import SendGridAction from '@/components/workflow/Actions/Email/Services/SendGridAction'
 import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunAction'
 import AmazonSESAction from '@/components/workflow/Actions/Email/Services/AmazonSESAction'
-import SMTPAction from '@/components/workflow/Actions/Email/Services/SMTPAction'
-import WebhookAction from '@/components/workflow/Actions/Webhook/Webhook'
 import SlackAction from '@/components/workflow/Actions/Messaging/Services/SlackAction'
 import TeamsAction from '@/components/workflow/Actions/Messaging/Services/TeamsAction'
 import GoogleChatAction from '@/components/workflow/Actions/Messaging/Services/GoogleChatAction'
@@ -130,8 +126,6 @@ type ActionDropSubtype =
   | 'actionEmailSendgrid'
   | 'actionEmailMailgun'
   | 'actionEmailAmazonSes'
-  | 'actionEmailSmtp'
-  | 'actionWebhook'
   | 'actionSlack'
   | 'actionTeams'
   | 'actionGoogleChat'
@@ -221,56 +215,6 @@ const ACTION_NODE_DROP_CONFIG: Record<ActionDropSubtype, ActionDropConfig> = {
         body: '',
         template: '',
         templateVariables: []
-      },
-      timeout: 5000,
-      retries: 0,
-      stopOnError: true
-    })
-  },
-  actionEmailSmtp: {
-    nodeType: 'actionEmailSmtp',
-    labelBase: 'SMTP email',
-    idPrefix: 'action-email-smtp',
-    expanded: true,
-    createData: () => ({
-      actionType: 'email',
-      emailProvider: 'smtp',
-      params: {
-        smtpHost: '',
-        smtpPort: 587,
-        smtpUser: '',
-        smtpPassword: '',
-        smtpTlsMode: 'starttls',
-        smtpTls: true,
-        from: '',
-        to: '',
-        subject: '',
-        body: ''
-      },
-      timeout: 5000,
-      retries: 0,
-      stopOnError: true
-    })
-  },
-  actionWebhook: {
-    nodeType: 'actionWebhook',
-    labelBase: 'Webhook call',
-    idPrefix: 'action-webhook',
-    expanded: true,
-    createData: () => ({
-      actionType: 'webhook',
-      params: {
-        method: 'POST',
-        url: '',
-        headers: [],
-        queryParams: [],
-        bodyType: 'raw',
-        body: '',
-        formBody: [],
-        authType: 'none',
-        authUsername: '',
-        authPassword: '',
-        authToken: ''
       },
       timeout: 5000,
       retries: 0,
@@ -437,13 +381,6 @@ function normalizeActionDropSubtype(
     case 'amazon_ses':
     case 'amazonses':
       return 'actionEmailAmazonSes'
-    case 'actionemailsmtp':
-    case 'smtp':
-      return 'actionEmailSmtp'
-    case 'actionwebhook':
-    case 'post webhook':
-    case 'webhook':
-      return 'actionWebhook'
     case 'actionslack':
     case 'slack':
       return 'actionSlack'
@@ -702,9 +639,6 @@ export default function FlowCanvas({
           ) {
             return 'actionEmailAmazonSes'
           }
-          if (normalizedProvider === 'smtp') {
-            return 'actionEmailSmtp'
-          }
           if (normalizedProvider.includes('sendgrid')) {
             return 'actionEmailSendgrid'
           }
@@ -713,10 +647,6 @@ export default function FlowCanvas({
             data?.params && typeof data.params === 'object'
               ? (data.params as Record<string, unknown>)
               : ({} as Record<string, unknown>)
-
-          if ('smtpHost' in paramsRecord || 'smtpUser' in paramsRecord) {
-            return 'actionEmailSmtp'
-          }
           if (
             'awsAccessKey' in paramsRecord ||
             'awsSecretKey' in paramsRecord ||
@@ -730,8 +660,6 @@ export default function FlowCanvas({
           }
           return 'actionEmailSendgrid'
         }
-        case 'webhook':
-          return 'actionWebhook'
         case 'slack':
           return 'actionSlack'
         case 'teams':
@@ -793,28 +721,6 @@ export default function FlowCanvas({
           key={`action-email-amazon-ses-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
           {...createSharedRunProps()}
-          isRunning={runningIdsRef.current.has(props.id)}
-          isSucceeded={succeededIdsRef.current.has(props.id)}
-          isFailed={failedIdsRef.current.has(props.id)}
-        />
-      ),
-      actionEmailSmtp: (props: ActionNodeRendererProps) => (
-        <SmtpActionNode
-          key={`action-email-smtp-${props.id}-${props?.data?.wfEpoch ?? ''}`}
-          {...props}
-          {...createSharedRunProps()}
-          isRunning={runningIdsRef.current.has(props.id)}
-          isSucceeded={succeededIdsRef.current.has(props.id)}
-          isFailed={failedIdsRef.current.has(props.id)}
-        />
-      ),
-      actionWebhook: (props: ActionNodeRendererProps) => (
-        <WebhookActionNode
-          key={`action-webhook-${props.id}-${props?.data?.wfEpoch ?? ''}`}
-          {...props}
-          {...createSharedRunProps()}
-          planTier={normalizedPlanTierRef.current}
-          onRestrictionNotice={onRestrictionNoticeRef.current}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
@@ -933,14 +839,10 @@ export default function FlowCanvas({
         renderActionNode('actionEmailMailgun', props),
       actionEmailAmazonSes: (props: ActionNodeRendererProps) =>
         renderActionNode('actionEmailAmazonSes', props),
-      actionEmailSmtp: (props: ActionNodeRendererProps) =>
-        renderActionNode('actionEmailSmtp', props),
       actionEmail: (props: ActionNodeRendererProps) => {
         const subtype = determineActionSubtype(props?.data)
         return renderActionNode(subtype as keyof typeof actionRenderers, props)
       },
-      actionWebhook: (props: ActionNodeRendererProps) =>
-        renderActionNode('actionWebhook', props),
       actionSlack: (props: ActionNodeRendererProps) =>
         renderActionNode('actionSlack', props),
       actionTeams: (props: ActionNodeRendererProps) =>
@@ -1459,17 +1361,6 @@ function FlyoutActionFields({
       case 'actionEmailAmazonSes':
         return (
           <AmazonSESAction
-            nodeId={nodeId}
-            canEdit={controller.effectiveCanEdit}
-          />
-        )
-      case 'actionEmailSmtp':
-        return (
-          <SMTPAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
-        )
-      case 'actionWebhook':
-        return (
-          <WebhookAction
             nodeId={nodeId}
             canEdit={controller.effectiveCanEdit}
           />
