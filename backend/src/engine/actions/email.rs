@@ -179,13 +179,13 @@ pub(crate) async fn execute_email(
     state: &AppState,
 ) -> Result<(Value, Option<String>), String> {
     let params = node.data.get("params").cloned().unwrap_or(Value::Null);
-    let service = params
-        .get("service")
+    let provider = node
+        .data
+        .get("emailProvider")
         .and_then(|v| v.as_str())
-        .unwrap_or("")
+        .unwrap_or_default()
         .to_lowercase();
-
-    match service.as_str() {
+    match provider.as_str() {
         "smtp" => {
             let timeout_ms = node
                 .data
@@ -935,7 +935,7 @@ pub(crate) async fn execute_email(
                 }
             }
         }
-        _ => Err("Unsupported email service".to_string()),
+        _ => Err(format!("Unsupported email service. Params: {}", params)),
     }
 }
 

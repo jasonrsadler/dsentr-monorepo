@@ -27,3 +27,5 @@ reports/
 # Legacy ignores
 backend/target/
 target
+
+.vscode

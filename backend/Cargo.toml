@@ -67,4 +67,6 @@ default = []
 tls = ["axum-server/tls-rustls"]
 
 [profile.dev]
-incremental = false
+incremental = true
+opt-level=0
+debug=true
