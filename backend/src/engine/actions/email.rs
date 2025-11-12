@@ -636,7 +636,7 @@ pub(crate) async fn execute_email(
                 message_id,
             ))
         }
-        "amazon ses" => {
+        "amazon_ses" => {
             let access_key = params
                 .get("awsAccessKey")
                 .and_then(|v| v.as_str())
@@ -1949,7 +1949,7 @@ mod tests {
             id: "action-ses-v2-1".into(),
             kind: "action".into(),
             data: json!({
-                "emailProvider": "Amazon SES",
+                "emailProvider": "Amazon_SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2011,7 +2011,7 @@ mod tests {
             id: "action-ses-v2-2".into(),
             kind: "action".into(),
             data: json!({
-                "emailProvider": "Amazon SES",
+                "emailProvider": "Amazon_SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2072,7 +2072,7 @@ mod tests {
             id: "action-ses-v1-1".into(),
             kind: "action".into(),
             data: json!({
-                "emailProvider": "Amazon SES",
+                "emailProvider": "Amazon_SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2134,7 +2134,7 @@ mod tests {
             id: "action-ses-v1-2".into(),
             kind: "action".into(),
             data: json!({
-                "emailProvider": "Amazon SES",
+                "emailProvider": "Amazon_SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2195,7 +2195,7 @@ mod tests {
             id: "action-ses-default-version".into(),
             kind: "action".into(),
             data: json!({
-                "emailProvider": "Amazon SES",
+                "emailProvider": "Amazon_SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2227,7 +2227,7 @@ mod tests {
             id: "action-ses-invalid-version".into(),
             kind: "action".into(),
             data: json!({
-                "emailProvider": "Amazon SES",
+                "emailProvider": "Amazon_SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
