@@ -32,8 +32,8 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Build release binary
-        run: cargo build --release
+      - name: Run Clippy
+        run: cargo clippy
 
       - name: Run unit tests
         run: cargo test --locked --all
