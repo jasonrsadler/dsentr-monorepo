@@ -1119,6 +1119,7 @@ mod tests {
             id: "action-smtp".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SMTP",
                 "params": {
                     "service": "SMTP",
                     "smtpHost": "smtp.example.com",
@@ -1171,6 +1172,7 @@ mod tests {
             id: "action-smtp-insecure".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SMTP",
                 "params": {
                     "service": "SMTP",
                     "smtpHost": "smtp.example.com",
@@ -1204,6 +1206,7 @@ mod tests {
             id: "action-smtp-default".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SMTP",
                 "params": {
                     "service": "SMTP",
                     "smtpHost": "smtp.example.com",
@@ -1241,6 +1244,7 @@ mod tests {
             id: "action-smtp-implicit".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SMTP",
                 "params": {
                     "service": "SMTP",
                     "smtpHost": "smtp.example.com",
@@ -1278,6 +1282,7 @@ mod tests {
             id: "action-smtp-explicit".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SMTP",
                 "params": {
                     "service": "SMTP",
                     "smtpHost": "smtp.example.com",
@@ -1319,6 +1324,7 @@ mod tests {
             id: "action-smtp-timeout".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SMTP",
                 "timeout": 25,
                 "params": {
                     "service": "SMTP",
@@ -1349,6 +1355,7 @@ mod tests {
             id: "action-smtp-invalid".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SMTP",
                 "params": {
                     "service": "SMTP",
                     "smtpHost": "smtp.example.com",
@@ -1554,6 +1561,7 @@ mod tests {
             id: "action-1".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SendGrid",
                 "params": {
                     "service": "SendGrid",
                     "apiKey": "SG.fake-key",
@@ -1607,6 +1615,7 @@ mod tests {
             id: "action-2".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SendGrid",
                 "params": {
                     "service": "SendGrid",
                     "apiKey": "SG.template",
@@ -1671,6 +1680,7 @@ mod tests {
             id: "action-3".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SendGrid",
                 "params": {
                     "service": "SendGrid",
                     "apiKey": "SG.error",
@@ -1699,6 +1709,7 @@ mod tests {
             id: "action-4".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "SendGrid",
                 "params": {
                     "service": "SendGrid",
                     "apiKey": "SG.key",
@@ -1733,6 +1744,7 @@ mod tests {
             id: "action-mailgun-1".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Mailgun",
                 "params": {
                     "service": "Mailgun",
                     "domain": "mg.example.com",
@@ -1797,6 +1809,7 @@ mod tests {
             id: "action-mailgun-2".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Mailgun",
                 "params": {
                     "service": "Mailgun",
                     "domain": "mg.example.com",
@@ -1868,6 +1881,7 @@ mod tests {
             id: "action-mailgun-3".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Mailgun",
                 "params": {
                     "service": "Mailgun",
                     "domain": "mg.example.com",
@@ -1898,6 +1912,7 @@ mod tests {
             id: "action-mailgun-4".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Mailgun",
                 "params": {
                     "service": "Mailgun",
                     "domain": "mg.example.com",
@@ -1934,6 +1949,7 @@ mod tests {
             id: "action-ses-v2-1".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Amazon SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -1995,6 +2011,7 @@ mod tests {
             id: "action-ses-v2-2".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Amazon SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2055,6 +2072,7 @@ mod tests {
             id: "action-ses-v1-1".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Amazon SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2116,6 +2134,7 @@ mod tests {
             id: "action-ses-v1-2".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Amazon SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2176,6 +2195,7 @@ mod tests {
             id: "action-ses-default-version".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Amazon SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
@@ -2207,6 +2227,7 @@ mod tests {
             id: "action-ses-invalid-version".into(),
             kind: "action".into(),
             data: json!({
+                "emailProvider": "Amazon SES",
                 "params": {
                     "service": "Amazon SES",
                     "awsAccessKey": "AKIAFAKE",
