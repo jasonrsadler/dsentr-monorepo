@@ -538,7 +538,8 @@ async fn main() -> Result<()> {
         .route("/microsoft/start", get(microsoft_connect_start))
         .route("/microsoft/callback", get(microsoft_connect_callback))
         .route("/slack/start", get(slack_connect_start))
-        .route("/slack/callback", get(slack_connect_callback));
+        .route("/slack/callback", get(slack_connect_callback))
+        .layer(session_guard.clone());
 
     let oauth_private_routes = Router::new()
         .route("/connections", get(list_connections))
