@@ -717,6 +717,164 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn worker_continues_on_missing_connection_event() {
+        // Ensure the worker doesn't terminate when a run event references a deleted connection.
+        let _max_guard = EnvGuard::set("WORKER_MAX_INFLIGHT_RUNS", "1");
+        let _deadline_guard = EnvGuard::set("WORKER_RUN_DEADLINE_SECONDS", "0");
+
+        // Build a run snapshot that includes a workspace connection reference.
+        let conn_id = Uuid::new_v4();
+        let run = WorkflowRun {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            workflow_id: Uuid::new_v4(),
+            workspace_id: Some(Uuid::new_v4()),
+            snapshot: json!({
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "data": json!({
+                        "label": "Trigger",
+                        "connection": {"connectionScope": "workspace", "connectionId": conn_id}
+                    })}
+                ],
+                "edges": []
+            }),
+            status: "running".into(),
+            error: None,
+            idempotency_key: None,
+            started_at: OffsetDateTime::now_utc(),
+            finished_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let mut repo = MockWorkflowRepository::new();
+        // Only one run to claim.
+        let run_queue = Arc::new(Mutex::new(VecDeque::from([run.clone()])));
+        let claim_queue = Arc::clone(&run_queue);
+        repo.expect_list_due_schedules()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
+        repo.expect_requeue_expired_leases()
+            .returning(|| Box::pin(async { Ok(0) }));
+        repo.expect_claim_next_eligible_run()
+            .returning(move |_, _| {
+                let q = Arc::clone(&claim_queue);
+                Box::pin(async move { Ok(q.lock().unwrap().pop_front()) })
+            });
+
+        // When the executor attempts to record the run event, it should have already
+        // downgraded the missing connection reference to a safe fallback.
+        repo.expect_record_run_event().returning(|event| {
+            assert_eq!(event.connection_type.as_deref(), Some("connection_missing"));
+            assert_eq!(event.connection_id, None);
+            Box::pin(async move {
+                Ok(WorkflowRunEvent {
+                    id: Uuid::new_v4(),
+                    workflow_run_id: event.workflow_run_id,
+                    workflow_id: event.workflow_id,
+                    workspace_id: event.workspace_id,
+                    triggered_by: event.triggered_by,
+                    connection_type: event.connection_type,
+                    connection_id: event.connection_id,
+                    recorded_at: OffsetDateTime::now_utc(),
+                })
+            })
+        });
+
+        // Minimal interactions to complete the run successfully.
+        repo.expect_renew_run_lease()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+        repo.expect_get_run_status()
+            .returning(|_| Box::pin(async { Ok(None) }));
+        let run_id = run.id;
+        repo.expect_upsert_node_run()
+            .returning(move |_, node_id, name, node_type, inputs, outputs, status, error| {
+                let node_id = node_id.to_owned();
+                let name = name.map(|s| s.to_owned());
+                let node_type = node_type.map(|s| s.to_owned());
+                let inputs = inputs.clone();
+                let outputs = outputs.clone();
+                let status = status.to_owned();
+                let error = error.map(|s| s.to_owned());
+                Box::pin(async move {
+                    Ok(WorkflowNodeRun {
+                        id: Uuid::new_v4(),
+                        run_id,
+                        node_id,
+                        name,
+                        node_type,
+                        inputs,
+                        outputs,
+                        status,
+                        error,
+                        started_at: OffsetDateTime::now_utc(),
+                        finished_at: None,
+                        created_at: OffsetDateTime::now_utc(),
+                        updated_at: OffsetDateTime::now_utc(),
+                    })
+                })
+            });
+        repo.expect_complete_workflow_run()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+
+        let workflow_repo: Arc<dyn WorkflowRepository> = Arc::new(repo);
+        let config = Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+        });
+
+        let state = AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo,
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        };
+
+        // The worker loop should keep running without terminating; we assert it does not
+        // return within the timeout window (i.e., stays alive).
+        let result = tokio::time::timeout(std::time::Duration::from_millis(300), worker_loop(state)).await;
+        assert!(result.is_err(), "worker should remain alive on safe persistence fallback");
+    }
+
+    #[tokio::test]
     async fn trigger_schedule_records_connection_run_events() {
         let workspace_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();

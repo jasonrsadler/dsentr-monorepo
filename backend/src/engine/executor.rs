@@ -60,11 +60,11 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) -> Result<(), Execut
     let metadata = workflow_connection_metadata::collect(&run.snapshot);
     let events = workflow_connection_metadata::build_run_events(&run, &triggered_by, &metadata);
     for event in events {
-        let repo = state.workflow_repo.clone();
+        let state_clone = state.clone();
         retry_with_backoff(run.id, "record_run_event", || {
-            let repo = repo.clone();
+            let state = state_clone.clone();
             let event = event.clone();
-            async move { repo.record_run_event(event).await }
+            async move { record_run_event_safe(&state, event).await }
         })
         .await?;
     }
@@ -118,11 +118,10 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) -> Result<(), Execut
             recorded_at: None,
         };
 
-        let repo = state.workflow_repo.clone();
         if let Err(err) = retry_with_backoff(run.id, "record_run_event", || {
-            let repo = repo.clone();
+            let state = state.clone();
             let event = violation_event.clone();
-            async move { repo.record_run_event(event).await }
+            async move { record_run_event_safe(&state, event).await }
         })
         .await
         {
@@ -593,6 +592,62 @@ fn merge_advisory_allowlist(
     (allowed_vec, rejected)
 }
 
+async fn record_run_event_safe(
+    state: &AppState,
+    event: NewWorkflowRunEvent,
+) -> Result<crate::models::workflow_run_event::WorkflowRunEvent, sqlx::Error> {
+    // If the event references a workspace connection, pre-check existence to avoid FK violations.
+    if let Some(conn_id) = event.connection_id {
+        match state.workspace_connection_repo.find_by_id(conn_id).await {
+            Ok(Some(_)) => {
+                // proceed
+            }
+            Ok(None) => {
+                // Missing connection: log and fall back to a sentinel event.
+                warn!(
+                    run_id = %event.workflow_run_id,
+                    workflow_id = %event.workflow_id,
+                    workspace_id = ?event.workspace_id,
+                    connection_id = %conn_id,
+                    "Foreign key reference to deleted connection, skipping event"
+                );
+                let mut fallback = event.clone();
+                fallback.connection_id = None;
+                fallback.connection_type = Some("connection_missing".to_string());
+                return state.workflow_repo.record_run_event(fallback).await;
+            }
+            Err(_) => {
+                // If the pre-check fails (transient), proceed to attempt insert and rely on DB error handling.
+            }
+        }
+    }
+
+    match state.workflow_repo.record_run_event(event.clone()).await {
+        Ok(row) => Ok(row),
+        Err(err) => {
+            // Handle FK violations explicitly: Postgres SQLSTATE 23503
+            if let sqlx::Error::Database(db_err) = &err {
+                if db_err.code().as_deref() == Some("23503") {
+                    let missing_id = event.connection_id;
+                    warn!(
+                        run_id = %event.workflow_run_id,
+                        workflow_id = %event.workflow_id,
+                        workspace_id = ?event.workspace_id,
+                        connection_id = ?missing_id,
+                        code = "23503",
+                        "Foreign key reference to deleted connection, inserting fallback event"
+                    );
+                    let mut fallback = event.clone();
+                    fallback.connection_id = None;
+                    fallback.connection_type = Some("connection_missing".to_string());
+                    return state.workflow_repo.record_run_event(fallback).await;
+                }
+            }
+            Err(err)
+        }
+    }
+}
+
 async fn insert_dead_letter_with_retry(
     state: &AppState,
     run: &WorkflowRun,
@@ -973,5 +1028,56 @@ mod tests {
         execute_run(state, run)
             .await
             .expect("success path should still complete");
+    }
+
+    #[tokio::test]
+    async fn missing_workspace_connection_records_safe_fallback_event() {
+        // Build a run that references a workspace connection ID that does not exist.
+        let missing_conn = Uuid::new_v4();
+        let run = base_run(
+            "trigger",
+            json!({
+                "label": "Trigger",
+                "connection": {"connectionScope": "workspace", "connectionId": missing_conn}
+            }),
+        );
+
+        let mut repo = MockWorkflowRepository::new();
+        // Expect a single event to be recorded, but with connection_id cleared and type marked as connection_missing.
+        repo.expect_record_run_event().returning(|event| {
+            assert_eq!(event.connection_type.as_deref(), Some("connection_missing"));
+            assert_eq!(event.connection_id, None);
+            Box::pin(async move {
+                Ok(WorkflowRunEvent {
+                    id: Uuid::new_v4(),
+                    workflow_run_id: event.workflow_run_id,
+                    workflow_id: event.workflow_id,
+                    workspace_id: event.workspace_id,
+                    triggered_by: event.triggered_by,
+                    connection_type: event.connection_type,
+                    connection_id: event.connection_id,
+                    recorded_at: OffsetDateTime::now_utc(),
+                })
+            })
+        });
+        repo.expect_renew_run_lease()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+        repo.expect_get_run_status()
+            .returning(|_| Box::pin(async { Ok(None) }));
+        let run_id = run.id;
+        repo.expect_upsert_node_run()
+            .returning(move |_, _, _, _, _, _, _, _| {
+                let node_run = dummy_node_run(run_id, "running");
+                Box::pin(async move { Ok(node_run) })
+            });
+        repo.expect_complete_workflow_run()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+
+        let state = build_state(repo);
+
+        // Should complete without surfacing an executor error.
+        execute_run(state, run)
+            .await
+            .expect("executor should gracefully handle missing connection FK");
     }
 }

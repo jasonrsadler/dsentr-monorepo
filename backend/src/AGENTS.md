@@ -22,3 +22,7 @@
 - Workflow run execution now records connection metadata and emits run events from routes, workers, and the engine.
 - Config now exposes Stripe credentials so downstream services can initialize billing integrations without bespoke env parsing.
  - Introduced `StripeService` into `AppState` to centralize Stripe usage. Live service is created from `Config.stripe`; tests use `MockStripeService`. This keeps construction uniform and avoids per-handler instantiation.
+- Hardened executor event persistence against FK violations from deleted workspace connections. The executor now:
+  - Warn-logs when a referenced `connection_id` is missing.
+  - Records a fallback run event with `connection_id = NULL` and `connection_type = "connection_missing"` to preserve audit ordering.
+  - Avoids crashing the worker loop on these nonfatal persistence errors.
