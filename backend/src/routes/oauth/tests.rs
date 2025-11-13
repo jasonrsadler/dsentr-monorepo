@@ -125,12 +125,20 @@ fn stub_state_with_workspace_repo(
 }
 
 struct MembershipWorkspaceRepo {
-    memberships: Vec<WorkspaceMembershipSummary>,
+    memberships: Vec<(Uuid, WorkspaceMembershipSummary)>,
 }
 
 impl MembershipWorkspaceRepo {
-    fn new(memberships: Vec<WorkspaceMembershipSummary>) -> Self {
+    fn new(memberships: Vec<(Uuid, WorkspaceMembershipSummary)>) -> Self {
         Self { memberships }
+    }
+
+    fn memberships_for(&self, user_id: Uuid) -> Vec<WorkspaceMembershipSummary> {
+        self.memberships
+            .iter()
+            .filter(|(member_id, _)| *member_id == user_id)
+            .map(|(_, membership)| membership.clone())
+            .collect()
     }
 }
 
@@ -151,6 +159,99 @@ fn workspace_membership(
             deleted_at: None,
         },
         role,
+    }
+}
+
+fn build_list_connections_state(
+    config: Arc<Config>,
+    memberships: Vec<(Uuid, WorkspaceMembershipSummary)>,
+    personal_tokens: Vec<UserOAuthToken>,
+    workspace_entries: Vec<(Uuid, WorkspaceConnectionListing)>,
+) -> AppState {
+    let workspace_repo: Arc<dyn WorkspaceRepository> =
+        Arc::new(MembershipWorkspaceRepo::new(memberships));
+    let workspace_connections: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(workspace_entries));
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
+        tokens: personal_tokens,
+    });
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+    let oauth_client = Arc::new(reqwest::Client::new());
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        workspace_connections.clone(),
+        encryption_key,
+        oauth_client,
+        &config.oauth,
+    ));
+
+    let mut state = stub_state_with_workspace_repo(config, workspace_repo);
+    state.oauth_accounts = oauth_service;
+    state.workspace_connection_repo = workspace_connections;
+    state
+}
+
+fn claims_for(user_id: Uuid) -> Claims {
+    Claims {
+        id: user_id.to_string(),
+        ..stub_claims()
+    }
+}
+
+fn personal_token_fixture(
+    config: &Config,
+    user_id: Uuid,
+    provider: ConnectedOAuthProvider,
+    account_email: &str,
+    is_shared: bool,
+) -> UserOAuthToken {
+    let now = OffsetDateTime::now_utc();
+    let encrypted_access = encrypt_secret(
+        &config.oauth.token_encryption_key,
+        &format!("access-{}-{}", user_id, account_email),
+    )
+    .expect("encrypt access token");
+    let encrypted_refresh = encrypt_secret(
+        &config.oauth.token_encryption_key,
+        &format!("refresh-{}-{}", user_id, account_email),
+    )
+    .expect("encrypt refresh token");
+
+    UserOAuthToken {
+        id: Uuid::new_v4(),
+        user_id,
+        workspace_id: None,
+        provider,
+        access_token: encrypted_access,
+        refresh_token: encrypted_refresh,
+        expires_at: now + Duration::hours(1),
+        account_email: account_email.into(),
+        is_shared,
+        created_at: now - Duration::hours(1),
+        updated_at: now - Duration::minutes(1),
+    }
+}
+
+fn workspace_connection_fixture(
+    workspace_id: Uuid,
+    provider: ConnectedOAuthProvider,
+    account_email: &str,
+    requires_reconnect: bool,
+    shared_by: (&str, &str, &str),
+) -> WorkspaceConnectionListing {
+    let now = OffsetDateTime::now_utc();
+    WorkspaceConnectionListing {
+        id: Uuid::new_v4(),
+        workspace_id,
+        workspace_name: "Shared Workspace".into(),
+        provider,
+        account_email: account_email.into(),
+        expires_at: now + Duration::hours(4),
+        shared_by_first_name: Some(shared_by.0.into()),
+        shared_by_last_name: Some(shared_by.1.into()),
+        shared_by_email: Some(shared_by.2.into()),
+        updated_at: now - Duration::minutes(5),
+        requires_reconnect,
     }
 }
 
@@ -331,6 +432,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
     let personal_token = UserOAuthToken {
         id: personal_token_id,
         user_id,
+        workspace_id: None,
         provider: ConnectedOAuthProvider::Google,
         access_token: encrypted_access,
         refresh_token: encrypted_refresh,
@@ -375,7 +477,12 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         &config.oauth,
     ));
 
-    let mut state = stub_state(config.clone());
+    // Ensure user is a member of the requested workspace
+    let membership = workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace");
+    let mut state = stub_state_with_workspace_repo(
+        config.clone(),
+        Arc::new(MembershipWorkspaceRepo::new(vec![(user_id, membership)])),
+    );
     state.oauth_accounts = oauth_service;
     state.workspace_connection_repo = workspace_repo;
 
@@ -388,7 +495,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         State(state),
         AuthSession(claims),
         Query(ListConnectionsQuery {
-            workspace: Some(workspace_id),
+            workspace: workspace_id,
         }),
     )
     .await;
@@ -478,52 +585,14 @@ async fn list_connections_returns_personal_and_workspace_entries() {
 }
 
 #[tokio::test]
-async fn list_connections_without_workspace_excludes_shared_entries() {
+async fn list_connections_requires_membership() {
     let config = stub_config();
     let user_id = Uuid::new_v4();
-    let now = OffsetDateTime::now_utc();
-    let personal_expires_at = now + Duration::hours(1);
-
-    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
-        .expect("encrypt access token");
-    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
-        .expect("encrypt refresh token");
-
-    let personal_token = UserOAuthToken {
-        id: Uuid::new_v4(),
-        user_id,
-        provider: ConnectedOAuthProvider::Google,
-        access_token: encrypted_access,
-        refresh_token: encrypted_refresh,
-        expires_at: personal_expires_at,
-        account_email: "user@example.com".into(),
-        is_shared: false,
-        created_at: now - Duration::hours(2),
-        updated_at: now - Duration::minutes(10),
-    };
-
-    let workspace_connection_id = Uuid::new_v4();
     let workspace_id = Uuid::new_v4();
-    let workspace_listing = WorkspaceConnectionListing {
-        id: workspace_connection_id,
-        workspace_id,
-        workspace_name: "Shared Workspace".into(),
-        provider: ConnectedOAuthProvider::Google,
-        account_email: "shared@example.com".into(),
-        expires_at: personal_expires_at + Duration::hours(4),
-        shared_by_first_name: Some("Taylor".into()),
-        shared_by_last_name: Some("Admin".into()),
-        shared_by_email: Some("taylor@example.com".into()),
-        updated_at: now - Duration::minutes(3),
-        requires_reconnect: false,
-    };
 
-    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> = Arc::new(
-        WorkspaceConnectionsStub::new(vec![(user_id, workspace_listing)]),
-    );
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![personal_token],
-    });
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(vec![]));
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo { tokens: vec![] });
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_client = Arc::new(reqwest::Client::new());
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -534,7 +603,11 @@ async fn list_connections_without_workspace_excludes_shared_entries() {
         &config.oauth,
     ));
 
-    let mut state = stub_state(config.clone());
+    // No membership for this workspace
+    let mut state = stub_state_with_workspace_repo(
+        config.clone(),
+        Arc::new(MembershipWorkspaceRepo::new(vec![])),
+    );
     state.oauth_accounts = oauth_service;
     state.workspace_connection_repo = workspace_repo;
 
@@ -546,9 +619,70 @@ async fn list_connections_without_workspace_excludes_shared_entries() {
     let response = list_connections(
         State(state),
         AuthSession(claims),
-        Query(ListConnectionsQuery::default()),
+        Query(ListConnectionsQuery {
+            workspace: workspace_id,
+        }),
     )
     .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn shared_workspace_member_does_not_receive_other_personal_tokens() {
+    let config = stub_config();
+    let workspace_id = Uuid::new_v4();
+    let owner_id = Uuid::new_v4();
+    let member_id = Uuid::new_v4();
+
+    let owner_token = personal_token_fixture(
+        &config,
+        owner_id,
+        ConnectedOAuthProvider::Google,
+        "owner@example.com",
+        false,
+    );
+    let member_token = personal_token_fixture(
+        &config,
+        member_id,
+        ConnectedOAuthProvider::Google,
+        "member@example.com",
+        false,
+    );
+    let shared_listing = workspace_connection_fixture(
+        workspace_id,
+        ConnectedOAuthProvider::Google,
+        "shared@example.com",
+        false,
+        ("Alice", "Owner", "alice@example.com"),
+    );
+
+    let memberships = vec![
+        (
+            owner_id,
+            workspace_membership(workspace_id, WorkspaceRole::Owner, "workspace"),
+        ),
+        (
+            member_id,
+            workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace"),
+        ),
+    ];
+
+    let state = build_list_connections_state(
+        config.clone(),
+        memberships,
+        vec![owner_token, member_token],
+        vec![(owner_id, shared_listing.clone())],
+    );
+
+    let response = list_connections(
+        State(state),
+        AuthSession(claims_for(member_id)),
+        Query(ListConnectionsQuery {
+            workspace: workspace_id,
+        }),
+    )
+    .await;
+
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -556,10 +690,180 @@ async fn list_connections_without_workspace_excludes_shared_entries() {
         .expect("read body");
     let json: Value = serde_json::from_slice(&body).expect("response json");
 
-    let workspace = json["workspace"].as_array().expect("workspace array");
-    assert!(workspace.is_empty());
     let personal = json["personal"].as_array().expect("personal array");
     assert_eq!(personal.len(), 1);
+    assert_eq!(
+        personal[0]["accountEmail"].as_str(),
+        Some("member@example.com")
+    );
+
+    let workspace = json["workspace"].as_array().expect("workspace array");
+    assert_eq!(workspace.len(), 1);
+    assert_eq!(
+        workspace[0]["accountEmail"].as_str(),
+        Some("shared@example.com")
+    );
+    assert_eq!(
+        workspace[0]["sharedByEmail"].as_str(),
+        Some("alice@example.com")
+    );
+}
+
+#[tokio::test]
+async fn promoted_connection_only_appears_in_workspace_list_for_non_owner() {
+    let config = stub_config();
+    let workspace_id = Uuid::new_v4();
+    let owner_id = Uuid::new_v4();
+    let member_id = Uuid::new_v4();
+
+    let owner_token = personal_token_fixture(
+        &config,
+        owner_id,
+        ConnectedOAuthProvider::Google,
+        "owner@example.com",
+        true,
+    );
+    let shared_listing = workspace_connection_fixture(
+        workspace_id,
+        ConnectedOAuthProvider::Google,
+        "shared@example.com",
+        false,
+        ("Alex", "Owner", "owner@example.com"),
+    );
+
+    let memberships = vec![
+        (
+            owner_id,
+            workspace_membership(workspace_id, WorkspaceRole::Owner, "workspace"),
+        ),
+        (
+            member_id,
+            workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace"),
+        ),
+    ];
+
+    let state = build_list_connections_state(
+        config.clone(),
+        memberships,
+        vec![owner_token],
+        vec![(owner_id, shared_listing.clone())],
+    );
+
+    let response = list_connections(
+        State(state),
+        AuthSession(claims_for(member_id)),
+        Query(ListConnectionsQuery {
+            workspace: workspace_id,
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+
+    assert_eq!(json["personal"].as_array().unwrap().len(), 0);
+    let workspace = json["workspace"].as_array().expect("workspace array");
+    assert_eq!(workspace.len(), 1);
+    assert_eq!(
+        workspace[0]["accountEmail"].as_str(),
+        Some("shared@example.com")
+    );
+}
+
+#[tokio::test]
+async fn self_promotion_visibility_differs_for_owner_and_member() {
+    let config = stub_config();
+    let workspace_id = Uuid::new_v4();
+    let owner_id = Uuid::new_v4();
+    let member_id = Uuid::new_v4();
+
+    let owner_token = personal_token_fixture(
+        &config,
+        owner_id,
+        ConnectedOAuthProvider::Google,
+        "owner@example.com",
+        true,
+    );
+    let member_token = personal_token_fixture(
+        &config,
+        member_id,
+        ConnectedOAuthProvider::Google,
+        "member@example.com",
+        false,
+    );
+    let shared_listing = workspace_connection_fixture(
+        workspace_id,
+        ConnectedOAuthProvider::Google,
+        "shared@example.com",
+        false,
+        ("Owner", "User", "owner@example.com"),
+    );
+
+    let memberships = vec![
+        (
+            owner_id,
+            workspace_membership(workspace_id, WorkspaceRole::Owner, "workspace"),
+        ),
+        (
+            member_id,
+            workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace"),
+        ),
+    ];
+    let workspace_entries = vec![(owner_id, shared_listing.clone())];
+    let personal_tokens = vec![owner_token.clone(), member_token.clone()];
+
+    let owner_state = build_list_connections_state(
+        config.clone(),
+        memberships.clone(),
+        personal_tokens.clone(),
+        workspace_entries.clone(),
+    );
+    let owner_response = list_connections(
+        State(owner_state),
+        AuthSession(claims_for(owner_id)),
+        Query(ListConnectionsQuery {
+            workspace: workspace_id,
+        }),
+    )
+    .await;
+    assert_eq!(owner_response.status(), StatusCode::OK);
+    let owner_body = axum::body::to_bytes(owner_response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let owner_json: Value = serde_json::from_slice(&owner_body).expect("owner response json");
+    assert_eq!(owner_json["personal"].as_array().unwrap().len(), 1);
+    assert_eq!(owner_json["workspace"].as_array().unwrap().len(), 1);
+
+    let member_state = build_list_connections_state(
+        config.clone(),
+        memberships,
+        personal_tokens,
+        workspace_entries,
+    );
+    let member_response = list_connections(
+        State(member_state),
+        AuthSession(claims_for(member_id)),
+        Query(ListConnectionsQuery {
+            workspace: workspace_id,
+        }),
+    )
+    .await;
+    assert_eq!(member_response.status(), StatusCode::OK);
+    let member_body = axum::body::to_bytes(member_response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let member_json: Value = serde_json::from_slice(&member_body).expect("member response json");
+    let member_personal = member_json["personal"].as_array().unwrap();
+    assert_eq!(member_personal.len(), 1);
+    assert_eq!(
+        member_personal[0]["accountEmail"].as_str(),
+        Some("member@example.com")
+    );
+    assert_eq!(member_json["workspace"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -598,7 +902,12 @@ async fn list_connections_includes_workspace_reconnect_flag() {
         &config.oauth,
     ));
 
-    let mut state = stub_state(config.clone());
+    // Ensure membership for the requested workspace
+    let membership = workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace");
+    let mut state = stub_state_with_workspace_repo(
+        config.clone(),
+        Arc::new(MembershipWorkspaceRepo::new(vec![(user_id, membership)])),
+    );
     state.oauth_accounts = oauth_service;
     state.workspace_connection_repo = workspace_repo;
 
@@ -611,7 +920,7 @@ async fn list_connections_includes_workspace_reconnect_flag() {
         State(state),
         AuthSession(claims),
         Query(ListConnectionsQuery {
-            workspace: Some(workspace_id),
+            workspace: workspace_id,
         }),
     )
     .await;
@@ -646,6 +955,7 @@ async fn refresh_connection_returns_last_refreshed_timestamp() {
         tokens: vec![UserOAuthToken {
             id: Uuid::new_v4(),
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,
@@ -723,6 +1033,7 @@ async fn refresh_connection_returns_conflict_when_revoked() {
         tokens: vec![UserOAuthToken {
             id: Uuid::new_v4(),
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,
@@ -858,16 +1169,16 @@ impl WorkspaceRepository for MembershipWorkspaceRepo {
 
     async fn list_memberships_for_user(
         &self,
-        _user_id: Uuid,
+        user_id: Uuid,
     ) -> Result<Vec<WorkspaceMembershipSummary>, Error> {
-        Ok(self.memberships.clone())
+        Ok(self.memberships_for(user_id))
     }
 
     async fn list_user_workspaces(
         &self,
-        _user_id: Uuid,
+        user_id: Uuid,
     ) -> Result<Vec<WorkspaceMembershipSummary>, Error> {
-        Ok(self.memberships.clone())
+        Ok(self.memberships_for(user_id))
     }
 
     async fn create_workspace_invitation(
@@ -1101,13 +1412,14 @@ async fn workspace_plan_slack_start_sets_state_cookie() {
 async fn joined_workspace_member_with_solo_claims_can_connect() {
     let config = stub_config();
     let workspace_id = Uuid::new_v4();
+    let user_id = Uuid::new_v4();
     let membership = workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace");
     let state = stub_state_with_workspace_repo(
         config.clone(),
-        Arc::new(MembershipWorkspaceRepo::new(vec![membership])),
+        Arc::new(MembershipWorkspaceRepo::new(vec![(user_id, membership)])),
     );
     let claims = Claims {
-        id: Uuid::new_v4().to_string(),
+        id: user_id.to_string(),
         plan: Some("solo".into()),
         ..stub_claims()
     };
@@ -1136,13 +1448,14 @@ async fn joined_workspace_member_with_solo_claims_can_connect() {
 async fn workspace_viewer_is_blocked_from_connecting() {
     let config = stub_config();
     let workspace_id = Uuid::new_v4();
+    let user_id = Uuid::new_v4();
     let membership = workspace_membership(workspace_id, WorkspaceRole::Viewer, "workspace");
     let state = stub_state_with_workspace_repo(
         config.clone(),
-        Arc::new(MembershipWorkspaceRepo::new(vec![membership])),
+        Arc::new(MembershipWorkspaceRepo::new(vec![(user_id, membership)])),
     );
     let claims = Claims {
-        id: Uuid::new_v4().to_string(),
+        id: user_id.to_string(),
         plan: Some("workspace".into()),
         ..stub_claims()
     };

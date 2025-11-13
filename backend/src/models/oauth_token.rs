@@ -20,6 +20,7 @@ pub const WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED: &str = "connection_unshared
 pub struct UserOAuthToken {
     pub id: Uuid,
     pub user_id: Uuid,
+    pub workspace_id: Option<Uuid>,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,

@@ -786,8 +786,8 @@ mod tests {
         repo.expect_get_run_status()
             .returning(|_| Box::pin(async { Ok(None) }));
         let run_id = run.id;
-        repo.expect_upsert_node_run()
-            .returning(move |_, node_id, name, node_type, inputs, outputs, status, error| {
+        repo.expect_upsert_node_run().returning(
+            move |_, node_id, name, node_type, inputs, outputs, status, error| {
                 let node_id = node_id.to_owned();
                 let name = name.map(|s| s.to_owned());
                 let node_type = node_type.map(|s| s.to_owned());
@@ -812,7 +812,8 @@ mod tests {
                         updated_at: OffsetDateTime::now_utc(),
                     })
                 })
-            });
+            },
+        );
         repo.expect_complete_workflow_run()
             .returning(|_, _, _| Box::pin(async { Ok(()) }));
 
@@ -870,8 +871,12 @@ mod tests {
 
         // The worker loop should keep running without terminating; we assert it does not
         // return within the timeout window (i.e., stays alive).
-        let result = tokio::time::timeout(std::time::Duration::from_millis(300), worker_loop(state)).await;
-        assert!(result.is_err(), "worker should remain alive on safe persistence fallback");
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(300), worker_loop(state)).await;
+        assert!(
+            result.is_err(),
+            "worker should remain alive on safe persistence fallback"
+        );
     }
 
     #[tokio::test]

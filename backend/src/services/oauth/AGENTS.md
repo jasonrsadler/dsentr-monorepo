@@ -12,3 +12,7 @@
 - Always call `OAuthAccountService::ensure_valid_access_token` before making provider API calls; it transparently refreshes tokens when expired.
 - Encryption utilities expect a 32-byte key from `Config`; do not bypass them when storing secrets.
 - Use the mock modules when unit testing routes or engine actions to avoid external HTTP calls.
+
+## Change Reasons
+- Introduced workspace OAuth service for cloning encrypted tokens into workspace-level connections and emitting audit events.
+- Hardened workspace OAuth removal: `WorkspaceOAuthService::remove_connection` now enforces that only the connection creator can unshare a personal OAuth token, returning `403 Forbidden` when a different workspace admin attempts removal.

@@ -12,7 +12,8 @@ import {
   promoteConnection,
   unshareWorkspaceConnection,
   setCachedConnections,
-  markProviderRevoked
+  markProviderRevoked,
+  type GroupedConnectionsSnapshot
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
@@ -72,28 +73,7 @@ const emptyProviderState = (): ProviderConnectionSet => ({
   workspace: []
 })
 
-const buildInitialStatuses = (): Record<
-  OAuthProvider,
-  ProviderConnectionSet
-> => {
-  const map = {} as Record<OAuthProvider, ProviderConnectionSet>
-  PROVIDERS.forEach((provider) => {
-    map[provider.key] = emptyProviderState()
-  })
-  return map
-}
-
-const cloneProviderState = (
-  state?: ProviderConnectionSet
-): ProviderConnectionSet => {
-  if (!state) {
-    return emptyProviderState()
-  }
-  return {
-    personal: { ...state.personal },
-    workspace: state.workspace.map((entry) => ({ ...entry }))
-  }
-}
+// Provider state is derived on the fly from the grouped snapshot.
 
 export default function IntegrationsTab({
   notice,
@@ -106,9 +86,8 @@ export default function IntegrationsTab({
   const workspaceId = currentWorkspace?.workspace.id ?? null
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [statuses, setStatuses] = useState<
-    Record<OAuthProvider, ProviderConnectionSet>
-  >(() => buildInitialStatuses())
+  const [connections, setConnections] =
+    useState<GroupedConnectionsSnapshot | null>(null)
   const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
   const [promoteDialogProvider, setPromoteDialogProvider] =
     useState<OAuthProvider | null>(null)
@@ -194,15 +173,14 @@ export default function IntegrationsTab({
       // Ensure a clean slate between mounts or workspace switches
       // so prior in-memory state from other renders/tests cannot
       // leak into this view.
-      setStatuses(buildInitialStatuses())
+      setConnections(null)
       try {
         const data = await fetchConnections({ workspaceId })
         if (!active) return
-        const normalized = {} as Record<OAuthProvider, ProviderConnectionSet>
-        PROVIDERS.forEach((provider) => {
-          normalized[provider.key] = cloneProviderState(data[provider.key])
+        setConnections({
+          personal: data.personal.map((p) => ({ ...p })),
+          workspace: data.workspace.map((w) => ({ ...w }))
         })
-        setStatuses(normalized)
         setError(null)
       } catch (err) {
         if (!active) return
@@ -265,32 +243,38 @@ export default function IntegrationsTab({
           await unshareWorkspaceConnection(entry.workspaceId, entry.id)
         }
         await disconnectProvider(provider)
-        setStatuses((prev) => {
-          const existing = prev[provider] ?? emptyProviderState()
-          const filteredWorkspace = existing.workspace
-            .filter(
-              (entry) =>
-                !sharedConnections.some((shared) => shared.id === entry.id)
-            )
-            .map((entry) => ({ ...entry }))
-          const nextState = {
-            ...prev,
-            [provider]: {
-              personal: {
-                scope: 'personal' as const,
-                id: null,
-                connected: false,
-                accountEmail: undefined,
-                expiresAt: undefined,
-                lastRefreshedAt: undefined,
-                requiresReconnect: false,
-                isShared: false
-              },
-              workspace: filteredWorkspace
-            }
+        setConnections((prev) => {
+          const next: GroupedConnectionsSnapshot = {
+            personal: Array.isArray(prev?.personal)
+              ? prev!.personal.map((p) =>
+                  p.provider === provider
+                    ? {
+                        ...p,
+                        id: null,
+                        connected: false,
+                        requiresReconnect: false,
+                        isShared: false,
+                        accountEmail: undefined,
+                        expiresAt: undefined,
+                        lastRefreshedAt: undefined
+                      }
+                    : { ...p }
+                )
+              : [],
+            workspace: Array.isArray(prev?.workspace)
+              ? prev!.workspace
+                  .filter(
+                    (entry) =>
+                      entry.provider !== provider ||
+                      !sharedConnections.some(
+                        (shared) => shared.id === entry.id
+                      )
+                  )
+                  .map((entry) => ({ ...entry }))
+              : []
           }
-          setCachedConnections(nextState, { workspaceId })
-          return nextState
+          setCachedConnections(next, { workspaceId })
+          return next
         })
         setError(null)
         return true
@@ -308,11 +292,33 @@ export default function IntegrationsTab({
 
   const handleDisconnect = useCallback(
     (provider: OAuthProvider) => {
-      const status = statuses[provider]
-      // no-op: personal reference unused
-      const workspaceConnections = (status?.workspace ?? []).filter(
-        (entry) => !workspaceId || entry.workspaceId === workspaceId
-      )
+      const status = (() => {
+        const personalRecord = connections?.personal.find(
+          (p) => p.provider === provider
+        )
+        const workspace = (connections?.workspace ?? []).filter(
+          (w) => w.provider === provider
+        )
+        return {
+          personal: personalRecord
+            ? {
+                scope: 'personal' as const,
+                id: personalRecord.id ?? null,
+                connected: Boolean(
+                  personalRecord.connected && personalRecord.id
+                ),
+                accountEmail: personalRecord.accountEmail,
+                expiresAt: personalRecord.expiresAt,
+                lastRefreshedAt: personalRecord.lastRefreshedAt,
+                requiresReconnect: Boolean(personalRecord.requiresReconnect),
+                isShared: Boolean(personalRecord.isShared)
+              }
+            : emptyProviderState().personal,
+          workspace
+        } as ProviderConnectionSet
+      })()
+      // backend enforces workspace boundary; use workspace entries as-is
+      const workspaceConnections = status?.workspace ?? []
       const sharedConnections = workspaceConnections.filter((entry) =>
         matchesCurrentUser(entry)
       )
@@ -324,53 +330,71 @@ export default function IntegrationsTab({
 
       void performDisconnect(provider, [])
     },
-    [matchesCurrentUser, performDisconnect, statuses, workspaceId]
+    [connections, matchesCurrentUser, performDisconnect]
   )
 
   const handleRefresh = async (provider: OAuthProvider) => {
     setBusyProvider(provider)
     try {
       const updated = await refreshProvider(provider)
-      setStatuses((prev) => {
-        const previousPersonal =
-          prev[provider]?.personal ?? emptyProviderState().personal
-        const nextPersonal = {
-          ...previousPersonal,
-          connected: true,
-          requiresReconnect: false
+      setConnections((prev) => {
+        const next: GroupedConnectionsSnapshot = {
+          personal: Array.isArray(prev?.personal)
+            ? prev!.personal.map((p) => {
+                if (p.provider !== provider) return { ...p }
+                const patch: any = {
+                  ...p,
+                  connected: true,
+                  requiresReconnect: false
+                }
+                if (typeof updated.accountEmail !== 'undefined') {
+                  patch.accountEmail = updated.accountEmail
+                }
+                if (typeof updated.expiresAt !== 'undefined') {
+                  patch.expiresAt = updated.expiresAt
+                }
+                if (typeof updated.lastRefreshedAt !== 'undefined') {
+                  patch.lastRefreshedAt = updated.lastRefreshedAt
+                }
+                return patch
+              })
+            : [],
+          workspace: Array.isArray(prev?.workspace)
+            ? prev!.workspace.map((w) => ({ ...w }))
+            : []
         }
-
-        if (typeof updated.accountEmail !== 'undefined') {
-          nextPersonal.accountEmail = updated.accountEmail
-        }
-        if (typeof updated.expiresAt !== 'undefined') {
-          nextPersonal.expiresAt = updated.expiresAt
-        }
-        if (typeof updated.lastRefreshedAt !== 'undefined') {
-          nextPersonal.lastRefreshedAt = updated.lastRefreshedAt
-        }
-        const nextState = {
-          ...prev,
-          [provider]: {
-            personal: nextPersonal,
-            workspace: (prev[provider]?.workspace ?? []).map((entry) => ({
-              ...entry
-            }))
-          }
-        }
-        setCachedConnections(nextState, { workspaceId })
-        return nextState
+        setCachedConnections(next, { workspaceId })
+        return next
       })
     } catch (err) {
       if (err && typeof err === 'object' && (err as any).requiresReconnect) {
         markProviderRevoked(provider)
-        setStatuses((prev) => {
-          const revoked = emptyProviderState()
-          revoked.personal.requiresReconnect = true
-          return {
-            ...prev,
-            [provider]: revoked
+        setConnections((prev) => {
+          const next: GroupedConnectionsSnapshot = {
+            personal: Array.isArray(prev?.personal)
+              ? prev!.personal.map((p) =>
+                  p.provider === provider
+                    ? { ...p, connected: false, requiresReconnect: true }
+                    : { ...p }
+                )
+              : [
+                  {
+                    provider,
+                    scope: 'personal',
+                    id: null,
+                    connected: false,
+                    accountEmail: undefined,
+                    expiresAt: undefined,
+                    lastRefreshedAt: undefined,
+                    requiresReconnect: true,
+                    isShared: false
+                  }
+                ],
+            workspace: Array.isArray(prev?.workspace)
+              ? prev!.workspace.filter((w) => w.provider !== provider)
+              : []
           }
+          return next
         })
         setError(
           err instanceof Error
@@ -454,7 +478,33 @@ export default function IntegrationsTab({
       ) : (
         <div className="space-y-4">
           {PROVIDERS.map((provider) => {
-            const status = statuses[provider.key]
+            const status: ProviderConnectionSet = (() => {
+              const personalRecord = connections?.personal.find(
+                (p) => p.provider === provider.key
+              )
+              const workspace = (connections?.workspace ?? []).filter(
+                (w) => w.provider === provider.key
+              )
+              return {
+                personal: personalRecord
+                  ? {
+                      scope: 'personal' as const,
+                      id: personalRecord.id ?? null,
+                      connected: Boolean(
+                        personalRecord.connected && personalRecord.id
+                      ),
+                      accountEmail: personalRecord.accountEmail,
+                      expiresAt: personalRecord.expiresAt,
+                      lastRefreshedAt: personalRecord.lastRefreshedAt,
+                      requiresReconnect: Boolean(
+                        personalRecord.requiresReconnect
+                      ),
+                      isShared: Boolean(personalRecord.isShared)
+                    }
+                  : emptyProviderState().personal,
+                workspace
+              }
+            })()
             const personal = status?.personal
             const connected = personal?.connected ?? false
             const accountEmail = personal?.accountEmail
@@ -673,13 +723,15 @@ export default function IntegrationsTab({
         onConfirm={async () => {
           const provider = promoteDialogProvider
           if (!provider) return
-          const personal = statuses[provider]?.personal
+          const personalRecord = connections?.personal.find(
+            (p) => p.provider === provider
+          )
           if (!workspaceId) {
             setError('No active workspace selected for promotion')
             setPromoteDialogProvider(null)
             return
           }
-          if (!personal?.id) {
+          if (!personalRecord?.id) {
             setError('Missing connection identifier. Refresh and try again.')
             setPromoteDialogProvider(null)
             return
@@ -689,7 +741,7 @@ export default function IntegrationsTab({
             const promotion = await promoteConnection({
               workspaceId,
               provider,
-              connectionId: personal.id
+              connectionId: personalRecord.id
             })
             const workspaceConnectionId = promotion.workspaceConnectionId
             if (!workspaceConnectionId) {
@@ -705,31 +757,35 @@ export default function IntegrationsTab({
                 : undefined
             const sharedByEmail = currentUser?.email?.trim() || undefined
 
-            setStatuses((prev) => {
-              const existing = prev[provider] ?? {
-                personal: personal,
-                workspace: []
+            setConnections((prev) => {
+              const next: GroupedConnectionsSnapshot = {
+                personal: Array.isArray(prev?.personal)
+                  ? prev!.personal.map((p) =>
+                      p.provider === provider
+                        ? { ...p, requiresReconnect: false, isShared: true }
+                        : { ...p }
+                    )
+                  : [],
+                workspace: Array.isArray(prev?.workspace)
+                  ? prev!.workspace
+                      .filter(
+                        (entry) =>
+                          entry.provider !== provider ||
+                          (entry.id !== workspaceConnectionId &&
+                            entry.id !== personalRecord.id)
+                      )
+                      .map((entry) => ({ ...entry }))
+                  : []
               }
-
-              const nextPersonal = {
-                ...existing.personal,
-                requiresReconnect: false,
-                isShared: true
-              }
-
-              const filteredWorkspace = (existing.workspace ?? []).filter(
-                (entry) =>
-                  entry.id !== workspaceConnectionId && entry.id !== personal.id
-              )
 
               const workspaceEntry: WorkspaceConnectionInfo = {
                 scope: 'workspace',
                 id: workspaceConnectionId,
                 connected: true,
                 provider,
-                accountEmail: personal.accountEmail,
-                expiresAt: personal.expiresAt,
-                lastRefreshedAt: personal.lastRefreshedAt,
+                accountEmail: personalRecord.accountEmail,
+                expiresAt: personalRecord.expiresAt,
+                lastRefreshedAt: personalRecord.lastRefreshedAt,
                 workspaceId,
                 workspaceName,
                 sharedByName,
@@ -737,15 +793,9 @@ export default function IntegrationsTab({
                 requiresReconnect: false
               }
 
-              const nextState = {
-                ...prev,
-                [provider]: {
-                  personal: nextPersonal,
-                  workspace: [...filteredWorkspace, workspaceEntry]
-                }
-              }
-              setCachedConnections(nextState, { workspaceId })
-              return nextState
+              next.workspace = [...next.workspace, workspaceEntry]
+              setCachedConnections(next, { workspaceId })
+              return next
             })
             setError(null)
             // After promotion, attempt a best-effort refresh to pick up any
@@ -753,18 +803,10 @@ export default function IntegrationsTab({
             // mocked responses in tests that expect a follow-up fetch.
             try {
               const data = await fetchConnections({ workspaceId })
-              if (data && typeof data === 'object') {
-                const normalized = {} as Record<
-                  OAuthProvider,
-                  ProviderConnectionSet
-                >
-                PROVIDERS.forEach((p) => {
-                  normalized[p.key] = cloneProviderState(
-                    (data as Record<string, ProviderConnectionSet>)[p.key]
-                  )
-                })
-                setStatuses(normalized)
-              }
+              setConnections({
+                personal: data.personal.map((p) => ({ ...p })),
+                workspace: data.workspace.map((w) => ({ ...w }))
+              })
             } catch {
               // ignore refresh failures
             }
@@ -813,41 +855,31 @@ export default function IntegrationsTab({
           try {
             setRemoveBusyId(entry.id)
             await unshareWorkspaceConnection(entry.workspaceId, entry.id)
-            setStatuses((prev) => {
-              const providerKey = entry.provider
-              const existing = prev[providerKey] ?? {
-                personal: {
-                  scope: 'personal',
-                  id: null,
-                  connected: false,
-                  accountEmail: undefined,
-                  expiresAt: undefined,
-                  lastRefreshedAt: undefined,
-                  isShared: false
-                },
-                workspace: []
-              }
-              const nextWorkspace = existing.workspace
+            setConnections((prev) => {
+              const nextWorkspace = (prev?.workspace ?? [])
                 .filter((workspaceEntry) => workspaceEntry.id !== entry.id)
                 .map((workspaceEntry) => ({ ...workspaceEntry }))
+
               const shouldClearSharedFlag =
                 matchesCurrentUser(entry) &&
-                !nextWorkspace.some((workspaceEntry) =>
-                  matchesCurrentUser(workspaceEntry)
+                !nextWorkspace.some(
+                  (workspaceEntry) =>
+                    workspaceEntry.provider === entry.provider &&
+                    matchesCurrentUser(workspaceEntry)
                 )
-              const nextPersonal = shouldClearSharedFlag
-                ? { ...existing.personal, isShared: false }
-                : { ...existing.personal }
 
-              const nextState = {
-                ...prev,
-                [providerKey]: {
-                  personal: nextPersonal,
-                  workspace: nextWorkspace
-                }
+              const nextPersonal = (prev?.personal ?? []).map((p) =>
+                p.provider === entry.provider && shouldClearSharedFlag
+                  ? { ...p, isShared: false }
+                  : { ...p }
+              )
+
+              const next: GroupedConnectionsSnapshot = {
+                personal: nextPersonal,
+                workspace: nextWorkspace
               }
-              setCachedConnections(nextState, { workspaceId })
-              return nextState
+              setCachedConnections(next, { workspaceId })
+              return next
             })
             setError(null)
           } catch (err) {

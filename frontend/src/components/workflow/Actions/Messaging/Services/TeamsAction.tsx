@@ -11,7 +11,9 @@ import {
   getCachedConnections,
   subscribeToConnectionUpdates,
   type ConnectionScope,
-  type ProviderConnectionSet
+  type ProviderConnectionSet,
+  type GroupedConnectionsSnapshot,
+  type OAuthProvider
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { useActionParams } from '@/stores/workflowSelectors'
@@ -791,7 +793,7 @@ const validateTeamsParams = (
   {
     connectionsError,
     connectionsLoading,
-    connectionChoices,
+    connections,
     hasMicrosoftAccount,
     teamsError,
     teamsLoading,
@@ -800,10 +802,7 @@ const validateTeamsParams = (
   }: {
     connectionsError: string | null
     connectionsLoading: boolean
-    connectionChoices: (
-      | ProviderConnectionSet['personal']
-      | ProviderConnectionSet['workspace'][number]
-    )[]
+    connections: ProviderConnectionSet | null
     hasMicrosoftAccount: boolean
     teamsError: string | null
     teamsLoading: boolean
@@ -891,17 +890,22 @@ const validateTeamsParams = (
         } else {
           errors.oauthConnectionId = 'Microsoft connection is required'
         }
-      } else if (
-        !connectionChoices.some((choice) => {
-          if (choice.scope !== scope) return false
+      } else {
+        let exists = false
+        if (connections) {
           if (scope === 'personal') {
-            return id === 'microsoft' || choice.id === id
+            const personal = connections.personal
+            exists = Boolean(
+              personal.connected && (id === 'microsoft' || personal.id === id)
+            )
+          } else if (scope === 'workspace') {
+            exists = connections.workspace.some((entry) => entry.id === id)
           }
-          return choice.id === id
-        })
-      ) {
-        errors.oauthConnectionId =
-          'Selected Microsoft connection is no longer available. Refresh your integrations.'
+        }
+        if (!exists) {
+          errors.oauthConnectionId =
+            'Selected Microsoft connection is no longer available. Refresh your integrations.'
+        }
       }
     }
 
@@ -1043,6 +1047,44 @@ export default function TeamsAction({
     []
   )
 
+  const pickProviderConnections = useCallback(
+    (
+      snapshot: GroupedConnectionsSnapshot | null,
+      provider: OAuthProvider
+    ): ProviderConnectionSet | null => {
+      if (!snapshot) return null
+      const personalRecord = snapshot.personal.find(
+        (p) => p.provider === provider
+      )
+      const personal = personalRecord
+        ? {
+            scope: 'personal' as const,
+            id: personalRecord.id ?? null,
+            connected: Boolean(personalRecord.connected && personalRecord.id),
+            accountEmail: personalRecord.accountEmail,
+            expiresAt: personalRecord.expiresAt,
+            lastRefreshedAt: personalRecord.lastRefreshedAt,
+            requiresReconnect: Boolean(personalRecord.requiresReconnect),
+            isShared: Boolean(personalRecord.isShared)
+          }
+        : {
+            scope: 'personal' as const,
+            id: null,
+            connected: false,
+            accountEmail: undefined,
+            expiresAt: undefined,
+            lastRefreshedAt: undefined,
+            requiresReconnect: false,
+            isShared: false
+          }
+      const workspace = snapshot.workspace
+        .filter((w) => w.provider === provider)
+        .map((w) => ({ ...w }))
+      return { personal, workspace }
+    },
+    []
+  )
+
   const syncMicrosoftConnections = useCallback(
     (incoming: ProviderConnectionSet | null) => {
       const sanitized = sanitizeConnections(incoming)
@@ -1122,30 +1164,15 @@ export default function TeamsAction({
     [microsoftConnections]
   )
 
-  const connectionChoices = useMemo(() => {
-    if (!microsoftConnections)
-      return [] as (
-        | ProviderConnectionSet['personal']
-        | ProviderConnectionSet['workspace'][number]
-      )[]
-
-    const entries: (
-      | ProviderConnectionSet['personal']
-      | ProviderConnectionSet['workspace'][number]
-    )[] = []
-    const personal = microsoftConnections.personal
-    if (personal.connected && personal.id) {
-      entries.push(personal)
-    }
-    for (const entry of microsoftConnections.workspace) {
-      if (entry.id) {
-        entries.push(entry)
-      }
-    }
-    return entries
+  const hasMicrosoftAccount = useMemo(() => {
+    if (!microsoftConnections) return false
+    const hasPersonal = Boolean(
+      microsoftConnections.personal.connected &&
+        microsoftConnections.personal.id
+    )
+    const hasWorkspace = microsoftConnections.workspace.some((e) => !!e.id)
+    return hasPersonal || hasWorkspace
   }, [microsoftConnections])
-
-  const hasMicrosoftAccount = connectionChoices.length > 0
 
   const sanitizeState = useCallback(
     (params: TeamsActionValues, context?: TeamsParamContext) => {
@@ -1201,7 +1228,7 @@ export default function TeamsAction({
       validateTeamsParams(sanitizedParams, paramContext, {
         connectionsError,
         connectionsLoading,
-        connectionChoices,
+        connections: microsoftConnections ?? null,
         hasMicrosoftAccount,
         teamsError,
         teamsLoading,
@@ -1211,7 +1238,7 @@ export default function TeamsAction({
     [
       channelsError,
       channelsLoading,
-      connectionChoices,
+      microsoftConnections,
       connectionsError,
       connectionsLoading,
       sanitizedParams,
@@ -1228,7 +1255,7 @@ export default function TeamsAction({
       return validateTeamsParams(nextParams, context, {
         connectionsError,
         connectionsLoading,
-        connectionChoices,
+        connections: microsoftConnections ?? null,
         hasMicrosoftAccount,
         teamsError,
         teamsLoading,
@@ -1239,7 +1266,7 @@ export default function TeamsAction({
     [
       channelsError,
       channelsLoading,
-      connectionChoices,
+      microsoftConnections,
       connectionsError,
       connectionsLoading,
       hasMicrosoftAccount,
@@ -1348,9 +1375,12 @@ export default function TeamsAction({
 
     let active = true
 
-    const cached = getCachedConnections(workspaceId)
-    if (cached?.microsoft) {
-      syncMicrosoftConnections(cached.microsoft)
+    const cached = pickProviderConnections(
+      getCachedConnections(workspaceId),
+      'microsoft'
+    )
+    if (cached) {
+      syncMicrosoftConnections(cached)
       setConnectionsError(null)
       setConnectionsLoading(false)
       setConnectionsFetched(true)
@@ -1361,7 +1391,7 @@ export default function TeamsAction({
     const unsubscribe = subscribeToConnectionUpdates(
       (snapshot) => {
         if (!active) return
-        const microsoft = snapshot?.microsoft ?? null
+        const microsoft = pickProviderConnections(snapshot, 'microsoft')
         if (!microsoft) {
           syncMicrosoftConnections(null)
           setConnectionsLoading(false)
@@ -1382,7 +1412,7 @@ export default function TeamsAction({
       fetchConnections({ workspaceId })
         .then((data) => {
           if (!active) return
-          syncMicrosoftConnections(data.microsoft ?? null)
+          syncMicrosoftConnections(pickProviderConnections(data, 'microsoft'))
           setConnectionsError(null)
         })
         .catch((error) => {

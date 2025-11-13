@@ -1842,6 +1842,9 @@ pub async fn promote_workspace_connection(
             "created_by": connection.created_by,
         }))
         .into_response(),
+        Err(WorkspaceOAuthError::Forbidden) => {
+            JsonResponse::forbidden("OAuth token is not owned by the current user").into_response()
+        }
         Err(WorkspaceOAuthError::NotFound) => {
             JsonResponse::not_found("OAuth token not found for current user").into_response()
         }
@@ -1877,6 +1880,10 @@ pub async fn remove_workspace_connection(
         .await
     {
         Ok(()) => JsonResponse::success("Workspace connection removed").into_response(),
+        Err(WorkspaceOAuthError::Forbidden) => JsonResponse::forbidden(
+            "Workspace connections can only be removed by the user who originally shared the credential",
+        )
+        .into_response(),
         Err(WorkspaceOAuthError::NotFound) => {
             JsonResponse::not_found("Workspace connection not found").into_response()
         }
@@ -3077,6 +3084,7 @@ mod tests {
         let user_token = UserOAuthToken {
             id: Uuid::new_v4(),
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypted_access.clone(),
             refresh_token: encrypted_refresh.clone(),
@@ -3168,6 +3176,7 @@ mod tests {
         let token = UserOAuthToken {
             id: Uuid::new_v4(),
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypt_secret(&encryption_key, "access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "refresh").unwrap(),
@@ -3299,6 +3308,7 @@ mod tests {
         let user_token = UserOAuthToken {
             id: Uuid::new_v4(),
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypted_access.clone(),
             refresh_token: encrypted_refresh.clone(),
@@ -3361,6 +3371,108 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remove_workspace_connection_rejects_admin_when_not_creator() {
+        let owner_id = Uuid::new_v4();
+        let creator_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let admin_member = WorkspaceMember {
+            workspace_id,
+            user_id: owner_id,
+            role: WorkspaceRole::Admin,
+            joined_at: now,
+            email: "owner@example.com".into(),
+            first_name: "Owner".into(),
+            last_name: "Admin".into(),
+        };
+        let creator_member = WorkspaceMember {
+            workspace_id,
+            user_id: creator_id,
+            role: WorkspaceRole::User,
+            joined_at: now,
+            email: "creator@example.com".into(),
+            first_name: "Creator".into(),
+            last_name: "User".into(),
+        };
+        let workspace_repo: Arc<dyn WorkspaceRepository> =
+            Arc::new(RecordingWorkspaceRepo::seeded(
+                workspace.clone(),
+                vec![admin_member.clone(), creator_member.clone()],
+            ));
+
+        let encrypted_access = encrypt_secret(&encryption_key, "access-token").unwrap();
+        let encrypted_refresh = encrypt_secret(&encryption_key, "refresh-token").unwrap();
+
+        let user_token = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id: creator_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access.clone(),
+            refresh_token: encrypted_refresh.clone(),
+            expires_at: now + time::Duration::hours(1),
+            account_email: "creator@example.com".into(),
+            is_shared: true,
+            created_at: now,
+            updated_at: now,
+        };
+        let user_repo = Arc::new(StubUserTokenRepo::with_token(user_token));
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::new());
+
+        let state = promotion_state(
+            workspace_repo,
+            user_repo.clone(),
+            connection_repo.clone(),
+            Arc::clone(&config),
+            Arc::clone(&encryption_key),
+        );
+
+        let inserted = connection_repo
+            .insert_connection(NewWorkspaceConnection {
+                workspace_id,
+                created_by: creator_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at: now + time::Duration::hours(1),
+                account_email: "creator@example.com".into(),
+            })
+            .await
+            .expect("insert connection");
+
+        let response = remove_workspace_connection(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "owner@example.com")),
+            Path((workspace_id, inserted.id)),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        // Personal token should not be demoted and connection should remain.
+        assert!(user_repo.marks().is_empty());
+        assert!(connection_repo
+            .connections()
+            .iter()
+            .any(|connection| connection.id == inserted.id));
+        assert!(connection_repo.deleted().is_empty());
+    }
+
+    #[tokio::test]
     async fn remove_workspace_connection_returns_not_found_when_missing() {
         let user_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
@@ -3395,6 +3507,7 @@ mod tests {
         let token = UserOAuthToken {
             id: Uuid::new_v4(),
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypt_secret(&encryption_key, "access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "refresh").unwrap(),

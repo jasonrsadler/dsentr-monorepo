@@ -64,14 +64,36 @@ const buildGoogleConnections = (includeWorkspace: boolean) => ({
 })
 
 const buildConnectionMap = (includeWorkspace: boolean) => ({
-  google: (() => {
-    const google = buildGoogleConnections(includeWorkspace)
-    return {
-      personal: { ...google.personal },
-      workspace: google.workspace.map((entry) => ({ ...entry }))
+  personal: [
+    {
+      scope: 'personal' as const,
+      provider: 'google' as const,
+      id: 'google-personal',
+      connected: true,
+      accountEmail: 'owner@example.com',
+      expiresAt: '2025-01-01T00:00:00.000Z',
+      lastRefreshedAt: undefined,
+      requiresReconnect: false,
+      isShared: includeWorkspace
     }
-  })(),
-  microsoft: { personal: null, workspace: [] }
+  ],
+  workspace: includeWorkspace
+    ? [
+        {
+          scope: 'workspace' as const,
+          provider: 'google' as const,
+          id: 'google-workspace',
+          connected: true,
+          accountEmail: 'ops@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          workspaceId: 'ws-1',
+          workspaceName: 'Operations',
+          sharedByName: 'Team Admin',
+          sharedByEmail: 'admin@example.com',
+          requiresReconnect: false
+        }
+      ]
+    : []
 })
 
 const initialAuthState = useAuth.getState()

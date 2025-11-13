@@ -35,7 +35,15 @@ export interface ProviderConnectionSet {
   workspace: WorkspaceConnectionInfo[]
 }
 
-type ProviderConnectionMap = Record<OAuthProvider, ProviderConnectionSet>
+// Grouped snapshot shape as returned by the API (no regrouping by provider)
+export interface PersonalConnectionRecord extends PersonalConnectionInfo {
+  provider: OAuthProvider
+}
+
+export interface GroupedConnectionsSnapshot {
+  personal: PersonalConnectionRecord[]
+  workspace: WorkspaceConnectionInfo[]
+}
 
 const PROVIDER_KEYS: OAuthProvider[] = ['google', 'microsoft', 'slack']
 
@@ -55,13 +63,13 @@ const buildApiUrl = (path: string): string => {
   return new URL(normalizedPath, resolveApiBaseUrl()).toString()
 }
 
-type ConnectionListener = (snapshot: ProviderConnectionMap | null) => void
+type ConnectionListener = (snapshot: GroupedConnectionsSnapshot | null) => void
 type RawConnectionListener = (
-  snapshot: ProviderConnectionMap | null,
+  snapshot: GroupedConnectionsSnapshot | null,
   workspaceId: string | null
 ) => void
 
-let cachedConnections: ProviderConnectionMap | null = null
+let cachedConnections: GroupedConnectionsSnapshot | null = null
 let cachedWorkspaceId: string | null = null
 const connectionListeners = new Set<RawConnectionListener>()
 
@@ -80,36 +88,12 @@ const defaultPersonalConnection = (): PersonalConnectionInfo => ({
   isShared: false
 })
 
-const defaultProviderConnections = (): ProviderConnectionSet => ({
-  personal: defaultPersonalConnection(),
-  workspace: []
+const cloneGroupedSnapshot = (
+  snapshot: GroupedConnectionsSnapshot
+): GroupedConnectionsSnapshot => ({
+  personal: snapshot.personal.map((p) => ({ ...p })),
+  workspace: snapshot.workspace.map((w) => ({ ...w }))
 })
-
-const cloneConnectionSet = (
-  set: ProviderConnectionSet
-): ProviderConnectionSet => ({
-  personal: { ...set.personal },
-  workspace: set.workspace.map((entry) => ({ ...entry }))
-})
-
-const cloneConnectionMap = (
-  map: ProviderConnectionMap
-): ProviderConnectionMap => {
-  const result = {} as ProviderConnectionMap
-  PROVIDER_KEYS.forEach((provider) => {
-    const source = map[provider] ?? defaultProviderConnections()
-    result[provider] = cloneConnectionSet(source)
-  })
-  return result
-}
-
-const createEmptyConnectionMap = (): ProviderConnectionMap => {
-  const map = {} as ProviderConnectionMap
-  PROVIDER_KEYS.forEach((provider) => {
-    map[provider] = defaultProviderConnections()
-  })
-  return map
-}
 
 const isSupportedProvider = (value: unknown): value is OAuthProvider =>
   PROVIDER_KEYS.includes(value as OAuthProvider)
@@ -143,7 +127,7 @@ const resolveWorkspaceId = (workspaceId?: string | null): string | null => {
 }
 
 const emitCachedConnections = (
-  snapshot: ProviderConnectionMap | null,
+  snapshot: GroupedConnectionsSnapshot | null,
   options?: ConnectionCacheOptions
 ) => {
   if (options && Object.prototype.hasOwnProperty.call(options, 'workspaceId')) {
@@ -153,11 +137,11 @@ const emitCachedConnections = (
     cachedWorkspaceId = readActiveWorkspaceId()
   }
 
-  cachedConnections = snapshot ? cloneConnectionMap(snapshot) : null
+  cachedConnections = snapshot ? cloneGroupedSnapshot(snapshot) : null
   const workspaceId = cachedWorkspaceId
   connectionListeners.forEach((listener) => {
     const payload = cachedConnections
-      ? cloneConnectionMap(cachedConnections)
+      ? cloneGroupedSnapshot(cachedConnections)
       : null
     listener(payload, workspaceId)
   })
@@ -165,12 +149,12 @@ const emitCachedConnections = (
 
 export const getCachedConnections = (
   workspaceId?: string | null
-): ProviderConnectionMap | null => {
+): GroupedConnectionsSnapshot | null => {
   const targetWorkspace = resolveWorkspaceId(workspaceId)
   if (!cachedConnections || cachedWorkspaceId !== targetWorkspace) {
     return null
   }
-  return cloneConnectionMap(cachedConnections)
+  return cloneGroupedSnapshot(cachedConnections)
 }
 
 export const subscribeToConnectionUpdates = (
@@ -184,13 +168,13 @@ export const subscribeToConnectionUpdates = (
       listener(null)
       return
     }
-    listener(snapshot ? cloneConnectionMap(snapshot) : null)
+    listener(snapshot ? cloneGroupedSnapshot(snapshot) : null)
   }
 
   connectionListeners.add(wrappedListener)
 
   if (cachedConnections && cachedWorkspaceId === targetWorkspace) {
-    listener(cloneConnectionMap(cachedConnections))
+    listener(cloneGroupedSnapshot(cachedConnections))
   } else {
     listener(null)
   }
@@ -201,7 +185,7 @@ export const subscribeToConnectionUpdates = (
 }
 
 export const setCachedConnections = (
-  snapshot: ProviderConnectionMap,
+  snapshot: GroupedConnectionsSnapshot,
   options?: ConnectionCacheOptions
 ) => {
   emitCachedConnections(snapshot, options)
@@ -209,12 +193,12 @@ export const setCachedConnections = (
 
 export const updateCachedConnections = (
   updater: (
-    current: ProviderConnectionMap | null
-  ) => ProviderConnectionMap | null,
+    current: GroupedConnectionsSnapshot | null
+  ) => GroupedConnectionsSnapshot | null,
   options?: ConnectionCacheOptions
-): ProviderConnectionMap | null => {
+): GroupedConnectionsSnapshot | null => {
   const current = cachedConnections
-    ? cloneConnectionMap(cachedConnections)
+    ? cloneGroupedSnapshot(cachedConnections)
     : null
   const next = updater(current)
   emitCachedConnections(next, options)
@@ -260,27 +244,22 @@ interface RefreshApiResponse {
   message?: string | null
 }
 
-const ensureConnectionMap = (
-  map: ProviderConnectionMap | null
-): ProviderConnectionMap => {
-  const result = {} as ProviderConnectionMap
-  PROVIDER_KEYS.forEach((provider) => {
-    const source = map?.[provider]
-    result[provider] = source
-      ? cloneConnectionSet(source)
-      : defaultProviderConnections()
-  })
-  return result
-}
+const ensureGrouped = (
+  snapshot: GroupedConnectionsSnapshot | null
+): GroupedConnectionsSnapshot => ({
+  personal: Array.isArray(snapshot?.personal)
+    ? snapshot!.personal.map((p) => ({ ...p }))
+    : [],
+  workspace: Array.isArray(snapshot?.workspace)
+    ? snapshot!.workspace.map((w) => ({ ...w }))
+    : []
+})
 
 export async function fetchConnections(
   options?: ConnectionCacheOptions
-): Promise<ProviderConnectionMap> {
+): Promise<GroupedConnectionsSnapshot> {
   const targetWorkspace = resolveWorkspaceId(options?.workspaceId)
   const url = new URL('/api/oauth/connections', resolveApiBaseUrl())
-  if (targetWorkspace) {
-    url.searchParams.set('workspace', targetWorkspace)
-  }
 
   const res = await fetch(url.toString(), {
     credentials: 'include'
@@ -291,7 +270,10 @@ export async function fetchConnections(
   }
 
   const data = (await res.json()) as ConnectionsApiResponse
-  const map = createEmptyConnectionMap()
+  const grouped: GroupedConnectionsSnapshot = {
+    personal: [],
+    workspace: []
+  }
 
   const normalize = (value?: string | null): string | undefined => {
     if (typeof value !== 'string') {
@@ -306,22 +288,17 @@ export async function fetchConnections(
     if (!entry || !isSupportedProvider(entry.provider)) {
       return
     }
-
-    const provider = entry.provider
-
-    map[provider] = {
-      ...map[provider],
-      personal: {
-        scope: 'personal',
-        id: entry.id,
-        connected: !entry.requiresReconnect,
-        accountEmail: normalize(entry.accountEmail),
-        expiresAt: entry.expiresAt ?? undefined,
-        lastRefreshedAt: normalize(entry.lastRefreshedAt),
-        requiresReconnect: Boolean(entry.requiresReconnect),
-        isShared: Boolean(entry.isShared)
-      }
-    }
+    grouped.personal.push({
+      scope: 'personal',
+      provider: entry.provider,
+      id: entry.id,
+      connected: !entry.requiresReconnect,
+      accountEmail: normalize(entry.accountEmail),
+      expiresAt: entry.expiresAt ?? undefined,
+      lastRefreshedAt: normalize(entry.lastRefreshedAt),
+      requiresReconnect: Boolean(entry.requiresReconnect),
+      isShared: Boolean(entry.isShared)
+    })
   })
 
   const workspaceEntries = Array.isArray(data.workspace) ? data.workspace : []
@@ -336,13 +313,11 @@ export async function fetchConnections(
       return
     }
 
-    const provider = entry.provider
-
     const workspaceInfo: WorkspaceConnectionInfo = {
       scope: 'workspace',
       id: connectionId,
       connected: !entry.requiresReconnect,
-      provider,
+      provider: entry.provider,
       accountEmail: normalize(entry.accountEmail),
       expiresAt: entry.expiresAt ?? undefined,
       lastRefreshedAt: normalize(entry.lastRefreshedAt),
@@ -353,14 +328,11 @@ export async function fetchConnections(
       requiresReconnect: Boolean(entry.requiresReconnect)
     }
 
-    map[provider] = {
-      ...map[provider],
-      workspace: [...map[provider].workspace, workspaceInfo]
-    }
+    grouped.workspace.push(workspaceInfo)
   })
 
-  setCachedConnections(map, { workspaceId: targetWorkspace })
-  return map
+  setCachedConnections(grouped, { workspaceId: targetWorkspace })
+  return grouped
 }
 
 export async function disconnectProvider(
@@ -462,26 +434,43 @@ export async function refreshProvider(
 
 export const clearProviderConnections = (provider: OAuthProvider) => {
   updateCachedConnections((current) => {
-    const map = ensureConnectionMap(current)
-    return {
-      ...map,
-      [provider]: defaultProviderConnections()
-    }
+    const snapshot = ensureGrouped(current)
+    const nextPersonal = snapshot.personal.filter(
+      (p) => p.provider !== provider
+    )
+    const nextWorkspace = snapshot.workspace.filter(
+      (w) => w.provider !== provider
+    )
+    return { personal: nextPersonal, workspace: nextWorkspace }
   })
 }
 
 export const markProviderRevoked = (provider: OAuthProvider) => {
   updateCachedConnections((current) => {
-    const map = ensureConnectionMap(current)
-    const personal = defaultPersonalConnection()
-    personal.requiresReconnect = true
-    return {
-      ...map,
-      [provider]: {
-        personal,
-        workspace: []
+    const snapshot = ensureGrouped(current)
+    let found = false
+    const nextPersonal = snapshot.personal.map((p) => {
+      if (p.provider !== provider) return { ...p }
+      found = true
+      return {
+        ...p,
+        connected: false,
+        requiresReconnect: true,
+        id: p.id ?? null
       }
+    })
+    // If no personal record exists for the provider, add a revoked placeholder
+    if (!found) {
+      nextPersonal.push({
+        provider,
+        ...defaultPersonalConnection(),
+        requiresReconnect: true
+      })
     }
+    const nextWorkspace = snapshot.workspace.filter(
+      (w) => w.provider !== provider
+    )
+    return { personal: nextPersonal, workspace: nextWorkspace }
   })
 }
 

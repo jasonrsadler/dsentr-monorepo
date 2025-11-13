@@ -117,6 +117,7 @@ fn extract_required_str<'a>(params: &'a Value, key: &str, field: &str) -> Result
 enum SlackConnectionContext {
     Personal {
         user_id: Uuid,
+        connection_id: Uuid,
     },
     Workspace {
         workspace_id: Uuid,
@@ -180,14 +181,6 @@ async fn send_slack(
                     return Err("Selected connection is not a Slack connection".to_string());
                 }
 
-                if let Some(expected) = info.account_email.as_ref() {
-                    if !connection.account_email.eq_ignore_ascii_case(expected) {
-                        return Err(
-                            "Selected Slack connection does not match the expected account. Refresh your integration settings.".to_string(),
-                        );
-                    }
-                }
-
                 (
                     connection.access_token.clone(),
                     Some(connection.account_email.clone()),
@@ -216,19 +209,12 @@ async fn send_slack(
                     }
                 }
 
-                if let Some(expected_email) = info.account_email.as_ref() {
-                    if !token.account_email.eq_ignore_ascii_case(expected_email) {
-                        return Err(
-                            "Selected Slack account does not match the connected account. Refresh your integration settings.".to_string(),
-                        );
-                    }
-                }
-
                 (
                     token.access_token.clone(),
                     Some(token.account_email.clone()),
                     Some(SlackConnectionContext::Personal {
                         user_id: run.user_id,
+                        connection_id: token.id,
                     }),
                 )
             }
@@ -284,7 +270,7 @@ async fn send_slack(
         if let Some(context) = &connection_context {
             if is_revocation_signal(Some(status), &body_text) {
                 match context {
-                    SlackConnectionContext::Personal { user_id } => {
+                    SlackConnectionContext::Personal { user_id, .. } => {
                         if let Err(err) = state
                             .oauth_accounts
                             .handle_revoked_token(*user_id, ConnectedOAuthProvider::Slack)
@@ -385,8 +371,9 @@ async fn send_slack(
 
     if let Some(context) = connection_context {
         match context {
-            SlackConnectionContext::Personal { .. } => {
+            SlackConnectionContext::Personal { connection_id, .. } => {
                 output["connectionScope"] = Value::String("user".to_string());
+                output["connectionId"] = Value::String(connection_id.to_string());
             }
             SlackConnectionContext::Workspace { connection_id, .. } => {
                 output["connectionScope"] = Value::String("workspace".to_string());
@@ -1290,6 +1277,7 @@ async fn send_teams_delegated_oauth(
     enum ConnectionContext {
         Personal {
             user_id: Uuid,
+            connection_id: Uuid,
             account_email: Option<String>,
         },
         Workspace {
@@ -1316,14 +1304,6 @@ async fn send_teams_delegated_oauth(
                 return Err("Selected connection is not a Microsoft connection".to_string());
             }
 
-            if let Some(expected) = info.account_email.as_ref() {
-                if !connection.account_email.eq_ignore_ascii_case(expected) {
-                    return Err(
-                        "Selected Microsoft connection does not match the expected account. Refresh your integration settings.".to_string(),
-                    );
-                }
-            }
-
             (
                 connection.access_token.clone(),
                 connection.account_email.clone(),
@@ -1342,19 +1322,6 @@ async fn send_teams_delegated_oauth(
                 .map(|value| value.trim())
                 .filter(|value| !value.is_empty())
                 .and_then(|value| Uuid::parse_str(value).ok());
-            let expected_email = info
-                .account_email
-                .as_ref()
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_string());
-
-            if connection_hint.is_none() && expected_email.is_none() {
-                return Err(
-                    "Select a connected Microsoft account before using delegated Teams messaging"
-                        .to_string(),
-                );
-            }
 
             let token = ensure_microsoft_access_token(state, run.user_id).await?;
 
@@ -1364,37 +1331,17 @@ async fn send_teams_delegated_oauth(
                         "Selected Microsoft account does not match the connected account. Refresh your integration settings.".to_string(),
                     );
                 }
-                (
-                    token.access_token.clone(),
-                    token.account_email.clone(),
-                    ConnectionContext::Personal {
-                        user_id: run.user_id,
-                        account_email: Some(token.account_email.clone()),
-                    },
-                )
-            } else {
-                let Some(expected) = expected_email else {
-                    return Err(
-                        "Select a connected Microsoft account before using delegated Teams messaging"
-                            .to_string(),
-                    );
-                };
-
-                if !token.account_email.eq_ignore_ascii_case(&expected) {
-                    return Err(
-                        "Selected Microsoft account does not match the connected account. Refresh your integration settings.".to_string(),
-                    );
-                }
-
-                (
-                    token.access_token.clone(),
-                    token.account_email.clone(),
-                    ConnectionContext::Personal {
-                        user_id: run.user_id,
-                        account_email: Some(token.account_email.clone()),
-                    },
-                )
             }
+
+            (
+                token.access_token.clone(),
+                token.account_email.clone(),
+                ConnectionContext::Personal {
+                    user_id: run.user_id,
+                    connection_id: token.id,
+                    account_email: Some(token.account_email.clone()),
+                },
+            )
         }
     };
 
@@ -1458,6 +1405,7 @@ async fn send_teams_delegated_oauth(
                 ConnectionContext::Personal {
                     user_id,
                     account_email,
+                    ..
                 } => {
                     if let Err(err) = state
                         .oauth_accounts
@@ -1567,6 +1515,18 @@ async fn send_teams_delegated_oauth(
 
     if !token_email.trim().is_empty() {
         output["oauthAccountEmail"] = Value::String(token_email.clone());
+    }
+
+    // Surface connection metadata to help detect stale selections
+    match connection_context {
+        ConnectionContext::Personal { connection_id, .. } => {
+            output["connectionScope"] = Value::String("user".to_string());
+            output["connectionId"] = Value::String(connection_id.to_string());
+        }
+        ConnectionContext::Workspace { connection_id, .. } => {
+            output["connectionScope"] = Value::String("workspace".to_string());
+            output["connectionId"] = Value::String(connection_id.to_string());
+        }
     }
 
     if let Some(Value::Object(obj)) = parsed.as_ref() {
@@ -2342,6 +2302,7 @@ mod tests {
         let record = UserOAuthToken {
             id: token_id,
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Slack,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,
@@ -3070,6 +3031,7 @@ mod tests {
         let record = UserOAuthToken {
             id: token_id,
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,
@@ -3199,6 +3161,7 @@ mod tests {
         let record = UserOAuthToken {
             id: token_id,
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,

@@ -18,7 +18,7 @@
 - Handlers expect `AppState` and often an `AuthSession` extractor; ensure new routes reuse these patterns for authorization.
 - For APIs returning JSON, use `responses::JsonResponse` helpers to keep status/message structure consistent.
 - When adding new route groups, update `main.rs` to mount them and consider rate-limit layer alignment (`auth_governor_conf` vs global).
-- Workspace invitation emails must link to `/signup?invite=…` and use URL-encoded tokens—update the dedicated test if this contract changes.
+- Workspace invitation emails must link to `/signup?invite=�?�` and use URL-encoded tokens�?"update the dedicated test if this contract changes.
 - Workspace lifecycle flows now expose `GET /api/workspaces`, `GET /api/invites`, `POST /api/workspaces/:id/leave`, and `POST /api/workspaces/:id/revoke`. Use the shared Solo-provisioning helper so the last member receives an automatic personal workspace when they leave or are revoked.
 
 ## Change Reasons
@@ -41,6 +41,8 @@
 
 - Tests: added coverage to assert that initiating a Workspace upgrade triggers the Stripe mock and returns a Checkout URL without mutating plans, plus integration-style tests for the Stripe webhook handler covering both success (creates workspace, clears pending, sets plan) and failure (records error, clears pending, rolls back plans) paths.
 
+- Workspace OAuth administration now returns `403 Forbidden` when a workspace admin attempts to remove a shared connection that they did not create. The `/api/workspaces/:id/connections/:connection_id` handler surfaces a clear error so clients can prompt users to ask the original sharer to unshare their credential.
+
 ## New (Stripe billing plan lifecycle)
 - Workspace subscribers now see renewal/reversion dates surfaced in the Plans tab. `GET /api/workspaces/onboarding` attaches `billing.subscription` with:
   - `renews_at` (RFC3339), `cancel_at` (RFC3339|null), and `cancel_at_period_end`.
@@ -52,4 +54,4 @@
   - On `customer.subscription.deleted`, we map the `customer` to a user, set `users.plan = "solo"`, and downgrade any owned workspaces to `"solo"`.
 
 ### New endpoint: resume subscription
-- `POST /api/workspaces/billing/subscription/resume` clears `cancel_at_period_end` on the active Stripe subscription for the authenticated user’s Stripe customer. Returns the updated renewal date so clients can refresh UI.
+- `POST /api/workspaces/billing/subscription/resume` clears `cancel_at_period_end` on the active Stripe subscription for the authenticated user�?Ts Stripe customer. Returns the updated renewal date so clients can refresh UI.

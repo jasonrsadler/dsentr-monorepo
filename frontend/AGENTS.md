@@ -225,3 +225,9 @@ WorkspaceOnboarding checkout flow (network calls simplification):
 - Removed the initial `getPrivacyPreference()` fetch from `src/WorkspaceOnboarding.tsx` and kept the default (`allowWorkflowInsights=true`). This avoids an extra GET during mount that interfered with test fetch ordering and can introduce subtle race conditions.
 - Deferred persisting the privacy preference (`setPrivacyPreference`) to only the Solo path, after navigation completes. For the Workspace (Stripe) path, we no longer issue this extra request before redirecting to Checkout. Result: the upgrade flow performs exactly three calls in order (GET onboarding context → GET CSRF → POST onboarding) and immediately transitions to the “Redirecting…” state.
 - Rationale: keeps the checkout flow snappy and deterministic in tests and production, and prevents redundant background calls right before leaving the page.
+
+OAuth connections grouping (Google Sheets, Microsoft Teams):
+- Removed flattened `connectionChoices` arrays in `src/components/workflow/Actions/Google/SheetsAction.tsx` and `src/components/workflow/Actions/Messaging/Services/TeamsAction.tsx`.
+- Kept separate references to `personal` and `workspace` connection groups from the OAuth snapshot and iterated each group independently when rendering dropdowns ("Your connections" first, then "Workspace connections").
+- Updated validation to check the selected `scope/id` within the appropriate group and surface errors when the selection is missing or stale per group, without intermediate flattening logic.
+- Adjusted related unit tests to assert grouped behavior and guard against regressions.

@@ -10,7 +10,9 @@ import {
   getCachedConnections,
   subscribeToConnectionUpdates,
   type ConnectionScope,
-  type ProviderConnectionSet
+  type ProviderConnectionSet,
+  type GroupedConnectionsSnapshot,
+  type OAuthProvider
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { useActionParams } from '@/stores/workflowSelectors'
@@ -295,6 +297,44 @@ export default function SlackAction({
   const [connectionsError, setConnectionsError] = useState<string | null>(null)
   const refreshRequestIdRef = useRef(0)
 
+  const pickProviderConnections = useCallback(
+    (
+      snapshot: GroupedConnectionsSnapshot | null,
+      provider: OAuthProvider
+    ): ProviderConnectionSet | null => {
+      if (!snapshot) return null
+      const personalRecord = snapshot.personal.find(
+        (p) => p.provider === provider
+      )
+      const personal = personalRecord
+        ? {
+            scope: 'personal' as const,
+            id: personalRecord.id ?? null,
+            connected: Boolean(personalRecord.connected && personalRecord.id),
+            accountEmail: personalRecord.accountEmail,
+            expiresAt: personalRecord.expiresAt,
+            lastRefreshedAt: personalRecord.lastRefreshedAt,
+            requiresReconnect: Boolean(personalRecord.requiresReconnect),
+            isShared: Boolean(personalRecord.isShared)
+          }
+        : {
+            scope: 'personal' as const,
+            id: null,
+            connected: false,
+            accountEmail: undefined,
+            expiresAt: undefined,
+            lastRefreshedAt: undefined,
+            requiresReconnect: false,
+            isShared: false
+          }
+      const workspace = snapshot.workspace
+        .filter((w) => w.provider === provider)
+        .map((w) => ({ ...w }))
+      return { personal, workspace }
+    },
+    []
+  )
+
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null) => {
       if (!connections) return null
@@ -326,11 +366,13 @@ export default function SlackAction({
       !mountedRef.current || refreshRequestIdRef.current !== requestId
 
     try {
-      const map = await fetchConnections({ workspaceId })
+      const grouped = await fetchConnections({ workspaceId })
       if (isStale()) {
         return
       }
-      const slackConnections = sanitizeConnections(map.slack ?? null)
+      const slackConnections = sanitizeConnections(
+        pickProviderConnections(grouped, 'slack')
+      )
       setConnectionState(slackConnections)
     } catch (err) {
       if (isStale()) {
@@ -347,16 +389,19 @@ export default function SlackAction({
         setConnectionsLoading(false)
       }
     }
-  }, [sanitizeConnections, workspaceId])
+  }, [sanitizeConnections, workspaceId, pickProviderConnections])
 
   useEffect(() => {
-    const cached = getCachedConnections(workspaceId)?.slack ?? null
+    const cached = pickProviderConnections(
+      getCachedConnections(workspaceId),
+      'slack'
+    )
     setConnectionState(sanitizeConnections(cached))
 
     const unsubscribe = subscribeToConnectionUpdates(
       (snapshot) => {
         if (!mountedRef.current) return
-        const slackConnections = snapshot?.slack ?? null
+        const slackConnections = pickProviderConnections(snapshot, 'slack')
         setConnectionState(sanitizeConnections(slackConnections))
       },
       { workspaceId }
@@ -367,7 +412,12 @@ export default function SlackAction({
     return () => {
       unsubscribe()
     }
-  }, [refreshConnections, sanitizeConnections, workspaceId])
+  }, [
+    refreshConnections,
+    sanitizeConnections,
+    workspaceId,
+    pickProviderConnections
+  ])
 
   const findConnectionByValue = useCallback(
     (scope: ConnectionScope, id: string): SlackConnectionSelection | null => {

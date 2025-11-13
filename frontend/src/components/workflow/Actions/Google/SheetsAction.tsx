@@ -10,7 +10,9 @@ import {
   getCachedConnections,
   subscribeToConnectionUpdates,
   type ConnectionScope,
-  type ProviderConnectionSet
+  type ProviderConnectionSet,
+  type GroupedConnectionsSnapshot,
+  type OAuthProvider
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import {
@@ -140,6 +142,41 @@ export default function SheetsAction({
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
 
+  const pickProviderConnections = (
+    snapshot: GroupedConnectionsSnapshot | null,
+    provider: OAuthProvider
+  ): ProviderConnectionSet | null => {
+    if (!snapshot) return null
+    const personalRecord = snapshot.personal.find(
+      (p) => p.provider === provider
+    )
+    const personal = personalRecord
+      ? {
+          scope: 'personal' as const,
+          id: personalRecord.id ?? null,
+          connected: Boolean(personalRecord.connected && personalRecord.id),
+          accountEmail: personalRecord.accountEmail,
+          expiresAt: personalRecord.expiresAt,
+          lastRefreshedAt: personalRecord.lastRefreshedAt,
+          requiresReconnect: Boolean(personalRecord.requiresReconnect),
+          isShared: Boolean(personalRecord.isShared)
+        }
+      : {
+          scope: 'personal' as const,
+          id: null,
+          connected: false,
+          accountEmail: undefined,
+          expiresAt: undefined,
+          lastRefreshedAt: undefined,
+          requiresReconnect: false,
+          isShared: false
+        }
+    const workspace = snapshot.workspace
+      .filter((w) => w.provider === provider)
+      .map((w) => ({ ...w }))
+    return { personal, workspace }
+  }
+
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null) => {
       if (!connections) return null
@@ -162,9 +199,12 @@ export default function SheetsAction({
   useEffect(() => {
     let active = true
 
-    const cached = getCachedConnections(workspaceId)
-    if (cached?.google) {
-      setConnectionState(sanitizeConnections(cached.google))
+    const cached = pickProviderConnections(
+      getCachedConnections(workspaceId),
+      'google'
+    )
+    if (cached) {
+      setConnectionState(sanitizeConnections(cached))
       setConnectionsError(null)
       setConnectionsLoading(false)
     } else {
@@ -174,7 +214,7 @@ export default function SheetsAction({
     const unsubscribe = subscribeToConnectionUpdates(
       (snapshot) => {
         if (!active) return
-        const googleConnections = snapshot?.google ?? null
+        const googleConnections = pickProviderConnections(snapshot, 'google')
         if (!googleConnections) {
           setConnectionState(null)
           setConnectionsLoading(false)
@@ -191,9 +231,11 @@ export default function SheetsAction({
       setConnectionsLoading(true)
       setConnectionsError(null)
       fetchConnections({ workspaceId })
-        .then((connections) => {
+        .then((grouped) => {
           if (!active) return
-          setConnectionState(sanitizeConnections(connections.google ?? null))
+          setConnectionState(
+            sanitizeConnections(pickProviderConnections(grouped, 'google'))
+          )
           setConnectionsError(null)
         })
         .catch((error) => {
@@ -338,27 +380,14 @@ export default function SheetsAction({
     oauthConnectionScope
   ])
 
-  const connectionChoices = useMemo(() => {
-    if (!connectionState)
-      return [] as (
-        | ProviderConnectionSet['personal']
-        | ProviderConnectionSet['workspace'][number]
-      )[]
-
-    const entries: (
-      | ProviderConnectionSet['personal']
-      | ProviderConnectionSet['workspace'][number]
-    )[] = []
-    const personal = connectionState.personal
-    if (personal.connected && personal.id) {
-      entries.push(personal)
-    }
-    for (const entry of connectionState.workspace) {
-      if (entry.id) {
-        entries.push(entry)
-      }
-    }
-    return entries
+  // Keep personal and workspace references separate; avoid flattening
+  const hasAnyGoogleConnection = useMemo(() => {
+    if (!connectionState) return false
+    const hasPersonal = Boolean(
+      connectionState.personal.connected && connectionState.personal.id
+    )
+    const hasWorkspace = connectionState.workspace.some((e) => !!e.id)
+    return hasPersonal || hasWorkspace
   }, [connectionState])
 
   const connectionOptionGroups = useMemo<NodeDropdownOptionGroup[]>(() => {
@@ -447,36 +476,44 @@ export default function SheetsAction({
     if (connectionsError) {
       errors.accountEmail = connectionsError
     } else if (!connectionsLoading) {
-      if (connectionChoices.length === 0) {
+      const scope =
+        oauthConnectionScope === 'personal' ||
+        oauthConnectionScope === 'workspace'
+          ? oauthConnectionScope
+          : null
+      const id = oauthConnectionId?.toString().trim() || ''
+
+      if (!hasAnyGoogleConnection) {
         errors.accountEmail =
           'Connect a Google account in Settings → Integrations'
-      } else {
-        const scope =
-          oauthConnectionScope === 'personal' ||
-          oauthConnectionScope === 'workspace'
-            ? oauthConnectionScope
-            : null
-        const id = oauthConnectionId?.toString().trim() || ''
-
-        if (!scope || !id) {
-          errors.accountEmail = 'Select a connected Google account'
-        } else if (
-          !connectionChoices.some(
-            (choice) => choice.scope === scope && (choice.id ?? '') === id
-          )
-        ) {
-          errors.accountEmail =
-            'Selected Google connection is no longer available. Refresh your integrations.'
+      } else if (!scope || !id) {
+        errors.accountEmail = 'Select a connected Google account'
+      } else if (connectionState) {
+        if (scope === 'personal') {
+          const personal = connectionState.personal
+          const ok = Boolean(personal.connected && personal.id === id)
+          if (!ok) {
+            errors.accountEmail =
+              'Selected Google connection is no longer available. Refresh your integrations.'
+          }
+        }
+        if (scope === 'workspace') {
+          const ok = connectionState.workspace.some((e) => e.id === id)
+          if (!ok) {
+            errors.accountEmail =
+              'Selected Google connection is no longer available. Refresh your integrations.'
+          }
         }
       }
     }
 
     return errors
   }, [
-    connectionChoices,
     connectionsError,
     connectionsLoading,
     columns,
+    connectionState,
+    hasAnyGoogleConnection,
     oauthConnectionId,
     oauthConnectionScope,
     spreadsheetId,

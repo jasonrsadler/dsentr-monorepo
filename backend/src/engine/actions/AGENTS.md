@@ -19,3 +19,5 @@
 
 ## Change Reasons
 - Teams routing now infers Delegated OAuth when `teamId` + `channelId` are provided (and `oauthProvider` is Microsoft) even if `deliveryMethod` is omitted. This prevents silent fallback to the Incoming Webhook path and "sent" logs without posting to the intended channel after the node refactor.
+- Replaced account email comparisons with ID-based validation for Google, Slack, and Microsoft Teams actions. Workspace connections are validated by `connectionId` ownership, and personal connections optionally verify `connectionId` when supplied. This eliminates brittle email matching and aligns node validation with repository-backed identifiers.
+- Action outputs now include `connectionScope` and `connectionId` so nodes can detect stale selections without relying on emails. This surfaces enough metadata for the UI to reconcile saved selections across plan changes and connection rotations.

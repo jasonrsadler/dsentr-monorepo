@@ -16,3 +16,8 @@
 - Always validate the returned `state` parameter before exchanging codes; reuse `build_state_cookie`/`clear_state_cookie`.
 - When adding new providers, extend `ConnectedOAuthProvider`, update `parse_provider`/`provider_to_key`, and build new connect handlers following the existing pattern.
 - Redirects back to the frontend include query flags—coordinate expected parameters with the UI before changing them.
+
+## Change Reasons
+- Accounts: Listing connections now requires an explicit `workspace` query parameter and verifies membership via `workspace_repo.list_memberships_for_user` before proceeding. This prevents cross-workspace leakage and aligns with workspace context routing elsewhere.
+- Accounts: Workspace connections are fetched with `WorkspaceConnectionRepository::list_for_workspace(workspace_id)` instead of a user-membership scan. The handler asserts all returned rows match the requested workspace and returns 403 on any violation.
+- Accounts: Added a defensive ownership assertion for personal tokens by cross-checking repository lookups for the authenticated `user_id` and provider before serializing the response. Violations return 403 and are logged.

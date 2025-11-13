@@ -343,6 +343,10 @@ async fn ensure_workspace_token(
 
 fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> Response {
     match err {
+        WorkspaceOAuthError::Forbidden => {
+            JsonResponse::forbidden("Not authorized to use this workspace connection")
+                .into_response()
+        }
         WorkspaceOAuthError::NotFound => JsonResponse::not_found(
             "Selected workspace Microsoft connection is no longer available",
         )
@@ -642,6 +646,7 @@ mod tests {
         let personal_repo = Arc::new(PersonalTokenRepo::new(Some(UserOAuthToken {
             id: token_id,
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,

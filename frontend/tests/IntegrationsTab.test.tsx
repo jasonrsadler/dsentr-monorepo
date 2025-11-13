@@ -72,9 +72,10 @@ describe('IntegrationsTab', () => {
   it('promotes a personal connection to the workspace', async () => {
     fetchConnections
       .mockResolvedValueOnce({
-        google: {
-          personal: {
+        personal: [
+          {
             scope: 'personal',
+            provider: 'google',
             id: 'google-personal',
             connected: true,
             accountEmail: 'owner@example.com',
@@ -82,40 +83,15 @@ describe('IntegrationsTab', () => {
             lastRefreshedAt: '2024-12-31T15:30:00.000Z',
             requiresReconnect: false,
             isShared: false
-          },
-          workspace: []
-        },
-        microsoft: {
-          personal: {
-            scope: 'personal',
-            id: null,
-            connected: false,
-            accountEmail: undefined,
-            expiresAt: undefined,
-            lastRefreshedAt: undefined,
-            requiresReconnect: false,
-            isShared: false
-          },
-          workspace: []
-        },
-        slack: {
-          personal: {
-            scope: 'personal',
-            id: null,
-            connected: false,
-            accountEmail: undefined,
-            expiresAt: undefined,
-            lastRefreshedAt: undefined,
-            requiresReconnect: false,
-            isShared: false
-          },
-          workspace: []
-        }
+          }
+        ],
+        workspace: []
       })
       .mockResolvedValueOnce({
-        google: {
-          personal: {
+        personal: [
+          {
             scope: 'personal',
+            provider: 'google',
             id: 'google-personal',
             connected: true,
             accountEmail: 'owner@example.com',
@@ -123,49 +99,24 @@ describe('IntegrationsTab', () => {
             lastRefreshedAt: '2025-01-03T11:00:00.000Z',
             requiresReconnect: false,
             isShared: true
-          },
-          workspace: [
-            {
-              scope: 'workspace',
-              id: 'google-shared',
-              connected: true,
-              accountEmail: 'owner@example.com',
-              expiresAt: '2025-01-01T00:00:00.000Z',
-              lastRefreshedAt: '2025-01-02T08:15:00.000Z',
-              workspaceId: 'ws-1',
-              workspaceName: 'Acme Workspace',
-              sharedByName: 'Owner Example',
-              sharedByEmail: 'owner@example.com',
-              requiresReconnect: false
-            }
-          ]
-        },
-        microsoft: {
-          personal: {
-            scope: 'personal',
-            id: null,
-            connected: false,
-            accountEmail: undefined,
-            expiresAt: undefined,
-            lastRefreshedAt: undefined,
-            requiresReconnect: false,
-            isShared: false
-          },
-          workspace: []
-        },
-        slack: {
-          personal: {
-            scope: 'personal',
-            id: null,
-            connected: false,
-            accountEmail: undefined,
-            expiresAt: undefined,
-            lastRefreshedAt: undefined,
-            requiresReconnect: false,
-            isShared: false
-          },
-          workspace: []
-        }
+          }
+        ],
+        workspace: [
+          {
+            scope: 'workspace',
+            provider: 'google',
+            id: 'google-shared',
+            connected: true,
+            accountEmail: 'owner@example.com',
+            expiresAt: '2025-01-01T00:00:00.000Z',
+            lastRefreshedAt: '2025-01-02T08:15:00.000Z',
+            workspaceId: 'ws-1',
+            workspaceName: 'Acme Workspace',
+            sharedByName: 'Owner Example',
+            sharedByEmail: 'owner@example.com',
+            requiresReconnect: false
+          }
+        ]
       })
 
     const user = userEvent.setup()
@@ -204,7 +155,9 @@ describe('IntegrationsTab', () => {
       ]
     expect(lastCacheCall?.[1]).toEqual({ workspaceId: 'ws-1' })
     const cachedSnapshot = lastCacheCall?.[0] as any
-    const workspaceEntries = cachedSnapshot.google.workspace
+    const workspaceEntries = cachedSnapshot.workspace.filter(
+      (w: any) => w.provider === 'google'
+    )
     const lastWorkspaceEntry = workspaceEntries[workspaceEntries.length - 1]
     expect(lastWorkspaceEntry.id).toBe('workspace-generated-id')
 
@@ -220,9 +173,10 @@ describe('IntegrationsTab', () => {
 
   it('removes a newly promoted workspace connection without refreshing', async () => {
     fetchConnections.mockResolvedValueOnce({
-      google: {
-        personal: {
+      personal: [
+        {
           scope: 'personal',
+          provider: 'google',
           id: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
@@ -230,35 +184,9 @@ describe('IntegrationsTab', () => {
           lastRefreshedAt: '2024-12-31T15:30:00.000Z',
           requiresReconnect: false,
           isShared: false
-        },
-        workspace: []
-      },
-      microsoft: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      },
-      slack: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      }
+        }
+      ],
+      workspace: []
     })
 
     const user = userEvent.setup()
@@ -300,9 +228,10 @@ describe('IntegrationsTab', () => {
 
   it('preserves existing token metadata when refresh response omits fields', async () => {
     fetchConnections.mockResolvedValueOnce({
-      google: {
-        personal: {
+      personal: [
+        {
           scope: 'personal',
+          provider: 'google',
           id: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
@@ -310,35 +239,9 @@ describe('IntegrationsTab', () => {
           lastRefreshedAt: '2024-12-31T15:30:00.000Z',
           requiresReconnect: false,
           isShared: false
-        },
-        workspace: []
-      },
-      microsoft: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      },
-      slack: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      }
+        }
+      ],
+      workspace: []
     })
     refreshProvider.mockResolvedValueOnce({
       connected: true,
@@ -369,10 +272,11 @@ describe('IntegrationsTab', () => {
     const snapshot = lastCall?.[0] as any
     expect(lastCall?.[1]).toEqual({ workspaceId: 'ws-1' })
 
-    expect(snapshot.google.personal.expiresAt).toBe('2025-01-01T00:00:00.000Z')
-    expect(snapshot.google.personal.lastRefreshedAt).toBe(
-      '2024-12-31T15:30:00.000Z'
+    const personalGoogle = snapshot.personal.find(
+      (p: any) => p.provider === 'google'
     )
+    expect(personalGoogle.expiresAt).toBe('2025-01-01T00:00:00.000Z')
+    expect(personalGoogle.lastRefreshedAt).toBe('2024-12-31T15:30:00.000Z')
 
     expect(screen.getByText(/Token expires:/i)).toBeInTheDocument()
     expect(screen.getByText(/Last refreshed:/i)).toBeInTheDocument()
@@ -380,57 +284,33 @@ describe('IntegrationsTab', () => {
 
   it('warns about breaking workflows when removing a workspace connection', async () => {
     fetchConnections.mockResolvedValueOnce({
-      google: {
-        personal: {
+      personal: [
+        {
           scope: 'personal',
+          provider: 'google',
           id: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
           lastRefreshedAt: '2024-12-31T15:30:00.000Z',
           isShared: true
-        },
-        workspace: [
-          {
-            scope: 'workspace',
-            id: 'google-workspace-1',
-            connected: true,
-            accountEmail: 'owner@example.com',
-            expiresAt: '2025-01-01T00:00:00.000Z',
-            lastRefreshedAt: '2025-01-02T08:15:00.000Z',
-            workspaceId: 'ws-1',
-            workspaceName: 'Acme Workspace',
-            sharedByName: 'Owner Example',
-            sharedByEmail: 'owner@example.com'
-          }
-        ]
-      },
-      microsoft: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      },
-      slack: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      }
+        }
+      ],
+      workspace: [
+        {
+          scope: 'workspace',
+          provider: 'google',
+          id: 'google-workspace-1',
+          connected: true,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2025-01-02T08:15:00.000Z',
+          workspaceId: 'ws-1',
+          workspaceName: 'Acme Workspace',
+          sharedByName: 'Owner Example',
+          sharedByEmail: 'owner@example.com'
+        }
+      ]
     })
 
     const user = userEvent.setup()
@@ -453,56 +333,34 @@ describe('IntegrationsTab', () => {
 
   it('removes shared workspace connections when disconnecting a personal credential', async () => {
     fetchConnections.mockResolvedValueOnce({
-      google: {
-        personal: {
+      personal: [
+        {
           scope: 'personal',
+          provider: 'google',
           id: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
           lastRefreshedAt: '2024-12-31T15:30:00.000Z',
-          isShared: true
-        },
-        workspace: [
-          {
-            scope: 'workspace',
-            id: 'google-workspace-1',
-            connected: true,
-            accountEmail: 'owner@example.com',
-            expiresAt: '2025-01-01T00:00:00.000Z',
-            lastRefreshedAt: '2025-01-02T08:15:00.000Z',
-            workspaceId: 'ws-1',
-            workspaceName: 'Acme Workspace',
-            sharedByName: 'Owner Example',
-            sharedByEmail: 'owner@example.com'
-          }
-        ]
-      },
-      microsoft: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          isShared: false
-        },
-        workspace: []
-      },
-      slack: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      }
+          isShared: true,
+          requiresReconnect: false
+        }
+      ],
+      workspace: [
+        {
+          scope: 'workspace',
+          provider: 'google',
+          id: 'google-workspace-1',
+          connected: true,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2025-01-02T08:15:00.000Z',
+          workspaceId: 'ws-1',
+          workspaceName: 'Acme Workspace',
+          sharedByName: 'Owner Example',
+          sharedByEmail: 'owner@example.com'
+        }
+      ]
     })
     disconnectProvider.mockResolvedValueOnce(undefined)
     unshareWorkspaceConnection.mockResolvedValue(undefined)
@@ -546,9 +404,10 @@ describe('IntegrationsTab', () => {
 
   it('displays a reconnect warning when the personal credential is revoked', async () => {
     fetchConnections.mockResolvedValueOnce({
-      google: {
-        personal: {
+      personal: [
+        {
           scope: 'personal',
+          provider: 'google',
           id: 'google-personal',
           connected: false,
           accountEmail: 'owner@example.com',
@@ -556,35 +415,9 @@ describe('IntegrationsTab', () => {
           lastRefreshedAt: '2024-12-31T15:30:00.000Z',
           requiresReconnect: true,
           isShared: false
-        },
-        workspace: []
-      },
-      microsoft: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      },
-      slack: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      }
+        }
+      ],
+      workspace: []
     })
 
     render(<IntegrationsTab />)
@@ -602,9 +435,10 @@ describe('IntegrationsTab', () => {
 
   it('clears provider state when refresh indicates revocation', async () => {
     fetchConnections.mockResolvedValueOnce({
-      google: {
-        personal: {
+      personal: [
+        {
           scope: 'personal',
+          provider: 'google',
           id: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
@@ -612,35 +446,9 @@ describe('IntegrationsTab', () => {
           lastRefreshedAt: '2024-12-31T15:30:00.000Z',
           requiresReconnect: false,
           isShared: false
-        },
-        workspace: []
-      },
-      microsoft: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      },
-      slack: {
-        personal: {
-          scope: 'personal',
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        },
-        workspace: []
-      }
+        }
+      ],
+      workspace: []
     })
     const revokedError = new Error('revoked') as Error & {
       requiresReconnect: boolean

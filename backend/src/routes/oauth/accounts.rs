@@ -5,12 +5,33 @@ use super::{
     },
     prelude::*,
 };
+use crate::models::workspace::WorkspaceRole;
 use axum::http::StatusCode;
 
-#[derive(Debug, Default, Deserialize)]
+async fn ensure_workspace_membership(
+    app_state: &AppState,
+    user_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<WorkspaceRole, Response> {
+    let memberships = app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+        .map_err(|err| {
+            error!(?err, user_id = %user_id, workspace_id = %workspace_id, "Failed to load memberships while checking workspace access");
+            JsonResponse::server_error("Failed to load workspace access").into_response()
+        })?;
+
+    memberships
+        .into_iter()
+        .find(|membership| membership.workspace.id == workspace_id)
+        .map(|membership| membership.role)
+        .ok_or_else(|| JsonResponse::forbidden("Workspace membership required").into_response())
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ListConnectionsQuery {
-    #[serde(default)]
-    pub workspace: Option<Uuid>,
+    pub workspace: Uuid,
 }
 
 pub async fn refresh_connection(
@@ -94,24 +115,49 @@ pub async fn list_connections(
         Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
     };
 
+    // Enforce workspace membership up-front
+    if let Err(resp) = ensure_workspace_membership(&state, user_id, params.workspace).await {
+        return resp;
+    }
+
     let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
         Ok(tokens) => tokens,
         Err(OAuthAccountError::NotFound) => Vec::new(),
         Err(err) => return map_oauth_error(err),
     };
 
+    // Assert that all personal tokens are owned by the authenticated user
+    if let Err(err) = state
+        .oauth_accounts
+        .assert_personal_tokens_owned_by(user_id, &personal_tokens)
+        .await
+    {
+        error!(user_id = %user_id, ?err, "Personal OAuth token ownership assertion failed");
+        return JsonResponse::forbidden("Access to OAuth credentials is forbidden").into_response();
+    }
+
     let workspace_connections = match state
         .workspace_connection_repo
-        .list_for_user_memberships(user_id)
+        .list_for_workspace(params.workspace)
         .await
     {
         Ok(connections) => connections,
         Err(err) => {
-            error!(?err, "Failed to load workspace OAuth connections");
+            error!(workspace_id = %params.workspace, ?err, "Failed to load workspace OAuth connections");
             return JsonResponse::server_error("Failed to load workspace connections")
                 .into_response();
         }
     };
+
+    // Defensive assertion: all entries must match the requested workspace
+    let all_match = workspace_connections
+        .iter()
+        .all(|c| c.workspace_id == params.workspace);
+    if !all_match {
+        error!(workspace_id = %params.workspace, "Workspace OAuth listing contained entries for a different workspace");
+        return JsonResponse::forbidden("Access to workspace credentials is forbidden")
+            .into_response();
+    }
 
     let personal = personal_tokens
         .into_iter()
@@ -126,39 +172,34 @@ pub async fn list_connections(
         })
         .collect();
 
-    let workspace = if let Some(workspace_id) = params.workspace {
-        workspace_connections
-            .into_iter()
-            .filter(|connection| connection.workspace_id == workspace_id)
-            .map(|connection| {
-                let shared_by_name = format_shared_name(
-                    &connection.shared_by_first_name,
-                    &connection.shared_by_last_name,
-                );
-                let shared_by_email = connection
-                    .shared_by_email
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(|value| value.to_string());
+    let workspace = workspace_connections
+        .into_iter()
+        .map(|connection| {
+            let shared_by_name = format_shared_name(
+                &connection.shared_by_first_name,
+                &connection.shared_by_last_name,
+            );
+            let shared_by_email = connection
+                .shared_by_email
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string());
 
-                WorkspaceConnectionPayload {
-                    id: connection.id,
-                    provider: connection.provider,
-                    account_email: connection.account_email,
-                    expires_at: connection.expires_at,
-                    workspace_id: connection.workspace_id,
-                    workspace_name: connection.workspace_name,
-                    shared_by_name,
-                    shared_by_email,
-                    last_refreshed_at: connection.updated_at,
-                    requires_reconnect: connection.requires_reconnect,
-                }
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+            WorkspaceConnectionPayload {
+                id: connection.id,
+                provider: connection.provider,
+                account_email: connection.account_email,
+                expires_at: connection.expires_at,
+                workspace_id: connection.workspace_id,
+                workspace_name: connection.workspace_name,
+                shared_by_name,
+                shared_by_email,
+                last_refreshed_at: connection.updated_at,
+                requires_reconnect: connection.requires_reconnect,
+            }
+        })
+        .collect();
 
     Json(ConnectionsResponse {
         success: true,

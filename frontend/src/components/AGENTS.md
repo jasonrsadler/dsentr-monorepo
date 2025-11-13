@@ -12,6 +12,7 @@
 - WebhooksTab: Updated HMAC instructions to match backend behavior. Preferred header-based verification using `X-DSentr-Timestamp` and `X-DSentr-Signature` (HMAC over `ts + '.' + canonical_json_body` with base64url-decoded key). Documented legacy body fields (`_dsentr_ts`/`_dsentr_sig`) with signing over the body excluding those fields. Added copyable examples for Bash (curl), PowerShell, and Node.
 - WebhooksTab: Added positive confirmation states for the Signing Key "Copy" button ("Copied!") and HMAC settings "Save" button ("Saving…" → "Saved!") to clearly indicate the action was applied.
 - WebhooksTab: Restored copy-to-clipboard controls for the HMAC language examples and added a signing key rotation button that surfaces success state, refreshes the derived webhook URL, and warns that both credentials change together.
+- IntegrationsTab: Removed redundant client-side filtering of workspace OAuth connections by `workspaceId`. Backend now enforces workspace scoping for the connections listing endpoint, so the UI consumes the `workspace` array as returned.
 
 ## Affected Areas
 - Settings > LogsTab: change history list

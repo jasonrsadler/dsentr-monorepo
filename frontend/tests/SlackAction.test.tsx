@@ -97,15 +97,18 @@ const workflowState = {
 }
 
 const fetchConnections = vi.fn().mockResolvedValue({
-  slack: {
-    personal: {
+  personal: [
+    {
+      scope: 'personal',
+      provider: 'slack',
       connected: true,
       id: 'conn-1',
       accountEmail: 'alice@example.com',
-      requiresReconnect: false
-    },
-    workspace: []
-  }
+      requiresReconnect: false,
+      isShared: false
+    }
+  ],
+  workspace: []
 })
 const getCachedConnections = vi.fn().mockReturnValue(null)
 const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => {})
@@ -249,15 +252,18 @@ describe('SlackAction (workflow store integration)', () => {
 
   it('merges connection updates into the full Slack payload', async () => {
     fetchConnections.mockResolvedValue({
-      slack: {
-        personal: {
+      personal: [
+        {
+          scope: 'personal',
+          provider: 'slack',
           connected: true,
           id: 'conn-2',
           accountEmail: 'carol@example.com',
-          requiresReconnect: false
-        },
-        workspace: []
-      }
+          requiresReconnect: false,
+          isShared: false
+        }
+      ],
+      workspace: []
     })
 
     mockParamsRef.current = {

@@ -44,6 +44,8 @@ pub struct DecryptedWorkspaceConnection {
 pub enum WorkspaceOAuthError {
     #[error("token not found")]
     NotFound,
+    #[error("forbidden")]
+    Forbidden,
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("encryption error: {0}")]
@@ -153,6 +155,10 @@ impl WorkspaceOAuthService {
             .await?
             .filter(|conn| conn.workspace_id == workspace_id)
             .ok_or(WorkspaceOAuthError::NotFound)?;
+
+        if connection.created_by != actor_id {
+            return Err(WorkspaceOAuthError::Forbidden);
+        }
 
         match self
             .user_tokens
@@ -362,8 +368,9 @@ impl WorkspaceOAuthService {
             .await?
             .ok_or(WorkspaceOAuthError::NotFound)?;
 
-        if record.user_id != actor_id {
-            return Err(WorkspaceOAuthError::NotFound);
+        // Enforce personal token ownership strictly
+        if record.user_id != actor_id || record.workspace_id.is_some() {
+            return Err(WorkspaceOAuthError::Forbidden);
         }
 
         Ok(record)
@@ -893,6 +900,7 @@ mod tests {
             token: Mutex::new(Some(UserOAuthToken {
                 id: Uuid::new_v4(),
                 user_id,
+                workspace_id: None,
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -950,6 +958,7 @@ mod tests {
             token: Mutex::new(Some(UserOAuthToken {
                 id: Uuid::new_v4(),
                 user_id,
+                workspace_id: None,
                 provider: ConnectedOAuthProvider::Slack,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -1004,6 +1013,7 @@ mod tests {
             token: Mutex::new(Some(UserOAuthToken {
                 id: Uuid::new_v4(),
                 user_id,
+                workspace_id: None,
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -1137,6 +1147,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remove_connection_rejects_non_creator_actor() {
+        let creator_id = Uuid::new_v4();
+        let actor_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let key = Arc::new(vec![23u8; 32]);
+        let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+        let encrypted_access = encrypt_secret(&key, "access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "refresh").unwrap();
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(Some(UserOAuthToken {
+                id: Uuid::new_v4(),
+                user_id: creator_id,
+                workspace_id: None,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "owner@example.com".into(),
+                is_shared: true,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            })),
+            shared_flag: Mutex::new(true),
+        });
+        let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = workspace_repo.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: connection_id,
+                workspace_id,
+                created_by: creator_id,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypted_access.clone(),
+                refresh_token: encrypted_refresh.clone(),
+                expires_at,
+                account_email: "owner@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
+        let service =
+            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+
+        let err = service
+            .remove_connection(workspace_id, actor_id, connection_id)
+            .await
+            .expect_err("non-creator actor should be rejected");
+
+        assert!(matches!(err, WorkspaceOAuthError::Forbidden));
+        assert!(workspace_repo.connection.lock().unwrap().is_some());
+        let shared = *user_repo.shared_flag.lock().unwrap();
+        assert!(shared, "shared flag should remain unchanged when forbidden");
+        let events = workspace_repo.events.lock().unwrap();
+        assert!(events.is_empty(), "no audit events should be recorded");
+    }
+
+    #[tokio::test]
     async fn handle_revoked_connection_removes_entry_and_marks_unshared() {
         let user_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
@@ -1150,6 +1223,7 @@ mod tests {
             token: Mutex::new(Some(UserOAuthToken {
                 id: Uuid::new_v4(),
                 user_id,
+                workspace_id: None,
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -1572,6 +1646,7 @@ mod tests {
             token: Mutex::new(Some(UserOAuthToken {
                 id: Uuid::new_v4(),
                 user_id,
+                workspace_id: None,
                 provider: ConnectedOAuthProvider::Google,
                 access_token: String::new(),
                 refresh_token: String::new(),
@@ -1639,6 +1714,7 @@ mod tests {
             token: Mutex::new(Some(UserOAuthToken {
                 id: Uuid::new_v4(),
                 user_id,
+                workspace_id: None,
                 provider: ConnectedOAuthProvider::Slack,
                 access_token: String::new(),
                 refresh_token: String::new(),

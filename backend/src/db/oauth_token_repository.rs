@@ -7,11 +7,23 @@ use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
 #[derive(Debug, Clone)]
 pub struct NewUserOAuthToken {
     pub user_id: Uuid,
+    pub workspace_id: Option<Uuid>,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: OffsetDateTime,
     pub account_email: String,
+}
+
+// Helpers for ownership checks and personal token assertions
+#[allow(dead_code)]
+pub fn is_personal_token(record: &UserOAuthToken) -> bool {
+    record.workspace_id.is_none()
+}
+
+#[allow(dead_code)]
+pub fn is_owned_by(record: &UserOAuthToken, user_id: Uuid) -> bool {
+    record.user_id == user_id
 }
 
 #[async_trait]

@@ -427,7 +427,23 @@ describe('TeamsAction (workflow store integration)', () => {
     }
 
     vi.mocked(getCachedConnections).mockReturnValue({
-      microsoft: microsoftConnections
+      personal: [
+        {
+          scope: 'personal',
+          provider: 'microsoft',
+          id: microsoftConnections.personal.id,
+          connected: microsoftConnections.personal.connected,
+          accountEmail: microsoftConnections.personal.accountEmail,
+          expiresAt: microsoftConnections.personal.expiresAt,
+          lastRefreshedAt: microsoftConnections.personal.lastRefreshedAt,
+          requiresReconnect: microsoftConnections.personal.requiresReconnect,
+          isShared: microsoftConnections.personal.isShared
+        }
+      ],
+      workspace: microsoftConnections.workspace.map((w) => ({
+        ...w,
+        provider: 'microsoft' as const
+      }))
     } as any)
 
     renderWithSecrets(<TeamsAction nodeId={nodeId} />, { secrets })

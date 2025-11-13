@@ -224,6 +224,7 @@ impl OAuthAccountService {
             .repo
             .upsert_token(NewUserOAuthToken {
                 user_id,
+                workspace_id: None,
                 provider,
                 access_token: encrypted_access,
                 refresh_token: encrypted_refresh,
@@ -253,6 +254,29 @@ impl OAuthAccountService {
             .into_iter()
             .map(|record| self.decrypt_record(record))
             .collect()
+    }
+
+    // Defensive assertion used by routes to ensure that any personal tokens being
+    // returned are in fact owned by the authenticated user. This cross-checks the
+    // IDs by reloading from the repository using the (user_id, provider) pair.
+    pub async fn assert_personal_tokens_owned_by(
+        &self,
+        user_id: Uuid,
+        tokens: &[StoredOAuthToken],
+    ) -> Result<(), OAuthAccountError> {
+        for token in tokens.iter() {
+            let Some(record) = self
+                .repo
+                .find_by_user_and_provider(user_id, token.provider)
+                .await?
+            else {
+                return Err(OAuthAccountError::NotFound);
+            };
+            if record.user_id != user_id || record.id != token.id || record.workspace_id.is_some() {
+                return Err(OAuthAccountError::NotFound);
+            }
+        }
+        Ok(())
     }
 
     pub async fn ensure_valid_access_token(
@@ -295,6 +319,7 @@ impl OAuthAccountService {
                 .repo
                 .upsert_token(NewUserOAuthToken {
                     user_id,
+                    workspace_id: None,
                     provider,
                     access_token: encrypted_access.clone(),
                     refresh_token: encrypted_refresh.clone(),
@@ -1750,6 +1775,7 @@ mod tests {
                 .unwrap_or_else(|| UserOAuthToken {
                     id: Uuid::new_v4(),
                     user_id: new_token.user_id,
+                    workspace_id: None,
                     provider: new_token.provider,
                     access_token: new_token.access_token.clone(),
                     refresh_token: new_token.refresh_token.clone(),
@@ -1952,6 +1978,7 @@ mod tests {
         let stored_token = UserOAuthToken {
             id: token_id,
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,
@@ -2035,6 +2062,7 @@ mod tests {
         let stored_token = UserOAuthToken {
             id: token_id,
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: "enc-access".into(),
             refresh_token: "enc-refresh".into(),
@@ -2119,6 +2147,7 @@ mod tests {
         let stored_token = UserOAuthToken {
             id: Uuid::new_v4(),
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Slack,
             access_token: encrypt_secret(key.as_ref(), existing_access)
                 .expect("access token encryption succeeds"),

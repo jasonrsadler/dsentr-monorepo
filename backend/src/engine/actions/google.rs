@@ -111,6 +111,7 @@ pub(crate) async fn execute_sheets(
     enum ConnectionContext {
         Personal {
             user_id: Uuid,
+            connection_id: Uuid,
             account_email: Option<String>,
         },
         Workspace {
@@ -137,14 +138,6 @@ pub(crate) async fn execute_sheets(
                 return Err("Selected connection is not a Google connection".to_string());
             }
 
-            if let Some(expected) = info.account_email.as_ref() {
-                if !connection.account_email.eq_ignore_ascii_case(expected) {
-                    return Err(
-                        "Selected Google connection does not match the expected account. Refresh your integration settings.".to_string(),
-                    );
-                }
-            }
-
             (
                 connection.access_token.clone(),
                 connection.account_email.clone(),
@@ -163,18 +156,6 @@ pub(crate) async fn execute_sheets(
                 .map(|value| value.trim())
                 .filter(|value| !value.is_empty())
                 .and_then(|value| Uuid::parse_str(value).ok());
-            let expected_email = info
-                .account_email
-                .as_deref()
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_string());
-
-            if connection_hint.is_none() && expected_email.is_none() {
-                return Err(
-                    "Select a connected Google account before using this action".to_string()
-                );
-            }
 
             let token = state
                 .oauth_accounts
@@ -188,36 +169,17 @@ pub(crate) async fn execute_sheets(
                         "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
                     );
                 }
-                (
-                    token.access_token.clone(),
-                    token.account_email.clone(),
-                    ConnectionContext::Personal {
-                        user_id: run.user_id,
-                        account_email: Some(token.account_email.clone()),
-                    },
-                )
-            } else {
-                let Some(expected) = expected_email else {
-                    return Err(
-                        "Select a connected Google account before using this action".to_string()
-                    );
-                };
-
-                if !token.account_email.eq_ignore_ascii_case(&expected) {
-                    return Err(
-                        "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
-                    );
-                }
-
-                (
-                    token.access_token.clone(),
-                    token.account_email.clone(),
-                    ConnectionContext::Personal {
-                        user_id: run.user_id,
-                        account_email: Some(token.account_email.clone()),
-                    },
-                )
             }
+
+            (
+                token.access_token.clone(),
+                token.account_email.clone(),
+                ConnectionContext::Personal {
+                    user_id: run.user_id,
+                    connection_id: token.id,
+                    account_email: Some(token.account_email.clone()),
+                },
+            )
         }
     };
 
@@ -276,6 +238,7 @@ pub(crate) async fn execute_sheets(
                 ConnectionContext::Personal {
                     user_id,
                     account_email,
+                    ..
                 } => {
                     if let Err(err) = state
                         .oauth_accounts
@@ -371,6 +334,30 @@ pub(crate) async fn execute_sheets(
     );
     output.insert("columns".to_string(), Value::Object(column_map));
     output.insert("values".to_string(), Value::Array(row_values_json));
+
+    // Surface connection metadata for stale selection detection without relying on email
+    match connection_context {
+        ConnectionContext::Personal { connection_id, .. } => {
+            output.insert(
+                "connectionScope".to_string(),
+                Value::String("user".to_string()),
+            );
+            output.insert(
+                "connectionId".to_string(),
+                Value::String(connection_id.to_string()),
+            );
+        }
+        ConnectionContext::Workspace { connection_id, .. } => {
+            output.insert(
+                "connectionScope".to_string(),
+                Value::String("workspace".to_string()),
+            );
+            output.insert(
+                "connectionId".to_string(),
+                Value::String(connection_id.to_string()),
+            );
+        }
+    }
 
     if let Some(updated_range) = updates
         .and_then(|u| u.get("updatedRange"))
@@ -915,6 +902,7 @@ mod tests {
         let record = UserOAuthToken {
             id: record_id,
             user_id,
+            workspace_id: None,
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,
@@ -1006,11 +994,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_email_mismatch_rejected() {
+    async fn account_email_mismatch_ignored_and_id_surfaced() {
         let user_id = Uuid::new_v4();
         let (oauth_accounts, _) = oauth_service_with_token(user_id, "different@example.com");
         let state = test_state(oauth_accounts, Arc::new(Client::new()));
         let run = sample_run(user_id);
+
+        let response_body = json!({
+            "updates": {
+                "updatedRange": "Sheet1!A1:A1",
+                "updatedRows": 1,
+                "updatedColumns": 1
+            }
+        });
+
+        let (addr, mut rx, handle) = spawn_sheets_stub_server(move || {
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::from(response_body.to_string()))
+                .unwrap()
+        })
+        .await;
+
+        let _guard = EnvGuard::set(
+            "GOOGLE_SHEETS_API_BASE",
+            format!("http://{}/v4/spreadsheets", addr),
+        );
 
         let node = Node {
             id: "node-1".into(),
@@ -1027,11 +1036,23 @@ mod tests {
             }),
         };
 
-        let err = execute_sheets(&node, &json!({"foo": "value"}), &state, &run)
+        let (output, _) = execute_sheets(&node, &json!({"foo": "value"}), &state, &run)
             .await
-            .expect_err("mismatched email should error");
+            .expect("mismatched email should no longer error");
 
-        assert!(err.contains("does not match the connected account"));
+        // Surfaces the actual connected account email and ID-based connection metadata
+        assert_eq!(output["accountEmail"], "different@example.com");
+        assert_eq!(output["connectionScope"], "user");
+        assert!(output.get("connectionId").is_some());
+        let recorded = rx
+            .recv()
+            .await
+            .expect("request should be recorded for email-mismatch test");
+        assert!(recorded
+            .uri
+            .path()
+            .contains("/v4/spreadsheets/abc123/values/Sheet1!A1:append"));
+        handle.abort();
     }
 
     #[tokio::test]
@@ -1087,6 +1108,8 @@ mod tests {
             .expect("connection id should allow updated email");
 
         assert_eq!(output["accountEmail"], "updated@example.com");
+        assert_eq!(output["connectionScope"], "user");
+        assert_eq!(output["connectionId"], token_id.to_string());
 
         let recorded = rx
             .recv()
@@ -1243,6 +1266,8 @@ mod tests {
             .expect("workspace connection succeeds");
 
         assert_eq!(output["accountEmail"], "workspace@example.com");
+        assert_eq!(output["connectionScope"], "workspace");
+        assert_eq!(output["connectionId"], connection_id.to_string());
 
         let request = rx.recv().await.expect("sheet request captured");
         handle.abort();
