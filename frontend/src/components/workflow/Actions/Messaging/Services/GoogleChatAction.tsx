@@ -141,8 +141,8 @@ export default function GoogleChatAction({
 
   // Track selected payload mode locally so it doesn't revert
   // when cardJson is empty but user chose 'Card JSON'.
-  const [mode, setMode] = useState<'text' | 'card'>(
-    () => (currentParams.cardJson?.trim() ? 'card' : 'text')
+  const [mode, setMode] = useState<'text' | 'card'>(() =>
+    currentParams.cardJson?.trim() ? 'card' : 'text'
   )
 
   // If params gain a cards payload externally, promote mode to 'card'.
