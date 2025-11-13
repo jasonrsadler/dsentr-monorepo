@@ -145,6 +145,7 @@ Content Security Policy hardening:
 - GetStarted: success message updated to “You're in! We'll be in touch soon.”
 - BrandHero: removed inline brand text “DSentr” to avoid duplicate matches with header in App tests.
 - GoogleChatAction: commit payload now includes both flattened fields and a namespaced `'Google Chat'` object, and preserves `dirty` + `hasValidationErrors` per updates.
+- GoogleChatAction: fixed message type dropdown reverting to “Text message” by decoupling mode from `cardJson` content. Mode is now tracked in local state and only promoted to `card` when external params include a non-empty cards payload. Prevents unintended reversions when switching between “Text message” and “Card JSON (cardsV2)”.
 - Test shims: added lightweight re-exports so tests resolve their intended imports:
   - `frontend/DashboardLayout.tsx` → `@/layouts/DashboardLayout`
   - `frontend/IntegrationsTab.tsx` → `@/components/settings/tabs/IntegrationsTab`

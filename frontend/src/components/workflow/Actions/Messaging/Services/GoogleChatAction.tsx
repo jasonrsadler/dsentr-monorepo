@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/ui/InputFields/NodeInputField'
@@ -139,9 +139,18 @@ export default function GoogleChatAction({
     return normalizeParams(actionParams as GoogleChatActionValues)
   }, [actionParams])
 
-  const mode = useMemo<'text' | 'card'>(() => {
-    return currentParams.cardJson?.trim() ? 'card' : 'text'
-  }, [currentParams.cardJson])
+  // Track selected payload mode locally so it doesn't revert
+  // when cardJson is empty but user chose 'Card JSON'.
+  const [mode, setMode] = useState<'text' | 'card'>(
+    () => (currentParams.cardJson?.trim() ? 'card' : 'text')
+  )
+
+  // If params gain a cards payload externally, promote mode to 'card'.
+  useEffect(() => {
+    if (currentParams.cardJson?.trim() && mode !== 'card') {
+      setMode('card')
+    }
+  }, [currentParams.cardJson, mode])
 
   const validationErrors = useMemo(
     () => computeValidationErrors(currentParams, mode),
@@ -187,11 +196,12 @@ export default function GoogleChatAction({
   const handleFieldChange = useCallback(
     (key: keyof GoogleChatActionValues, value: string) => {
       if (!effectiveCanEdit) return
-      const {
-        params: nextParams,
-        nextMode,
-        hasValidationErrors: nextHasErrors
-      } = prepareNextParams(currentParams, { [key]: value })
+      const { params: nextParams } = prepareNextParams(currentParams, {
+        [key]: value
+      })
+
+      const nextHasErrors =
+        Object.keys(computeValidationErrors(nextParams, mode)).length > 0
 
       if (
         shallowEqualParams(currentParams, nextParams) &&
@@ -200,13 +210,13 @@ export default function GoogleChatAction({
         return
       }
 
-      if (nextMode === 'card' && nextParams.cardJson?.trim()) {
+      if (mode === 'card' && nextParams.cardJson?.trim()) {
         cardDraftRef.current = nextParams.cardJson
       }
 
       commitParams(nextParams, nextHasErrors, true)
     },
-    [currentParams, effectiveCanEdit, hasValidationErrors, commitParams]
+    [currentParams, effectiveCanEdit, hasValidationErrors, commitParams, mode]
   )
 
   const handleModeChange = useCallback(
@@ -214,6 +224,8 @@ export default function GoogleChatAction({
       if (!effectiveCanEdit) return
       const nextMode = value === payloadOptions[1] ? 'card' : 'text'
       if (nextMode === mode) return
+
+      setMode(nextMode)
 
       if (nextMode === 'card') {
         const draft = currentParams.cardJson?.trim()
