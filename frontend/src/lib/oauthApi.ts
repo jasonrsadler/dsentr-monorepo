@@ -260,7 +260,7 @@ export async function fetchConnections(
 ): Promise<GroupedConnectionsSnapshot> {
   const targetWorkspace = resolveWorkspaceId(options?.workspaceId)
   const url = new URL('/api/oauth/connections', resolveApiBaseUrl())
-
+  url.searchParams.set('workspace', targetWorkspace as string)
   const res = await fetch(url.toString(), {
     credentials: 'include'
   })
