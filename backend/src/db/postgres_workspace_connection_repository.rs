@@ -191,6 +191,35 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         .await
     }
 
+    async fn list_by_workspace_creator(
+        &self,
+        workspace_id: Uuid,
+        creator_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+        sqlx::query_as::<_, WorkspaceConnection>(
+            r#"
+            SELECT
+                id,
+                workspace_id,
+                created_by,
+                provider,
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                created_at,
+                updated_at
+            FROM workspace_connections
+            WHERE workspace_id = $1
+              AND created_by = $2
+            "#,
+        )
+        .bind(workspace_id)
+        .bind(creator_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
     async fn update_tokens_for_creator(
         &self,
         creator_id: Uuid,
@@ -264,6 +293,10 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
     }
 
     async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error> {
+        self.delete_by_id(connection_id).await
+    }
+
+    async fn delete_by_id(&self, connection_id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query!(
             r#"
             DELETE FROM workspace_connections

@@ -60,6 +60,8 @@ pub trait WorkspaceRepository: Send + Sync {
         workspace_id: Uuid,
     ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error>;
 
+    async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error>;
+
     async fn list_memberships_for_user(
         &self,
         user_id: Uuid,

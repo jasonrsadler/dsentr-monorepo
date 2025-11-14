@@ -7,7 +7,6 @@ use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
 #[derive(Debug, Clone)]
 pub struct NewUserOAuthToken {
     pub user_id: Uuid,
-    pub workspace_id: Option<Uuid>,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,

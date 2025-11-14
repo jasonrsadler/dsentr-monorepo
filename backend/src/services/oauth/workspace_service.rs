@@ -1,13 +1,15 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use dashmap::DashMap;
 use serde_json::json;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
 use tokio::sync::Mutex;
-use tracing::warn;
+use tracing::{error, warn};
 use uuid::Uuid;
 
+#[cfg(test)]
+use crate::db::mock_db::NoopWorkspaceRepository;
 use crate::db::oauth_token_repository::UserOAuthTokenRepository;
 #[cfg(test)]
 use crate::db::workspace_connection_repository::StaleWorkspaceConnection;
@@ -16,6 +18,7 @@ use crate::db::workspace_connection_repository::WorkspaceConnectionListing;
 use crate::db::workspace_connection_repository::{
     NewWorkspaceAuditEvent, NewWorkspaceConnection, WorkspaceConnectionRepository,
 };
+use crate::db::workspace_repository::WorkspaceRepository;
 use crate::models::oauth_token::{
     ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection,
     WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED, WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED,
@@ -77,6 +80,7 @@ impl WorkspaceTokenRefresher for OAuthAccountService {
 #[derive(Clone)]
 pub struct WorkspaceOAuthService {
     user_tokens: Arc<dyn UserOAuthTokenRepository>,
+    workspace_repo: Arc<dyn WorkspaceRepository>,
     workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
     oauth_accounts: Arc<dyn WorkspaceTokenRefresher>,
     encryption_key: Arc<Vec<u8>>,
@@ -86,12 +90,14 @@ pub struct WorkspaceOAuthService {
 impl WorkspaceOAuthService {
     pub fn new(
         user_tokens: Arc<dyn UserOAuthTokenRepository>,
+        workspace_repo: Arc<dyn WorkspaceRepository>,
         workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
         oauth_accounts: Arc<dyn WorkspaceTokenRefresher>,
         encryption_key: Arc<Vec<u8>>,
     ) -> Self {
         Self {
             user_tokens,
+            workspace_repo,
             workspace_connections,
             oauth_accounts,
             encryption_key,
@@ -105,6 +111,8 @@ impl WorkspaceOAuthService {
         actor_id: Uuid,
         provider: ConnectedOAuthProvider,
     ) -> Result<WorkspaceConnection, WorkspaceOAuthError> {
+        self.ensure_membership(actor_id, workspace_id).await?;
+
         let token = self.load_token(actor_id, provider).await?;
 
         let connection = self
@@ -149,6 +157,8 @@ impl WorkspaceOAuthService {
         actor_id: Uuid,
         connection_id: Uuid,
     ) -> Result<(), WorkspaceOAuthError> {
+        self.ensure_membership(actor_id, workspace_id).await?;
+
         let connection = self
             .workspace_connections
             .find_by_id(connection_id)
@@ -200,12 +210,133 @@ impl WorkspaceOAuthService {
         Ok(())
     }
 
+    async fn ensure_membership(
+        &self,
+        user_id: Uuid,
+        workspace_id: Uuid,
+    ) -> Result<(), WorkspaceOAuthError> {
+        if !self.workspace_repo.is_member(workspace_id, user_id).await? {
+            return Err(WorkspaceOAuthError::Forbidden);
+        }
+        Ok(())
+    }
+
+    /// Purges connections for a departing member. The caller is expected to have
+    /// already validated permissions because the actor might no longer belong to
+    /// the workspace when this runs.
+    pub async fn purge_member_connections(
+        &self,
+        workspace_id: Uuid,
+        removed_user_id: Uuid,
+        actor_id: Uuid,
+    ) -> Result<(), WorkspaceOAuthError> {
+        let connections = match self
+            .workspace_connections
+            .list_by_workspace_creator(workspace_id, removed_user_id)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(err) => {
+                error!(
+                    ?err,
+                    %workspace_id,
+                    removed_user_id = %removed_user_id,
+                    %actor_id,
+                    "failed to load workspace connections for purge"
+                );
+                return Err(WorkspaceOAuthError::Database(err));
+            }
+        };
+
+        if connections.is_empty() {
+            return Ok(());
+        }
+
+        let mut processed_providers = HashSet::new();
+
+        for connection in &connections {
+            if !processed_providers.insert(connection.provider) {
+                continue;
+            }
+            match self
+                .user_tokens
+                .mark_shared(removed_user_id, connection.provider, false)
+                .await
+            {
+                Ok(_) => {}
+                Err(sqlx::Error::RowNotFound) => {
+                    warn!(
+                        %workspace_id,
+                        removed_user_id = %removed_user_id,
+                        provider = ?connection.provider,
+                        "personal oauth token missing during workspace purge"
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        ?err,
+                        %workspace_id,
+                        removed_user_id = %removed_user_id,
+                        provider = ?connection.provider,
+                        "failed to update personal token while purging workspace connections"
+                    );
+                    return Err(WorkspaceOAuthError::Database(err));
+                }
+            }
+        }
+
+        for connection in connections {
+            if let Err(err) = self.workspace_connections.delete_by_id(connection.id).await {
+                error!(
+                    ?err,
+                    %workspace_id,
+                    removed_user_id = %removed_user_id,
+                    connection_id = %connection.id,
+                    "failed to delete workspace connection during purge"
+                );
+                return Err(WorkspaceOAuthError::Database(err));
+            }
+
+            let metadata = json!({
+                "provider": connection.provider,
+                "account_email": connection.account_email,
+                "connection_id": connection.id,
+                "removed_user_id": removed_user_id,
+            });
+
+            if let Err(err) = self
+                .workspace_connections
+                .record_audit_event(NewWorkspaceAuditEvent {
+                    workspace_id,
+                    actor_id,
+                    event_type: WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED.to_string(),
+                    metadata,
+                })
+                .await
+            {
+                error!(
+                    ?err,
+                    %workspace_id,
+                    removed_user_id = %removed_user_id,
+                    connection_id = %connection.id,
+                    "failed to record audit event during workspace purge"
+                );
+                return Err(WorkspaceOAuthError::Database(err));
+            }
+        }
+
+        Ok(())
+    }
+
     #[allow(dead_code)]
     pub async fn get_connection(
         &self,
+        user_id: Uuid,
         workspace_id: Uuid,
         provider: ConnectedOAuthProvider,
     ) -> Result<DecryptedWorkspaceConnection, WorkspaceOAuthError> {
+        self.ensure_membership(user_id, workspace_id).await?;
+
         let record = self
             .workspace_connections
             .find_by_workspace_and_provider(workspace_id, provider)
@@ -464,6 +595,14 @@ impl WorkspaceOAuthService {
                 Ok(Vec::new())
             }
 
+            async fn list_by_workspace_creator(
+                &self,
+                _workspace_id: Uuid,
+                _creator_id: Uuid,
+            ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+                Ok(Vec::new())
+            }
+
             async fn update_tokens_for_creator(
                 &self,
                 _creator_id: Uuid,
@@ -490,6 +629,10 @@ impl WorkspaceOAuthService {
                 Ok(())
             }
 
+            async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
             async fn mark_connections_stale_for_creator(
                 &self,
                 _creator_id: Uuid,
@@ -508,6 +651,7 @@ impl WorkspaceOAuthService {
 
         Arc::new(Self {
             user_tokens: Arc::new(StubUserRepo),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connections: Arc::new(StubWorkspaceRepo),
             oauth_accounts: OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
             encryption_key: Arc::new(vec![0u8; 32]),
@@ -520,6 +664,7 @@ impl WorkspaceOAuthService {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::collections::HashMap;
     use std::io::Write;
     use std::sync::{Arc, Mutex};
     use std::time::Duration as StdDuration;
@@ -527,7 +672,182 @@ mod tests {
     use tokio::time::sleep;
 
     use crate::db::oauth_token_repository::NewUserOAuthToken;
+    use crate::db::workspace_repository::WorkspaceRepository;
+    use crate::models::workspace::{
+        Workspace, WorkspaceInvitation, WorkspaceMember, WorkspaceMembershipSummary, WorkspaceRole,
+    };
     use crate::utils::encryption::encrypt_secret;
+
+    fn noop_membership_repo() -> Arc<dyn WorkspaceRepository> {
+        Arc::new(NoopWorkspaceRepository)
+    }
+
+    fn denying_membership_repo() -> Arc<dyn WorkspaceRepository> {
+        Arc::new(MembershipGateRepo::new(false))
+    }
+
+    struct MembershipGateRepo {
+        allowed: bool,
+    }
+
+    impl MembershipGateRepo {
+        fn new(allowed: bool) -> Self {
+            Self { allowed }
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceRepository for MembershipGateRepo {
+        async fn create_workspace(
+            &self,
+            _name: &str,
+            _created_by: Uuid,
+            _plan: &str,
+        ) -> Result<Workspace, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn update_workspace_name(
+            &self,
+            _workspace_id: Uuid,
+            _name: &str,
+        ) -> Result<Workspace, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn update_workspace_plan(
+            &self,
+            _workspace_id: Uuid,
+            _plan: &str,
+        ) -> Result<Workspace, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn find_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Option<Workspace>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn add_member(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+            _role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn set_member_role(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+            _role: WorkspaceRole,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn remove_member(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn leave_workspace(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn revoke_member(
+            &self,
+            _workspace_id: Uuid,
+            _member_id: Uuid,
+            _revoked_by: Uuid,
+            _reason: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_members(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Vec<WorkspaceMember>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn is_member(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+        ) -> Result<bool, sqlx::Error> {
+            Ok(self.allowed)
+        }
+
+        async fn list_memberships_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_user_workspaces(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn create_workspace_invitation(
+            &self,
+            _workspace_id: Uuid,
+            _email: &str,
+            _role: WorkspaceRole,
+            _token: &str,
+            _expires_at: OffsetDateTime,
+            _created_by: Uuid,
+        ) -> Result<WorkspaceInvitation, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_workspace_invitations(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn revoke_workspace_invitation(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn find_invitation_by_token(
+            &self,
+            _token: &str,
+        ) -> Result<Option<WorkspaceInvitation>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn mark_invitation_accepted(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn mark_invitation_declined(&self, _invite_id: Uuid) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn list_pending_invitations_for_email(
+            &self,
+            _email: &str,
+        ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
+            unimplemented!()
+        }
+    }
 
     #[derive(Clone)]
     struct BufferingMakeWriter {
@@ -738,6 +1058,21 @@ mod tests {
                 .collect())
         }
 
+        async fn list_by_workspace_creator(
+            &self,
+            workspace_id: Uuid,
+            creator_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            let guard = self.connection.lock().unwrap();
+            Ok(guard
+                .clone()
+                .filter(|record| {
+                    record.workspace_id == workspace_id && record.created_by == creator_id
+                })
+                .into_iter()
+                .collect())
+        }
+
         async fn update_tokens_for_creator(
             &self,
             creator_id: Uuid,
@@ -789,6 +1124,10 @@ mod tests {
                 *guard = None;
             }
             Ok(())
+        }
+
+        async fn delete_by_id(&self, connection_id: Uuid) -> Result<(), sqlx::Error> {
+            self.delete_connection(connection_id).await
         }
 
         async fn mark_connections_stale_for_creator(
@@ -887,6 +1226,260 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingUserRepo {
+        tokens: Mutex<HashMap<ConnectedOAuthProvider, UserOAuthToken>>,
+        marks: Mutex<Vec<(Uuid, ConnectedOAuthProvider, bool)>>,
+        missing: Mutex<HashSet<ConnectedOAuthProvider>>,
+    }
+
+    impl RecordingUserRepo {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn set_token(&self, provider: ConnectedOAuthProvider, user_id: Uuid) {
+            let now = OffsetDateTime::now_utc();
+            let token = UserOAuthToken {
+                id: Uuid::new_v4(),
+                user_id,
+                workspace_id: None,
+                provider,
+                access_token: String::new(),
+                refresh_token: String::new(),
+                expires_at: now + Duration::hours(1),
+                account_email: "shared@example.com".into(),
+                is_shared: true,
+                created_at: now,
+                updated_at: now,
+            };
+            self.tokens.lock().unwrap().insert(provider, token);
+        }
+
+        fn marks(&self) -> Vec<(Uuid, ConnectedOAuthProvider, bool)> {
+            self.marks.lock().unwrap().clone()
+        }
+
+        fn fail_for(&self, provider: ConnectedOAuthProvider) {
+            self.missing.lock().unwrap().insert(provider);
+        }
+    }
+
+    #[async_trait]
+    impl UserOAuthTokenRepository for RecordingUserRepo {
+        async fn upsert_token(
+            &self,
+            _new_token: crate::db::oauth_token_repository::NewUserOAuthToken,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn find_by_user_and_provider(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn delete_token(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn mark_shared(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+            is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            self.marks
+                .lock()
+                .unwrap()
+                .push((user_id, provider, is_shared));
+
+            if self.missing.lock().unwrap().contains(&provider) {
+                return Err(sqlx::Error::RowNotFound);
+            }
+
+            let mut guard = self.tokens.lock().unwrap();
+            if let Some(token) = guard
+                .get_mut(&provider)
+                .filter(|token| token.user_id == user_id)
+            {
+                token.is_shared = is_shared;
+                token.updated_at = OffsetDateTime::now_utc();
+                return Ok(token.clone());
+            }
+
+            Err(sqlx::Error::RowNotFound)
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingWorkspaceRepo {
+        connections: Mutex<Vec<WorkspaceConnection>>,
+        deleted: Mutex<Vec<Uuid>>,
+        events: Mutex<Vec<crate::models::oauth_token::WorkspaceAuditEvent>>,
+    }
+
+    impl RecordingWorkspaceRepo {
+        fn with_connections(connections: Vec<WorkspaceConnection>) -> Self {
+            Self {
+                connections: Mutex::new(connections),
+                deleted: Mutex::new(Vec::new()),
+                events: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn deleted(&self) -> Vec<Uuid> {
+            self.deleted.lock().unwrap().clone()
+        }
+
+        fn events(&self) -> Vec<crate::models::oauth_token::WorkspaceAuditEvent> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceConnectionRepository for RecordingWorkspaceRepo {
+        async fn insert_connection(
+            &self,
+            _new_connection: NewWorkspaceConnection,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn find_by_id(
+            &self,
+            _connection_id: Uuid,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn find_by_workspace_and_provider(
+            &self,
+            _workspace_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn list_for_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+            Ok(Vec::new())
+        }
+
+        async fn list_for_user_memberships(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error> {
+            Ok(Vec::new())
+        }
+
+        async fn list_by_workspace_creator(
+            &self,
+            workspace_id: Uuid,
+            creator_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            let guard = self.connections.lock().unwrap();
+            Ok(guard
+                .iter()
+                .filter(|conn| conn.workspace_id == workspace_id && conn.created_by == creator_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn update_tokens_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+            _account_email: String,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn update_tokens(
+            &self,
+            _connection_id: Uuid,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn delete_by_id(&self, connection_id: Uuid) -> Result<(), sqlx::Error> {
+            let mut guard = self.connections.lock().unwrap();
+            guard.retain(|conn| conn.id != connection_id);
+            self.deleted.lock().unwrap().push(connection_id);
+            Ok(())
+        }
+
+        async fn mark_connections_stale_for_creator(
+            &self,
+            _creator_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
+            Ok(Vec::new())
+        }
+
+        async fn record_audit_event(
+            &self,
+            event: NewWorkspaceAuditEvent,
+        ) -> Result<crate::models::oauth_token::WorkspaceAuditEvent, sqlx::Error> {
+            let audit = crate::models::oauth_token::WorkspaceAuditEvent {
+                id: Uuid::new_v4(),
+                workspace_id: event.workspace_id,
+                actor_id: event.actor_id,
+                event_type: event.event_type,
+                metadata: event.metadata,
+                created_at: OffsetDateTime::now_utc(),
+            };
+            self.events.lock().unwrap().push(audit.clone());
+            Ok(audit)
+        }
+    }
+
+    fn workspace_connection_record(
+        workspace_id: Uuid,
+        created_by: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> WorkspaceConnection {
+        let now = OffsetDateTime::now_utc();
+        WorkspaceConnection {
+            id: Uuid::new_v4(),
+            workspace_id,
+            created_by,
+            provider,
+            access_token: "enc-access".into(),
+            refresh_token: "enc-refresh".into(),
+            expires_at: now + Duration::hours(1),
+            account_email: "shared@example.com".into(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
     #[tokio::test]
     async fn promote_connection_copies_encrypted_tokens_and_marks_shared() {
         let user_id = Uuid::new_v4();
@@ -919,6 +1512,7 @@ mod tests {
             oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
         let service = WorkspaceOAuthService::new(
             user_repo.clone(),
+            noop_membership_repo(),
             workspace_repo.clone(),
             workspace_token_refresher,
             key,
@@ -975,8 +1569,13 @@ mod tests {
         let oauth_accounts = OAuthAccountService::test_stub();
         let refresher: Arc<dyn WorkspaceTokenRefresher> =
             oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
-        let service =
-            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            refresher,
+            key,
+        );
 
         let result = service
             .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Slack)
@@ -1045,8 +1644,13 @@ mod tests {
         let oauth_accounts = OAuthAccountService::test_stub();
         let refresher: Arc<dyn WorkspaceTokenRefresher> =
             oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
-        let service =
-            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            refresher,
+            key,
+        );
 
         service
             .remove_connection(workspace_id, user_id, connection_id)
@@ -1101,8 +1705,13 @@ mod tests {
         let oauth_accounts = OAuthAccountService::test_stub();
         let refresher: Arc<dyn WorkspaceTokenRefresher> =
             oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
-        let service =
-            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            refresher,
+            key,
+        );
 
         let make_writer = BufferingMakeWriter::new();
         let captured = make_writer.buffer();
@@ -1193,8 +1802,13 @@ mod tests {
         let oauth_accounts = OAuthAccountService::test_stub();
         let refresher: Arc<dyn WorkspaceTokenRefresher> =
             oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
-        let service =
-            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            refresher,
+            key,
+        );
 
         let err = service
             .remove_connection(workspace_id, actor_id, connection_id)
@@ -1255,8 +1869,13 @@ mod tests {
         let oauth_accounts = OAuthAccountService::test_stub();
         let refresher: Arc<dyn WorkspaceTokenRefresher> =
             oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
-        let service =
-            WorkspaceOAuthService::new(user_repo.clone(), workspace_repo.clone(), refresher, key);
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            refresher,
+            key,
+        );
 
         service
             .handle_revoked_connection(workspace_id, connection_id)
@@ -1305,11 +1924,16 @@ mod tests {
         let oauth_accounts = OAuthAccountService::test_stub();
         let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
             oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
-        let service =
-            WorkspaceOAuthService::new(user_repo, workspace_repo, workspace_token_refresher, key);
+        let service = WorkspaceOAuthService::new(
+            user_repo,
+            noop_membership_repo(),
+            workspace_repo,
+            workspace_token_refresher,
+            key,
+        );
 
         let connection = service
-            .get_connection(workspace_id, ConnectedOAuthProvider::Microsoft)
+            .get_connection(user_id, workspace_id, ConnectedOAuthProvider::Microsoft)
             .await
             .expect("connection exists");
 
@@ -1317,6 +1941,56 @@ mod tests {
         assert_eq!(connection.provider, ConnectedOAuthProvider::Microsoft);
         assert_eq!(connection.access_token, "access-token");
         assert_eq!(connection.refresh_token, "refresh-token");
+    }
+
+    #[tokio::test]
+    async fn get_connection_rejects_non_member() {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![5u8; 32]);
+        let expires_at = OffsetDateTime::now_utc();
+        let encrypted_access = encrypt_secret(&key, "blocked-access").unwrap();
+        let encrypted_refresh = encrypt_secret(&key, "blocked-refresh").unwrap();
+
+        let connections = Arc::new(InMemoryWorkspaceRepo::new());
+        {
+            let mut guard = connections.connection.lock().unwrap();
+            *guard = Some(WorkspaceConnection {
+                id: Uuid::new_v4(),
+                workspace_id,
+                created_by: user_id,
+                provider: ConnectedOAuthProvider::Slack,
+                access_token: encrypted_access,
+                refresh_token: encrypted_refresh,
+                expires_at,
+                account_email: "user@example.com".into(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            });
+        }
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(None),
+            shared_flag: Mutex::new(false),
+        });
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
+        let service = WorkspaceOAuthService::new(
+            user_repo,
+            denying_membership_repo(),
+            connections,
+            refresher,
+            key,
+        );
+
+        let err = service
+            .get_connection(user_id, workspace_id, ConnectedOAuthProvider::Slack)
+            .await
+            .expect_err("non-member should be rejected");
+
+        assert!(matches!(err, WorkspaceOAuthError::Forbidden));
     }
 
     #[tokio::test]
@@ -1354,8 +2028,13 @@ mod tests {
         let oauth_accounts = OAuthAccountService::test_stub();
         let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
             oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
-        let service =
-            WorkspaceOAuthService::new(user_repo, workspace_repo, workspace_token_refresher, key);
+        let service = WorkspaceOAuthService::new(
+            user_repo,
+            noop_membership_repo(),
+            workspace_repo,
+            workspace_token_refresher,
+            key,
+        );
 
         let connection = service
             .ensure_valid_workspace_token(workspace_id, connection_id)
@@ -1410,6 +2089,7 @@ mod tests {
         let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
         let service = WorkspaceOAuthService::new(
             user_repo,
+            noop_membership_repo(),
             workspace_repo.clone(),
             Arc::new(refresher.clone()) as Arc<dyn WorkspaceTokenRefresher>,
             key.clone(),
@@ -1472,6 +2152,7 @@ mod tests {
         let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
         let service = WorkspaceOAuthService::new(
             user_repo,
+            noop_membership_repo(),
             workspace_repo.clone(),
             Arc::new(refresher.clone()) as Arc<dyn WorkspaceTokenRefresher>,
             key.clone(),
@@ -1532,6 +2213,7 @@ mod tests {
 
         let service = WorkspaceOAuthService::new(
             user_repo,
+            noop_membership_repo(),
             workspace_repo,
             Arc::new(refresher) as Arc<dyn WorkspaceTokenRefresher>,
             key,
@@ -1586,6 +2268,7 @@ mod tests {
         let refresher = RecordingTokenRefresher::new(refreshed_tokens.clone());
         let service = Arc::new(WorkspaceOAuthService::new(
             user_repo,
+            noop_membership_repo(),
             workspace_repo.clone(),
             Arc::new(refresher.clone()) as Arc<dyn WorkspaceTokenRefresher>,
             key,
@@ -1661,6 +2344,7 @@ mod tests {
 
         let service = WorkspaceOAuthService::new(
             user_repo.clone(),
+            noop_membership_repo(),
             workspace_repo.clone(),
             Arc::new(RevokingTokenRefresher) as Arc<dyn WorkspaceTokenRefresher>,
             key,
@@ -1729,6 +2413,7 @@ mod tests {
 
         let service = WorkspaceOAuthService::new(
             user_repo.clone(),
+            noop_membership_repo(),
             workspace_repo.clone(),
             Arc::new(RevokingTokenRefresher) as Arc<dyn WorkspaceTokenRefresher>,
             key,
@@ -1748,5 +2433,106 @@ mod tests {
 
         assert!(workspace_repo.connection.lock().unwrap().is_none());
         assert!(!*user_repo.shared_flag.lock().unwrap());
+    }
+
+    #[tokio::test]
+    async fn purge_member_connections_deletes_records_and_marks_tokens() {
+        let workspace_id = Uuid::new_v4();
+        let removed_user_id = Uuid::new_v4();
+        let actor_id = Uuid::new_v4();
+        let key = Arc::new(vec![21u8; 32]);
+
+        let google_connection = workspace_connection_record(
+            workspace_id,
+            removed_user_id,
+            ConnectedOAuthProvider::Google,
+        );
+        let slack_connection = workspace_connection_record(
+            workspace_id,
+            removed_user_id,
+            ConnectedOAuthProvider::Slack,
+        );
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::with_connections(vec![
+            google_connection.clone(),
+            slack_connection.clone(),
+        ]));
+
+        let user_repo = Arc::new(RecordingUserRepo::new());
+        user_repo.set_token(ConnectedOAuthProvider::Google, removed_user_id);
+        user_repo.set_token(ConnectedOAuthProvider::Slack, removed_user_id);
+
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
+            key,
+        );
+
+        service
+            .purge_member_connections(workspace_id, removed_user_id, actor_id)
+            .await
+            .expect("purge should succeed");
+
+        let mut deleted = workspace_repo.deleted();
+        deleted.sort();
+        let mut expected = vec![google_connection.id, slack_connection.id];
+        expected.sort();
+        assert_eq!(deleted, expected);
+
+        assert_eq!(
+            user_repo.marks(),
+            vec![
+                (removed_user_id, ConnectedOAuthProvider::Google, false),
+                (removed_user_id, ConnectedOAuthProvider::Slack, false)
+            ]
+        );
+
+        let events = workspace_repo.events();
+        assert_eq!(events.len(), 2);
+        for event in events {
+            assert_eq!(event.workspace_id, workspace_id);
+            assert_eq!(event.actor_id, actor_id);
+            assert_eq!(event.event_type, WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED);
+        }
+    }
+
+    #[tokio::test]
+    async fn purge_member_connections_succeeds_when_token_missing() {
+        let workspace_id = Uuid::new_v4();
+        let removed_user_id = Uuid::new_v4();
+        let actor_id = Uuid::new_v4();
+        let key = Arc::new(vec![17u8; 32]);
+
+        let connection = workspace_connection_record(
+            workspace_id,
+            removed_user_id,
+            ConnectedOAuthProvider::Slack,
+        );
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::with_connections(vec![
+            connection.clone()
+        ]));
+
+        let user_repo = Arc::new(RecordingUserRepo::new());
+        user_repo.fail_for(ConnectedOAuthProvider::Slack);
+
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
+            key,
+        );
+
+        service
+            .purge_member_connections(workspace_id, removed_user_id, actor_id)
+            .await
+            .expect("purge should ignore missing token");
+
+        assert_eq!(workspace_repo.deleted(), vec![connection.id]);
+        assert_eq!(
+            user_repo.marks(),
+            vec![(removed_user_id, ConnectedOAuthProvider::Slack, false)]
+        );
     }
 }

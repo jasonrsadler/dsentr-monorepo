@@ -381,6 +381,7 @@ mod tests {
             NewWorkspaceAuditEvent, NewWorkspaceConnection, NoopWorkspaceConnectionRepository,
             WorkspaceConnectionListing, WorkspaceConnectionRepository,
         },
+        workspace_repository::WorkspaceRepository,
     };
     use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection};
     use crate::services::{
@@ -525,6 +526,14 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn list_by_workspace_creator(
+            &self,
+            _workspace_id: Uuid,
+            _creator_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            Ok(Vec::new())
+        }
+
         async fn update_tokens_for_creator(
             &self,
             _creator_id: Uuid,
@@ -548,6 +557,10 @@ mod tests {
         }
 
         async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
         }
 
@@ -720,15 +733,18 @@ mod tests {
         let workspace_repo: Arc<dyn WorkspaceConnectionRepository> = Arc::new(
             WorkspaceRepoStub::new(Some(user_id), Some(listing), Some(record)),
         );
+        let membership_repo: Arc<dyn WorkspaceRepository> = Arc::new(NoopWorkspaceRepository);
 
         let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
             Arc::new(PersonalTokenRepo::new(None)),
+            Arc::clone(&membership_repo),
             Arc::clone(&workspace_repo),
             OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
             Arc::clone(&encryption_key),
         ));
 
         let mut state = base_state(config);
+        state.workspace_repo = membership_repo;
         state.workspace_connection_repo = workspace_repo;
         state.workspace_oauth = workspace_oauth;
 

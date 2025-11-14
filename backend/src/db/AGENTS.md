@@ -28,3 +28,6 @@
   - Repository reads/writes for personal tokens now enforce `workspace_id IS NULL` to avoid cross-scope leakage.
   - Introduced ownership helpers at the service layer; `WorkspaceOAuthService::load_token` now rejects non-owned or non-personal tokens with a 403 (Forbidden) response.
   - `PostgresUserOAuthTokenRepository` uses `query_as::<_, UserOAuthToken>` bindings for these queries to avoid churn in SQLx offline artifacts while the schema evolves.
+- Workspace connection repositories now expose `list_by_workspace_creator` and `delete_by_id` so membership removals can enumerate a user's shared connections and delete them safely during cleanup flows.
+- Added `WorkspaceRepository::is_member` (with Postgres + Noop implementations) so workspace OAuth flows can check `workspace_members` directly before exposing or decrypting shared credentials.
+- Introduced `StaticWorkspaceMembershipRepository` in `mock_db.rs` so tests can flip `is_member` between allowed/denied states without rebuilding the entire trait surface, enabling engine, route, and service tests to assert `403 Forbidden` gating logic deterministically.

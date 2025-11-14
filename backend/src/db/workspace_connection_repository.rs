@@ -75,6 +75,12 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         user_id: Uuid,
     ) -> Result<Vec<WorkspaceConnectionListing>, sqlx::Error>;
 
+    async fn list_by_workspace_creator(
+        &self,
+        workspace_id: Uuid,
+        creator_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error>;
+
     async fn update_tokens_for_creator(
         &self,
         creator_id: Uuid,
@@ -94,6 +100,8 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
     ) -> Result<WorkspaceConnection, sqlx::Error>;
 
     async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn delete_by_id(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
 
     async fn mark_connections_stale_for_creator(
         &self,
@@ -149,6 +157,14 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Ok(Vec::new())
     }
 
+    async fn list_by_workspace_creator(
+        &self,
+        _workspace_id: Uuid,
+        _creator_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+        Ok(Vec::new())
+    }
+
     async fn update_tokens_for_creator(
         &self,
         _creator_id: Uuid,
@@ -172,6 +188,10 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
     }
 
     async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
     }
 

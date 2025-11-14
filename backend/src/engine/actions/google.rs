@@ -128,6 +128,8 @@ pub(crate) async fn execute_sheets(
                 "This workflow run is not associated with a workspace. Promote the Google connection to the workspace or switch the action back to a personal connection.".to_string()
             })?;
 
+            super::ensure_run_membership(state, workspace_id, run.user_id).await?;
+
             let connection = state
                 .workspace_oauth
                 .ensure_valid_workspace_token(workspace_id, info.connection_id)
@@ -502,10 +504,14 @@ mod tests {
     use super::*;
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::{
-        mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+        mock_db::{
+            MockDb, NoopWorkflowRepository, NoopWorkspaceRepository,
+            StaticWorkspaceMembershipRepository,
+        },
         workspace_connection_repository::{
             NoopWorkspaceConnectionRepository, WorkspaceConnectionRepository,
         },
+        workspace_repository::WorkspaceRepository,
     };
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
@@ -683,6 +689,14 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn list_by_workspace_creator(
+            &self,
+            _workspace_id: Uuid,
+            _creator_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+            Ok(Vec::new())
+        }
+
         async fn update_tokens_for_creator(
             &self,
             _creator_id: Uuid,
@@ -719,6 +733,10 @@ mod tests {
             Ok(())
         }
 
+        async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
         async fn mark_connections_stale_for_creator(
             &self,
             _creator_id: Uuid,
@@ -746,8 +764,11 @@ mod tests {
         Arc<RecordingWorkspaceConnections>,
     ) {
         let repo = Arc::new(RecordingWorkspaceConnections::with_connection(connection));
+        let membership_repo: Arc<dyn WorkspaceRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::allowing());
         let service = Arc::new(WorkspaceOAuthService::new(
             Arc::new(NoopUserTokenRepo),
+            membership_repo,
             repo.clone(),
             OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
             key,
@@ -814,11 +835,15 @@ mod tests {
         }
     }
 
-    fn test_state(oauth_accounts: Arc<OAuthAccountService>, http_client: Arc<Client>) -> AppState {
+    fn test_state(
+        oauth_accounts: Arc<OAuthAccountService>,
+        http_client: Arc<Client>,
+        workspace_repo: Arc<dyn WorkspaceRepository>,
+    ) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
-            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_repo,
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
             db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()) as Arc<dyn Mailer>,
@@ -956,7 +981,11 @@ mod tests {
             data: json!({ "params": { "worksheet": "Sheet1", "columns": [] } }),
         };
 
-        let state = test_state(OAuthAccountService::test_stub(), Arc::new(Client::new()));
+        let state = test_state(
+            OAuthAccountService::test_stub(),
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(Uuid::new_v4());
 
         let err = execute_sheets(&node, &Value::Null, &state, &run)
@@ -983,7 +1012,11 @@ mod tests {
             }),
         };
 
-        let state = test_state(OAuthAccountService::test_stub(), Arc::new(Client::new()));
+        let state = test_state(
+            OAuthAccountService::test_stub(),
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(Uuid::new_v4());
 
         let err = execute_sheets(&node, &Value::Null, &state, &run)
@@ -997,7 +1030,11 @@ mod tests {
     async fn account_email_mismatch_ignored_and_id_surfaced() {
         let user_id = Uuid::new_v4();
         let (oauth_accounts, _) = oauth_service_with_token(user_id, "different@example.com");
-        let state = test_state(oauth_accounts, Arc::new(Client::new()));
+        let state = test_state(
+            oauth_accounts,
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(user_id);
 
         let response_body = json!({
@@ -1080,7 +1117,11 @@ mod tests {
 
         let user_id = Uuid::new_v4();
         let (oauth_accounts, token_id) = oauth_service_with_token(user_id, "updated@example.com");
-        let state = test_state(oauth_accounts, Arc::new(Client::new()));
+        let state = test_state(
+            oauth_accounts,
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(user_id);
 
         let node = Node {
@@ -1142,7 +1183,11 @@ mod tests {
             }),
         };
 
-        let state = test_state(OAuthAccountService::test_stub(), Arc::new(Client::new()));
+        let state = test_state(
+            OAuthAccountService::test_stub(),
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(Uuid::new_v4());
 
         let err = execute_sheets(&node, &Value::Null, &state, &run)
@@ -1173,7 +1218,11 @@ mod tests {
             }),
         };
 
-        let state = test_state(OAuthAccountService::test_stub(), Arc::new(Client::new()));
+        let state = test_state(
+            OAuthAccountService::test_stub(),
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let mut run = sample_run(Uuid::new_v4());
         run.workspace_id = Some(Uuid::new_v4());
 
@@ -1236,7 +1285,11 @@ mod tests {
                 .unwrap(),
         );
         let oauth_accounts = OAuthAccountService::test_stub();
-        let mut state = test_state(oauth_accounts, http_client);
+        let mut state = test_state(
+            oauth_accounts,
+            http_client,
+            Arc::new(NoopWorkspaceRepository),
+        );
         state.workspace_oauth = workspace_service;
 
         let mut run = sample_run(Uuid::new_v4());
@@ -1309,7 +1362,11 @@ mod tests {
 
         let http_client = Arc::new(Client::new());
         let oauth_accounts = OAuthAccountService::test_stub();
-        let mut state = test_state(oauth_accounts, http_client);
+        let mut state = test_state(
+            oauth_accounts,
+            http_client,
+            Arc::new(NoopWorkspaceRepository),
+        );
         state.workspace_oauth = workspace_service;
 
         let mut run = sample_run(Uuid::new_v4());
@@ -1341,6 +1398,69 @@ mod tests {
         assert!(err.contains("does not belong to this workspace"));
         let calls = repo.find_calls();
         assert_eq!(calls, vec![connection_id]);
+    }
+
+    #[tokio::test]
+    async fn workspace_connection_rejects_when_membership_revoked() {
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+
+        let connection = WorkspaceConnection {
+            id: connection_id,
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + TimeDuration::hours(1),
+            account_email: "workspace@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let (workspace_service, repo) =
+            workspace_oauth_with_connection(connection, Arc::clone(&encryption_key));
+
+        let http_client = Arc::new(Client::new());
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let workspace_repo: Arc<dyn WorkspaceRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::denying());
+        let mut state = test_state(oauth_accounts, http_client, workspace_repo);
+        state.workspace_oauth = workspace_service;
+
+        let mut run = sample_run(Uuid::new_v4());
+        run.workspace_id = Some(workspace_id);
+
+        let node = Node {
+            id: "node-workspace-revoked".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "spreadsheetId": "sheet123",
+                    "worksheet": "Sheet1",
+                    "columns": [
+                        {"key": "A", "value": "1"}
+                    ],
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": connection_id,
+                        "accountEmail": "workspace@example.com"
+                    }
+                }
+            }),
+        };
+
+        let err = execute_sheets(&node, &Value::Null, &state, &run)
+            .await
+            .expect_err("removed members cannot use workspace Google tokens");
+
+        assert!(err.contains("Forbidden"));
+        assert!(
+            repo.find_calls().is_empty(),
+            "workspace OAuth should not be queried when membership fails"
+        );
     }
 
     #[derive(Debug)]
@@ -1453,7 +1573,11 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let state = test_state(oauth_accounts, http_client);
+        let state = test_state(
+            oauth_accounts,
+            http_client,
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(user_id);
 
         let node = Node {
@@ -1540,7 +1664,11 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let state = test_state(oauth_accounts, http_client);
+        let state = test_state(
+            oauth_accounts,
+            http_client,
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(user_id);
 
         let node = Node {
@@ -1590,7 +1718,11 @@ mod tests {
     async fn invalid_column_name_rejected() {
         let user_id = Uuid::new_v4();
         let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
-        let state = test_state(oauth_accounts, Arc::new(Client::new()));
+        let state = test_state(
+            oauth_accounts,
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(user_id);
 
         let node = Node {
@@ -1619,7 +1751,11 @@ mod tests {
     async fn duplicate_columns_rejected() {
         let user_id = Uuid::new_v4();
         let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
-        let state = test_state(oauth_accounts, Arc::new(Client::new()));
+        let state = test_state(
+            oauth_accounts,
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(user_id);
 
         let node = Node {
@@ -1651,7 +1787,11 @@ mod tests {
     async fn templated_column_rejected() {
         let user_id = Uuid::new_v4();
         let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
-        let state = test_state(oauth_accounts, Arc::new(Client::new()));
+        let state = test_state(
+            oauth_accounts,
+            Arc::new(Client::new()),
+            Arc::new(NoopWorkspaceRepository),
+        );
         let run = sample_run(user_id);
 
         let node = Node {

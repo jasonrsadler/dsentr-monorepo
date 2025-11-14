@@ -267,6 +267,7 @@ async fn main() -> Result<()> {
         oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
     let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
         oauth_repo.clone(),
+        workspace_repo.clone(),
         workspace_connection_repo.clone(),
         workspace_token_refresher,
         encryption_key.clone(),

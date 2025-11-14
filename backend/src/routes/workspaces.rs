@@ -1219,9 +1219,31 @@ pub async fn remove_workspace_member(
         .remove_member(workspace_id, member_id)
         .await
     {
-        Ok(_) => Json(json!({"success": true})).into_response(),
-        Err(_) => JsonResponse::server_error("Failed to remove member").into_response(),
+        Ok(_) => {}
+        Err(_) => return JsonResponse::server_error("Failed to remove member").into_response(),
     }
+
+    if let Err(err) = app_state
+        .workspace_oauth
+        .purge_member_connections(workspace_id, member_id, user_id)
+        .await
+    {
+        error!(
+            ?err,
+            %workspace_id,
+            removed_user_id = %member_id,
+            %user_id,
+            "failed to purge workspace connections after member removal"
+        );
+        let _ = app_state
+            .workspace_repo
+            .add_member(workspace_id, member_id, target_member.role)
+            .await;
+        return JsonResponse::server_error("Failed to remove shared workspace connections")
+            .into_response();
+    }
+
+    Json(json!({"success": true})).into_response()
 }
 
 pub async fn leave_workspace(
@@ -1254,6 +1276,25 @@ pub async fn leave_workspace(
     {
         error!(?err, %workspace_id, %user_id, "failed to leave workspace");
         return JsonResponse::server_error("Failed to leave workspace").into_response();
+    }
+
+    if let Err(err) = app_state
+        .workspace_oauth
+        .purge_member_connections(workspace_id, user_id, user_id)
+        .await
+    {
+        error!(
+            ?err,
+            %workspace_id,
+            %user_id,
+            "failed to purge workspace connections after leaving"
+        );
+        let _ = app_state
+            .workspace_repo
+            .add_member(workspace_id, user_id, membership.role)
+            .await;
+        return JsonResponse::server_error("Failed to remove shared workspace connections")
+            .into_response();
     }
 
     if should_provision_solo {
@@ -1363,6 +1404,26 @@ pub async fn revoke_workspace_member(
             error!(?err, %workspace_id, member_id = %payload.member_id, "failed to revoke member");
             return JsonResponse::server_error("Failed to revoke member").into_response();
         }
+    }
+
+    if let Err(err) = app_state
+        .workspace_oauth
+        .purge_member_connections(workspace_id, payload.member_id, user_id)
+        .await
+    {
+        error!(
+            ?err,
+            %workspace_id,
+            member_id = %payload.member_id,
+            %user_id,
+            "failed to purge workspace connections after revocation"
+        );
+        let _ = app_state
+            .workspace_repo
+            .add_member(workspace_id, payload.member_id, target_member.role)
+            .await;
+        return JsonResponse::server_error("Failed to remove shared workspace connections")
+            .into_response();
     }
 
     if should_provision_solo {
@@ -1793,22 +1854,62 @@ pub async fn workspace_to_solo_execute(
     if let Err(resp) = ensure_workspace_owner(&app_state, acting, payload.workspace_id).await {
         return resp;
     }
-    // Remove all members except acting user
-    if let Ok(members) = app_state
+    let members = match app_state
         .workspace_repo
         .list_members(payload.workspace_id)
         .await
     {
-        for m in members {
-            if m.user_id == acting {
-                continue;
-            }
+        Ok(list) => list,
+        Err(err) => {
+            error!(
+                ?err,
+                workspace_id = %payload.workspace_id,
+                "failed to list members before solo conversion"
+            );
+            return JsonResponse::server_error("Failed to list members").into_response();
+        }
+    };
+
+    for member in members {
+        if member.user_id == acting {
+            continue;
+        }
+
+        if let Err(err) = app_state
+            .workspace_repo
+            .remove_member(payload.workspace_id, member.user_id)
+            .await
+        {
+            error!(
+                ?err,
+                workspace_id = %payload.workspace_id,
+                member_id = %member.user_id,
+                "failed to remove member during solo conversion"
+            );
+            return JsonResponse::server_error("Failed to remove member").into_response();
+        }
+
+        if let Err(err) = app_state
+            .workspace_oauth
+            .purge_member_connections(payload.workspace_id, member.user_id, acting)
+            .await
+        {
+            error!(
+                ?err,
+                workspace_id = %payload.workspace_id,
+                member_id = %member.user_id,
+                %acting,
+                "failed to purge workspace connections during solo conversion"
+            );
             let _ = app_state
                 .workspace_repo
-                .remove_member(payload.workspace_id, m.user_id)
+                .add_member(payload.workspace_id, member.user_id, member.role)
                 .await;
+            return JsonResponse::server_error("Failed to remove shared workspace connections")
+                .into_response();
         }
     }
+
     let _ = app_state
         .db
         .update_user_plan(acting, PlanTier::Solo.as_str())
@@ -1905,9 +2006,10 @@ mod tests {
     use super::{
         accept_invitation, build_invite_accept_url, change_plan, complete_onboarding,
         decline_invitation, leave_workspace, list_pending_invites, preview_invitation,
-        promote_workspace_connection, remove_workspace_connection, revoke_workspace_member,
-        CompleteOnboardingPayload, InvitationDecisionPayload, PromoteWorkspaceConnectionPayload,
-        RevokeWorkspaceMemberPayload,
+        promote_workspace_connection, remove_workspace_connection, remove_workspace_member,
+        revoke_workspace_member, workspace_to_solo_execute, CompleteOnboardingPayload,
+        InvitationDecisionPayload, PromoteWorkspaceConnectionPayload, RevokeWorkspaceMemberPayload,
+        WorkspaceToSoloExecutePayload,
     };
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::{
@@ -2151,6 +2253,13 @@ mod tests {
             Self::default()
         }
 
+        fn with_connections(connections: Vec<WorkspaceConnection>) -> Self {
+            Self {
+                connections: Arc::new(Mutex::new(connections)),
+                ..Self::default()
+            }
+        }
+
         fn connections(&self) -> Vec<WorkspaceConnection> {
             self.connections.lock().unwrap().clone()
         }
@@ -2258,6 +2367,21 @@ mod tests {
                 .collect())
         }
 
+        async fn list_by_workspace_creator(
+            &self,
+            workspace_id: Uuid,
+            creator_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            let guard = self.connections.lock().unwrap();
+            Ok(guard
+                .iter()
+                .filter(|record| {
+                    record.workspace_id == workspace_id && record.created_by == creator_id
+                })
+                .cloned()
+                .collect())
+        }
+
         async fn update_tokens_for_creator(
             &self,
             creator_id: Uuid,
@@ -2307,6 +2431,10 @@ mod tests {
             }
             self.deleted.lock().unwrap().push(connection_id);
             Ok(())
+        }
+
+        async fn delete_by_id(&self, connection_id: Uuid) -> Result<(), sqlx::Error> {
+            self.delete_connection(connection_id).await
         }
 
         async fn mark_connections_stale_for_creator(
@@ -2477,6 +2605,13 @@ mod tests {
             _: Uuid,
         ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error> {
             unimplemented!()
+        }
+
+        async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
+            let members = self.members.lock().unwrap();
+            Ok(members
+                .iter()
+                .any(|(ws_id, member_id, _)| *ws_id == workspace_id && *member_id == user_id))
         }
 
         async fn list_memberships_for_user(
@@ -2810,6 +2945,10 @@ mod tests {
                 .unwrap_or_default())
         }
 
+        async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
+            Ok(self.member_exists(workspace_id, user_id))
+        }
+
         async fn list_memberships_for_user(
             &self,
             user_id: Uuid,
@@ -2942,6 +3081,7 @@ mod tests {
 
         let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
             user_token_repo.clone(),
+            Arc::clone(&workspace_repo),
             workspace_connection_repo.clone(),
             workspace_token_refresher,
             encryption_key,
@@ -2992,21 +3132,37 @@ mod tests {
         repo: Arc<dyn WorkspaceRepository>,
         mailer: Arc<dyn Mailer>,
         db: Arc<MockDb>,
+        workspace_connections: Option<Arc<dyn WorkspaceConnectionRepository>>,
+        user_tokens: Option<Arc<dyn UserOAuthTokenRepository>>,
     ) -> AppState {
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let connection_repo = workspace_connections
+            .unwrap_or_else(|| Arc::new(NoopWorkspaceConnectionRepository) as Arc<_>);
+        let token_repo =
+            user_tokens.unwrap_or_else(|| Arc::new(StubUserTokenRepo::default()) as Arc<_>);
+        let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
+            token_repo,
+            Arc::clone(&repo),
+            Arc::clone(&connection_repo),
+            OAuthAccountService::test_stub(),
+            Arc::clone(&encryption_key),
+        ));
+
         AppState {
             db: db.clone(),
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: repo,
-            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            workspace_connection_repo: Arc::clone(&connection_repo),
             db_pool: test_pg_pool(),
             mailer,
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
             oauth_accounts: OAuthAccountService::test_stub(),
-            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            workspace_oauth,
             stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
-            config: test_config(),
+            config,
             worker_id: Arc::new("worker-1".into()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
@@ -3043,6 +3199,26 @@ mod tests {
             iss: String::new(),
             aud: String::new(),
             token_use: TokenUse::Access,
+        }
+    }
+
+    fn workspace_connection_fixture(
+        workspace_id: Uuid,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> WorkspaceConnection {
+        let now = OffsetDateTime::now_utc();
+        WorkspaceConnection {
+            id: Uuid::new_v4(),
+            workspace_id,
+            created_by: user_id,
+            provider,
+            access_token: "encrypted-access".into(),
+            refresh_token: "encrypted-refresh".into(),
+            expires_at: now + time::Duration::hours(1),
+            account_email: "shared@example.com".into(),
+            created_at: now,
+            updated_at: now,
         }
     }
 
@@ -3736,7 +3912,7 @@ mod tests {
             }),
             ..Default::default()
         });
-        let state = state_with_components(repo.clone(), mailer, db);
+        let state = state_with_components(repo.clone(), mailer, db, None, None);
 
         let claims = claims_fixture(user_id, "owner@example.com");
         let payload = CompleteOnboardingPayload {
@@ -3860,6 +4036,8 @@ mod tests {
             repo.clone() as Arc<dyn WorkspaceRepository>,
             Arc::new(NoopMailer) as Arc<dyn Mailer>,
             db,
+            None,
+            None,
         );
 
         let payload = CompleteOnboardingPayload {
@@ -3939,6 +4117,8 @@ mod tests {
             repo.clone() as Arc<dyn WorkspaceRepository>,
             Arc::new(NoopMailer) as Arc<dyn Mailer>,
             db,
+            None,
+            None,
         );
 
         let payload = CompleteOnboardingPayload {
@@ -3992,7 +4172,7 @@ mod tests {
         let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, vec![member]));
         let mailer: Arc<dyn Mailer> = Arc::new(NoopMailer);
         let db = Arc::new(MockDb::default());
-        let state = state_with_components(repo.clone(), mailer, db);
+        let state = state_with_components(repo.clone(), mailer, db, None, None);
 
         let claims = claims_fixture(user_id, "owner@example.com");
         let payload = CompleteOnboardingPayload {
@@ -4122,6 +4302,8 @@ mod tests {
             repo.clone() as Arc<dyn WorkspaceRepository>,
             Arc::new(NoopMailer) as Arc<dyn Mailer>,
             Arc::new(db),
+            None,
+            None,
         );
 
         let response = leave_workspace(
@@ -4198,6 +4380,8 @@ mod tests {
             repo.clone() as Arc<dyn WorkspaceRepository>,
             Arc::new(NoopMailer) as Arc<dyn Mailer>,
             Arc::new(db),
+            None,
+            None,
         );
 
         let response = leave_workspace(
@@ -4211,6 +4395,219 @@ mod tests {
         assert!(!repo.member_exists(workspace_id, member_id));
         assert_eq!(repo.membership_count(member_id), 1);
         assert!(repo.workspace_count() >= 2);
+    }
+
+    #[tokio::test]
+    async fn remove_workspace_member_purges_shared_connections() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Growth".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let members = vec![
+            WorkspaceMember {
+                workspace_id,
+                user_id: owner_id,
+                role: WorkspaceRole::Owner,
+                joined_at: now,
+                email: "owner@example.com".into(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+            },
+            WorkspaceMember {
+                workspace_id,
+                user_id: member_id,
+                role: WorkspaceRole::Admin,
+                joined_at: now,
+                email: "member@example.com".into(),
+                first_name: "Member".into(),
+                last_name: "User".into(),
+            },
+        ];
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
+        let connection =
+            workspace_connection_fixture(workspace_id, member_id, ConnectedOAuthProvider::Google);
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::with_connections(vec![
+            connection.clone(),
+        ]));
+
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer) as Arc<dyn Mailer>,
+            Arc::new(MockDb::default()),
+            Some(connection_repo.clone() as Arc<dyn WorkspaceConnectionRepository>),
+            None,
+        );
+
+        let response = remove_workspace_member(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "owner@example.com")),
+            axum::extract::Path((workspace_id, member_id)),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(connection_repo.deleted(), vec![connection.id]);
+    }
+
+    #[tokio::test]
+    async fn leave_workspace_purges_shared_connections() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Growth Team".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let members = vec![
+            WorkspaceMember {
+                workspace_id,
+                user_id: owner_id,
+                role: WorkspaceRole::Owner,
+                joined_at: now,
+                email: "owner@example.com".into(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+            },
+            WorkspaceMember {
+                workspace_id,
+                user_id: member_id,
+                role: WorkspaceRole::User,
+                joined_at: now,
+                email: "member@example.com".into(),
+                first_name: "Member".into(),
+                last_name: "User".into(),
+            },
+        ];
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
+        let connection =
+            workspace_connection_fixture(workspace_id, member_id, ConnectedOAuthProvider::Slack);
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::with_connections(vec![
+            connection.clone(),
+        ]));
+
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: member_id,
+                email: "member@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Member".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                stripe_customer_id: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: Some(now),
+                created_at: now,
+            }),
+            ..Default::default()
+        });
+
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer) as Arc<dyn Mailer>,
+            db,
+            Some(connection_repo.clone() as Arc<dyn WorkspaceConnectionRepository>),
+            None,
+        );
+
+        let response = leave_workspace(
+            State(state),
+            AuthSession(claims_fixture(member_id, "member@example.com")),
+            axum::extract::Path(workspace_id),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(connection_repo.deleted(), vec![connection.id]);
+    }
+
+    #[tokio::test]
+    async fn workspace_to_solo_execute_purges_member_connections() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Growth Space".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: super::PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let members = vec![
+            WorkspaceMember {
+                workspace_id,
+                user_id: owner_id,
+                role: WorkspaceRole::Owner,
+                joined_at: now,
+                email: "owner@example.com".into(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+            },
+            WorkspaceMember {
+                workspace_id,
+                user_id: member_id,
+                role: WorkspaceRole::User,
+                joined_at: now,
+                email: "member@example.com".into(),
+                first_name: "Member".into(),
+                last_name: "User".into(),
+            },
+        ];
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
+        let connection =
+            workspace_connection_fixture(workspace_id, member_id, ConnectedOAuthProvider::Google);
+        let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::with_connections(vec![
+            connection.clone(),
+        ]));
+
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer) as Arc<dyn Mailer>,
+            Arc::new(MockDb::default()),
+            Some(connection_repo.clone() as Arc<dyn WorkspaceConnectionRepository>),
+            None,
+        );
+
+        let response = workspace_to_solo_execute(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "owner@example.com")),
+            Json(WorkspaceToSoloExecutePayload { workspace_id }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(connection_repo.deleted(), vec![connection.id]);
     }
 
     #[tokio::test]
@@ -4277,6 +4674,8 @@ mod tests {
             repo.clone() as Arc<dyn WorkspaceRepository>,
             mailer.clone() as Arc<dyn Mailer>,
             Arc::new(db),
+            None,
+            None,
         );
 
         let payload = RevokeWorkspaceMemberPayload {

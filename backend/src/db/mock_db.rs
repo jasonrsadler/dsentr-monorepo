@@ -752,8 +752,33 @@ impl WorkflowRepository for NoopWorkflowRepository {
 }
 
 #[allow(dead_code)]
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct NoopWorkspaceRepository;
+
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct StaticWorkspaceMembershipRepository {
+    allowed: bool,
+    inner: NoopWorkspaceRepository,
+}
+
+impl StaticWorkspaceMembershipRepository {
+    #[allow(dead_code)]
+    pub fn allowing() -> Self {
+        Self {
+            allowed: true,
+            inner: NoopWorkspaceRepository,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn denying() -> Self {
+        Self {
+            allowed: false,
+            inner: NoopWorkspaceRepository,
+        }
+    }
+}
 
 #[async_trait]
 impl WorkspaceRepository for NoopWorkspaceRepository {
@@ -860,6 +885,10 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         Ok(vec![])
     }
 
+    async fn is_member(&self, _workspace_id: Uuid, _user_id: Uuid) -> Result<bool, sqlx::Error> {
+        Ok(true)
+    }
+
     async fn list_memberships_for_user(
         &self,
         _user_id: Uuid,
@@ -930,5 +959,149 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         _email: &str,
     ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
         Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
+    async fn create_workspace(
+        &self,
+        name: &str,
+        created_by: Uuid,
+        plan: &str,
+    ) -> Result<Workspace, sqlx::Error> {
+        self.inner.create_workspace(name, created_by, plan).await
+    }
+
+    async fn update_workspace_name(
+        &self,
+        workspace_id: Uuid,
+        name: &str,
+    ) -> Result<Workspace, sqlx::Error> {
+        self.inner.update_workspace_name(workspace_id, name).await
+    }
+
+    async fn update_workspace_plan(
+        &self,
+        workspace_id: Uuid,
+        plan: &str,
+    ) -> Result<Workspace, sqlx::Error> {
+        self.inner.update_workspace_plan(workspace_id, plan).await
+    }
+
+    async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
+        self.inner.find_workspace(workspace_id).await
+    }
+
+    async fn add_member(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<(), sqlx::Error> {
+        self.inner.add_member(workspace_id, user_id, role).await
+    }
+
+    async fn set_member_role(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<(), sqlx::Error> {
+        self.inner
+            .set_member_role(workspace_id, user_id, role)
+            .await
+    }
+
+    async fn remove_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error> {
+        self.inner.remove_member(workspace_id, user_id).await
+    }
+
+    async fn leave_workspace(&self, workspace_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error> {
+        self.inner.leave_workspace(workspace_id, user_id).await
+    }
+
+    async fn revoke_member(
+        &self,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        revoked_by: Uuid,
+        reason: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        self.inner
+            .revoke_member(workspace_id, member_id, revoked_by, reason)
+            .await
+    }
+
+    async fn list_members(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error> {
+        self.inner.list_members(workspace_id).await
+    }
+
+    async fn is_member(&self, _workspace_id: Uuid, _user_id: Uuid) -> Result<bool, sqlx::Error> {
+        Ok(self.allowed)
+    }
+
+    async fn list_memberships_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+        self.inner.list_memberships_for_user(user_id).await
+    }
+
+    async fn list_user_workspaces(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<WorkspaceMembershipSummary>, sqlx::Error> {
+        self.inner.list_user_workspaces(user_id).await
+    }
+
+    async fn create_workspace_invitation(
+        &self,
+        workspace_id: Uuid,
+        email: &str,
+        role: WorkspaceRole,
+        token: &str,
+        expires_at: OffsetDateTime,
+        created_by: Uuid,
+    ) -> Result<crate::models::workspace::WorkspaceInvitation, sqlx::Error> {
+        self.inner
+            .create_workspace_invitation(workspace_id, email, role, token, expires_at, created_by)
+            .await
+    }
+
+    async fn list_workspace_invitations(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+        self.inner.list_workspace_invitations(workspace_id).await
+    }
+
+    async fn revoke_workspace_invitation(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+        self.inner.revoke_workspace_invitation(invite_id).await
+    }
+
+    async fn find_invitation_by_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+        self.inner.find_invitation_by_token(token).await
+    }
+
+    async fn mark_invitation_accepted(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+        self.inner.mark_invitation_accepted(invite_id).await
+    }
+
+    async fn mark_invitation_declined(&self, invite_id: Uuid) -> Result<(), sqlx::Error> {
+        self.inner.mark_invitation_declined(invite_id).await
+    }
+
+    async fn list_pending_invitations_for_email(
+        &self,
+        email: &str,
+    ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
+        self.inner.list_pending_invitations_for_email(email).await
     }
 }

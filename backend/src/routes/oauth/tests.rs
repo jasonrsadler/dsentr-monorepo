@@ -370,6 +370,14 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
             .collect())
     }
 
+    async fn list_by_workspace_creator(
+        &self,
+        _workspace_id: Uuid,
+        _creator_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+        Ok(Vec::new())
+    }
+
     async fn update_tokens_for_creator(
         &self,
         _creator_id: Uuid,
@@ -393,6 +401,10 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
     }
 
     async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
     }
 
@@ -1165,6 +1177,12 @@ impl WorkspaceRepository for MembershipWorkspaceRepo {
         _workspace_id: Uuid,
     ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, Error> {
         unimplemented!()
+    }
+
+    async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, Error> {
+        Ok(self.memberships.iter().any(|(member_id, membership)| {
+            *member_id == user_id && membership.workspace.id == workspace_id
+        }))
     }
 
     async fn list_memberships_for_user(

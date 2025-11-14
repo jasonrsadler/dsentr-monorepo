@@ -662,6 +662,15 @@ mod tests {
         ) -> Result<Vec<WorkspaceMember>, sqlx::Error> {
             Ok(vec![])
         }
+
+        async fn is_member(
+            &self,
+            _workspace_id: Uuid,
+            _user_id: Uuid,
+        ) -> Result<bool, sqlx::Error> {
+            Ok(true)
+        }
+
         async fn list_memberships_for_user(
             &self,
             _user_id: Uuid,

@@ -267,6 +267,25 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .await
     }
 
+    async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
+        let exists = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM workspace_members
+                WHERE workspace_id = $1
+                  AND user_id = $2
+            ) as "exists!: bool"
+            "#,
+            workspace_id,
+            user_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(exists)
+    }
+
     async fn list_memberships_for_user(
         &self,
         user_id: Uuid,

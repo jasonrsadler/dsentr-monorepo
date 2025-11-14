@@ -21,3 +21,4 @@
 - Accounts: Listing connections now requires an explicit `workspace` query parameter and verifies membership via `workspace_repo.list_memberships_for_user` before proceeding. This prevents cross-workspace leakage and aligns with workspace context routing elsewhere.
 - Accounts: Workspace connections are fetched with `WorkspaceConnectionRepository::list_for_workspace(workspace_id)` instead of a user-membership scan. The handler asserts all returned rows match the requested workspace and returns 403 on any violation.
 - Accounts: Added a defensive ownership assertion for personal tokens by cross-checking repository lookups for the authenticated `user_id` and provider before serializing the response. Violations return 403 and are logged.
+- OAuth route tests implement the new WorkspaceRepository::is_member helper so WorkspaceOAuthService membership checks work inside the test harness.

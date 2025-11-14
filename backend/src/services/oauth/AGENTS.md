@@ -16,3 +16,6 @@
 ## Change Reasons
 - Introduced workspace OAuth service for cloning encrypted tokens into workspace-level connections and emitting audit events.
 - Hardened workspace OAuth removal: `WorkspaceOAuthService::remove_connection` now enforces that only the connection creator can unshare a personal OAuth token, returning `403 Forbidden` when a different workspace admin attempts removal.
+- WorkspaceOAuthService now includes a purge helper plus unit tests so membership removals can revoke shared credentials, mark personal tokens unshared, and record audit events consistently.
+- WorkspaceOAuthService now receives `WorkspaceRepository` so it can call the new `is_member` check before decrypting shared credentials; `get_connection`, `promote_connection`, and removal flows enforce membership with new unit tests covering success and `403 Forbidden` cases.
+- Documented workspace membership invariants: all removal/leave/Solo-conversion flows in `workspace_service.rs` and `routes/workspaces.rs` must invoke the purge helper so shared workspace credentials disappear alongside the member, and every workspace token fetch (routes + engine actions via `engine/actions/mod.rs`) now performs a `workspace_repo.is_member` guard that surfaces a `403 Forbidden` before touching OAuth tokens when the actor is no longer a member.

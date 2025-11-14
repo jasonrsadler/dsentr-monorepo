@@ -224,7 +224,6 @@ impl OAuthAccountService {
             .repo
             .upsert_token(NewUserOAuthToken {
                 user_id,
-                workspace_id: None,
                 provider,
                 access_token: encrypted_access,
                 refresh_token: encrypted_refresh,
@@ -319,7 +318,6 @@ impl OAuthAccountService {
                 .repo
                 .upsert_token(NewUserOAuthToken {
                     user_id,
-                    workspace_id: None,
                     provider,
                     access_token: encrypted_access.clone(),
                     refresh_token: encrypted_refresh.clone(),
@@ -1165,6 +1163,14 @@ impl OAuthAccountService {
                 Ok(Vec::new())
             }
 
+            async fn list_by_workspace_creator(
+                &self,
+                _workspace_id: Uuid,
+                _creator_id: Uuid,
+            ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+                Ok(Vec::new())
+            }
+
             async fn update_tokens_for_creator(
                 &self,
                 _creator_id: Uuid,
@@ -1188,6 +1194,10 @@ impl OAuthAccountService {
             }
 
             async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
+            async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
                 Ok(())
             }
 
@@ -1440,6 +1450,14 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn list_by_workspace_creator(
+            &self,
+            _workspace_id: Uuid,
+            _creator_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            Ok(Vec::new())
+        }
+
         async fn update_tokens_for_creator(
             &self,
             _creator_id: Uuid,
@@ -1463,6 +1481,10 @@ mod tests {
         }
 
         async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
         }
 
@@ -1917,6 +1939,13 @@ mod tests {
         > {
             Ok(Vec::new())
         }
+        async fn list_by_workspace_creator(
+            &self,
+            _workspace_id: Uuid,
+            _creator_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            Ok(Vec::new())
+        }
 
         async fn update_tokens_for_creator(
             &self,
@@ -1941,6 +1970,9 @@ mod tests {
         }
 
         async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
         }
 

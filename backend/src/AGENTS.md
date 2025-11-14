@@ -26,3 +26,4 @@
   - Warn-logs when a referenced `connection_id` is missing.
   - Records a fallback run event with `connection_id = NULL` and `connection_type = "connection_missing"` to preserve audit ordering.
   - Avoids crashing the worker loop on these nonfatal persistence errors.
+- `main.rs` now passes the workspace repository into `WorkspaceOAuthService` (and the AppState test builders mirror it) so membership checks run before decrypting shared workspace OAuth tokens.

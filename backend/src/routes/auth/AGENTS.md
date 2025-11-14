@@ -25,3 +25,4 @@
 - Email/password login now returns the caller's workspace memberships so the frontend can hydrate the workspace switcher without requiring a hard refresh.
 
 - OAuth login without existing account now redirects users to `/signup?oauth=…` with provider/email hints. This ensures they accept the Terms of Service before account creation. The Signup page parses these params to prefill fields and display a friendly notice.
+- Signup tests now wire WorkspaceOAuthService with the workspace repository dependency so membership enforcement matches production when exercising invite and plan flows.

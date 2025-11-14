@@ -28,7 +28,6 @@ pub(crate) struct UserConnectionUsage {
 #[derive(Debug, Clone)]
 pub(crate) struct WorkspaceConnectionUsage {
     pub connection_id: Uuid,
-    pub account_email: Option<String>,
 }
 
 pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionUsage, String> {
@@ -77,7 +76,6 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
 
                 return Ok(NodeConnectionUsage::Workspace(WorkspaceConnectionUsage {
                     connection_id: parsed_id,
-                    account_email: account_email(),
                 }));
             }
             "user" => {
@@ -107,7 +105,6 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
 
                 return Ok(NodeConnectionUsage::Workspace(WorkspaceConnectionUsage {
                     connection_id: parsed_id,
-                    account_email: account_email(),
                 }));
             }
             "personal" | "user" => {
@@ -124,6 +121,26 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
         connection_id: legacy_connection_id,
         account_email: account_email(),
     }))
+}
+
+pub(crate) async fn ensure_run_membership(
+    state: &AppState,
+    workspace_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), String> {
+    let is_member = state
+        .workspace_repo
+        .is_member(workspace_id, user_id)
+        .await
+        .map_err(|err| format!("Failed to verify workspace membership: {err}"))?;
+
+    if !is_member {
+        return Err(
+            "Forbidden: you are no longer a member of this workspace. Ask an admin to re-invite you before using its shared connections.".to_string()
+        );
+    }
+
+    Ok(())
 }
 
 pub(crate) async fn execute_trigger(
@@ -458,7 +475,6 @@ mod tests {
         match usage {
             NodeConnectionUsage::Workspace(info) => {
                 assert_eq!(info.connection_id, connection_id);
-                assert_eq!(info.account_email.as_deref(), Some("workspace@example.com"));
             }
             other => panic!("expected workspace usage, got {:?}", other),
         }

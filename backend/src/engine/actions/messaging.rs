@@ -17,7 +17,7 @@ use tracing::{info, warn};
 use urlencoding::encode;
 use uuid::Uuid;
 
-use super::{resolve_connection_usage, NodeConnectionUsage};
+use super::{ensure_run_membership, resolve_connection_usage, NodeConnectionUsage};
 
 const DEFAULT_MICROSOFT_GRAPH_BASE_URL: &str = "https://graph.microsoft.com/v1.0";
 
@@ -170,6 +170,8 @@ async fn send_slack(
                 let workspace_id = run.workspace_id.ok_or_else(|| {
                     "This workflow run is not associated with a workspace. Promote the Slack connection to the workspace or switch the action back to a personal connection.".to_string()
                 })?;
+
+                ensure_run_membership(state, workspace_id, run.user_id).await?;
 
                 let connection = state
                     .workspace_oauth
@@ -1294,6 +1296,8 @@ async fn send_teams_delegated_oauth(
                 "This workflow run is not associated with a workspace. Promote the Microsoft connection to the workspace or switch the action back to a personal connection.".to_string()
             })?;
 
+            ensure_run_membership(state, workspace_id, run.user_id).await?;
+
             let connection = state
                 .workspace_oauth
                 .ensure_valid_workspace_token(workspace_id, info.connection_id)
@@ -1625,10 +1629,14 @@ mod tests {
         config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings},
         db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
         db::{
-            mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+            mock_db::{
+                MockDb, NoopWorkflowRepository, NoopWorkspaceRepository,
+                StaticWorkspaceMembershipRepository,
+            },
             workspace_connection_repository::{
                 NoopWorkspaceConnectionRepository, WorkspaceConnectionRepository,
             },
+            workspace_repository::WorkspaceRepository,
         },
         models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection},
         models::workflow_run::WorkflowRun,
@@ -1791,6 +1799,14 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn list_by_workspace_creator(
+            &self,
+            _workspace_id: Uuid,
+            _creator_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+            Ok(Vec::new())
+        }
+
         async fn update_tokens_for_creator(
             &self,
             _creator_id: Uuid,
@@ -1827,6 +1843,10 @@ mod tests {
             Ok(())
         }
 
+        async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
         async fn mark_connections_stale_for_creator(
             &self,
             _creator_id: Uuid,
@@ -1854,8 +1874,11 @@ mod tests {
         Arc<RecordingWorkspaceConnections>,
     ) {
         let repo = Arc::new(RecordingWorkspaceConnections::with_connection(connection));
+        let membership_repo: Arc<dyn WorkspaceRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::allowing());
         let service = Arc::new(WorkspaceOAuthService::new(
             Arc::new(NoopUserTokenRepo),
+            membership_repo,
             repo.clone(),
             OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
             key,
@@ -1992,11 +2015,12 @@ mod tests {
         oauth_accounts: Arc<OAuthAccountService>,
         workspace_oauth: Arc<WorkspaceOAuthService>,
         config: Arc<Config>,
+        workspace_repo: Arc<dyn WorkspaceRepository>,
     ) -> AppState {
         AppState {
             db: Arc::new(MockDb::default()),
             workflow_repo: Arc::new(NoopWorkflowRepository),
-            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_repo,
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
             db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
@@ -2013,12 +2037,13 @@ mod tests {
         }
     }
 
-    fn test_state() -> AppState {
+    fn test_state(workspace_repo: Arc<dyn WorkspaceRepository>) -> AppState {
         let config = test_config();
         build_state_with_oauth(
             OAuthAccountService::test_stub(),
             WorkspaceOAuthService::test_stub(),
             Arc::clone(&config),
+            workspace_repo,
         )
     }
 
@@ -2043,7 +2068,7 @@ mod tests {
         node: &Node,
         context: &Value,
     ) -> Result<(Value, Option<String>), String> {
-        let state = test_state();
+        let state = test_state(Arc::new(NoopWorkspaceRepository));
         let run = test_run();
         execute_messaging(node, context, &state, &run).await
     }
@@ -2328,6 +2353,7 @@ mod tests {
             oauth_accounts,
             WorkspaceOAuthService::test_stub(),
             Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
         );
         state.workspace_connection_repo = workspace_repo;
 
@@ -2410,7 +2436,12 @@ mod tests {
             workspace_oauth_with_connection(connection, Arc::clone(&encryption_key));
 
         let oauth_accounts = OAuthAccountService::test_stub();
-        let state = build_state_with_oauth(oauth_accounts, workspace_service, Arc::clone(&config));
+        let state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
+        );
 
         let mut run = test_run();
         run.workspace_id = Some(workspace_id);
@@ -2457,6 +2488,70 @@ mod tests {
 
         let calls = repo.find_calls();
         assert_eq!(calls, vec![connection_id]);
+    }
+
+    #[tokio::test]
+    async fn slack_workspace_connection_rejects_when_membership_revoked() {
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+
+        let connection = WorkspaceConnection {
+            id: connection_id,
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypt_secret(&encryption_key, "workspace-slack-access").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "workspace-slack-refresh").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "workspace@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let (workspace_service, repo) =
+            workspace_oauth_with_connection(connection, Arc::clone(&encryption_key));
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let workspace_repo: Arc<dyn WorkspaceRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::denying());
+        let state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            workspace_repo,
+        );
+
+        let mut run = test_run();
+        run.workspace_id = Some(workspace_id);
+
+        let node = Node {
+            id: "slack-workspace-forbidden".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Slack",
+                    "channel": "#team",
+                    "message": "Hello workspace",
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": connection_id,
+                        "accountEmail": "workspace@example.com"
+                    }
+                }
+            }),
+        };
+
+        let err = execute_messaging(&node, &Value::Null, &state, &run)
+            .await
+            .expect_err("revoked members should be blocked from workspace Slack tokens");
+
+        assert!(err.contains("Forbidden"));
+        assert!(
+            repo.find_calls().is_empty(),
+            "workspace OAuth should not be queried when membership fails"
+        );
     }
 
     #[tokio::test]
@@ -3057,6 +3152,7 @@ mod tests {
             oauth_accounts,
             WorkspaceOAuthService::test_stub(),
             Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
         );
         state.workspace_connection_repo = workspace_repo;
         let mut run = test_run();
@@ -3187,6 +3283,7 @@ mod tests {
             oauth_accounts,
             WorkspaceOAuthService::test_stub(),
             Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
         );
         state.workspace_connection_repo = workspace_repo;
         let mut run = test_run();
@@ -3389,7 +3486,7 @@ mod tests {
             }),
         };
 
-        let state = test_state();
+        let state = test_state(Arc::new(NoopWorkspaceRepository));
         let run = test_run();
 
         let err = execute_messaging(&node, &Value::Null, &state, &run)
@@ -3421,7 +3518,7 @@ mod tests {
             }),
         };
 
-        let state = test_state();
+        let state = test_state(Arc::new(NoopWorkspaceRepository));
         let mut run = test_run();
         run.workspace_id = Some(Uuid::new_v4());
 
@@ -3473,7 +3570,12 @@ mod tests {
             workspace_oauth_with_connection(connection, Arc::clone(&encryption_key));
 
         let oauth_accounts = OAuthAccountService::test_stub();
-        let state = build_state_with_oauth(oauth_accounts, workspace_service, Arc::clone(&config));
+        let state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
+        );
 
         let mut run = test_run();
         run.workspace_id = Some(workspace_id);
@@ -3521,6 +3623,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn teams_workspace_connection_rejects_when_membership_revoked() {
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let workspace_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+
+        let connection = WorkspaceConnection {
+            id: connection_id,
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            provider: ConnectedOAuthProvider::Microsoft,
+            access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "workspace@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let (workspace_service, repo) =
+            workspace_oauth_with_connection(connection, Arc::clone(&encryption_key));
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let workspace_repo: Arc<dyn WorkspaceRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::denying());
+        let state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            workspace_repo,
+        );
+
+        let mut run = test_run();
+        run.workspace_id = Some(workspace_id);
+
+        let node = Node {
+            id: "teams-workspace-forbidden".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Teams",
+                    "deliveryMethod": "Delegated OAuth (Post as user)",
+                    "oauthProvider": "microsoft",
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": connection_id,
+                        "accountEmail": "workspace@example.com"
+                    },
+                    "teamId": "team-1",
+                    "channelId": "channel-1",
+                    "messageType": "Text",
+                    "message": "Hello"
+                }
+            }),
+        };
+
+        let err = execute_messaging(&node, &Value::Null, &state, &run)
+            .await
+            .expect_err("revoked members should not use workspace Teams tokens");
+
+        assert!(err.contains("Forbidden"));
+        assert!(
+            repo.find_calls().is_empty(),
+            "workspace OAuth lookup should be skipped when membership check fails"
+        );
+    }
+
+    #[tokio::test]
     async fn teams_workspace_connection_workspace_mismatch_surfaces_message() {
         let config = test_config();
         let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
@@ -3545,7 +3715,12 @@ mod tests {
             workspace_oauth_with_connection(connection, Arc::clone(&encryption_key));
 
         let oauth_accounts = OAuthAccountService::test_stub();
-        let state = build_state_with_oauth(oauth_accounts, workspace_service, Arc::clone(&config));
+        let state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
+        );
 
         let mut run = test_run();
         run.workspace_id = Some(workspace_id);
