@@ -1,4 +1,4 @@
-mod actions;
+pub mod actions;
 mod executor;
 pub(crate) mod graph;
 mod templating;

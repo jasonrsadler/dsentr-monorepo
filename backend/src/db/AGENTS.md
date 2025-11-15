@@ -31,3 +31,4 @@
 - Workspace connection repositories now expose `list_by_workspace_creator` and `delete_by_id` so membership removals can enumerate a user's shared connections and delete them safely during cleanup flows.
 - Added `WorkspaceRepository::is_member` (with Postgres + Noop implementations) so workspace OAuth flows can check `workspace_members` directly before exposing or decrypting shared credentials.
 - Introduced `StaticWorkspaceMembershipRepository` in `mock_db.rs` so tests can flip `is_member` between allowed/denied states without rebuilding the entire trait surface, enabling engine, route, and service tests to assert `403 Forbidden` gating logic deterministically.
+- Workspace repositories now expose a normalized `get_plan` helper (Postgres + mock implementations) returning the shared `PlanTier`, allowing services/tests to gate workspace-only features without probing route modules.

@@ -485,6 +485,7 @@ mod tests {
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
     use crate::db::workspace_repository::WorkspaceRepository;
+    use crate::models::plan::PlanTier;
     use crate::models::user::{OauthProvider, User, UserRole};
     use crate::models::workspace::{
         Workspace, WorkspaceMember, WorkspaceMembershipSummary, WorkspaceRole,
@@ -492,7 +493,7 @@ mod tests {
     use crate::services::smtp_mailer::MockMailer;
     use crate::services::stripe::MockStripeService;
     use crate::state::{test_pg_pool, AppState};
-    use crate::utils::jwt::JwtKeys;
+    use crate::utils::{jwt::JwtKeys, plan_limits::NormalizedPlanTier};
     use axum::extract::State as AxumState;
     use axum::http::{HeaderMap, HeaderValue};
     use reqwest::Client;
@@ -603,6 +604,17 @@ mod tests {
                     .push((workspace_id, plan.to_string()));
                 Ok(ws)
             }
+        }
+
+        async fn get_plan(&self, workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
+            let list = self.workspaces.lock().unwrap();
+            let plan = list
+                .iter()
+                .find(|workspace| workspace.id == workspace_id)
+                .map(|workspace| workspace.plan.clone())
+                .ok_or(sqlx::Error::RowNotFound)?;
+            let normalized = NormalizedPlanTier::from_option(Some(plan.as_str()));
+            Ok(PlanTier::from(normalized))
         }
 
         async fn find_workspace(

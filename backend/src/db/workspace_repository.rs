@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
+use crate::models::{
+    plan::PlanTier,
+    workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole},
+};
 
 #[async_trait]
 pub trait WorkspaceRepository: Send + Sync {
@@ -25,6 +28,9 @@ pub trait WorkspaceRepository: Send + Sync {
         workspace_id: Uuid,
         plan: &str,
     ) -> Result<Workspace, sqlx::Error>;
+
+    #[allow(dead_code)]
+    async fn get_plan(&self, workspace_id: Uuid) -> Result<PlanTier, sqlx::Error>;
 
     #[allow(dead_code)]
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error>;

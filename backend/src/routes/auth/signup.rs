@@ -234,6 +234,7 @@ mod tests {
             workspace_repository::WorkspaceRepository,
         },
         models::{
+            plan::PlanTier,
             signup::{SignupInviteDecision, SignupPayload},
             user::{OauthProvider, PublicUser, User, UserRole},
             workspace::{
@@ -250,7 +251,7 @@ mod tests {
             smtp_mailer::{Mailer, MockMailer},
         },
         state::{test_pg_pool, AppState},
-        utils::jwt::JwtKeys,
+        utils::{jwt::JwtKeys, plan_limits::NormalizedPlanTier},
     };
     use reqwest::Client;
 
@@ -628,6 +629,17 @@ mod tests {
                 updated_at: OffsetDateTime::now_utc(),
                 deleted_at: None,
             })
+        }
+
+        async fn get_plan(&self, workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
+            let created = self.created.lock().unwrap();
+            let plan = created
+                .iter()
+                .find(|workspace| workspace.id == workspace_id)
+                .map(|workspace| workspace.plan.clone())
+                .ok_or(sqlx::Error::RowNotFound)?;
+            let normalized = NormalizedPlanTier::from_option(Some(plan.as_str()));
+            Ok(PlanTier::from(normalized))
         }
 
         async fn find_workspace(

@@ -14,9 +14,12 @@ use crate::models::workflow_node_run::WorkflowNodeRun;
 use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_run_event::{NewWorkflowRunEvent, WorkflowRunEvent};
 use crate::models::workflow_schedule::WorkflowSchedule;
-use crate::models::workspace::{
-    Workspace, WorkspaceMembershipSummary, WorkspaceRole, INVITATION_STATUS_PENDING,
-    WORKSPACE_PLAN_TEAM,
+use crate::models::{
+    plan::PlanTier,
+    workspace::{
+        Workspace, WorkspaceMembershipSummary, WorkspaceRole, INVITATION_STATUS_PENDING,
+        WORKSPACE_PLAN_TEAM,
+    },
 };
 use serde_json::Value;
 
@@ -834,6 +837,10 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         })
     }
 
+    async fn get_plan(&self, _workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
+        Ok(PlanTier::Workspace)
+    }
+
     async fn find_workspace(&self, _workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
         Ok(None)
     }
@@ -987,6 +994,10 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
         plan: &str,
     ) -> Result<Workspace, sqlx::Error> {
         self.inner.update_workspace_plan(workspace_id, plan).await
+    }
+
+    async fn get_plan(&self, workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
+        self.inner.get_plan(workspace_id).await
     }
 
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {

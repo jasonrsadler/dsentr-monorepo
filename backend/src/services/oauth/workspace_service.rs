@@ -673,6 +673,7 @@ mod tests {
 
     use crate::db::oauth_token_repository::NewUserOAuthToken;
     use crate::db::workspace_repository::WorkspaceRepository;
+    use crate::models::plan::PlanTier;
     use crate::models::workspace::{
         Workspace, WorkspaceInvitation, WorkspaceMember, WorkspaceMembershipSummary, WorkspaceRole,
     };
@@ -721,6 +722,10 @@ mod tests {
             _plan: &str,
         ) -> Result<Workspace, sqlx::Error> {
             unimplemented!()
+        }
+
+        async fn get_plan(&self, _workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
+            Ok(PlanTier::Workspace)
         }
 
         async fn find_workspace(

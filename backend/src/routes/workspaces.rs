@@ -13,8 +13,10 @@ use urlencoding::encode;
 use uuid::Uuid;
 
 use crate::{
+    engine::actions::ensure_workspace_plan,
     models::oauth_token::ConnectedOAuthProvider,
     models::{
+        plan::PlanTier,
         user::PublicUser,
         workflow::Workflow,
         workspace::{
@@ -31,22 +33,6 @@ use crate::{
         secrets::{collect_secret_identifiers, read_secret_store, SecretIdentifier},
     },
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PlanTier {
-    Solo,
-    Workspace,
-}
-
-impl PlanTier {
-    fn as_str(&self) -> &'static str {
-        match self {
-            PlanTier::Solo => "solo",
-            PlanTier::Workspace => "workspace",
-        }
-    }
-}
 
 #[derive(Debug, Serialize, Clone)]
 struct PlanOption {
@@ -1032,6 +1018,12 @@ pub async fn list_workspace_secret_ownership(
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
+    // Premium gate
+    if let Err(msg) = ensure_workspace_plan(&app_state, workspace_id).await {
+        return JsonResponse::forbidden(&msg).into_response();
+    }
+
+    // Admin check
     if let Err(resp) = ensure_workspace_admin(&app_state, user_id, workspace_id).await {
         return resp;
     }
@@ -2026,6 +2018,7 @@ mod tests {
             ConnectedOAuthProvider, UserOAuthToken, WorkspaceAuditEvent, WorkspaceConnection,
             WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED, WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED,
         },
+        plan::PlanTier,
         user::{OauthProvider, User, UserRole},
         workspace::{
             Workspace, WorkspaceInvitation, WorkspaceMember, WorkspaceMembershipSummary,
@@ -2046,7 +2039,7 @@ mod tests {
         smtp_mailer::{MailError, Mailer, MockMailer, SmtpConfig},
     };
     use crate::state::{test_pg_pool, AppState};
-    use crate::utils::{encryption::encrypt_secret, jwt::JwtKeys};
+    use crate::utils::{encryption::encrypt_secret, jwt::JwtKeys, plan_limits::NormalizedPlanTier};
     use async_trait::async_trait;
     use axum::{
         body::to_bytes,
@@ -2552,6 +2545,17 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
+        async fn get_plan(&self, workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
+            let stored = self.workspace.lock().unwrap();
+            let workspace = stored
+                .as_ref()
+                .filter(|ws| ws.id == workspace_id)
+                .cloned()
+                .ok_or(sqlx::Error::RowNotFound)?;
+            let normalized = NormalizedPlanTier::from_option(Some(workspace.plan.as_str()));
+            Ok(PlanTier::from(normalized))
+        }
+
         async fn find_workspace(
             &self,
             workspace_id: Uuid,
@@ -2836,6 +2840,16 @@ mod tests {
                 return Ok(ws.clone());
             }
             Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn get_plan(&self, workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
+            let workspaces = self.workspaces.lock().unwrap();
+            let workspace = workspaces
+                .get(&workspace_id)
+                .cloned()
+                .ok_or(sqlx::Error::RowNotFound)?;
+            let normalized = NormalizedPlanTier::from_option(Some(workspace.plan.as_str()));
+            Ok(PlanTier::from(normalized))
         }
 
         async fn find_workspace(
@@ -3236,7 +3250,7 @@ mod tests {
             name: "Team".into(),
             created_by: user_id,
             owner_id: user_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3331,7 +3345,7 @@ mod tests {
             name: "Team".into(),
             created_by: user_id,
             owner_id: user_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3402,7 +3416,7 @@ mod tests {
             name: "Team".into(),
             created_by: user_id,
             owner_id: user_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3460,7 +3474,7 @@ mod tests {
             name: "Team".into(),
             created_by: user_id,
             owner_id: user_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3561,7 +3575,7 @@ mod tests {
             name: "Team".into(),
             created_by: owner_id,
             owner_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3662,7 +3676,7 @@ mod tests {
             name: "Team".into(),
             created_by: user_id,
             owner_id: user_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3746,7 +3760,7 @@ mod tests {
             name: "Growth Team".into(),
             created_by: invite.created_by,
             owner_id: invite.created_by,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3794,7 +3808,7 @@ mod tests {
             name: "Growth Team".into(),
             created_by: invite.created_by,
             owner_id: invite.created_by,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3877,7 +3891,7 @@ mod tests {
             name: "Solo Space".into(),
             created_by: user_id,
             owner_id: user_id,
-            plan: super::PlanTier::Solo.as_str().to_string(),
+            plan: PlanTier::Solo.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3916,7 +3930,7 @@ mod tests {
 
         let claims = claims_fixture(user_id, "owner@example.com");
         let payload = CompleteOnboardingPayload {
-            plan_tier: super::PlanTier::Workspace,
+            plan_tier: PlanTier::Workspace,
             workspace_name: Some("Team Workspace".into()),
             shared_workflow_ids: Vec::new(),
         };
@@ -3985,7 +3999,7 @@ mod tests {
 
         let claims = claims_fixture(user_id, "owner@example.com");
         let payload = CompleteOnboardingPayload {
-            plan_tier: super::PlanTier::Workspace,
+            plan_tier: PlanTier::Workspace,
             workspace_name: Some("My Team".into()),
             shared_workflow_ids: Vec::new(),
         };
@@ -4041,7 +4055,7 @@ mod tests {
         );
 
         let payload = CompleteOnboardingPayload {
-            plan_tier: super::PlanTier::Solo,
+            plan_tier: PlanTier::Solo,
             workspace_name: Some("Personal Sandbox".into()),
             shared_workflow_ids: Vec::new(),
         };
@@ -4061,10 +4075,7 @@ mod tests {
         assert_eq!(memberships.len(), 1);
         assert_eq!(memberships[0].role, WorkspaceRole::Owner);
         assert_eq!(memberships[0].workspace.owner_id, user_id);
-        assert_eq!(
-            memberships[0].workspace.plan,
-            super::PlanTier::Solo.as_str()
-        );
+        assert_eq!(memberships[0].workspace.plan, PlanTier::Solo.as_str());
     }
 
     #[tokio::test]
@@ -4078,7 +4089,7 @@ mod tests {
             name: "Personal Automations".into(),
             created_by: user_id,
             owner_id: user_id,
-            plan: super::PlanTier::Solo.as_str().to_string(),
+            plan: PlanTier::Solo.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4122,7 +4133,7 @@ mod tests {
         );
 
         let payload = CompleteOnboardingPayload {
-            plan_tier: super::PlanTier::Solo,
+            plan_tier: PlanTier::Solo,
             workspace_name: None,
             shared_workflow_ids: Vec::new(),
         };
@@ -4153,7 +4164,7 @@ mod tests {
             name: "Team Space".into(),
             created_by: user_id,
             owner_id: user_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4176,7 +4187,7 @@ mod tests {
 
         let claims = claims_fixture(user_id, "owner@example.com");
         let payload = CompleteOnboardingPayload {
-            plan_tier: super::PlanTier::Solo,
+            plan_tier: PlanTier::Solo,
             workspace_name: None,
             shared_workflow_ids: Vec::new(),
         };
@@ -4196,12 +4207,12 @@ mod tests {
             .and_then(|plan| plan.as_str())
             .unwrap_or_default();
 
-        assert_eq!(returned_plan, super::PlanTier::Solo.as_str());
+        assert_eq!(returned_plan, PlanTier::Solo.as_str());
 
         let stored_plan = repo
             .workspace_plan(workspace_id)
             .expect("workspace plan should be recorded");
-        assert_eq!(stored_plan, super::PlanTier::Solo.as_str());
+        assert_eq!(stored_plan, PlanTier::Solo.as_str());
     }
 
     #[tokio::test]
@@ -4251,7 +4262,7 @@ mod tests {
             name: "Team Workspace".into(),
             created_by: owner_id,
             owner_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4329,7 +4340,7 @@ mod tests {
             name: "Shared Automation".into(),
             created_by: owner_id,
             owner_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4409,7 +4420,7 @@ mod tests {
             name: "Growth".into(),
             created_by: owner_id,
             owner_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4474,7 +4485,7 @@ mod tests {
             name: "Growth Team".into(),
             created_by: owner_id,
             owner_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4557,7 +4568,7 @@ mod tests {
             name: "Growth Space".into(),
             created_by: owner_id,
             owner_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4622,7 +4633,7 @@ mod tests {
             name: "Growth Team".into(),
             created_by: owner_id,
             owner_id,
-            plan: super::PlanTier::Workspace.as_str().to_string(),
+            plan: PlanTier::Workspace.as_str().to_string(),
             created_at: now,
             updated_at: now,
             deleted_at: None,

@@ -129,6 +129,7 @@ pub(crate) async fn execute_sheets(
             })?;
 
             super::ensure_run_membership(state, workspace_id, run.user_id).await?;
+            super::ensure_workspace_plan(state, workspace_id).await?;
 
             let connection = state
                 .workspace_oauth

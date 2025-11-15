@@ -17,6 +17,7 @@ use crate::db::{
     workspace_repository::WorkspaceRepository,
 };
 use crate::models::oauth_token::{UserOAuthToken, WorkspaceAuditEvent, WorkspaceConnection};
+use crate::models::plan::PlanTier;
 use crate::models::user::UserRole;
 use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
 use crate::routes::auth::{
@@ -1130,6 +1131,10 @@ impl WorkspaceRepository for MembershipWorkspaceRepo {
         _plan: &str,
     ) -> Result<Workspace, Error> {
         unimplemented!()
+    }
+
+    async fn get_plan(&self, _workspace_id: Uuid) -> Result<PlanTier, Error> {
+        Ok(PlanTier::Workspace)
     }
 
     async fn find_workspace(&self, _workspace_id: Uuid) -> Result<Option<Workspace>, Error> {

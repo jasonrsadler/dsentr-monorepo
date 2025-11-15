@@ -21,6 +21,9 @@ use crate::services::oauth::account_service::StoredOAuthToken;
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
 use crate::state::AppState;
 
+use crate::engine::actions::ensure_run_membership;
+use crate::engine::actions::ensure_workspace_plan;
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ConnectionQuery {
@@ -175,16 +178,68 @@ pub async fn list_channel_members(
     Path((team_id, channel_id)): Path<(String, String)>,
     Query(query): Query<ConnectionQuery>,
 ) -> Response {
+    // Parse user
     let user_id = match parse_user_id(&claims) {
         Ok(id) => id,
         Err(resp) => return resp,
     };
 
+    // Reject personal-scope usage entirely
+    if let Some(scope) = &query.scope {
+        if scope.trim().eq_ignore_ascii_case("user") {
+            return JsonResponse::forbidden("Teams is only available on the Workspace plan")
+                .into_response();
+        }
+    }
+
+    // Workspace scope is required
+    let workspace_conn_id = match (&query.scope, &query.connection_id) {
+        (Some(scope), Some(conn_id)) if scope.trim().eq_ignore_ascii_case("workspace") => conn_id,
+        _ => {
+            return JsonResponse::bad_request(
+                "Workspace connection scope and connection_id are required for Teams",
+            )
+            .into_response();
+        }
+    };
+
+    // Resolve workspace_id from OAuth connection
+    let connection = match state
+        .workspace_oauth
+        .get_connection(
+            user_id,
+            *workspace_conn_id,
+            ConnectedOAuthProvider::Microsoft,
+        )
+        .await
+    {
+        Ok(conn) => conn,
+        Err(_) => {
+            return JsonResponse::forbidden(
+                "Teams connection not found or not allowed for this workspace",
+            )
+            .into_response();
+        }
+    };
+
+    let workspace_id = connection.workspace_id;
+
+    // Ensure plan and membership
+    if let Err(msg) = ensure_workspace_plan(&state, workspace_id).await {
+        return JsonResponse::forbidden(&msg).into_response();
+    }
+
+    if let Err(msg) = ensure_run_membership(&state, workspace_id, user_id).await {
+        return JsonResponse::forbidden(&msg).into_response();
+    };
+
+    // Now fetch the token the old way
     let token = match ensure_microsoft_token(&state, user_id, &query).await {
         Ok(token) => token,
         Err(resp) => return resp,
     };
 
+    // Validate inputs
     let trimmed_team = team_id.trim();
     if trimmed_team.is_empty() {
         return JsonResponse::bad_request("Team ID is required").into_response();

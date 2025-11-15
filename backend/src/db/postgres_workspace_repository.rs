@@ -3,8 +3,12 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::models::workspace::{
-    Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole,
+use crate::{
+    models::{
+        plan::PlanTier,
+        workspace::{Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole},
+    },
+    utils::plan_limits::NormalizedPlanTier,
 };
 
 use super::workspace_repository::WorkspaceRepository;
@@ -96,6 +100,22 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         )
         .fetch_one(&self.pool)
         .await
+    }
+
+    async fn get_plan(&self, workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
+        let record = sqlx::query!(
+            r#"
+            SELECT plan
+            FROM workspaces
+            WHERE id = $1
+            "#,
+            workspace_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let normalized = NormalizedPlanTier::from_option(Some(record.plan.as_str()));
+        Ok(PlanTier::from(normalized))
     }
 
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {

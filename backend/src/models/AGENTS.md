@@ -25,3 +25,4 @@
 
 ## Change Reasons
 - Documented workspace connection models and shared token flag for OAuth promotion flows.
+- Added a shared `plan` module that exposes the `PlanTier` enum so repositories and services can reason about plan tiers without depending on route-layer definitions.

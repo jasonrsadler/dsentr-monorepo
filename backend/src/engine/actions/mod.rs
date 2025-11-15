@@ -143,6 +143,22 @@ pub(crate) async fn ensure_run_membership(
     Ok(())
 }
 
+pub async fn ensure_workspace_plan(state: &AppState, workspace_id: Uuid) -> Result<(), String> {
+    // Query the workspace plan tier from the repository
+    let plan = state
+        .workspace_repo
+        .get_plan(workspace_id)
+        .await
+        .map_err(|err| format!("Failed to verify workspace plan: {err}"))?;
+
+    // Only the Workspace tier is allowed for workspace-scoped OAuth actions
+    if !matches!(plan, crate::models::plan::PlanTier::Workspace) {
+        return Err("Forbidden: This feature requires the Workspace plan.".to_string());
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn execute_trigger(
     node: &Node,
     context: &Value,
