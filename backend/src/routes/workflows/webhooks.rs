@@ -105,6 +105,22 @@ pub async fn webhook_trigger(
         return JsonResponse::unauthorized("Invalid token").into_response();
     }
 
+    let workspace_id = match wf.workspace_id {
+        Some(id) => id,
+        None => return JsonResponse::not_found("Workflow not in a workspace").into_response(),
+    };
+
+    let workspace = match app_state.workspace_repo.find_workspace(workspace_id).await {
+        Ok(Some(ws)) => ws,
+        _ => return JsonResponse::not_found("Workspace not found").into_response(),
+    };
+
+    // Runtime premium gating. Stop everything before touching HMAC logic.
+    if workspace.plan == "solo" && wf.require_hmac {
+        return JsonResponse::forbidden("Webhook signing requires the Workspace plan.")
+            .into_response();
+    }
+
     if wf.require_hmac {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let signing_key_b64 =
@@ -373,11 +389,13 @@ pub async fn regenerate_webhook_signing_key(
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
 ) -> Response {
+    // Parse user_id from claims
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
+    // Load workflow (scoped to user)
     let wf = match app_state
         .workflow_repo
         .find_workflow_by_id(user_id, workflow_id)
@@ -391,6 +409,24 @@ pub async fn regenerate_webhook_signing_key(
         }
     };
 
+    let workspace_id = match wf.workspace_id {
+        Some(id) => id,
+        None => return JsonResponse::not_found("Workflow not in a workspace").into_response(),
+    };
+
+    // Load workspace to check plan tier
+    let workspace = match app_state.workspace_repo.find_workspace(workspace_id).await {
+        Ok(Some(ws)) => ws,
+        _ => return JsonResponse::not_found("Workspace not found").into_response(),
+    };
+
+    // Premium gating: Solo users cannot regenerate signing keys
+    if workspace.plan == "solo" {
+        return JsonResponse::forbidden("Webhook signing requires the Workspace plan.")
+            .into_response();
+    }
+
+    // Generate a new salt and persist it
     let new_salt = match app_state
         .workflow_repo
         .rotate_webhook_salt(user_id, workflow_id)
@@ -404,13 +440,16 @@ pub async fn regenerate_webhook_signing_key(
         }
     };
 
+    // Load signing secret from config
     let secret = match webhook_secret(app_state.config.as_ref()) {
         Some(secret) => secret,
         None => return missing_webhook_secret_response(),
     };
 
+    // Compute new token + signing key
     let url_token = compute_webhook_token(&secret, wf.user_id, wf.id, new_salt);
     let signing_key = compute_webhook_signing_key(&secret, wf.user_id, wf.id, new_salt);
+
     let url = format!("/api/workflows/{}/trigger/{}", wf.id, url_token);
 
     (

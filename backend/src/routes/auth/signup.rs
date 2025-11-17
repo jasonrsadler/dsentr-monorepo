@@ -784,6 +784,13 @@ mod tests {
         ) -> Result<Vec<WorkspaceInvitation>, sqlx::Error> {
             Ok(vec![])
         }
+
+        async fn disable_webhook_signing_for_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
     }
     fn test_payload() -> SignupPayload {
         SignupPayload {

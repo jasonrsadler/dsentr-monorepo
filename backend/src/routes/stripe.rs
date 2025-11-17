@@ -69,6 +69,14 @@ fn extract_failure_message(event: &serde_json::Value) -> Option<String> {
     None
 }
 
+fn extract_bool(root: &serde_json::Value, path: &[&str]) -> Option<bool> {
+    let mut current = root;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    current.as_bool()
+}
+
 // POST /api/stripe/webhook
 pub async fn webhook(
     State(app_state): State<AppState>,
@@ -342,7 +350,6 @@ pub async fn webhook(
 
         // Handle failure-style events: payment intent failure, invoice failure, async failure/expired
         "payment_intent.payment_failed"
-        | "invoice.payment_failed"
         | "checkout.session.async_payment_failed"
         | "checkout.session.expired" => {
             let mut user_id: Option<Uuid> = None;
@@ -450,12 +457,33 @@ pub async fn webhook(
                     for m in memberships.into_iter().filter(|m| {
                         m.workspace.owner_id == uid && m.workspace.plan.as_str() != "solo"
                     }) {
+                        let wid = m.workspace.id;
+
                         if let Err(err) = app_state
                             .workspace_repo
-                            .update_workspace_plan(m.workspace.id, "solo")
+                            .update_workspace_plan(wid, "solo")
                             .await
                         {
-                            warn!(?err, workspace_id=%m.workspace.id, %uid, "failed to downgrade workspace to solo on subscription deletion");
+                            warn!(
+                                ?err,
+                                workspace_id=%wid,
+                                %uid,
+                                "failed to downgrade workspace to solo on subscription deletion"
+                            );
+                            continue;
+                        }
+
+                        if let Err(err) = app_state
+                            .workspace_repo
+                            .disable_webhook_signing_for_workspace(wid)
+                            .await
+                        {
+                            warn!(
+                                ?err,
+                                workspace_id=%wid,
+                                %uid,
+                                "failed to disable webhook signing on subscription deletion"
+                            );
                         }
                     }
                 }
@@ -470,7 +498,159 @@ pub async fn webhook(
 
             Json(serde_json::json!({ "received": true })).into_response()
         }
+        "customer.subscription.updated" => {
+            // Resolve user by customer id
+            let mut user_id: Option<Uuid> = None;
+            if let Some(customer_id) = extract_customer_id(payload) {
+                match app_state
+                    .db
+                    .find_user_id_by_stripe_customer_id(&customer_id)
+                    .await
+                {
+                    Ok(opt) => user_id = opt,
+                    Err(err) => error!(
+                        ?err,
+                        customer_id,
+                        "failed to map stripe customer to user for subscription update"
+                    ),
+                }
+            }
 
+            if let Some(uid) = user_id {
+                // status and cancel_at_period_end from payload
+                let status =
+                    extract_str(payload, &["data", "object", "status"]).unwrap_or("unknown");
+
+                let cancel_at_period_end =
+                    extract_bool(payload, &["data", "object", "cancel_at_period_end"])
+                        .unwrap_or(false);
+
+                match (status, cancel_at_period_end) {
+                    // cancel at period end: keep Workspace until sub.deleted
+                    ("active", true) | ("canceled", true) => {
+                        info!(
+                            %uid,
+                            status,
+                            "subscription marked to cancel at period end; no immediate downgrade"
+                        );
+                    }
+
+                    // immediate cancel: downgrade now
+                    ("canceled", false) => {
+                        info!(
+                            %uid,
+                            "subscription canceled immediately; downgrading workspaces to solo"
+                        );
+
+                        if let Err(err) = app_state.db.update_user_plan(uid, "solo").await {
+                            warn!(
+                                ?err,
+                                %uid,
+                                "failed to set user plan to solo on immediate cancellation"
+                            );
+                        }
+
+                        if let Ok(memberships) = app_state
+                            .workspace_repo
+                            .list_memberships_for_user(uid)
+                            .await
+                        {
+                            for m in memberships.into_iter().filter(|m| {
+                                m.workspace.owner_id == uid && m.workspace.plan.as_str() != "solo"
+                            }) {
+                                let wid = m.workspace.id;
+
+                                if let Err(err) = app_state
+                                    .workspace_repo
+                                    .update_workspace_plan(wid, "solo")
+                                    .await
+                                {
+                                    warn!(
+                                        ?err,
+                                        workspace_id=%wid,
+                                        %uid,
+                                        "failed to downgrade workspace to solo on immediate cancellation"
+                                    );
+                                    continue;
+                                }
+
+                                if let Err(err) = app_state
+                                    .workspace_repo
+                                    .disable_webhook_signing_for_workspace(wid)
+                                    .await
+                                {
+                                    warn!(
+                                        ?err,
+                                        workspace_id=%wid,
+                                        %uid,
+                                        "failed to disable webhook signing on immediate cancellation"
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    _ => {
+                        info!(
+                            %uid,
+                            status,
+                            "subscription updated; no downgrade action taken"
+                        );
+                    }
+                }
+            } else {
+                warn!(
+                    evt_type,
+                    "subscription update received but user not identified"
+                );
+            }
+
+            Json(serde_json::json!({ "received": true })).into_response()
+        }
+        "invoice.payment_failed" => {
+            // Resolve user from customer ID
+            let mut user_id: Option<Uuid> = None;
+            if let Some(customer_id) = extract_customer_id(payload) {
+                match app_state
+                    .db
+                    .find_user_id_by_stripe_customer_id(&customer_id)
+                    .await
+                {
+                    Ok(opt) => user_id = opt,
+                    Err(err) => error!(?err, customer_id, "failed to map stripe customer to user"),
+                }
+            }
+
+            if let Some(uid) = user_id {
+                let msg = extract_failure_message(payload).unwrap_or_else(|| {
+                    "Payment failed. Please update your card or try again.".to_string()
+                });
+
+                // Restore old behavior: clear pending checkout + record error
+                if let Err(err) = app_state
+                    .db
+                    .clear_pending_checkout_with_error(uid, &msg)
+                    .await
+                {
+                    error!(?err, %uid, "failed to record checkout failure in settings");
+                }
+
+                // DO NOT downgrade immediately. Renewal failure enters grace period.
+                warn!(
+                    %uid,
+                    evt_type,
+                    "invoice payment failed for renewal; not downgrading (grace period active)"
+                );
+
+                Json(serde_json::json!({ "received": true })).into_response()
+            } else {
+                warn!(
+                    evt_type,
+                    "invoice payment failed but user could not be resolved"
+                );
+                Json(serde_json::json!({ "received": true })).into_response()
+            }
+        }
         // Other events acknowledged to avoid retries; primary logic handled above.
         _ => {
             info!(evt_type, "unhandled stripe event acknowledged");
@@ -732,6 +912,13 @@ mod tests {
             _email: &str,
         ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
             Ok(vec![])
+        }
+
+        async fn disable_webhook_signing_for_workspace(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
         }
     }
 
@@ -1118,8 +1305,10 @@ mod tests {
         );
 
         // Personal plan rolled back and any owned workspace downgraded
-        assert_eq!(*db.update_user_plan_calls.lock().unwrap(), 1);
+        // update: grace period in effect on failure so no immediate downgrade
+        assert_eq!(*db.update_user_plan_calls.lock().unwrap(), 0);
         // At least one workspace plan update recorded
-        assert!(!workspace_repo.plan_updates.lock().unwrap().is_empty());
+        // update: grace period DOES NOT update the plan right away
+        assert!(workspace_repo.plan_updates.lock().unwrap().is_empty());
     }
 }

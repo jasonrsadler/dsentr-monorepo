@@ -967,6 +967,13 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
     ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
         Ok(vec![])
     }
+
+    async fn disable_webhook_signing_for_workspace(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1114,5 +1121,12 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
         email: &str,
     ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error> {
         self.inner.list_pending_invitations_for_email(email).await
+    }
+
+    async fn disable_webhook_signing_for_workspace(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
     }
 }

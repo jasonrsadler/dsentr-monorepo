@@ -109,4 +109,9 @@ pub trait WorkspaceRepository: Send + Sync {
         &self,
         email: &str,
     ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, sqlx::Error>;
+
+    async fn disable_webhook_signing_for_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<(), sqlx::Error>;
 }

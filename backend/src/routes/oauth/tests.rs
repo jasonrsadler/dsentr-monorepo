@@ -1248,6 +1248,13 @@ impl WorkspaceRepository for MembershipWorkspaceRepo {
     ) -> Result<Vec<crate::models::workspace::WorkspaceInvitation>, Error> {
         unimplemented!()
     }
+
+    async fn disable_webhook_signing_for_workspace(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 }
 
 fn stub_claims() -> Claims {

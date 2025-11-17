@@ -537,4 +537,22 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .fetch_all(&self.pool)
         .await
     }
+
+    async fn disable_webhook_signing_for_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE workflows
+            SET require_hmac = false
+            WHERE workspace_id = $1
+            "#,
+            workspace_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
 }
