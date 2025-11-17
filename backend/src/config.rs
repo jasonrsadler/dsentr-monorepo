@@ -64,7 +64,7 @@ impl Config {
             .unwrap_or(false);
 
         if !dotenv_disabled {
-            dotenv::dotenv().ok();
+            dotenvy::dotenv().ok();
         }
 
         fn require_env(name: &'static str) -> Result<String, ConfigError> {

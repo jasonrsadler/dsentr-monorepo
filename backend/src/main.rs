@@ -70,7 +70,6 @@ use services::oauth::google::client::GoogleOAuthClient;
 use services::oauth::workspace_service::{WorkspaceOAuthService, WorkspaceTokenRefresher};
 use sqlx::PgPool;
 use std::sync::Arc;
-#[cfg(not(feature = "tls"))]
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
@@ -92,9 +91,6 @@ use crate::services::pluggable_mailer::PluggableMailer;
 use crate::services::stripe::{LiveStripeService, StripeService};
 use crate::session::SESSION_CACHE;
 use crate::state::AppState;
-
-#[cfg(feature = "tls")]
-use axum_server::tls_rustls::RustlsConfig;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -637,69 +633,26 @@ async fn main() -> Result<()> {
 
     // Start background workers (simple no-op executor for now)
     worker::start_background_workers(state_for_worker).await;
-    #[cfg(feature = "tls")]
-    {
-        // TLS: Only run this block when `--features tls` is used
-        let cert_path = std::env::var("DEV_CERT_LOCATION")
-            .map_err(|error| {
-                tracing::error!(error = %error, "DEV_CERT_LOCATION environment variable missing");
-                error
-            })
-            .context("missing DEV_CERT_LOCATION environment variable")?;
-        let key_path = std::env::var("DEV_KEY_LOCATION")
-            .map_err(|error| {
-                tracing::error!(error = %error, "DEV_KEY_LOCATION environment variable missing");
-                error
-            })
-            .context("missing DEV_KEY_LOCATION environment variable")?;
 
-        let tls_config = RustlsConfig::from_pem_file(&cert_path, &key_path)
-            .await
-            .map_err(|error| {
-                tracing::error!(
-                    error = ?error,
-                    cert_path = %cert_path,
-                    key_path = %key_path,
-                    "Failed to load TLS configuration"
-                );
-                error
-            })
-            .context("failed to load TLS certificate or key")?;
-
-        info!(%addr, "Running with TLS");
-        axum_server::bind_rustls(addr, tls_config)
-            .serve(make_service)
-            .await
-            .map_err(|error| {
-                tracing::error!(error = ?error, %addr, "TLS server encountered an error");
-                error
-            })
-            .context("TLS server encountered an error")?;
-    }
-
-    #[cfg(not(feature = "tls"))]
-    {
-        let listener = TcpListener::bind(addr)
-            .await
-            .map_err(|error| {
-                tracing::error!(error = ?error, %addr, "Failed to bind TCP listener");
-                error
-            })
-            .with_context(|| format!("failed to bind TCP listener to {addr}"))?;
-        info!(%addr, "Running without TLS");
-        axum::serve(listener, make_service)
-            .await
-            .map_err(|error| {
-                tracing::error!(error = ?error, %addr, "Server encountered an error");
-                error
-            })
-            .context("server encountered an error")?;
-    }
+    let listener = TcpListener::bind(addr)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, %addr, "Failed to bind TCP listener");
+            error
+        })
+        .with_context(|| format!("failed to bind TCP listener to {addr}"))?;
+    axum::serve(listener, make_service)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, %addr, "Server encountered an error");
+            error
+        })
+        .context("server encountered an error")?;
     Ok(())
 }
 /// A simple root route.
 async fn root() -> Response {
-    JsonResponse::success("Hello, DSentr!").into_response()
+    JsonResponse::success("Hello, from DSentr!").into_response()
 }
 
 fn spawn_session_cleanup_task(db_pool: Arc<PgPool>) {
