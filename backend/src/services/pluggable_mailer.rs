@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::services::smtp_mailer::{MailError, Mailer, SmtpConfig, TlsMode};
 
+use super::mailjet_mailer::MailjetMailer;
 use super::sendgrid_mailer::SendgridMailer;
 use super::smtp_mailer::SmtpMailer;
 
@@ -19,6 +20,7 @@ use super::smtp_mailer::SmtpMailer;
 enum AppSender {
     Smtp(Arc<SmtpMailer>),
     Sendgrid(Arc<SendgridMailer>),
+    Mailjet(Arc<MailjetMailer>),
 }
 
 #[derive(Clone)]
@@ -47,6 +49,13 @@ impl PluggableMailer {
                 Ok(Self {
                     app_sender: AppSender::Sendgrid(sg),
                     smtp_runtime: None, // dynamic SMTP is implemented directly below
+                })
+            }
+            "mailjet" => {
+                let mj = Arc::new(MailjetMailer::from_env(http)?);
+                Ok(Self {
+                    app_sender: AppSender::Mailjet(mj),
+                    smtp_runtime: None,
                 })
             }
             other => Err(MailError::Other(format!(
@@ -152,6 +161,7 @@ impl Mailer for PluggableMailer {
         match &self.app_sender {
             AppSender::Smtp(smtp) => smtp.send_verification_email(to, token).await,
             AppSender::Sendgrid(sg) => sg.send_verification_email(to, token).await,
+            AppSender::Mailjet(mj) => mj.send_verification_email(to, token).await,
         }
     }
 
@@ -159,6 +169,7 @@ impl Mailer for PluggableMailer {
         match &self.app_sender {
             AppSender::Smtp(smtp) => smtp.send_reset_email(to, token).await,
             AppSender::Sendgrid(sg) => sg.send_reset_email(to, token).await,
+            AppSender::Mailjet(mj) => mj.send_reset_email(to, token).await,
         }
     }
 
@@ -171,6 +182,7 @@ impl Mailer for PluggableMailer {
         match &self.app_sender {
             AppSender::Smtp(smtp) => smtp.send_email_generic(to, subject, body).await,
             AppSender::Sendgrid(sg) => sg.send_email_generic(to, subject, body).await,
+            AppSender::Mailjet(mj) => mj.send_email_generic(to, subject, body).await,
         }
     }
 
