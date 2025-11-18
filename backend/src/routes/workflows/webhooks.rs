@@ -96,6 +96,27 @@ pub async fn webhook_trigger(
         }
     };
 
+    let trigger_type = wf
+        .data
+        .get("nodes")
+        .and_then(|arr| arr.as_array())
+        .and_then(|nodes| {
+            nodes
+                .iter()
+                .find(|n| n.get("type").and_then(|t| t.as_str()) == Some("trigger"))
+        })
+        .and_then(|trigger| {
+            trigger
+                .get("data")
+                .and_then(|d| d.get("triggerType"))
+                .and_then(|t| t.as_str())
+        });
+
+    if trigger_type != Some("Webhook") {
+        // As if this workflow never existed.
+        return JsonResponse::not_found("Workflow not found").into_response();
+    }
+
     let secret = match webhook_secret(app_state.config.as_ref()) {
         Some(secret) => secret,
         None => return missing_webhook_secret_response(),
