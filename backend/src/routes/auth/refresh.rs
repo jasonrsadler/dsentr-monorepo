@@ -206,6 +206,7 @@ mod tests {
             oauth_provider: None,
             onboarded_at: Some(OffsetDateTime::now_utc()),
             created_at: OffsetDateTime::now_utc(),
+            is_verified: false,
         }
     }
 

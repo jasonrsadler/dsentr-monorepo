@@ -10,6 +10,7 @@ pub struct JsonResponse {
     pub status: String,
     pub success: bool,
     pub message: String,
+    pub code: Option<String>,
 }
 
 impl JsonResponse {
@@ -20,6 +21,7 @@ impl JsonResponse {
                 status: "success".to_string(),
                 success: true,
                 message: msg.to_string(),
+                code: None,
             }),
         )
     }
@@ -31,6 +33,7 @@ impl JsonResponse {
                 status: "error".to_string(),
                 success: false,
                 message: msg.to_string(),
+                code: None,
             }),
         )
     }
@@ -42,6 +45,7 @@ impl JsonResponse {
                 status: "error".to_string(),
                 success: false,
                 message: msg.to_string(),
+                code: None,
             }),
         )
     }
@@ -53,6 +57,7 @@ impl JsonResponse {
                 status: "error".to_string(),
                 success: false,
                 message: msg.to_string(),
+                code: None,
             }),
         )
     }
@@ -64,6 +69,7 @@ impl JsonResponse {
                 status: "error".to_string(),
                 success: false,
                 message: msg.to_string(),
+                code: None,
             }),
         )
     }
@@ -75,6 +81,7 @@ impl JsonResponse {
                 status: "error".to_string(),
                 success: false,
                 message: msg.to_string(),
+                code: None,
             }),
         )
     }
@@ -86,6 +93,7 @@ impl JsonResponse {
                 status: "error".to_string(),
                 success: false,
                 message: msg.to_string(),
+                code: None,
             }),
         )
     }
@@ -97,6 +105,7 @@ impl JsonResponse {
                 status: "error".to_string(),
                 success: false,
                 message: msg.to_string(),
+                code: None,
             }),
         )
     }
@@ -106,6 +115,18 @@ impl JsonResponse {
             .unwrap_or_else(|_| "https://localhost:5173".to_string());
         let redirect_url = format!("{}/login?error={}", frontend_url, urlencoding::encode(msg));
         Redirect::to(&redirect_url).into_response()
+    }
+
+    pub fn forbidden_with_code(msg: &str, code: &str) -> impl IntoResponse {
+        (
+            StatusCode::FORBIDDEN,
+            Json(JsonResponse {
+                status: "error".to_string(),
+                message: msg.to_string(),
+                success: false,
+                code: Some(code.to_string()),
+            }),
+        )
     }
 }
 

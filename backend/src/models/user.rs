@@ -49,6 +49,7 @@ pub struct User {
     #[serde(with = "time::serde::rfc3339::option")]
     pub onboarded_at: Option<time::OffsetDateTime>,
     pub created_at: time::OffsetDateTime,
+    pub is_verified: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]

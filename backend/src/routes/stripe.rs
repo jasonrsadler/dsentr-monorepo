@@ -992,6 +992,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: None,
                 created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
             }),
             ..Default::default()
         });
@@ -1118,6 +1119,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: None,
                 created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
             }),
             ..Default::default()
         });
@@ -1236,6 +1238,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: None,
                 created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
             }),
             ..Default::default()
         });

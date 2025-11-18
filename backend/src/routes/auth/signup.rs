@@ -382,6 +382,7 @@ mod tests {
                 stripe_customer_id: None,
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: None,
+                is_verified: false,
             }))
         }
 
@@ -405,6 +406,7 @@ mod tests {
                 stripe_customer_id: None,
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: None,
+                is_verified: true,
             })
         }
 
@@ -538,6 +540,12 @@ mod tests {
             &self,
             _token: &str,
             _audit: crate::models::account_deletion::AccountDeletionAuditInsert,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn delete_verification_tokens_for_user(
+            &self,
+            _user_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }

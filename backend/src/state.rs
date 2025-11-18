@@ -223,6 +223,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(OffsetDateTime::now_utc()),
                 created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
             }),
             ..Default::default()
         };

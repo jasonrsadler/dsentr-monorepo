@@ -260,6 +260,11 @@ export default function Login() {
       clearInviteQuery()
       navigate('/dashboard')
     } else {
+      if (res.code === 'unverified_email') {
+        navigate('/check-email?email=' + email)
+        return
+      }
+
       setError(res.message || 'Login failed')
     }
   }

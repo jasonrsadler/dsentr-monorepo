@@ -43,7 +43,7 @@ use routes::{
         forgot_password::handle_forgot_password,
         github_login::{github_callback, github_login},
         google_login::{google_callback, google_login},
-        handle_logout, handle_me,
+        handle_logout, handle_me, resend_verification_email,
         reset_password::{handle_reset_password, handle_verify_token},
     },
     dashboard::dashboard_handler,
@@ -163,6 +163,32 @@ async fn main() -> Result<()> {
             .ok_or_else(|| {
                 tracing::error!("Failed to build global rate limiter configuration");
                 anyhow!("failed to build global rate limiter configuration")
+            })?,
+    );
+    let rate_limit_verify_s: u64 = std::env::var("RATE_LIMITER_VERIFY_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(60);
+    let rate_limit_verify_burst: u32 = std::env::var("RATE_LIMITER_VERIFY_BURST")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(3);
+
+    let verify_governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(rate_limit_verify_s)
+            .burst_size(rate_limit_verify_burst)
+            .use_headers()
+            .error_handler(|_err| {
+                JsonResponse::too_many_requests(
+                    "Too many requests. Please wait a moment and try again",
+                )
+                .into_response()
+            })
+            .finish()
+            .ok_or_else(|| {
+                tracing::error!("Failed to build verification rate limiter configuration");
+                anyhow!("failed to build verification rate limiter configuration")
             })?,
     );
 
@@ -321,9 +347,16 @@ async fn main() -> Result<()> {
 
     let csrf_layer = ServiceBuilder::new().layer(axum::middleware::from_fn(validate_csrf));
 
+    let verification_routes = Router::new()
+        .route("/signup", post(handle_signup))
+        .route("/resend-verification", post(resend_verification_email))
+        .layer(csrf_layer.clone())
+        .layer(GovernorLayer {
+            config: verify_governor_conf.clone(),
+        });
+
     // Routes that require CSRF protection (typically unsafe HTTP methods)
     let csrf_protected_routes = Router::new()
-        .route("/signup", post(handle_signup))
         .route("/login", post(handle_login))
         .route("/refresh", post(handle_refresh))
         .route("/logout", post(handle_logout))
@@ -333,7 +366,8 @@ async fn main() -> Result<()> {
         .layer(csrf_layer.clone()) // Apply CSRF middleware here
         .layer(GovernorLayer {
             config: auth_governor_conf.clone(),
-        });
+        })
+        .merge(verification_routes);
 
     // Routes that do NOT require CSRF (safe methods and OAuth)
     let auth_public_routes = Router::new()

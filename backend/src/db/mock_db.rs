@@ -288,6 +288,10 @@ impl UserRepository for MockDb {
     ) -> Result<(), sqlx::Error> {
         Ok(())
     }
+
+    async fn delete_verification_tokens_for_user(&self, _user_id: Uuid) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]

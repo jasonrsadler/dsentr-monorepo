@@ -1,5 +1,6 @@
 use crate::routes::auth::claims::{Claims, TokenUse};
 use crate::{
+    models::user::OauthProvider,
     responses::JsonResponse,
     session,
     state::AppState,
@@ -41,6 +42,11 @@ pub async fn handle_login(
             return JsonResponse::server_error("Database error").into_response();
         }
     };
+
+    if user.oauth_provider == Some(OauthProvider::Email) && !user.is_verified {
+        return JsonResponse::forbidden_with_code("Email not verified.", "unverified_email")
+            .into_response();
+    }
 
     if user.password_hash.trim().is_empty() {
         let provider = user.oauth_provider;
@@ -329,6 +335,7 @@ mod tests {
             stripe_customer_id: None,
             onboarded_at: None,
             created_at: OffsetDateTime::now_utc(),
+            is_verified: false,
         };
 
         (user, password.to_string())

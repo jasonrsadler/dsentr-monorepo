@@ -3937,6 +3937,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,
+                is_verified: true,
             }),
             ..Default::default()
         });
@@ -3985,6 +3986,8 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,
+
+                is_verified: true,
             }),
             ..Default::default()
         });
@@ -4056,6 +4059,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Google),
                 onboarded_at: Some(now),
                 created_at: now,
+                is_verified: true,
             }),
             ..Default::default()
         });
@@ -4134,6 +4138,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Google),
                 onboarded_at: Some(now),
                 created_at: now,
+                is_verified: true,
             }),
             ..Default::default()
         });
@@ -4319,6 +4324,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,
+                is_verified: true,
             }),
             ..Default::default()
         };
@@ -4397,6 +4403,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,
+                is_verified: true,
             }),
             ..Default::default()
         };
@@ -4547,6 +4554,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,
+                is_verified: true,
             }),
             ..Default::default()
         });
@@ -4691,6 +4699,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(now),
                 created_at: now,
+                is_verified: true,
             }),
             ..Default::default()
         };

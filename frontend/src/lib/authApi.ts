@@ -22,6 +22,7 @@ type LoginResponse = {
   user?: any
   memberships?: any[]
   requires_onboarding?: boolean
+  code?: string
 }
 
 export async function signupUser(
@@ -127,7 +128,8 @@ export async function loginWithEmail({
 
       return {
         success: false,
-        message
+        message,
+        code: data?.code
       }
     }
 

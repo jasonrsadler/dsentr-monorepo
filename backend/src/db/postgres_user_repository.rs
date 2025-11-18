@@ -65,7 +65,8 @@ impl UserRepository for PostgresUserRepository {
                    stripe_customer_id,
                    oauth_provider as "oauth_provider: OauthProvider",
                    onboarded_at,
-                   created_at
+                   created_at,
+                   is_verified
             FROM users
             WHERE email = $1
             "#,
@@ -110,7 +111,8 @@ impl UserRepository for PostgresUserRepository {
                 stripe_customer_id,
                 oauth_provider as "oauth_provider: OauthProvider",
                 onboarded_at,
-                created_at
+                created_at,
+                is_verified
             "#,
             email,
             first_name,
@@ -518,7 +520,8 @@ impl UserRepository for PostgresUserRepository {
                 u.stripe_customer_id,
                 u.oauth_provider AS "oauth_provider: OauthProvider",
                 u.onboarded_at,
-                u.created_at
+                u.created_at,
+                u.is_verified
             FROM account_deletion_tokens t
             JOIN users u ON u.id = t.user_id
             WHERE t.token = $1
@@ -553,6 +556,7 @@ impl UserRepository for PostgresUserRepository {
             oauth_provider: row.oauth_provider,
             onboarded_at: row.onboarded_at,
             created_at: row.created_at,
+            is_verified: row.is_verified,
         };
 
         Ok(Some(AccountDeletionContext { token, user }))
@@ -761,5 +765,15 @@ impl UserRepository for PostgresUserRepository {
 
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn delete_verification_tokens_for_user(&self, user_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            "DELETE FROM email_verification_tokens WHERE user_id = $1",
+            user_id
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
     }
 }

@@ -1435,7 +1435,13 @@ export default function TeamsAction({
       active = false
       unsubscribe()
     }
-  }, [isDelegated, connectionsFetched, syncMicrosoftConnections, workspaceId])
+  }, [
+    isDelegated,
+    connectionsFetched,
+    syncMicrosoftConnections,
+    workspaceId,
+    pickProviderConnections
+  ])
 
   useEffect(() => {
     if (!effectiveCanEdit) return

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                t.token,\n                t.user_id AS token_user_id,\n                t.expires_at,\n                t.consumed_at,\n                t.created_at AS token_created_at,\n                u.id,\n                u.email,\n                u.password_hash,\n                u.first_name,\n                u.last_name,\n                u.role AS \"role: crate::models::user::UserRole\",\n                u.plan,\n                u.company_name,\n                u.stripe_customer_id,\n                u.oauth_provider AS \"oauth_provider: OauthProvider\",\n                u.onboarded_at,\n                u.created_at\n            FROM account_deletion_tokens t\n            JOIN users u ON u.id = t.user_id\n            WHERE t.token = $1\n            ",
+  "query": "\n            SELECT\n                t.token,\n                t.user_id AS token_user_id,\n                t.expires_at,\n                t.consumed_at,\n                t.created_at AS token_created_at,\n                u.id,\n                u.email,\n                u.password_hash,\n                u.first_name,\n                u.last_name,\n                u.role AS \"role: crate::models::user::UserRole\",\n                u.plan,\n                u.company_name,\n                u.stripe_customer_id,\n                u.oauth_provider AS \"oauth_provider: OauthProvider\",\n                u.onboarded_at,\n                u.created_at,\n                u.is_verified\n            FROM account_deletion_tokens t\n            JOIN users u ON u.id = t.user_id\n            WHERE t.token = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -109,6 +109,11 @@
         "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "is_verified",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -133,8 +138,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "a3a9f4aa7fefb620095af82b7e8a8118846ca350551868f886c2b939a54dddb8"
+  "hash": "9165ab6628062dcb40fd92eaf54e90c7cc16840a91b542f6570dd98baa6de67a"
 }

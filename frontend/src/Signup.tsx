@@ -338,7 +338,7 @@ export default function SignupPage() {
 
       const result = await signupUser(request)
       if (result.success) {
-        navigate('/check-email')
+        navigate('/check-email?email=' + request.email)
       } else {
         setMessage(result.message)
         setServerError(true)

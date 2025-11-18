@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id,\n                   email,\n                   role as \"role: _\",\n                   password_hash,\n                   first_name,\n                   last_name,\n                   plan,\n                   company_name,\n                   stripe_customer_id,\n                   oauth_provider as \"oauth_provider: OauthProvider\",\n                   onboarded_at,\n                   created_at\n            FROM users\n            WHERE email = $1\n            ",
+  "query": "\n            SELECT id,\n                   email,\n                   role as \"role: _\",\n                   password_hash,\n                   first_name,\n                   last_name,\n                   plan,\n                   company_name,\n                   stripe_customer_id,\n                   oauth_provider as \"oauth_provider: OauthProvider\",\n                   onboarded_at,\n                   created_at,\n                   is_verified\n            FROM users\n            WHERE email = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -84,6 +84,11 @@
         "ordinal": 11,
         "name": "created_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "is_verified",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -103,8 +108,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "54b2ec6d7998017e717e17432e658a94a7f0ba1fa8e14b5035c00231d690f22f"
+  "hash": "3b88ee268c97abe0e4829dfa08f1e9d91bcebb55b4d28ddbe283277ec1ee3493"
 }

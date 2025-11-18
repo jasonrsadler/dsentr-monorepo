@@ -217,6 +217,7 @@ mod tests {
                 oauth_provider: Some(OauthProvider::Google),
                 onboarded_at: None,
                 created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
             })
         }
 
@@ -343,6 +344,13 @@ mod tests {
             _token: &str,
             _audit: crate::models::account_deletion::AccountDeletionAuditInsert,
         ) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn delete_verification_tokens_for_user(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
             Ok(())
         }
     }

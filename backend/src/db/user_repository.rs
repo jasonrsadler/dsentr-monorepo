@@ -129,4 +129,6 @@ pub trait UserRepository: Send + Sync {
         token: &str,
         audit: AccountDeletionAuditInsert,
     ) -> Result<(), sqlx::Error>;
+
+    async fn delete_verification_tokens_for_user(&self, user_id: Uuid) -> Result<(), sqlx::Error>;
 }
