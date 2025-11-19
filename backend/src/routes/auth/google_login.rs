@@ -263,7 +263,7 @@ pub async fn google_callback(
         token_use: TokenUse::Access,
     };
 
-    let session_value = match serde_json::to_value(&claims) {
+    let mut session_value = match serde_json::to_value(&claims) {
         Ok(val) => val,
         Err(err) => {
             error!(?err, user_id=%user.id, "failed to serialize claims for Google session");
@@ -273,6 +273,7 @@ pub async fn google_callback(
             .into_response();
         }
     };
+    session_value["is_verified"] = serde_json::json!(user.is_verified);
 
     let (session_id, _) = match session::create_session(
         app_state.db_pool.as_ref(),

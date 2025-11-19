@@ -98,13 +98,14 @@ pub async fn handle_login(
                 }
             };
 
-            let session_value = match serde_json::to_value(&claims) {
+            let mut session_value = match serde_json::to_value(&claims) {
                 Ok(value) => value,
                 Err(err) => {
                     error!(?err, user_id=%user.id, "failed to serialize claims for session");
                     return JsonResponse::server_error("Failed to create session").into_response();
                 }
             };
+            session_value["is_verified"] = serde_json::json!(user.is_verified);
 
             let (session_id, _) = match session::create_session(
                 app_state.db_pool.as_ref(),

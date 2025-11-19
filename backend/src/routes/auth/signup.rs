@@ -296,12 +296,17 @@ mod tests {
         fail_record_terms: bool,
         cleaned_up: Arc<Mutex<bool>>,
         terms_recorded: Arc<Mutex<bool>>,
+        find_user_result: Option<User>,
     }
 
     #[async_trait]
     impl UserRepository for MockRepo {
         async fn is_email_taken(&self, _email: &str) -> Result<bool, sqlx::Error> {
             Ok(self.email_taken)
+        }
+
+        async fn find_user_by_id(&self, _: Uuid) -> Result<Option<User>, sqlx::Error> {
+            Ok(self.find_user_result.clone())
         }
 
         async fn create_user(
@@ -887,6 +892,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
 
         let mailer = MockMailer::default();
@@ -912,6 +918,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
 
         let mailer = MockMailer::default();
@@ -928,6 +935,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
 
         let mailer = MockMailer::default();
@@ -950,6 +958,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
 
         let mailer = MockMailer::default();
@@ -972,6 +981,7 @@ mod tests {
             fail_record_terms: true,
             cleaned_up: Arc::clone(&cleaned_up),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
 
         let mailer = MockMailer::default();
@@ -996,6 +1006,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
 
         let mailer = MockMailer::default();
@@ -1020,6 +1031,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::clone(&cleaned_up),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
 
         let mailer = MockMailer {
@@ -1047,6 +1059,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
 
         let mailer = MockMailer::default();
@@ -1086,6 +1099,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
         let invite = invite_fixture(
             "join-token",
@@ -1125,6 +1139,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
         let invite = invite_fixture(
             "decline-token",
@@ -1164,6 +1179,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
         let invite = invite_fixture(
             "mismatch-token",
@@ -1201,6 +1217,7 @@ mod tests {
             fail_record_terms: false,
             cleaned_up: Arc::new(Mutex::new(false)),
             terms_recorded: Arc::new(Mutex::new(false)),
+            find_user_result: None,
         };
         let invite = invite_fixture(
             "expired-token",

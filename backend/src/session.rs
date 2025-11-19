@@ -18,6 +18,7 @@ pub struct SessionData {
     pub data: Value,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    pub is_verified: bool,
 }
 
 pub static SESSION_CACHE: Lazy<DashMap<Uuid, SessionData>> = Lazy::new(DashMap::new);
@@ -38,6 +39,7 @@ fn build_in_memory_session(user_id: Uuid, data: Value, ttl_hours: i64) -> Sessio
         data,
         created_at: now,
         expires_at: now + Duration::hours(ttl_hours.max(1)),
+        is_verified: true,
     }
 }
 
@@ -216,11 +218,17 @@ pub async fn get_session(
                     }
                 };
 
+                let is_verified = data
+                    .get("is_verified")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
                 let session = SessionData {
                     user_id,
                     data,
                     expires_at,
                     created_at,
+                    is_verified,
                 };
                 SESSION_CACHE.insert(session_id, session.clone());
                 debug!(%session_id, "Session cache refreshed from Postgres");
@@ -406,11 +414,17 @@ async fn persist_session(
                     return Err(error);
                 }
             };
+            let is_verified = db_data
+                .get("is_verified")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
             let session = SessionData {
                 user_id: db_user_id,
                 data: db_data,
                 expires_at,
                 created_at,
+                is_verified,
             };
 
             SESSION_CACHE.insert(session_id, session.clone());

@@ -37,6 +37,22 @@ where
     }
 }
 
+pub async fn require_verified_user(
+    State(_): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let Some(user) = req.extensions().get::<SessionData>() else {
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+
+    if !user.is_verified {
+        return Ok(JsonResponse::forbidden("Email not verified").into_response());
+    }
+
+    Ok(next.run(req).await)
+}
+
 pub async fn require_session(
     State(state): State<AppState>,
     mut request: Request<Body>,
@@ -223,6 +239,7 @@ mod tests {
             data: serde_json::to_value(&claims).unwrap(),
             expires_at: Utc::now() + Duration::hours(1),
             created_at: Utc::now(),
+            is_verified: true,
         };
         request.extensions_mut().insert(session);
 
@@ -288,6 +305,7 @@ mod tests {
         let session_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
         let expires_at = Utc::now() - Duration::hours(1);
+        let is_verified = true;
         let data = json!({ "id": user_id.to_string(), "token_use": "access" });
         session::insert_test_session(
             session_id,
@@ -296,6 +314,7 @@ mod tests {
                 data,
                 created_at: expires_at - Duration::hours(1),
                 expires_at,
+                is_verified,
             },
         );
 

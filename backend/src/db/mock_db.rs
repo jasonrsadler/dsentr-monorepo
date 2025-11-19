@@ -67,6 +67,10 @@ impl UserRepository for MockDb {
         Ok(self.find_user_result.clone())
     }
 
+    async fn find_user_by_id(&self, _: Uuid) -> Result<Option<User>, sqlx::Error> {
+        Ok(self.find_user_result.clone())
+    }
+
     async fn create_user_with_oauth(
         &self,
         _: &str,

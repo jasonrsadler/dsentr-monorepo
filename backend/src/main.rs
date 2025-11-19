@@ -87,6 +87,7 @@ use crate::db::{
     workspace_connection_repository::WorkspaceConnectionRepository,
     workspace_repository::WorkspaceRepository,
 };
+use crate::routes::auth::session::require_verified_user;
 use crate::services::pluggable_mailer::PluggableMailer;
 use crate::services::stripe::{LiveStripeService, StripeService};
 use crate::session::SESSION_CACHE;
@@ -321,6 +322,7 @@ async fn main() -> Result<()> {
     let state_for_worker = state.clone();
     spawn_session_cleanup_task(shared_pg_pool.clone());
     let session_guard = axum::middleware::from_fn_with_state(state.clone(), require_session);
+    let verified_guard = axum::middleware::from_fn_with_state(state.clone(), require_verified_user);
 
     let frontend_origin = config
         .frontend_origin
@@ -490,7 +492,8 @@ async fn main() -> Result<()> {
             delete(routes::workflows::delete_workflow_log_entry),
         )
         .layer(csrf_layer.clone())
-        .layer(session_guard.clone());
+        .layer(session_guard.clone())
+        .layer(verified_guard.clone());
 
     let workspace_routes = Router::new()
         .route("/", get(routes::workspaces::list_workspaces))
@@ -552,7 +555,8 @@ async fn main() -> Result<()> {
             delete(routes::workspaces::remove_workspace_connection),
         )
         .layer(csrf_layer.clone())
-        .layer(session_guard.clone());
+        .layer(session_guard.clone())
+        .layer(verified_guard.clone());
 
     let options_routes = Router::new()
         .route("/secrets", get(list_secrets))
@@ -561,7 +565,8 @@ async fn main() -> Result<()> {
             put(upsert_secret).delete(delete_secret),
         )
         .layer(csrf_layer.clone())
-        .layer(session_guard.clone());
+        .layer(session_guard.clone())
+        .layer(verified_guard.clone());
 
     let oauth_public_routes = Router::new()
         .route("/google/start", get(google_connect_start))
@@ -577,7 +582,8 @@ async fn main() -> Result<()> {
         .route("/{provider}/refresh", post(refresh_connection))
         .route("/{provider}/disconnect", delete(disconnect_connection))
         .layer(csrf_layer.clone())
-        .layer(session_guard.clone());
+        .layer(session_guard.clone())
+        .layer(verified_guard.clone());
 
     let oauth_routes = oauth_public_routes.merge(oauth_private_routes);
 
@@ -589,13 +595,15 @@ async fn main() -> Result<()> {
             get(list_channel_members),
         )
         .layer(csrf_layer.clone())
-        .layer(session_guard.clone());
+        .layer(session_guard.clone())
+        .layer(verified_guard.clone());
 
     // Admin routes (CSRF + rate limit). Only Admin role may call these handlers.
     let admin_routes = Router::new()
         .route("/purge-runs", post(purge_runs))
         .layer(csrf_layer.clone())
         .layer(session_guard.clone())
+        .layer(verified_guard.clone())
         .layer(GovernorLayer {
             config: global_governor_conf.clone(),
         });
@@ -623,7 +631,8 @@ async fn main() -> Result<()> {
     let invite_routes = invite_private_routes.merge(invite_public_routes);
     let dashboard_routes = Router::new()
         .route("/api/dashboard", get(dashboard_handler))
-        .layer(session_guard.clone());
+        .layer(session_guard.clone())
+        .layer(verified_guard.clone());
 
     let app = Router::new()
         .route("/", get(root))
