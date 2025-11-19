@@ -143,7 +143,6 @@ mod tests {
 
     struct MockRepo {
         behavior: MockBehavior,
-        find_user_result: Option<User>,
     }
 
     #[derive(Clone, Copy)]
@@ -164,10 +163,6 @@ mod tests {
                 MockBehavior::TokenDbError => Err(Error::RowNotFound),
                 _ => Ok(Some(Uuid::new_v4())),
             }
-        }
-
-        async fn find_user_by_id(&self, _: Uuid) -> Result<Option<User>, sqlx::Error> {
-            Ok(self.find_user_result.clone())
         }
 
         async fn update_user_password(&self, _: Uuid, _: &str) -> Result<(), Error> {
@@ -361,10 +356,7 @@ mod tests {
     }
 
     fn make_app(behavior: MockBehavior) -> Router {
-        let db = Arc::new(MockRepo {
-            behavior,
-            find_user_result: None,
-        });
+        let db = Arc::new(MockRepo { behavior });
         let state = AppState {
             db,
             workflow_repo: Arc::new(NoopWorkflowRepository),

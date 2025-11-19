@@ -120,7 +120,6 @@ mod tests {
     }
 
     struct MockRepo {
-        find_user_result: Option<User>,
         behavior: MockBehavior,
     }
 
@@ -139,10 +138,6 @@ mod tests {
                 MockBehavior::UserNotFound => Ok(None),
                 _ => Ok(Some(UserId { id: Uuid::new_v4() })),
             }
-        }
-
-        async fn find_user_by_id(&self, _: Uuid) -> Result<Option<User>, sqlx::Error> {
-            Ok(self.find_user_result.clone())
         }
 
         async fn insert_password_reset_token(
@@ -332,10 +327,7 @@ mod tests {
     }
 
     fn make_app(behavior: MockBehavior) -> Router {
-        let repo = Arc::new(MockRepo {
-            behavior,
-            find_user_result: None,
-        });
+        let repo = Arc::new(MockRepo { behavior });
         let mailer = Arc::new(MockMailer::default());
         let google_oauth = Arc::new(MockGoogleOAuth::default());
         let github_oauth = Arc::new(MockGitHubOAuth::default());
@@ -461,7 +453,6 @@ mod tests {
     async fn test_email_send_fails() {
         let repo = Arc::new(MockRepo {
             behavior: MockBehavior::UserFound,
-            find_user_result: None,
         });
         let mailer = Arc::new(MockMailer::default());
         let google_oauth = Arc::new(MockGoogleOAuth::default());

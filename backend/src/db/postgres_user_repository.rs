@@ -78,23 +78,6 @@ impl UserRepository for PostgresUserRepository {
         Ok(row)
     }
 
-    async fn find_user_by_id(&self, user_id: Uuid) -> Result<Option<User>, sqlx::Error> {
-        sqlx::query_as!(
-            User,
-            r#"
-        SELECT id, email, password_hash, first_name, last_name,
-               role as "role: _", plan, company_name, stripe_customer_id,
-               oauth_provider as "oauth_provider: OauthProvider", onboarded_at, created_at,
-               is_verified
-        FROM users
-        WHERE id = $1
-        "#,
-            user_id
-        )
-        .fetch_optional(&self.pool)
-        .await
-    }
-
     async fn create_user_with_oauth(
         &self,
         email: &str,

@@ -30,7 +30,6 @@ pub trait UserRepository: Send + Sync {
         last_name: &str,
         provider: OauthProvider,
     ) -> Result<User, sqlx::Error>;
-    async fn find_user_by_id(&self, user_id: Uuid) -> Result<Option<User>, sqlx::Error>;
     async fn find_public_user_by_id(
         &self,
         user_id: Uuid,

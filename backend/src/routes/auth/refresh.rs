@@ -5,7 +5,7 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use chrono::{Duration, Utc};
-use serde_json::{from_value, json, to_value};
+use serde_json::{from_value, to_value};
 use time::Duration as TimeDuration;
 use tracing::{error, info, warn};
 
@@ -60,7 +60,7 @@ pub async fn handle_refresh(
     let new_expiration = Utc::now() + Duration::hours(ttl_hours);
     claims.exp = new_expiration.timestamp() as usize;
 
-    let mut updated_data = match to_value(&claims) {
+    let updated_data = match to_value(&claims) {
         Ok(value) => value,
         Err(error) => {
             error!(?error, %session_id, "failed to serialize session claims for refresh");
@@ -68,16 +68,7 @@ pub async fn handle_refresh(
         }
     };
 
-    let user_record = match app_state.db.find_user_by_id(session.user_id).await {
-        Ok(Some(u)) => u,
-        _ => {
-            return JsonResponse::server_error("Failed to refresh session").into_response();
-        }
-    };
-
-    updated_data["is_verified"] = json!(user_record.is_verified);
-
-    let new_session = match session::upsert_session(
+    if let Err(error) = session::upsert_session(
         app_state.db_pool.as_ref(),
         session_id,
         session.user_id,
@@ -86,15 +77,9 @@ pub async fn handle_refresh(
     )
     .await
     {
-        Ok(s) => s,
-        Err(error) => {
-            error!(?error, %session_id, "failed to extend session expiration");
-            return JsonResponse::server_error("Failed to refresh session").into_response();
-        }
-    };
-
-    // update cache (just to be safe)
-    crate::session::SESSION_CACHE.insert(session_id, new_session.clone());
+        error!(?error, %session_id, "failed to extend session expiration");
+        return JsonResponse::server_error("Failed to refresh session").into_response();
+    }
 
     info!(%session_id, user_id = %session.user_id, "session refreshed");
 
@@ -107,14 +92,8 @@ pub async fn handle_refresh(
         .max_age(TimeDuration::hours(ttl_hours))
         .build();
 
-    let body = json!({
-        "user_id": new_session.user_id,
-        "is_verified": new_session.is_verified
-    });
-
     let jar = jar.add(refreshed_cookie);
-
-    (jar, axum::Json(body)).into_response()
+    (jar, JsonResponse::success("Session refreshed")).into_response()
 }
 
 #[cfg(test)]

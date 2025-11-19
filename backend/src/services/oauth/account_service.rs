@@ -432,7 +432,7 @@ impl OAuthAccountService {
         struct UserInfoResponse {
             email: Option<String>,
             #[serde(default)]
-            is_verified: Option<bool>,
+            email_verified: Option<bool>,
         }
 
         let response: TokenResponse = self
@@ -473,7 +473,7 @@ impl OAuthAccountService {
             .email
             .ok_or_else(|| OAuthAccountError::InvalidResponse("Missing email".into()))?;
 
-        if !user_info.is_verified.unwrap_or(false) {
+        if !user_info.email_verified.unwrap_or(false) {
             return Err(OAuthAccountError::EmailNotVerified {
                 provider: ConnectedOAuthProvider::Google,
             });
@@ -1564,7 +1564,7 @@ mod tests {
             when.method(httpmock::Method::GET).path("/v1/userinfo");
             then.status(200).json_body(serde_json::json!({
                 "email": "user@example.com",
-                "is_verified": false
+                "email_verified": false
             }));
         });
 
@@ -1629,7 +1629,7 @@ mod tests {
             when.method(httpmock::Method::GET).path("/v1/userinfo");
             then.status(200).json_body(serde_json::json!({
                 "email": "user@example.com",
-                "is_verified": true
+                "email_verified": true
             }));
         });
 
