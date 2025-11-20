@@ -7,6 +7,7 @@ use crate::models::{
     workspace::{Workspace, WorkspaceBillingCycle, WorkspaceMembershipSummary, WorkspaceRole},
 };
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct WorkspaceRunQuotaUpdate {
     pub allowed: bool,
@@ -130,6 +131,7 @@ pub trait WorkspaceRepository: Send + Sync {
         max_runs: i64,
     ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn get_workspace_run_quota(
         &self,
         workspace_id: Uuid,

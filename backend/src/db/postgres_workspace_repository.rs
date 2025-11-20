@@ -595,7 +595,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .fetch_optional(&mut *tx)
         .await?;
 
-        let current = existing.map(|row| row.run_count).unwrap_or(0);
+        let current = existing.as_ref().map(|row| row.run_count).unwrap_or(0);
         let next = current + 1;
         if next > max_runs {
             tx.rollback().await?;

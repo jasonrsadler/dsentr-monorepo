@@ -1,10 +1,12 @@
 use crate::models::user::{OauthProvider, PublicUser, User};
 use async_trait::async_trait;
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::user_repository::{UserId, UserRepository};
+use crate::db::workflow_repository::CreateWorkflowRunOutcome;
 use crate::db::{
     workflow_repository::WorkflowRepository,
     workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate},
@@ -767,6 +769,11 @@ pub struct NoopWorkspaceRepository;
 #[derive(Clone)]
 pub struct StaticWorkspaceMembershipRepository {
     allowed: bool,
+    max_runs: Option<i64>,
+    run_usage: Arc<Mutex<HashMap<(Uuid, i64), i64>>>,
+    release_calls: Arc<Mutex<usize>>,
+    period_starts: Arc<Mutex<Vec<OffsetDateTime>>>,
+    billing_cycle: Arc<Mutex<Option<WorkspaceBillingCycle>>>,
     inner: NoopWorkspaceRepository,
 }
 
@@ -775,6 +782,11 @@ impl StaticWorkspaceMembershipRepository {
     pub fn allowing() -> Self {
         Self {
             allowed: true,
+            max_runs: None,
+            run_usage: Arc::new(Mutex::new(HashMap::new())),
+            release_calls: Arc::new(Mutex::new(0)),
+            period_starts: Arc::new(Mutex::new(Vec::new())),
+            billing_cycle: Arc::new(Mutex::new(None)),
             inner: NoopWorkspaceRepository,
         }
     }
@@ -783,8 +795,45 @@ impl StaticWorkspaceMembershipRepository {
     pub fn denying() -> Self {
         Self {
             allowed: false,
+            max_runs: None,
+            run_usage: Arc::new(Mutex::new(HashMap::new())),
+            release_calls: Arc::new(Mutex::new(0)),
+            period_starts: Arc::new(Mutex::new(Vec::new())),
+            billing_cycle: Arc::new(Mutex::new(None)),
             inner: NoopWorkspaceRepository,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_run_limit(max_runs: i64) -> Self {
+        let base = Self::allowing();
+        Self {
+            max_runs: Some(max_runs),
+            ..base
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_billing_cycle(cycle: WorkspaceBillingCycle) -> Self {
+        let repo = Self::allowing();
+        *repo.billing_cycle.lock().unwrap() = Some(cycle.clone());
+        repo
+    }
+
+    #[allow(dead_code)]
+    pub fn usage_for(&self, workspace_id: Uuid, period_start: OffsetDateTime) -> i64 {
+        let key = (workspace_id, period_start.unix_timestamp());
+        *self.run_usage.lock().unwrap().get(&key).unwrap_or(&0)
+    }
+
+    #[allow(dead_code)]
+    pub fn release_calls(&self) -> usize {
+        *self.release_calls.lock().unwrap()
+    }
+
+    #[allow(dead_code)]
+    pub fn last_period_starts(&self) -> Vec<OffsetDateTime> {
+        self.period_starts.lock().unwrap().clone()
     }
 }
 
@@ -1194,10 +1243,42 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
 
     async fn try_increment_workspace_run_quota(
         &self,
-        _workspace_id: Uuid,
-        _period_start: OffsetDateTime,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
         _max_runs: i64,
     ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
+        self.period_starts.lock().unwrap().push(period_start);
+        if !self.allowed {
+            let current = self
+                .run_usage
+                .lock()
+                .unwrap()
+                .get(&(workspace_id, period_start.unix_timestamp()))
+                .copied()
+                .unwrap_or(0);
+            return Ok(WorkspaceRunQuotaUpdate {
+                allowed: false,
+                run_count: current,
+            });
+        }
+
+        if let Some(limit) = self.max_runs {
+            let mut usage = self.run_usage.lock().unwrap();
+            let key = (workspace_id, period_start.unix_timestamp());
+            let entry = usage.entry(key).or_insert(0);
+            if *entry >= limit {
+                return Ok(WorkspaceRunQuotaUpdate {
+                    allowed: false,
+                    run_count: *entry,
+                });
+            }
+            *entry += 1;
+            return Ok(WorkspaceRunQuotaUpdate {
+                allowed: true,
+                run_count: *entry,
+            });
+        }
+
         Ok(WorkspaceRunQuotaUpdate {
             allowed: self.allowed,
             run_count: 1,
@@ -1206,31 +1287,56 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
 
     async fn get_workspace_run_quota(
         &self,
-        _workspace_id: Uuid,
-        _period_start: OffsetDateTime,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
     ) -> Result<i64, sqlx::Error> {
+        if self.max_runs.is_some() {
+            let key = (workspace_id, period_start.unix_timestamp());
+            return Ok(*self.run_usage.lock().unwrap().get(&key).unwrap_or(&0));
+        }
         Ok(0)
     }
 
     async fn release_workspace_run_quota(
         &self,
-        _workspace_id: Uuid,
-        _period_start: OffsetDateTime,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
     ) -> Result<(), sqlx::Error> {
+        *self.release_calls.lock().unwrap() += 1;
+        if self.max_runs.is_some() {
+            let mut usage = self.run_usage.lock().unwrap();
+            let key = (workspace_id, period_start.unix_timestamp());
+            if let Some(entry) = usage.get_mut(&key) {
+                if *entry > 0 {
+                    *entry -= 1;
+                }
+                if *entry == 0 {
+                    usage.remove(&key);
+                }
+            }
+        }
         Ok(())
     }
 
     async fn upsert_workspace_billing_cycle(
         &self,
-        _workspace_id: Uuid,
-        _subscription_id: &str,
-        _period_start: OffsetDateTime,
-        _period_end: OffsetDateTime,
+        workspace_id: Uuid,
+        subscription_id: &str,
+        period_start: OffsetDateTime,
+        period_end: OffsetDateTime,
     ) -> Result<(), sqlx::Error> {
+        *self.billing_cycle.lock().unwrap() = Some(WorkspaceBillingCycle {
+            workspace_id,
+            stripe_subscription_id: subscription_id.to_string(),
+            current_period_start: period_start,
+            current_period_end: period_end,
+            synced_at: OffsetDateTime::now_utc(),
+        });
         Ok(())
     }
 
     async fn clear_workspace_billing_cycle(&self, _workspace_id: Uuid) -> Result<(), sqlx::Error> {
+        *self.billing_cycle.lock().unwrap() = None;
         Ok(())
     }
 
@@ -1238,6 +1344,6 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
         &self,
         _workspace_id: Uuid,
     ) -> Result<Option<WorkspaceBillingCycle>, sqlx::Error> {
-        Ok(None)
+        Ok(self.billing_cycle.lock().unwrap().clone())
     }
 }

@@ -1,4 +1,7 @@
-use axum::{http::StatusCode, response::Response};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use tracing::error;
 
 use crate::{responses::JsonResponse, state::WorkspaceLimitError};

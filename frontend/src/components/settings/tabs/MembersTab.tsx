@@ -521,7 +521,7 @@ export default function MembersTab() {
           </div>
         ) : null}
         {planTier === 'workspace' &&
-          (memberLimitReached || memberLimitApproaching) ? (
+        (memberLimitReached || memberLimitApproaching) ? (
           <QuotaBanner
             variant={memberLimitReached ? 'danger' : 'warning'}
             title={
@@ -703,9 +703,7 @@ export default function MembersTab() {
                     ? [...baseRoles, 'owner' as WorkspaceMember['role']]
                     : baseRoles
                 const disableSelect =
-                  busy ||
-                  !canManageMembers ||
-                  m.role === 'owner'
+                  busy || !canManageMembers || m.role === 'owner'
                 const disableRemove =
                   busy ||
                   !canManageMembers ||
@@ -750,7 +748,6 @@ export default function MembersTab() {
                             ? manageMembersPermissionMessage
                             : undefined
                         }
-
                         className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
                       >
                         {roleOptions.map((option) => (

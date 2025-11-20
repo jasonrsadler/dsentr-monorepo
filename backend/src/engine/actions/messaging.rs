@@ -3906,6 +3906,6 @@ mod tests {
         let result = execute_messaging(&node, &json!({}), &state, &run).await;
 
         // Allowed to attempt, but send_google_chat will fail without a stub
-        assert!(result.is_err() == false || result.is_err());
+        assert!(result.is_err());
     }
 }

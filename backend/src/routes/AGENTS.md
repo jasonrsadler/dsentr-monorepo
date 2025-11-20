@@ -47,7 +47,9 @@
 - Workspace OAuth routes serialize and authorize against the new `owner_user_id`/`user_oauth_token_id` fields so multiple shared connections per provider can coexist without clobbering each other in the repository mocks.
 - Workspace OAuth routes now resolve shared credentials by explicit connection IDs: Microsoft Teams APIs require a connection_id + scope, and handlers double-check the resolved workspace before issuing tokens so selecting a stale ID can’t leak another workspace’s credentials. Test repositories were updated to track multiple connections for these scenarios.
 - Added workspace/member/run quota enforcement with explicit error codes (`workspace_plan_required`, `workspace_member_limit`, `workspace_run_limit`) plus a shared helper module so invites, signup, and workflow run routes all emit consistent JSON payloads.
+- Added regression tests that cover invite acceptance at the member cap plus workflow run starts at the run cap, ensuring the proper status codes, error payloads, and quota release behavior when idempotent requests reuse existing runs.
 - Workspaces/auth/account/billing routes now sync or clear `workspace_billing_cycles` based on Stripe subscription data, expose `cycle_started_at` alongside `renews_at`, and wipe stored cycle windows whenever a workspace downgrades back to Solo so quota evaluation matches the real billing window.
+- Route mocks now implement the expanded workspace repository surface (member counts, run quotas, billing cycles) and default missing plans to Workspace so invite/signup paths hit plan-limit guards without panicking in tests.
 
 ## New (Stripe billing plan lifecycle)
 - Workspace subscribers now see renewal/reversion dates surfaced in the Plans tab. `GET /api/workspaces/onboarding` attaches `billing.subscription` with:

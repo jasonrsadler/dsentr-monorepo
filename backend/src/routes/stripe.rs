@@ -116,7 +116,7 @@ pub async fn webhook(
                     return Json(serde_json::json!({ "received": true })).into_response();
                 }
             };
-            let mut stripe_customer_id = extract_customer_id(payload);
+            let stripe_customer_id = extract_customer_id(payload);
 
             // Resolve user
             let mut user_id: Option<Uuid> = extract_checkout_user_id(payload);
@@ -586,7 +586,7 @@ pub async fn webhook(
                     // cancel at period end: keep Workspace until sub.deleted
                     ("active", true) | ("canceled", true) => {
                         if let (Some((start, end)), Some(sub_id)) =
-                            (period_bounds.clone(), subscription_id.as_ref())
+                            (period_bounds, subscription_id.as_ref())
                         {
                             app_state
                                 .sync_owned_workspace_billing_cycles(uid, sub_id, start, end)
@@ -657,7 +657,7 @@ pub async fn webhook(
 
                     _ => {
                         if let (Some((start, end)), Some(sub_id)) =
-                            (period_bounds.clone(), subscription_id.as_ref())
+                            (period_bounds, subscription_id.as_ref())
                         {
                             app_state
                                 .sync_owned_workspace_billing_cycles(uid, sub_id, start, end)
@@ -736,11 +736,12 @@ mod tests {
     use super::*;
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
-    use crate::db::workspace_repository::WorkspaceRepository;
+    use crate::db::workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate};
     use crate::models::plan::PlanTier;
     use crate::models::user::{OauthProvider, User, UserRole};
     use crate::models::workspace::{
-        Workspace, WorkspaceMember, WorkspaceMembershipSummary, WorkspaceRole,
+        Workspace, WorkspaceBillingCycle, WorkspaceMember, WorkspaceMembershipSummary,
+        WorkspaceRole,
     };
     use crate::services::smtp_mailer::MockMailer;
     use crate::services::stripe::MockStripeService;
@@ -749,6 +750,7 @@ mod tests {
     use axum::extract::State as AxumState;
     use axum::http::{HeaderMap, HeaderValue};
     use reqwest::Client;
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use time::OffsetDateTime;
     use uuid::Uuid;
@@ -761,6 +763,8 @@ mod tests {
         memberships: Arc<Mutex<Vec<WorkspaceMembershipSummary>>>,
         plan_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
         name_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
+        run_usage: Arc<Mutex<HashMap<(Uuid, i64), i64>>>,
+        billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
     }
 
     #[async_trait::async_trait]
@@ -927,6 +931,15 @@ mod tests {
             Ok(vec![])
         }
 
+        async fn count_members(&self, workspace_id: Uuid) -> Result<i64, sqlx::Error> {
+            let members = self.memberships.lock().unwrap();
+            let count = members
+                .iter()
+                .filter(|membership| membership.workspace.id == workspace_id)
+                .count();
+            Ok(count as i64)
+        }
+
         async fn is_member(
             &self,
             _workspace_id: Uuid,
@@ -991,6 +1004,96 @@ mod tests {
             _workspace_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             Ok(())
+        }
+
+        async fn try_increment_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+            max_runs: i64,
+        ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
+            let mut usage = self.run_usage.lock().unwrap();
+            let key = (workspace_id, period_start.unix_timestamp());
+            let entry = usage.entry(key).or_insert(0);
+            if *entry >= max_runs {
+                return Ok(WorkspaceRunQuotaUpdate {
+                    allowed: false,
+                    run_count: *entry,
+                });
+            }
+            *entry += 1;
+            Ok(WorkspaceRunQuotaUpdate {
+                allowed: true,
+                run_count: *entry,
+            })
+        }
+
+        async fn get_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+        ) -> Result<i64, sqlx::Error> {
+            let usage = self.run_usage.lock().unwrap();
+            let key = (workspace_id, period_start.unix_timestamp());
+            Ok(*usage.get(&key).unwrap_or(&0))
+        }
+
+        async fn release_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            let mut usage = self.run_usage.lock().unwrap();
+            let key = (workspace_id, period_start.unix_timestamp());
+            if let Some(entry) = usage.get_mut(&key) {
+                if *entry > 0 {
+                    *entry -= 1;
+                }
+                if *entry == 0 {
+                    usage.remove(&key);
+                }
+            }
+            Ok(())
+        }
+
+        async fn upsert_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+            subscription_id: &str,
+            period_start: OffsetDateTime,
+            period_end: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            self.billing_cycles.lock().unwrap().insert(
+                workspace_id,
+                WorkspaceBillingCycle {
+                    workspace_id,
+                    stripe_subscription_id: subscription_id.to_string(),
+                    current_period_start: period_start,
+                    current_period_end: period_end,
+                    synced_at: OffsetDateTime::now_utc(),
+                },
+            );
+            Ok(())
+        }
+
+        async fn clear_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            self.billing_cycles.lock().unwrap().remove(&workspace_id);
+            Ok(())
+        }
+
+        async fn get_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Option<WorkspaceBillingCycle>, sqlx::Error> {
+            Ok(self
+                .billing_cycles
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .cloned())
         }
     }
 

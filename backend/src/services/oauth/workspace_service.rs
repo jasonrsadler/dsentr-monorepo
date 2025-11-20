@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use serde_json::json;
@@ -701,7 +701,7 @@ impl WorkspaceOAuthService {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::io::Write;
     use std::sync::{Arc, Mutex};
     use std::time::Duration as StdDuration;
@@ -709,10 +709,11 @@ mod tests {
     use tokio::time::sleep;
 
     use crate::db::oauth_token_repository::NewUserOAuthToken;
-    use crate::db::workspace_repository::WorkspaceRepository;
+    use crate::db::workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate};
     use crate::models::plan::PlanTier;
     use crate::models::workspace::{
-        Workspace, WorkspaceInvitation, WorkspaceMember, WorkspaceMembershipSummary, WorkspaceRole,
+        Workspace, WorkspaceBillingCycle, WorkspaceInvitation, WorkspaceMember,
+        WorkspaceMembershipSummary, WorkspaceRole,
     };
     use crate::utils::encryption::encrypt_secret;
 
@@ -823,6 +824,10 @@ mod tests {
             unimplemented!()
         }
 
+        async fn count_members(&self, _workspace_id: Uuid) -> Result<i64, sqlx::Error> {
+            Ok(0)
+        }
+
         async fn is_member(
             &self,
             _workspace_id: Uuid,
@@ -895,6 +900,58 @@ mod tests {
             _workspace_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             Ok(())
+        }
+
+        async fn try_increment_workspace_run_quota(
+            &self,
+            _workspace_id: Uuid,
+            _period_start: OffsetDateTime,
+            _max_runs: i64,
+        ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
+            Ok(WorkspaceRunQuotaUpdate {
+                allowed: true,
+                run_count: 1,
+            })
+        }
+
+        async fn get_workspace_run_quota(
+            &self,
+            _workspace_id: Uuid,
+            _period_start: OffsetDateTime,
+        ) -> Result<i64, sqlx::Error> {
+            Ok(0)
+        }
+
+        async fn release_workspace_run_quota(
+            &self,
+            _workspace_id: Uuid,
+            _period_start: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn upsert_workspace_billing_cycle(
+            &self,
+            _workspace_id: Uuid,
+            _subscription_id: &str,
+            _period_start: OffsetDateTime,
+            _period_end: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn clear_workspace_billing_cycle(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn get_workspace_billing_cycle(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Option<WorkspaceBillingCycle>, sqlx::Error> {
+            Ok(None)
         }
     }
 

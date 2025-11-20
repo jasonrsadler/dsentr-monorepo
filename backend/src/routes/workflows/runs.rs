@@ -648,3 +648,260 @@ pub async fn download_run_json(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
+    use crate::db::{
+        mock_db::{MockDb, StaticWorkspaceMembershipRepository},
+        workflow_repository::{CreateWorkflowRunOutcome, MockWorkflowRepository, WorkflowRepository},
+        workspace_connection_repository::NoopWorkspaceConnectionRepository,
+        workspace_repository::WorkspaceRepository,
+    };
+    use crate::models::{plan::PlanTier, workflow_run::WorkflowRun};
+    use crate::routes::auth::claims::{Claims, TokenUse};
+    use crate::routes::auth::session::AuthSession;
+    use crate::services::{
+        oauth::{
+            github::mock_github_oauth::MockGitHubOAuth,
+            google::mock_google_oauth::MockGoogleOAuth,
+            workspace_service::WorkspaceOAuthService,
+        },
+        smtp_mailer::MockMailer,
+    };
+    use crate::state::{test_pg_pool, AppState};
+    use crate::utils::jwt::JwtKeys;
+    use axum::body::to_bytes;
+    use reqwest::Client;
+    use serde_json::Value;
+    use sqlx::Error as SqlxError;
+    use std::sync::Arc;
+    use time::{Duration, OffsetDateTime};
+
+    fn test_config() -> Arc<Config> {
+        Arc::new(Config {
+            database_url: "postgres://localhost/test".into(),
+            frontend_origin: "https://app.example.com".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/slack".into(),
+                },
+                token_encryption_key: vec![0; 32],
+            },
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+        })
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
+    }
+
+    fn claims_fixture(user_id: Uuid, email: &str) -> Claims {
+        Claims {
+            id: user_id.to_string(),
+            email: email.to_string(),
+            exp: OffsetDateTime::now_utc().unix_timestamp() as usize + 3600,
+            first_name: "Test".into(),
+            last_name: "User".into(),
+            role: None,
+            plan: Some(PlanTier::Workspace.as_str().to_string()),
+            company_name: None,
+            iss: String::new(),
+            aud: String::new(),
+            token_use: TokenUse::Access,
+        }
+    }
+
+    fn workflow_fixture(workspace_id: Uuid, owner_id: Uuid) -> Workflow {
+        let now = OffsetDateTime::now_utc();
+        Workflow {
+            id: Uuid::new_v4(),
+            user_id: owner_id,
+            workspace_id: Some(workspace_id),
+            name: "Workflow".into(),
+            description: None,
+            data: json!({
+                "nodes": [],
+                "edges": []
+            }),
+            concurrency_limit: 1,
+            egress_allowlist: vec![],
+            require_hmac: false,
+            hmac_replay_window_sec: 300,
+            webhook_salt: Uuid::new_v4(),
+            locked_by: None,
+            locked_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn run_fixture(workflow: &Workflow) -> WorkflowRun {
+        let now = OffsetDateTime::now_utc();
+        WorkflowRun {
+            id: Uuid::new_v4(),
+            user_id: workflow.user_id,
+            workflow_id: workflow.id,
+            workspace_id: workflow.workspace_id,
+            snapshot: workflow.data.clone(),
+            status: "running".into(),
+            error: None,
+            idempotency_key: None,
+            started_at: now,
+            finished_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn test_state(
+        workflow_repo: Arc<dyn WorkflowRepository>,
+        workspace_repo: Arc<dyn WorkspaceRepository>,
+    ) -> AppState {
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo,
+            workspace_repo,
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
+            worker_id: Arc::new("worker-1".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        }
+    }
+
+    #[tokio::test]
+    async fn start_workflow_run_returns_workspace_run_limit_error() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let workflow = workflow_fixture(workspace_id, owner_id);
+        let workflow_for_find = workflow.clone();
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_find_workflow_for_member()
+            .returning(move |user, workflow_id| {
+                let wf = workflow_for_find.clone();
+                assert_eq!(user, wf.user_id);
+                assert_eq!(workflow_id, wf.id);
+                Box::pin(async move { Ok(Some(wf)) })
+            });
+        repo.expect_record_run_event()
+            .returning(|_| Box::pin(async { Err(SqlxError::RowNotFound) }));
+
+        let workspace_repo: Arc<StaticWorkspaceMembershipRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::with_run_limit(0));
+        let state = test_state(
+            Arc::new(repo),
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+        );
+
+        let response = start_workflow_run(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "member@example.com")),
+            Path(workflow.id),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], Value::String("workspace_run_limit".into()));
+        assert_eq!(workspace_repo.release_calls(), 0);
+        assert_eq!(workspace_repo.last_period_starts().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn start_workflow_run_releases_quota_when_idempotent() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let workflow = workflow_fixture(workspace_id, owner_id);
+        let workflow_for_find = workflow.clone();
+        let run = run_fixture(&workflow);
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_find_workflow_for_member()
+            .returning(move |_, _| {
+                let wf = workflow_for_find.clone();
+                Box::pin(async move { Ok(Some(wf)) })
+            });
+        repo.expect_create_workflow_run().returning(move |_, _, _, _, _| {
+            let run = run.clone();
+            Box::pin(async move {
+                Ok(CreateWorkflowRunOutcome {
+                    run,
+                    created: false,
+                })
+            })
+        });
+        repo.expect_record_run_event()
+            .returning(|_| Box::pin(async { Err(SqlxError::RowNotFound) }));
+
+        let workspace_repo: Arc<StaticWorkspaceMembershipRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::with_run_limit(1));
+        let period_start = OffsetDateTime::now_utc() - Duration::days(60);
+        let period_end = period_start + Duration::days(30);
+        workspace_repo
+            .upsert_workspace_billing_cycle(
+                workspace_id,
+                "sub_123",
+                period_start,
+                period_end,
+            )
+            .await
+            .unwrap();
+
+        let state = test_state(
+            Arc::new(repo),
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+        );
+
+        let response = start_workflow_run(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "member@example.com")),
+            Path(workflow.id),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert_eq!(workspace_repo.release_calls(), 1);
+        // The run ticket should use the billing cycle end because the current clock
+        // is past the stored period end.
+        let recorded = workspace_repo.last_period_starts();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0], period_end);
+    }
+}

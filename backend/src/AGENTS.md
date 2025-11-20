@@ -29,3 +29,4 @@
 - `main.rs` now passes the workspace repository into `WorkspaceOAuthService` (and the AppState test builders mirror it) so membership checks run before decrypting shared workspace OAuth tokens.
 - AppState exposes workspace member and run quota helpers (with rollback tickets) so routes/workers can consistently enforce seat caps and monthly run allocations.
 - AppState now syncs/clears workspace billing cycle metadata (subscription id plus current period start/end) and run quota checks consume those persisted anchors instead of hardcoding calendar-month resets.
+- Added unit coverage for workspace quota period calculations so billing-aligned run windows roll over at the correct boundary even when the current clock is past the stored cycle.

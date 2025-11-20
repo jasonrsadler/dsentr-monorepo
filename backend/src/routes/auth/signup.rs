@@ -226,6 +226,7 @@ mod tests {
         body::{to_bytes, Body},
         http::{Request, StatusCode},
     };
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -239,15 +240,15 @@ mod tests {
             mock_db::{NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::{UserId, UserRepository},
             workspace_connection_repository::NoopWorkspaceConnectionRepository,
-            workspace_repository::WorkspaceRepository,
+            workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate},
         },
         models::{
             plan::PlanTier,
             signup::{SignupInviteDecision, SignupPayload},
             user::{OauthProvider, PublicUser, User, UserRole},
             workspace::{
-                Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole,
-                INVITATION_STATUS_PENDING, WORKSPACE_PLAN_SOLO,
+                Workspace, WorkspaceBillingCycle, WorkspaceInvitation, WorkspaceMembershipSummary,
+                WorkspaceRole, INVITATION_STATUS_PENDING, WORKSPACE_PLAN_SOLO,
             },
         },
         services::{
@@ -568,6 +569,8 @@ mod tests {
         declined: Arc<Mutex<Vec<Uuid>>>,
         fail_create_workspace: bool,
         fail_join_membership: bool,
+        run_usage: Mutex<HashMap<(Uuid, i64), i64>>,
+        billing_cycles: Mutex<HashMap<Uuid, WorkspaceBillingCycle>>,
     }
 
     impl RecordingWorkspaceRepo {
@@ -652,10 +655,14 @@ mod tests {
             let plan = created
                 .iter()
                 .find(|workspace| workspace.id == workspace_id)
-                .map(|workspace| workspace.plan.clone())
-                .ok_or(sqlx::Error::RowNotFound)?;
-            let normalized = NormalizedPlanTier::from_option(Some(plan.as_str()));
-            Ok(PlanTier::from(normalized))
+                .map(|workspace| workspace.plan.clone());
+
+            if let Some(plan) = plan {
+                let normalized = NormalizedPlanTier::from_option(Some(plan.as_str()));
+                Ok(PlanTier::from(normalized))
+            } else {
+                Ok(PlanTier::Workspace)
+            }
         }
 
         async fn find_workspace(
@@ -729,6 +736,15 @@ mod tests {
             _workspace_id: Uuid,
         ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error> {
             Ok(vec![])
+        }
+
+        async fn count_members(&self, workspace_id: Uuid) -> Result<i64, sqlx::Error> {
+            let members = self.add_calls.lock().unwrap();
+            let count = members
+                .iter()
+                .filter(|(ws_id, _, _)| *ws_id == workspace_id)
+                .count();
+            Ok(count as i64)
         }
 
         async fn is_member(
@@ -806,6 +822,96 @@ mod tests {
             _workspace_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             Ok(())
+        }
+
+        async fn try_increment_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+            max_runs: i64,
+        ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
+            let mut usage = self.run_usage.lock().unwrap();
+            let key = (workspace_id, period_start.unix_timestamp());
+            let entry = usage.entry(key).or_insert(0);
+            if *entry >= max_runs {
+                return Ok(WorkspaceRunQuotaUpdate {
+                    allowed: false,
+                    run_count: *entry,
+                });
+            }
+            *entry += 1;
+            Ok(WorkspaceRunQuotaUpdate {
+                allowed: true,
+                run_count: *entry,
+            })
+        }
+
+        async fn get_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+        ) -> Result<i64, sqlx::Error> {
+            let usage = self.run_usage.lock().unwrap();
+            let key = (workspace_id, period_start.unix_timestamp());
+            Ok(*usage.get(&key).unwrap_or(&0))
+        }
+
+        async fn release_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            let mut usage = self.run_usage.lock().unwrap();
+            let key = (workspace_id, period_start.unix_timestamp());
+            if let Some(entry) = usage.get_mut(&key) {
+                if *entry > 0 {
+                    *entry -= 1;
+                }
+                if *entry == 0 {
+                    usage.remove(&key);
+                }
+            }
+            Ok(())
+        }
+
+        async fn upsert_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+            subscription_id: &str,
+            period_start: OffsetDateTime,
+            period_end: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            self.billing_cycles.lock().unwrap().insert(
+                workspace_id,
+                WorkspaceBillingCycle {
+                    workspace_id,
+                    stripe_subscription_id: subscription_id.to_string(),
+                    current_period_start: period_start,
+                    current_period_end: period_end,
+                    synced_at: OffsetDateTime::now_utc(),
+                },
+            );
+            Ok(())
+        }
+
+        async fn clear_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            self.billing_cycles.lock().unwrap().remove(&workspace_id);
+            Ok(())
+        }
+
+        async fn get_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Option<WorkspaceBillingCycle>, sqlx::Error> {
+            Ok(self
+                .billing_cycles
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .cloned())
         }
     }
     fn test_payload() -> SignupPayload {

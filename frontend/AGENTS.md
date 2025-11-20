@@ -193,6 +193,7 @@ Content Security Policy hardening:
 - Signup: kept Terms of Service acceptance as a server-side validation requirement but no longer disables the submit button when unchecked. This allows users (and tests) to trigger full form validation feedback in one action; the handler still enforces acceptance and surfaces a clear error.
 - Tests: components rendered inside `MarketingShell` use `react-router-dom`'s `Link`. Updated tests for `About`, `CheckEmail`, `GetStarted`, and `Logout` to wrap components in `MemoryRouter` so router context is available during rendering.
 - Tests: updated `Signup.test.tsx` to explicitly tick the Terms checkbox before submitting invite flows so API calls (`signupUser`) occur as expected.
+- Plan usage tests: mocked the plan/quota store in Members and Dashboard scenarios to assert the member limit warning banner, disabled invite controls, workspace run limit banners, and manual run gating all appear when quotas are exhausted.
 
 ## Auth pages compact layout
 - Added compact prop to src/components/marketing/MarketingShell.tsx to reduce outer/inner padding on pages that must fit above the fold.

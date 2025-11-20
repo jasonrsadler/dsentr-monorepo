@@ -1,5 +1,5 @@
 use crate::{
-    db::workflow_repository::WorkflowRepository,
+    db::workflow_repository::{CreateWorkflowRunOutcome, WorkflowRepository},
     models::workflow::Workflow,
     models::workflow_dead_letter::WorkflowDeadLetter,
     models::workflow_log::WorkflowLog,

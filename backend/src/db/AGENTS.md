@@ -36,3 +36,5 @@
 - Workspace connection repositories add a `has_connections_for_owner_provider` helper so services can determine whether a personal OAuth token is still shared elsewhere before flipping the `is_shared` flag, and all Postgres/test implementations expose the new method.
 - Workspace repositories now provide member counting plus `workspace_run_usage` quota helpers (Postgres + mocks) so plan gating can atomically enforce seat and run limits without duplicating concurrency logic in routes or workers.
 - Workspace repositories now manage `workspace_billing_cycles` (upsert/get/clear) so Stripe subscription ids and current period windows are stored centrally for billing-aligned quota resets.
+- Workflow and workspace repositories were refreshed to fix build regressions: workflow repos import `CreateWorkflowRunOutcome` explicitly, and the Postgres workspace run quota helper avoids moving the optional row before checking it.
+- Expanded `StaticWorkspaceMembershipRepository` so tests can simulate run quotas and billing cycles, capture release counts, and assert how routes respond when workspaces are at or over their monthly allocations.

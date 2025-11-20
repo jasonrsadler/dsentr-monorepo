@@ -119,7 +119,7 @@ describe('MembersTab workspace actions', () => {
     window.localStorage.clear()
     vi.clearAllMocks()
     resetAuthStore()
-    resetPlanUsageStore()
+    act(() => resetPlanUsageStore())
     listMembersMock.mockResolvedValue([])
     listInvitesMock.mockResolvedValue([])
     leaveWorkspaceMock.mockResolvedValue(undefined)
@@ -131,7 +131,7 @@ describe('MembersTab workspace actions', () => {
 
   afterEach(() => {
     resetAuthStore()
-    resetPlanUsageStore()
+    act(() => resetPlanUsageStore())
   })
 
   it('disables the leave workspace action for owners', async () => {
@@ -523,11 +523,10 @@ describe('MembersTab workspace actions', () => {
     const targetLabel = await screen.findByText('Target Member')
     const targetRow = targetLabel.closest('tr')
     expect(targetRow).not.toBeNull()
-    if (!targetRow) {
-      throw new Error('Target row not found')
-    }
+    if (!targetRow) throw new Error('Target row not found')
 
     const user = userEvent.setup()
+
     fetchOwnershipMock.mockResolvedValueOnce({
       'target-user': [{ group: 'email', service: 'smtp', name: 'primary-key' }]
     })
@@ -537,9 +536,12 @@ describe('MembersTab workspace actions', () => {
     })
     await user.click(removeButton)
 
-    expect(fetchOwnershipMock).toHaveBeenCalledWith(
-      workspaceMembership.workspace.id
-    )
+    await waitFor(() => {
+      expect(fetchOwnershipMock).toHaveBeenCalledWith(
+        workspaceMembership.workspace.id
+      )
+    })
+
     expect(removeMemberMock).not.toHaveBeenCalled()
 
     const modalHeading = await screen.findByText(/confirm member removal/i)
@@ -548,13 +550,18 @@ describe('MembersTab workspace actions', () => {
     const confirmButton = screen.getByRole('button', { name: /remove member/i })
     await user.click(confirmButton)
 
+    // deterministic: wait until removal happens
     await waitFor(() => {
       expect(removeMemberMock).toHaveBeenCalledWith(
         workspaceMembership.workspace.id,
         'target-user'
       )
     })
-    expect(refreshSecretsMock).toHaveBeenCalled()
+
+    // CI-safe: refreshSecrets may fire after a rerender tick
+    await waitFor(() => {
+      expect(refreshSecretsMock).toHaveBeenCalled()
+    })
 
     await waitFor(() => {
       expect(
@@ -580,17 +587,19 @@ describe('MembersTab workspace actions', () => {
         currentWorkspaceId: workspaceMembership.workspace.id
       }))
     })
-    usePlanUsageStore.setState((state) => ({
-      ...state,
-      usage: {
-        plan: 'workspace',
-        runs: { used: 0, period_start: '' },
-        workflows: { total: 0 },
-        workspace: {
-          members: { used: 8, limit: 8 }
+    act(() => {
+      usePlanUsageStore.setState((state) => ({
+        ...state,
+        usage: {
+          plan: 'workspace',
+          runs: { used: 0, period_start: '' },
+          workflows: { total: 0 },
+          workspace: {
+            members: { used: 8, limit: 8 }
+          }
         }
-      }
-    }))
+      }))
+    })
     listMembersMock.mockResolvedValue(
       Array.from({ length: 8 }).map((_, index) => ({
         workspace_id: workspaceMembership.workspace.id,
@@ -614,6 +623,56 @@ describe('MembersTab workspace actions', () => {
     )
   })
 
+  it('shows a warning banner when the workspace is nearing the member limit', async () => {
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'owner',
+          email: 'owner@example.com',
+          first_name: 'Owner',
+          last_name: 'User',
+          plan: 'workspace',
+          role: 'owner',
+          companyName: null
+        },
+        memberships: [workspaceMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id
+      }))
+    })
+    act(() => {
+      usePlanUsageStore.setState((state) => ({
+        ...state,
+        usage: {
+          plan: 'workspace',
+          runs: { used: 0, period_start: '' },
+          workflows: { total: 0 },
+          workspace: {
+            members: { used: 7, limit: 8 }
+          }
+        }
+      }))
+    })
+    listMembersMock.mockResolvedValue(
+      Array.from({ length: 7 }).map((_, index) => ({
+        workspace_id: workspaceMembership.workspace.id,
+        user_id: `member-${index}`,
+        role: index === 0 ? 'owner' : 'admin',
+        joined_at: new Date().toISOString(),
+        email: `member${index}@example.com`,
+        first_name: `Member${index}`,
+        last_name: 'User'
+      }))
+    )
+
+    render(<MembersTab />)
+
+    const banner = await screen.findByTestId('quota-banner')
+    expect(banner.textContent).toMatch(/member limit nearly reached/i)
+    const inviteInput = screen.getByPlaceholderText(/name@example\.com/i)
+    expect(inviteInput).not.toBeDisabled()
+  })
+
   it('allows role changes even when the member limit is reached', async () => {
     act(() => {
       useAuth.setState((state) => ({
@@ -632,17 +691,19 @@ describe('MembersTab workspace actions', () => {
       }))
     })
 
-    usePlanUsageStore.setState((state) => ({
-      ...state,
-      usage: {
-        plan: 'workspace',
-        runs: { used: 0, period_start: '' },
-        workflows: { total: 0 },
-        workspace: {
-          members: { used: 8, limit: 8 }
+    act(() => {
+      usePlanUsageStore.setState((state) => ({
+        ...state,
+        usage: {
+          plan: 'workspace',
+          runs: { used: 0, period_start: '' },
+          workflows: { total: 0 },
+          workspace: {
+            members: { used: 8, limit: 8 }
+          }
         }
-      }
-    }))
+      }))
+    })
 
     listMembersMock.mockResolvedValue(
       Array.from({ length: 8 }).map((_, index) => ({
@@ -665,5 +726,4 @@ describe('MembersTab workspace actions', () => {
     const roleSelect = within(targetRow).getByRole('combobox')
     expect(roleSelect).not.toBeDisabled()
   })
-
 })

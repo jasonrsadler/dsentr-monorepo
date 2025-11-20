@@ -91,16 +91,20 @@ export function useActionNodeController({
   remove,
   runState
 }: UseActionNodeControllerOptions): ActionNodeController {
-  const safeRunState: BaseActionNodeRunState =
-    runState ?? {
+  const fallbackRunState: BaseActionNodeRunState = useMemo(
+    () => ({
       canInvoke: false,
       isInvoking: false,
       isRunning: false,
       isSucceeded: false,
       isFailed: false,
-      run: async () => { },
+      run: async () => {},
       blockedReason: null
-    }
+    }),
+    []
+  )
+
+  const safeRunState = runState ?? fallbackRunState
 
   const meta = useActionMeta(id)
   const params = useActionParams<ActionNodeParams>(id, meta.actionType)
