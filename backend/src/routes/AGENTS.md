@@ -44,6 +44,8 @@
 - Workspace OAuth administration now returns `403 Forbidden` when a workspace admin attempts to remove a shared connection that they did not create. The `/api/workspaces/:id/connections/:connection_id` handler surfaces a clear error so clients can prompt users to ask the original sharer to unshare their credential.
 - Workspace OAuth-related routes/tests now construct `WorkspaceOAuthService` with the workspace repository so membership checks run before decrypting connections (workspaces API helpers, Microsoft route helpers, and Stripe/account tests were updated to the new constructor).
 - Shared the `PlanTier` enum from models and updated workspaces/auth/stripe route tests to rely on the repository-level `get_plan` helper so backend plan gating no longer depends on route-local definitions.
+- Workspace OAuth routes serialize and authorize against the new `owner_user_id`/`user_oauth_token_id` fields so multiple shared connections per provider can coexist without clobbering each other in the repository mocks.
+- Workspace OAuth routes now resolve shared credentials by explicit connection IDs: Microsoft Teams APIs require a connection_id + scope, and handlers double-check the resolved workspace before issuing tokens so selecting a stale ID can’t leak another workspace’s credentials. Test repositories were updated to track multiple connections for these scenarios.
 
 ## New (Stripe billing plan lifecycle)
 - Workspace subscribers now see renewal/reversion dates surfaced in the Plans tab. `GET /api/workspaces/onboarding` attaches `billing.subscription` with:

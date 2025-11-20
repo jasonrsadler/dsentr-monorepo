@@ -1,7 +1,8 @@
 use super::{
     helpers::{
-        map_oauth_error, parse_provider, ConnectionsResponse, PersonalConnectionPayload,
-        RefreshResponse, WorkspaceConnectionPayload,
+        map_oauth_error, parse_provider, ConnectionOwnerPayload, ConnectionsResponse,
+        PersonalConnectionPayload, ProviderGroupedConnections, RefreshResponse,
+        WorkspaceConnectionPayload,
     },
     prelude::*,
 };
@@ -159,33 +160,48 @@ pub async fn list_connections(
             .into_response();
     }
 
-    let personal = personal_tokens
-        .into_iter()
-        .map(|token| PersonalConnectionPayload {
-            id: token.id,
-            provider: token.provider,
-            account_email: token.account_email,
-            expires_at: token.expires_at,
-            is_shared: token.is_shared,
-            last_refreshed_at: token.updated_at,
-            requires_reconnect: false,
-        })
-        .collect();
+    let personal_owner = ConnectionOwnerPayload {
+        user_id,
+        name: format_shared_name(
+            &Some(claims.first_name.clone()),
+            &Some(claims.last_name.clone()),
+        ),
+        email: normalize_optional_field(&claims.email),
+    };
 
-    let workspace = workspace_connections
-        .into_iter()
-        .map(|connection| {
-            let shared_by_name = format_shared_name(
-                &connection.shared_by_first_name,
-                &connection.shared_by_last_name,
-            );
-            let shared_by_email = connection
-                .shared_by_email
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_string());
+    let mut personal = ProviderGroupedConnections::default();
+    for token in personal_tokens {
+        personal.push(
+            token.provider,
+            PersonalConnectionPayload {
+                id: token.id,
+                provider: token.provider,
+                account_email: token.account_email,
+                expires_at: token.expires_at,
+                is_shared: token.is_shared,
+                last_refreshed_at: token.updated_at,
+                requires_reconnect: false,
+                owner: personal_owner.clone(),
+            },
+        );
+    }
 
+    let mut workspace = ProviderGroupedConnections::default();
+    for connection in workspace_connections {
+        let shared_by_name = format_shared_name(
+            &connection.shared_by_first_name,
+            &connection.shared_by_last_name,
+        );
+        let shared_by_email =
+            normalize_optional_field(connection.shared_by_email.as_deref().unwrap_or_default());
+        let owner = ConnectionOwnerPayload {
+            user_id: connection.owner_user_id,
+            name: shared_by_name.clone(),
+            email: shared_by_email.clone(),
+        };
+
+        workspace.push(
+            connection.provider,
             WorkspaceConnectionPayload {
                 id: connection.id,
                 provider: connection.provider,
@@ -197,9 +213,10 @@ pub async fn list_connections(
                 shared_by_email,
                 last_refreshed_at: connection.updated_at,
                 requires_reconnect: connection.requires_reconnect,
-            }
-        })
-        .collect();
+                owner,
+            },
+        );
+    }
 
     Json(ConnectionsResponse {
         success: true,
@@ -225,4 +242,12 @@ fn format_shared_name(first: &Option<String>, last: &Option<String>) -> Option<S
         (None, Some(last)) => Some(last.to_string()),
         (Some(first), Some(last)) => Some(format!("{} {}", first, last)),
     }
+}
+
+fn normalize_optional_field(value: &str) -> Option<String> {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(normalized.to_string())
 }

@@ -34,3 +34,4 @@
 
 ## Change Reasons
 - Added workspace connection and audit event migration to back shared OAuth token promotion.
+- Added owner/token metadata to `workspace_connections` plus a composite uniqueness constraint so multiple shared credentials per provider can coexist without colliding on `(workspace_id, provider)`.

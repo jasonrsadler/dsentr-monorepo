@@ -2276,6 +2276,8 @@ mod tests {
                 id: Uuid::new_v4(),
                 workspace_id: new_connection.workspace_id,
                 created_by: new_connection.created_by,
+                owner_user_id: new_connection.owner_user_id,
+                user_oauth_token_id: new_connection.user_oauth_token_id,
                 provider: new_connection.provider,
                 access_token: new_connection.access_token,
                 refresh_token: new_connection.refresh_token,
@@ -2300,16 +2302,17 @@ mod tests {
                 .cloned())
         }
 
-        async fn find_by_workspace_and_provider(
+        async fn list_for_workspace_provider(
             &self,
             workspace_id: Uuid,
             provider: ConnectedOAuthProvider,
-        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
             let guard = self.connections.lock().unwrap();
             Ok(guard
                 .iter()
-                .find(|record| record.workspace_id == workspace_id && record.provider == provider)
-                .cloned())
+                .filter(|record| record.workspace_id == workspace_id && record.provider == provider)
+                .cloned()
+                .collect())
         }
 
         async fn list_for_workspace(
@@ -2323,6 +2326,7 @@ mod tests {
                 .map(|record| WorkspaceConnectionListing {
                     id: record.id,
                     workspace_id: record.workspace_id,
+                    owner_user_id: record.owner_user_id,
                     workspace_name: String::new(),
                     provider: record.provider,
                     account_email: record.account_email.clone(),
@@ -2343,10 +2347,11 @@ mod tests {
             let guard = self.connections.lock().unwrap();
             Ok(guard
                 .iter()
-                .filter(|record| record.created_by == user_id)
+                .filter(|record| record.owner_user_id == user_id)
                 .map(|record| WorkspaceConnectionListing {
                     id: record.id,
                     workspace_id: record.workspace_id,
+                    owner_user_id: record.owner_user_id,
                     workspace_name: String::new(),
                     provider: record.provider,
                     account_email: record.account_email.clone(),
@@ -2369,7 +2374,7 @@ mod tests {
             Ok(guard
                 .iter()
                 .filter(|record| {
-                    record.workspace_id == workspace_id && record.created_by == creator_id
+                    record.workspace_id == workspace_id && record.owner_user_id == creator_id
                 })
                 .cloned()
                 .collect())
@@ -2386,7 +2391,7 @@ mod tests {
         ) -> Result<(), sqlx::Error> {
             let mut guard = self.connections.lock().unwrap();
             for record in guard.iter_mut() {
-                if record.created_by == creator_id && record.provider == provider {
+                if record.owner_user_id == creator_id && record.provider == provider {
                     record.access_token = access_token.clone();
                     record.refresh_token = refresh_token.clone();
                     record.expires_at = expires_at;
@@ -2430,6 +2435,40 @@ mod tests {
             self.delete_connection(connection_id).await
         }
 
+        async fn delete_by_owner_and_provider(
+            &self,
+            workspace_id: Uuid,
+            owner_user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.connections.lock().unwrap();
+            let mut deleted_ids = Vec::new();
+            guard.retain(|record| {
+                let should_remove = record.workspace_id == workspace_id
+                    && record.owner_user_id == owner_user_id
+                    && record.provider == provider;
+                if should_remove {
+                    deleted_ids.push(record.id);
+                }
+                !should_remove
+            });
+            if !deleted_ids.is_empty() {
+                self.deleted.lock().unwrap().extend(deleted_ids);
+            }
+            Ok(())
+        }
+
+        async fn has_connections_for_owner_provider(
+            &self,
+            owner_user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<bool, sqlx::Error> {
+            let guard = self.connections.lock().unwrap();
+            Ok(guard
+                .iter()
+                .any(|record| record.owner_user_id == owner_user_id && record.provider == provider))
+        }
+
         async fn mark_connections_stale_for_creator(
             &self,
             creator_id: Uuid,
@@ -2438,7 +2477,7 @@ mod tests {
             let mut guard = self.connections.lock().unwrap();
             let mut affected = Vec::new();
             for record in guard.iter_mut() {
-                if record.created_by == creator_id && record.provider == provider {
+                if record.owner_user_id == creator_id && record.provider == provider {
                     record.expires_at = OffsetDateTime::now_utc() - time::Duration::minutes(5);
                     record.updated_at = OffsetDateTime::now_utc();
                     affected.push(StaleWorkspaceConnection {
@@ -3240,6 +3279,8 @@ mod tests {
             id: Uuid::new_v4(),
             workspace_id,
             created_by: user_id,
+            owner_user_id: user_id,
+            user_oauth_token_id: Uuid::new_v4(),
             provider,
             access_token: "encrypted-access".into(),
             refresh_token: "encrypted-refresh".into(),
@@ -3537,6 +3578,8 @@ mod tests {
             .insert_connection(NewWorkspaceConnection {
                 workspace_id,
                 created_by: user_id,
+                owner_user_id: user_id,
+                user_oauth_token_id: Uuid::new_v4(),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -3649,6 +3692,8 @@ mod tests {
             .insert_connection(NewWorkspaceConnection {
                 workspace_id,
                 created_by: creator_id,
+                owner_user_id: creator_id,
+                user_oauth_token_id: Uuid::new_v4(),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),

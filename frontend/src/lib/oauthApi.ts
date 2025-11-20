@@ -19,6 +19,9 @@ export interface BaseConnectionInfo {
 export interface PersonalConnectionInfo extends BaseConnectionInfo {
   scope: 'personal'
   isShared: boolean
+  ownerUserId?: string
+  ownerName?: string
+  ownerEmail?: string
 }
 
 export interface WorkspaceConnectionInfo extends BaseConnectionInfo {
@@ -28,6 +31,7 @@ export interface WorkspaceConnectionInfo extends BaseConnectionInfo {
   workspaceName: string
   sharedByName?: string
   sharedByEmail?: string
+  ownerUserId?: string
 }
 
 export interface ProviderConnectionSet {
@@ -205,6 +209,12 @@ export const updateCachedConnections = (
   return next
 }
 
+interface ConnectionOwnerPayload {
+  userId?: string | null
+  name?: string | null
+  email?: string | null
+}
+
 interface PersonalConnectionPayload {
   id: string
   provider: OAuthProvider
@@ -213,6 +223,7 @@ interface PersonalConnectionPayload {
   isShared: boolean
   lastRefreshedAt?: string | null
   requiresReconnect?: boolean | null
+  owner?: ConnectionOwnerPayload | null
 }
 
 interface WorkspaceConnectionPayload {
@@ -226,12 +237,15 @@ interface WorkspaceConnectionPayload {
   sharedByEmail?: string | null
   lastRefreshedAt?: string | null
   requiresReconnect?: boolean | null
+  owner?: ConnectionOwnerPayload | null
 }
+
+type ProviderConnectionBuckets<T> = Partial<Record<OAuthProvider, T[] | null>>
 
 interface ConnectionsApiResponse {
   success: boolean
-  personal?: PersonalConnectionPayload[] | null
-  workspace?: WorkspaceConnectionPayload[] | null
+  personal?: ProviderConnectionBuckets<PersonalConnectionPayload> | null
+  workspace?: ProviderConnectionBuckets<WorkspaceConnectionPayload> | null
 }
 
 interface RefreshApiResponse {
@@ -282,53 +296,75 @@ export async function fetchConnections(
     const trimmed = value.trim()
     return trimmed.length > 0 ? trimmed : undefined
   }
+  const normalizeId = (value?: string | null): string | undefined => {
+    return normalize(value)
+  }
 
-  const personalEntries = Array.isArray(data.personal) ? data.personal : []
-  personalEntries.forEach((entry) => {
-    if (!entry || !isSupportedProvider(entry.provider)) {
-      return
-    }
-    grouped.personal.push({
-      scope: 'personal',
-      provider: entry.provider,
-      id: entry.id,
-      connected: !entry.requiresReconnect,
-      accountEmail: normalize(entry.accountEmail),
-      expiresAt: entry.expiresAt ?? undefined,
-      lastRefreshedAt: normalize(entry.lastRefreshedAt),
-      requiresReconnect: Boolean(entry.requiresReconnect),
-      isShared: Boolean(entry.isShared)
+  const personalBuckets = data.personal ?? {}
+  PROVIDER_KEYS.forEach((provider) => {
+    const entries = Array.isArray(personalBuckets[provider])
+      ? (personalBuckets[provider] as PersonalConnectionPayload[])
+      : []
+    entries.forEach((entry) => {
+      if (!entry) {
+        return
+      }
+      grouped.personal.push({
+        scope: 'personal',
+        provider,
+        id: entry.id,
+        connected: !entry.requiresReconnect,
+        accountEmail: normalize(entry.accountEmail),
+        expiresAt: entry.expiresAt ?? undefined,
+        lastRefreshedAt: normalize(entry.lastRefreshedAt),
+        requiresReconnect: Boolean(entry.requiresReconnect),
+        isShared: Boolean(entry.isShared),
+        ownerUserId: normalizeId(entry.owner?.userId),
+        ownerName: normalize(entry.owner?.name),
+        ownerEmail: normalize(entry.owner?.email)
+      })
     })
   })
 
-  const workspaceEntries = Array.isArray(data.workspace) ? data.workspace : []
-  workspaceEntries.forEach((entry) => {
-    if (!entry || !isSupportedProvider(entry.provider)) {
-      return
-    }
+  const workspaceBuckets = data.workspace ?? {}
+  PROVIDER_KEYS.forEach((provider) => {
+    const entries = Array.isArray(workspaceBuckets[provider])
+      ? (workspaceBuckets[provider] as WorkspaceConnectionPayload[])
+      : []
+    entries.forEach((entry) => {
+      if (!entry) {
+        return
+      }
 
-    const connectionId = entry.id?.trim()
-    const workspaceId = entry.workspaceId?.trim()
-    if (!connectionId || !workspaceId) {
-      return
-    }
+      const connectionId = entry.id?.trim()
+      const workspaceId = entry.workspaceId?.trim()
+      if (!connectionId || !workspaceId) {
+        return
+      }
 
-    const workspaceInfo: WorkspaceConnectionInfo = {
-      scope: 'workspace',
-      id: connectionId,
-      connected: !entry.requiresReconnect,
-      provider: entry.provider,
-      accountEmail: normalize(entry.accountEmail),
-      expiresAt: entry.expiresAt ?? undefined,
-      lastRefreshedAt: normalize(entry.lastRefreshedAt),
-      workspaceId,
-      workspaceName: normalize(entry.workspaceName) ?? 'Workspace connection',
-      sharedByName: normalize(entry.sharedByName),
-      sharedByEmail: normalize(entry.sharedByEmail),
-      requiresReconnect: Boolean(entry.requiresReconnect)
-    }
+      const ownerName =
+        normalize(entry.sharedByName) ?? normalize(entry.owner?.name)
+      const ownerEmail =
+        normalize(entry.sharedByEmail) ?? normalize(entry.owner?.email)
 
-    grouped.workspace.push(workspaceInfo)
+      const workspaceInfo: WorkspaceConnectionInfo = {
+        scope: 'workspace',
+        id: connectionId,
+        connected: !entry.requiresReconnect,
+        provider,
+        accountEmail: normalize(entry.accountEmail),
+        expiresAt: entry.expiresAt ?? undefined,
+        lastRefreshedAt: normalize(entry.lastRefreshedAt),
+        workspaceId,
+        workspaceName: normalize(entry.workspaceName) ?? 'Workspace connection',
+        sharedByName: ownerName,
+        sharedByEmail: ownerEmail,
+        requiresReconnect: Boolean(entry.requiresReconnect),
+        ownerUserId: normalizeId(entry.owner?.userId)
+      }
+
+      grouped.workspace.push(workspaceInfo)
+    })
   })
 
   setCachedConnections(grouped, { workspaceId: targetWorkspace })

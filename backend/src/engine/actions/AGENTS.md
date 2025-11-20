@@ -23,3 +23,4 @@
 - Action outputs now include `connectionScope` and `connectionId` so nodes can detect stale selections without relying on emails. This surfaces enough metadata for the UI to reconcile saved selections across plan changes and connection rotations.
 - Messaging and Google action tests now construct WorkspaceOAuthService with the workspace repository dependency so the new membership checks run while refreshing workspace tokens.
 - Added `ensure_run_membership` in `mod.rs` and wired Slack, Teams, and Sheets workspace branches through it so we short-circuit with a `Forbidden` error (and dedicated tests) before touching shared OAuth tokens or external APIs when a run's actor is no longer a workspace member.
+- Workspace connection contexts for Slack, Teams, and Sheets now emit the `owner_user_id` (replacing the old `created_by` semantics) so downstream logs/tests know which member shared the credential.

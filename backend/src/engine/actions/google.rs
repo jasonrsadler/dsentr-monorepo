@@ -133,9 +133,13 @@ pub(crate) async fn execute_sheets(
 
             let connection = state
                 .workspace_oauth
-                .ensure_valid_workspace_token(workspace_id, info.connection_id)
+                .ensure_valid_workspace_token(info.connection_id)
                 .await
                 .map_err(map_workspace_oauth_error)?;
+
+            if connection.workspace_id != workspace_id {
+                return Err(map_workspace_oauth_error(WorkspaceOAuthError::NotFound));
+            }
 
             if connection.provider != ConnectedOAuthProvider::Google {
                 return Err("Selected connection is not a Google connection".to_string());
@@ -147,7 +151,7 @@ pub(crate) async fn execute_sheets(
                 ConnectionContext::Workspace {
                     workspace_id,
                     connection_id: connection.id,
-                    created_by: connection.created_by,
+                    created_by: connection.owner_user_id,
                     account_email: Some(connection.account_email.clone()),
                 },
             )
@@ -659,15 +663,17 @@ mod tests {
             Ok(guard.clone().filter(|conn| conn.id == connection_id))
         }
 
-        async fn find_by_workspace_and_provider(
+        async fn list_for_workspace_provider(
             &self,
             workspace_id: Uuid,
             provider: ConnectedOAuthProvider,
-        ) -> Result<Option<WorkspaceConnection>, SqlxError> {
+        ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
             let guard = self.connection.lock().unwrap();
             Ok(guard
                 .clone()
-                .filter(|conn| conn.workspace_id == workspace_id && conn.provider == provider))
+                .filter(|conn| conn.workspace_id == workspace_id && conn.provider == provider)
+                .into_iter()
+                .collect())
         }
 
         async fn list_for_workspace(
@@ -736,6 +742,23 @@ mod tests {
 
         async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
             Ok(())
+        }
+
+        async fn delete_by_owner_and_provider(
+            &self,
+            _workspace_id: Uuid,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), SqlxError> {
+            Ok(())
+        }
+
+        async fn has_connections_for_owner_provider(
+            &self,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<bool, SqlxError> {
+            Ok(false)
         }
 
         async fn mark_connections_stale_for_creator(
@@ -1263,10 +1286,14 @@ mod tests {
         let workspace_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
 
+        let creator_id = Uuid::new_v4();
+
         let connection = WorkspaceConnection {
             id: connection_id,
             workspace_id,
-            created_by: Uuid::new_v4(),
+            created_by: creator_id,
+            owner_user_id: creator_id,
+            user_oauth_token_id: Uuid::new_v4(),
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
@@ -1345,10 +1372,14 @@ mod tests {
         let other_workspace = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
 
+        let creator_id = Uuid::new_v4();
+
         let connection = WorkspaceConnection {
             id: connection_id,
             workspace_id: other_workspace,
-            created_by: Uuid::new_v4(),
+            created_by: creator_id,
+            owner_user_id: creator_id,
+            user_oauth_token_id: Uuid::new_v4(),
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
@@ -1408,10 +1439,14 @@ mod tests {
         let workspace_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
 
+        let creator_id = Uuid::new_v4();
+
         let connection = WorkspaceConnection {
             id: connection_id,
             workspace_id,
-            created_by: Uuid::new_v4(),
+            created_by: creator_id,
+            owner_user_id: creator_id,
+            user_oauth_token_id: Uuid::new_v4(),
             provider: ConnectedOAuthProvider::Google,
             access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),

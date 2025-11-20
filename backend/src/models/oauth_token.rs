@@ -38,6 +38,8 @@ pub struct WorkspaceConnection {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub created_by: Uuid,
+    pub owner_user_id: Uuid,
+    pub user_oauth_token_id: Uuid,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,

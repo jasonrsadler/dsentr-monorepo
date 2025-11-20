@@ -16,6 +16,8 @@ pub struct StaleWorkspaceConnection {
 pub struct NewWorkspaceConnection {
     pub workspace_id: Uuid,
     pub created_by: Uuid,
+    pub owner_user_id: Uuid,
+    pub user_oauth_token_id: Uuid,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,
@@ -35,6 +37,7 @@ pub struct NewWorkspaceAuditEvent {
 pub struct WorkspaceConnectionListing {
     pub id: Uuid,
     pub workspace_id: Uuid,
+    pub owner_user_id: Uuid,
     pub workspace_name: String,
     pub provider: ConnectedOAuthProvider,
     pub account_email: String,
@@ -59,11 +62,11 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         connection_id: Uuid,
     ) -> Result<Option<WorkspaceConnection>, sqlx::Error>;
 
-    async fn find_by_workspace_and_provider(
+    async fn list_for_workspace_provider(
         &self,
         workspace_id: Uuid,
         provider: ConnectedOAuthProvider,
-    ) -> Result<Option<WorkspaceConnection>, sqlx::Error>;
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error>;
 
     async fn list_for_workspace(
         &self,
@@ -103,6 +106,19 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
 
     async fn delete_by_id(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
 
+    async fn delete_by_owner_and_provider(
+        &self,
+        workspace_id: Uuid,
+        owner_user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn has_connections_for_owner_provider(
+        &self,
+        owner_user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<bool, sqlx::Error>;
+
     async fn mark_connections_stale_for_creator(
         &self,
         creator_id: Uuid,
@@ -135,12 +151,12 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Ok(None)
     }
 
-    async fn find_by_workspace_and_provider(
+    async fn list_for_workspace_provider(
         &self,
         _workspace_id: Uuid,
         _provider: ConnectedOAuthProvider,
-    ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
-        Ok(None)
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+        Ok(Vec::new())
     }
 
     async fn list_for_workspace(
@@ -193,6 +209,23 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
 
     async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
+    }
+
+    async fn delete_by_owner_and_provider(
+        &self,
+        _workspace_id: Uuid,
+        _owner_user_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn has_connections_for_owner_provider(
+        &self,
+        _owner_user_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
     }
 
     async fn mark_connections_stale_for_creator(

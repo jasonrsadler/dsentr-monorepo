@@ -19,6 +19,6 @@
 - Added `stripe` service: unified trait for creating Checkout Sessions, verifying webhooks safely, and retrieving events; live implementation wraps `async-stripe` and mock captures calls for deterministic tests.
  - Extended StripeService to support customer creation (`create_customer`) and enriched Checkout Session requests with `customer` and `metadata` fields so routes can associate sessions with users and desired workspace upgrades.
  - New: subscription helpers for plan lifecycle – `get_active_subscription_for_customer` and `set_subscription_cancel_at_period_end` – so routes can display renewal dates and schedule downgrades at period end without immediate plan changes. The mock tracks a synthetic `active_subscription` to keep tests deterministic.
- - Tests: added unit tests for the Stripe service validating request construction (via the mock capturing last requests) and error mapping (invalid webhook signature, invalid customer id parsing) without hitting the network.
+- Tests: added unit tests for the Stripe service validating request construction (via the mock capturing last requests) and error mapping (invalid webhook signature, invalid customer id parsing) without hitting the network.
 - Workspace OAuth service adds connection purge helpers plus dedicated mocks/tests so member removals can revoke shared tokens and audit deletions consistently.
-
+- Workspace OAuth workflows now persist `owner_user_id`/`user_oauth_token_id` on shared connections and ensure permission checks, mocks, and decrypt helpers respect the new ownership contract.

@@ -23,3 +23,4 @@
 ## Change Log
 - Context key casing: Node outputs are now inserted into the workflow context using the node label's original casing, with a lowercase alias added for backward compatibility. This allows templates like `{{Trigger.Name}}` to resolve while still supporting existing `{{trigger.Name}}` references. Field/property casing remains unchanged and must be matched exactly.
 - Snapshot egress allowlists are treated as advisory inputs and intersected with the deployment `ALLOWED_HTTP_DOMAINS` policy. Rejected hosts emit structured warnings and an `egress_policy_violation` run event for audit trails.
+- Slack/Microsoft workspace actions now revalidate workspace OAuth connection IDs locally—after fetching tokens they confirm the connection belongs to the run's workspace so a misconfigured workflow cannot borrow credentials from another workspace.

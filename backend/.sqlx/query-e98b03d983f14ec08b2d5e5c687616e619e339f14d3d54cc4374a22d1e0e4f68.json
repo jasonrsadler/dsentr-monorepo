@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                workspace_id,\n                created_by,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at\n            FROM workspace_connections\n            WHERE id = $1\n            ",
+  "query": "\n            UPDATE workspace_connections\n            SET\n                access_token = $2,\n                refresh_token = $3,\n                expires_at = $4,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING\n                id,\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -20,6 +20,16 @@
       },
       {
         "ordinal": 3,
+        "name": "owner_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_oauth_token_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
         "name": "provider: _",
         "type_info": {
           "Custom": {
@@ -35,39 +45,42 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "access_token",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "refresh_token",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "account_email",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -80,8 +93,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "0e9668f1f175dd48e41bec532a54ee1061cd8e4693ccc1904a95e9a2a4156c97"
+  "hash": "e98b03d983f14ec08b2d5e5c687616e619e339f14d3d54cc4374a22d1e0e4f68"
 }

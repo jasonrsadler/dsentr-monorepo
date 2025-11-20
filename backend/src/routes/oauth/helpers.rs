@@ -19,6 +19,16 @@ pub(crate) struct CallbackQuery {
     pub(crate) error_description: Option<String>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConnectionOwnerPayload {
+    pub(crate) user_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) email: Option<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PersonalConnectionPayload {
@@ -31,6 +41,7 @@ pub(crate) struct PersonalConnectionPayload {
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) last_refreshed_at: OffsetDateTime,
     pub(crate) requires_reconnect: bool,
+    pub(crate) owner: ConnectionOwnerPayload,
 }
 
 #[derive(Serialize)]
@@ -48,14 +59,42 @@ pub(crate) struct WorkspaceConnectionPayload {
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) last_refreshed_at: OffsetDateTime,
     pub(crate) requires_reconnect: bool,
+    pub(crate) owner: ConnectionOwnerPayload,
+}
+
+#[derive(Serialize)]
+pub(crate) struct ProviderGroupedConnections<T> {
+    pub(crate) google: Vec<T>,
+    pub(crate) microsoft: Vec<T>,
+    pub(crate) slack: Vec<T>,
+}
+
+impl<T> Default for ProviderGroupedConnections<T> {
+    fn default() -> Self {
+        Self {
+            google: Vec::new(),
+            microsoft: Vec::new(),
+            slack: Vec::new(),
+        }
+    }
+}
+
+impl<T> ProviderGroupedConnections<T> {
+    pub(crate) fn push(&mut self, provider: ConnectedOAuthProvider, payload: T) {
+        match provider {
+            ConnectedOAuthProvider::Google => self.google.push(payload),
+            ConnectedOAuthProvider::Microsoft => self.microsoft.push(payload),
+            ConnectedOAuthProvider::Slack => self.slack.push(payload),
+        }
+    }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionsResponse {
     pub(crate) success: bool,
-    pub(crate) personal: Vec<PersonalConnectionPayload>,
-    pub(crate) workspace: Vec<WorkspaceConnectionPayload>,
+    pub(crate) personal: ProviderGroupedConnections<PersonalConnectionPayload>,
+    pub(crate) workspace: ProviderGroupedConnections<WorkspaceConnectionPayload>,
 }
 
 #[derive(Serialize)]

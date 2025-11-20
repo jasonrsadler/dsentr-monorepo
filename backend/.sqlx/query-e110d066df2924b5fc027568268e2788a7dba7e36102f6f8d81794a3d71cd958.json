@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM workspace_connections\n            WHERE workspace_id = $1\n              AND owner_user_id = $2\n              AND provider = $3::oauth_connection_provider\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        {
+          "Custom": {
+            "name": "oauth_connection_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "microsoft",
+                "slack"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e110d066df2924b5fc027568268e2788a7dba7e36102f6f8d81794a3d71cd958"
+}

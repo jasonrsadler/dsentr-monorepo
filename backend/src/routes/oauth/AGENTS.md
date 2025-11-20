@@ -23,3 +23,4 @@
 - Accounts: Added a defensive ownership assertion for personal tokens by cross-checking repository lookups for the authenticated `user_id` and provider before serializing the response. Violations return 403 and are logged.
 - OAuth route tests implement the new WorkspaceRepository::is_member helper so WorkspaceOAuthService membership checks work inside the test harness.
 - Workspace OAuth tests now cover the shared `get_plan` repository helper so plan-aware services can reuse the mocks without referring back to route modules.
+- OAuth route tests and repository stubs now understand multiple workspace connection records so connection-id scoped flows (Microsoft Teams) can assert the selected connection still belongs to the requesting workspace before issuing tokens.

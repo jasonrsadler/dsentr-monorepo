@@ -27,6 +27,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             INSERT INTO workspace_connections (
                 workspace_id,
                 created_by,
+                owner_user_id,
+                user_oauth_token_id,
                 provider,
                 access_token,
                 refresh_token,
@@ -34,19 +36,13 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 account_email,
                 updated_at
             )
-            VALUES ($1, $2, $3::oauth_connection_provider, $4, $5, $6, $7, now())
-            ON CONFLICT (workspace_id, provider)
-            DO UPDATE SET
-                created_by = EXCLUDED.created_by,
-                access_token = EXCLUDED.access_token,
-                refresh_token = EXCLUDED.refresh_token,
-                expires_at = EXCLUDED.expires_at,
-                account_email = EXCLUDED.account_email,
-                updated_at = now()
+            VALUES ($1, $2, $3, $4, $5::oauth_connection_provider, $6, $7, $8, $9, now())
             RETURNING
                 id,
                 workspace_id,
                 created_by,
+                owner_user_id,
+                user_oauth_token_id,
                 provider as "provider: _",
                 access_token,
                 refresh_token,
@@ -57,6 +53,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             "#,
             new_connection.workspace_id,
             new_connection.created_by,
+            new_connection.owner_user_id,
+            new_connection.user_oauth_token_id,
             new_connection.provider as ConnectedOAuthProvider,
             new_connection.access_token,
             new_connection.refresh_token,
@@ -78,6 +76,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 id,
                 workspace_id,
                 created_by,
+                owner_user_id,
+                user_oauth_token_id,
                 provider as "provider: _",
                 access_token,
                 refresh_token,
@@ -94,11 +94,11 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         .await
     }
 
-    async fn find_by_workspace_and_provider(
+    async fn list_for_workspace_provider(
         &self,
         workspace_id: Uuid,
         provider: ConnectedOAuthProvider,
-    ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
         sqlx::query_as!(
             WorkspaceConnection,
             r#"
@@ -106,6 +106,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 id,
                 workspace_id,
                 created_by,
+                owner_user_id,
+                user_oauth_token_id,
                 provider as "provider: _",
                 access_token,
                 refresh_token,
@@ -114,12 +116,14 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 created_at,
                 updated_at
             FROM workspace_connections
-            WHERE workspace_id = $1 AND provider = $2::oauth_connection_provider
+            WHERE workspace_id = $1
+              AND provider = $2::oauth_connection_provider
+            ORDER BY created_at ASC
             "#,
             workspace_id,
             provider as ConnectedOAuthProvider,
         )
-        .fetch_optional(&self.pool)
+        .fetch_all(&self.pool)
         .await
     }
 
@@ -132,6 +136,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             SELECT
                 wc.id,
                 wc.workspace_id,
+                wc.owner_user_id,
                 w.name AS workspace_name,
                 wc.provider,
                 wc.account_email,
@@ -143,10 +148,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 (owner_token.id IS NULL) AS requires_reconnect
             FROM workspace_connections wc
             JOIN workspaces w ON w.id = wc.workspace_id
-            LEFT JOIN users owner ON owner.id = wc.created_by
+            LEFT JOIN users owner ON owner.id = wc.owner_user_id
             LEFT JOIN user_oauth_tokens owner_token
-                ON owner_token.user_id = wc.created_by
-               AND owner_token.provider = wc.provider
+                ON owner_token.id = wc.user_oauth_token_id
             WHERE wc.workspace_id = $1
             ORDER BY wc.created_at ASC
             "#,
@@ -165,6 +169,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             SELECT DISTINCT ON (wc.id)
                 wc.id,
                 wc.workspace_id,
+                wc.owner_user_id,
                 w.name AS workspace_name,
                 wc.provider,
                 wc.account_email,
@@ -177,10 +182,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             FROM workspace_connections wc
             JOIN workspace_members wm ON wm.workspace_id = wc.workspace_id
             JOIN workspaces w ON w.id = wc.workspace_id
-            LEFT JOIN users owner ON owner.id = wc.created_by
+            LEFT JOIN users owner ON owner.id = wc.owner_user_id
             LEFT JOIN user_oauth_tokens owner_token
-                ON owner_token.user_id = wc.created_by
-               AND owner_token.provider = wc.provider
+                ON owner_token.id = wc.user_oauth_token_id
             WHERE wm.user_id = $1
               AND w.deleted_at IS NULL
             ORDER BY wc.id, wc.created_at ASC
@@ -202,6 +206,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 id,
                 workspace_id,
                 created_by,
+                owner_user_id,
+                user_oauth_token_id,
                 provider,
                 access_token,
                 refresh_token,
@@ -211,7 +217,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 updated_at
             FROM workspace_connections
             WHERE workspace_id = $1
-              AND created_by = $2
+              AND owner_user_id = $2
             "#,
         )
         .bind(workspace_id)
@@ -238,7 +244,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 expires_at = $5,
                 account_email = $6,
                 updated_at = now()
-            WHERE created_by = $1
+            WHERE owner_user_id = $1
               AND provider = $2
             "#,
         )
@@ -275,6 +281,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 id,
                 workspace_id,
                 created_by,
+                owner_user_id,
+                user_oauth_token_id,
                 provider as "provider: _",
                 access_token,
                 refresh_token,
@@ -309,6 +317,52 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         Ok(())
     }
 
+    async fn delete_by_owner_and_provider(
+        &self,
+        workspace_id: Uuid,
+        owner_user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            DELETE FROM workspace_connections
+            WHERE workspace_id = $1
+              AND owner_user_id = $2
+              AND provider = $3::oauth_connection_provider
+            "#,
+            workspace_id,
+            owner_user_id,
+            provider as ConnectedOAuthProvider,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn has_connections_for_owner_provider(
+        &self,
+        owner_user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<bool, sqlx::Error> {
+        let exists = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM workspace_connections
+                WHERE owner_user_id = $1
+                  AND provider = $2::oauth_connection_provider
+            )
+            "#,
+            owner_user_id,
+            provider as ConnectedOAuthProvider,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(exists.unwrap_or(false))
+    }
+
     async fn mark_connections_stale_for_creator(
         &self,
         creator_id: Uuid,
@@ -320,7 +374,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             SET
                 expires_at = now() - INTERVAL '5 minutes',
                 updated_at = now()
-            WHERE created_by = $1
+            WHERE owner_user_id = $1
               AND provider = $2
             RETURNING id, workspace_id
             "#,

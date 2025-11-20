@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                FROM workspace_connections\n                WHERE owner_user_id = $1\n                  AND provider = $2::oauth_connection_provider\n            )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "oauth_connection_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "microsoft",
+                "slack"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f30650888d8309b7cd088a94d60ec0ab2ec90897b237b24442931b0624f75487"
+}

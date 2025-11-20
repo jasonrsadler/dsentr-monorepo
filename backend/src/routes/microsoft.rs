@@ -381,19 +381,28 @@ async fn ensure_workspace_token(
 
     state
         .workspace_oauth
-        .ensure_valid_workspace_token(listing.workspace_id, listing.id)
+        .ensure_valid_workspace_token(listing.id)
         .await
-        .map(|connection| StoredOAuthToken {
-            id: connection.id,
-            provider: ConnectedOAuthProvider::Microsoft,
-            access_token: connection.access_token,
-            refresh_token: connection.refresh_token,
-            expires_at: connection.expires_at,
-            account_email: connection.account_email,
-            is_shared: true,
-            updated_at: connection.updated_at,
-        })
         .map_err(map_workspace_oauth_error)
+        .and_then(|connection| {
+            if connection.workspace_id != listing.workspace_id {
+                return Err(JsonResponse::not_found(
+                    "Selected workspace Microsoft connection is no longer available",
+                )
+                .into_response());
+            }
+
+            Ok(StoredOAuthToken {
+                id: connection.id,
+                provider: ConnectedOAuthProvider::Microsoft,
+                access_token: connection.access_token,
+                refresh_token: connection.refresh_token,
+                expires_at: connection.expires_at,
+                account_email: connection.account_email,
+                is_shared: true,
+                updated_at: connection.updated_at,
+            })
+        })
 }
 
 fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> Response {
@@ -551,12 +560,12 @@ mod tests {
                 .filter(|record| record.id == connection_id))
         }
 
-        async fn find_by_workspace_and_provider(
+        async fn list_for_workspace_provider(
             &self,
             _workspace_id: Uuid,
             _provider: ConnectedOAuthProvider,
-        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
-            Ok(None)
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            Ok(Vec::new())
         }
 
         async fn list_for_workspace(
@@ -617,6 +626,23 @@ mod tests {
 
         async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
+        }
+
+        async fn delete_by_owner_and_provider(
+            &self,
+            _workspace_id: Uuid,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn has_connections_for_owner_provider(
+            &self,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<bool, sqlx::Error> {
+            Ok(false)
         }
 
         async fn mark_connections_stale_for_creator(
@@ -761,6 +787,7 @@ mod tests {
         let listing = WorkspaceConnectionListing {
             id: connection_id,
             workspace_id,
+            owner_user_id: user_id,
             workspace_name: "Workspace".into(),
             provider: ConnectedOAuthProvider::Microsoft,
             account_email: "shared@example.com".into(),
@@ -776,6 +803,8 @@ mod tests {
             id: connection_id,
             workspace_id,
             created_by: user_id,
+            owner_user_id: user_id,
+            user_oauth_token_id: Uuid::new_v4(),
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,

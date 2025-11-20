@@ -1135,12 +1135,12 @@ impl OAuthAccountService {
                 Ok(None)
             }
 
-            async fn find_by_workspace_and_provider(
+            async fn list_for_workspace_provider(
                 &self,
                 _workspace_id: Uuid,
                 _provider: ConnectedOAuthProvider,
-            ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
-                Ok(None)
+            ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+                Ok(Vec::new())
             }
 
             async fn list_for_workspace(
@@ -1199,6 +1199,23 @@ impl OAuthAccountService {
 
             async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
                 Ok(())
+            }
+
+            async fn delete_by_owner_and_provider(
+                &self,
+                _workspace_id: Uuid,
+                _owner_user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
+            async fn has_connections_for_owner_provider(
+                &self,
+                _owner_user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<bool, sqlx::Error> {
+                Ok(false)
             }
 
             async fn mark_connections_stale_for_creator(
@@ -1422,12 +1439,12 @@ mod tests {
             Ok(None)
         }
 
-        async fn find_by_workspace_and_provider(
+        async fn list_for_workspace_provider(
             &self,
             _workspace_id: Uuid,
             _provider: ConnectedOAuthProvider,
-        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
-            Ok(None)
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            Ok(Vec::new())
         }
 
         async fn list_for_workspace(
@@ -1486,6 +1503,23 @@ mod tests {
 
         async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
+        }
+
+        async fn delete_by_owner_and_provider(
+            &self,
+            _workspace_id: Uuid,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn has_connections_for_owner_provider(
+            &self,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<bool, sqlx::Error> {
+            Ok(false)
         }
 
         async fn mark_connections_stale_for_creator(
@@ -1912,12 +1946,12 @@ mod tests {
             Ok(None)
         }
 
-        async fn find_by_workspace_and_provider(
+        async fn list_for_workspace_provider(
             &self,
             _workspace_id: Uuid,
             _provider: ConnectedOAuthProvider,
-        ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
-            Ok(None)
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            Ok(Vec::new())
         }
 
         async fn list_for_workspace(
@@ -1974,6 +2008,23 @@ mod tests {
         }
         async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
+        }
+
+        async fn delete_by_owner_and_provider(
+            &self,
+            _workspace_id: Uuid,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn has_connections_for_owner_provider(
+            &self,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<bool, sqlx::Error> {
+            Ok(false)
         }
 
         async fn mark_connections_stale_for_creator(
