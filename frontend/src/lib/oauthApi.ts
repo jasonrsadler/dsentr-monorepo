@@ -99,9 +99,6 @@ const cloneGroupedSnapshot = (
   workspace: snapshot.workspace.map((w) => ({ ...w }))
 })
 
-const isSupportedProvider = (value: unknown): value is OAuthProvider =>
-  PROVIDER_KEYS.includes(value as OAuthProvider)
-
 const normalizeWorkspaceId = (value?: string | null): string | null => {
   if (typeof value !== 'string') {
     return null
@@ -244,8 +241,14 @@ type ProviderConnectionBuckets<T> = Partial<Record<OAuthProvider, T[] | null>>
 
 interface ConnectionsApiResponse {
   success: boolean
-  personal?: ProviderConnectionBuckets<PersonalConnectionPayload> | null
-  workspace?: ProviderConnectionBuckets<WorkspaceConnectionPayload> | null
+  personal?:
+    | ProviderConnectionBuckets<PersonalConnectionPayload>
+    | PersonalConnectionPayload[]
+    | null
+  workspace?:
+    | ProviderConnectionBuckets<WorkspaceConnectionPayload>
+    | WorkspaceConnectionPayload[]
+    | null
 }
 
 interface RefreshApiResponse {
@@ -256,6 +259,24 @@ interface RefreshApiResponse {
   requiresReconnect?: boolean | null
   requires_reconnect?: boolean | null
   message?: string | null
+}
+
+const resolveBucketEntries = <T extends { provider: OAuthProvider }>(
+  bucket: ProviderConnectionBuckets<T> | T[] | null | undefined,
+  provider: OAuthProvider
+): T[] => {
+  if (!bucket) {
+    return []
+  }
+
+  if (Array.isArray(bucket)) {
+    return bucket.filter(
+      (entry) => !!entry && entry.provider === provider
+    ) as T[]
+  }
+
+  const entries = bucket[provider]
+  return Array.isArray(entries) ? (entries as T[]).filter(Boolean) : []
 }
 
 const ensureGrouped = (
@@ -300,11 +321,9 @@ export async function fetchConnections(
     return normalize(value)
   }
 
-  const personalBuckets = data.personal ?? {}
+  const personalBuckets = data.personal
   PROVIDER_KEYS.forEach((provider) => {
-    const entries = Array.isArray(personalBuckets[provider])
-      ? (personalBuckets[provider] as PersonalConnectionPayload[])
-      : []
+    const entries = resolveBucketEntries(personalBuckets, provider)
     entries.forEach((entry) => {
       if (!entry) {
         return
@@ -326,11 +345,9 @@ export async function fetchConnections(
     })
   })
 
-  const workspaceBuckets = data.workspace ?? {}
+  const workspaceBuckets = data.workspace
   PROVIDER_KEYS.forEach((provider) => {
-    const entries = Array.isArray(workspaceBuckets[provider])
-      ? (workspaceBuckets[provider] as WorkspaceConnectionPayload[])
-      : []
+    const entries = resolveBucketEntries(workspaceBuckets, provider)
     entries.forEach((entry) => {
       if (!entry) {
         return

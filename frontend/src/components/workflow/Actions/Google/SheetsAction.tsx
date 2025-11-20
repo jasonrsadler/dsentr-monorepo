@@ -141,6 +141,7 @@ export default function SheetsAction({
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
+  const clearedWorkspaceSelectionRef = useRef(false)
 
   const pickProviderConnections = (
     snapshot: GroupedConnectionsSnapshot | null,
@@ -319,12 +320,22 @@ export default function SheetsAction({
 
     if (!selected && wasWorkspaceSelection) {
       if (oauthConnectionScope || oauthConnectionId || accountEmail) {
+        clearedWorkspaceSelectionRef.current = true
         applySheetsParamsPatch({
           oauthConnectionScope: '',
           oauthConnectionId: '',
           accountEmail: ''
         })
       }
+      return
+    }
+
+    if (
+      clearedWorkspaceSelectionRef.current &&
+      !oauthConnectionScope &&
+      !oauthConnectionId &&
+      !accountEmail
+    ) {
       return
     }
 
@@ -368,6 +379,7 @@ export default function SheetsAction({
     }
 
     if (Object.keys(updates).length > 0) {
+      clearedWorkspaceSelectionRef.current = false
       applySheetsParamsPatch(updates)
     }
   }, [
@@ -379,6 +391,15 @@ export default function SheetsAction({
     oauthConnectionId,
     oauthConnectionScope
   ])
+
+  useEffect(() => {
+    if (
+      oauthConnectionScope === 'personal' ||
+      oauthConnectionScope === 'workspace'
+    ) {
+      clearedWorkspaceSelectionRef.current = false
+    }
+  }, [oauthConnectionScope])
 
   // Keep personal and workspace references separate; avoid flattening
   const hasAnyGoogleConnection = useMemo(() => {

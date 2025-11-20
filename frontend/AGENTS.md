@@ -31,8 +31,14 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Leaving a workspace is initiated from the Members settings tab. The "Leave workspace" button must be disabled for owners, call the `leaveWorkspace` API when allowed, refresh cached memberships, and send users back to their Solo workspace (or next available one) when the server responds with `403`.
 
 ## Change Reasons
+SheetsAction credential fallback guard:
+- Prevent Sheets action nodes from silently auto-selecting the personal Google credential after a shared workspace credential disappears. Track when we clear a workspace selection and suppress the automatic fallback so users must explicitly pick another connection, keeping React Flow updates bounded.
+
+OAuth connections response normalization:
+- `fetchConnections` now tolerates API responses where `personal`/`workspace` are provided as flat arrays instead of provider buckets by grouping entries client-side. This keeps the cached snapshot populated for tests and production regardless of response shape.
+
 Vite 7 migration:
-- Moved Vitest options into `vitest.config.ts` and removed the `test` field from `vite.config.ts` because Vite 7’s `UserConfig` no longer includes `test`. Mirrored aliases/plugins so test transforms and import paths match the app.
+- Moved Vitest options into `vitest.config.ts` and removed the `test` field from `vite.config.ts` because Vite 7's `UserConfig` no longer includes `test`. Mirrored aliases/plugins so test transforms and import paths match the app.
 
 Vitest config type compatibility:
 - Removed Vite plugins from `vitest.config.ts` to avoid cross-package `PluginOption` type mismatches between Vitest’s bundled Vite types and the app’s Vite types. Vitest/esbuild handles JSX/TS without these plugins; aliases are preserved for import resolution.
