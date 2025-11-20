@@ -15,3 +15,4 @@
 ## Change Reasons
 - Documented Stripe OAuth and webhook secrets alongside existing provider guidance so billing setup stays aligned with backend config.
 - Added egress allowlist enforcement notes so engineers understand how snapshot metadata interacts with environment policies and audit logging.
+- Added plan limit reference (member/run quotas + error codes) so API consumers know how to handle `workspace_plan_required`, `workspace_member_limit`, and `workspace_run_limit` responses.

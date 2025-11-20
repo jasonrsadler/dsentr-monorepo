@@ -6,6 +6,8 @@ import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import { getCsrfToken } from '@/lib/csrfCache'
 import type { WorkspaceMembershipSummary } from '@/lib/orgWorkspaceApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
+import { usePlanUsageStore } from '@/stores/planUsageStore'
+import { QuotaBanner } from '@/components/quota/QuotaBanner'
 
 type PlanOption = {
   tier: PlanTier
@@ -73,6 +75,43 @@ export default function PlanTab() {
   const [isResuming, setIsResuming] = useState(false)
   const workspaceEditedRef = useRef(false)
   const isWorkspaceOwner = currentWorkspace?.role === 'owner'
+  const planUsage = usePlanUsageStore((state) => state.usage)
+  const refreshPlanUsage = usePlanUsageStore((state) => state.refresh)
+  useEffect(() => {
+    void refreshPlanUsage()
+  }, [refreshPlanUsage])
+  const planRunUsage = planUsage?.workspace?.runs ?? planUsage?.runs ?? null
+  const planRunLimit = planRunUsage?.limit
+  const planRunUsed = planRunUsage?.used ?? 0
+  const runUsageReached =
+    typeof planRunLimit === 'number' && planRunLimit > 0
+      ? planRunUsed >= planRunLimit
+      : false
+  const runUsageApproaching =
+    !runUsageReached &&
+    typeof planRunLimit === 'number' &&
+    planRunLimit > 0 &&
+    planRunUsed / planRunLimit >= 0.8
+  const memberUsageSummary = planUsage?.workspace?.members
+  const membersLimit = memberUsageSummary?.limit
+  const membersUsed = memberUsageSummary?.used ?? 0
+  const memberUsageReached =
+    typeof membersLimit === 'number' && membersLimit > 0
+      ? membersUsed >= membersLimit
+      : false
+  const memberUsageApproaching =
+    !memberUsageReached &&
+    typeof membersLimit === 'number' &&
+    membersLimit > 0 &&
+    membersUsed / membersLimit >= 0.8
+  const runUsageDescription =
+    typeof planRunLimit === 'number'
+      ? `${planRunUsed.toLocaleString()} of ${planRunLimit.toLocaleString()} runs used this month.`
+      : null
+  const memberUsageDescription =
+    typeof membersLimit === 'number'
+      ? `${membersUsed} of ${membersLimit} members in use.`
+      : null
 
   useEffect(() => {
     const fetchOptions = async () => {
@@ -574,6 +613,41 @@ export default function PlanTab() {
         <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
           {error}
         </div>
+      ) : null}
+      {(runUsageReached || runUsageApproaching) && runUsageDescription ? (
+        <QuotaBanner
+          variant={runUsageReached ? 'danger' : 'warning'}
+          title={
+            runUsageReached
+              ? 'Workflow run limit reached'
+              : 'Workflow run limit nearly reached'
+          }
+          description={runUsageDescription}
+          actionLabel="Manage plan"
+          onAction={() =>
+            window.dispatchEvent(
+              new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+            )
+          }
+        />
+      ) : null}
+      {(memberUsageReached || memberUsageApproaching) &&
+      memberUsageDescription ? (
+        <QuotaBanner
+          variant={memberUsageReached ? 'danger' : 'warning'}
+          title={
+            memberUsageReached
+              ? 'Workspace member limit reached'
+              : 'Workspace member limit nearly reached'
+          }
+          description={memberUsageDescription}
+          actionLabel="Manage members"
+          onAction={() =>
+            window.dispatchEvent(
+              new CustomEvent('open-plan-settings', { detail: { tab: 'members' } })
+            )
+          }
+        />
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">

@@ -1,6 +1,9 @@
 use super::prelude::*;
 use crate::config::MIN_WEBHOOK_SECRET_LENGTH;
-use crate::utils::plan_limits::NormalizedPlanTier;
+use crate::{
+    routes::plan_limits::workspace_limit_error_response, state::WorkspaceRunQuotaTicket,
+    utils::plan_limits::NormalizedPlanTier,
+};
 use axum::http::HeaderMap;
 use tracing::error;
 
@@ -242,17 +245,33 @@ pub async fn webhook_trigger(
             .collect(),
     );
 
+    let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
+    if let Some(workspace_id) = wf.workspace_id {
+        match app_state.consume_workspace_run_quota(workspace_id).await {
+            Ok(ticket) => workspace_quota = Some(ticket),
+            Err(err) => return workspace_limit_error_response(err),
+        }
+    }
+
     match app_state
         .workflow_repo
         .create_workflow_run(wf.user_id, wf.id, wf.workspace_id, snapshot, None)
         .await
     {
-        Ok(run) => (
-            StatusCode::ACCEPTED,
-            Json(json!({"success": true, "run": run})),
-        )
-            .into_response(),
+        Ok(outcome) => {
+            if let (Some(ticket), false) = (&workspace_quota, outcome.created) {
+                let _ = app_state.release_workspace_run_quota(*ticket).await;
+            }
+            (
+                StatusCode::ACCEPTED,
+                Json(json!({"success": true, "run": outcome.run})),
+            )
+                .into_response()
+        }
         Err(e) => {
+            if let Some(ticket) = workspace_quota {
+                let _ = app_state.release_workspace_run_quota(ticket).await;
+            }
             eprintln!("DB error creating run: {:?}", e);
             JsonResponse::server_error("Failed to enqueue run").into_response()
         }

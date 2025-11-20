@@ -29,6 +29,7 @@ import { normalizePlanTier } from '@/lib/planTiers'
 import { errorMessage } from '@/lib/errorMessage'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
 import { useWorkflowFlyout } from '@/components/workflow/useWorkflowFlyout'
+import type { RunAvailability } from '@/types/runAvailability'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
   'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'
@@ -124,6 +125,7 @@ interface TriggerNodeProps {
   planTier?: string | null
   onRestrictionNotice?: (message: string) => void
   canEdit?: boolean
+  runAvailability?: RunAvailability
 }
 
 type TriggerNodeContentProps = BaseNodeRenderProps<TriggerNodeData> & {
@@ -134,6 +136,7 @@ type TriggerNodeContentProps = BaseNodeRenderProps<TriggerNodeData> & {
   isSoloPlan: boolean
   onRestrictionNotice?: (message: string) => void
   defaultTimezone: string
+  runAvailability?: RunAvailability
 }
 
 export default function TriggerNode({
@@ -145,7 +148,8 @@ export default function TriggerNode({
   isFailed,
   planTier,
   onRestrictionNotice,
-  canEdit = true
+  canEdit = true,
+  runAvailability
 }: TriggerNodeProps) {
   const selectNodeData = useMemo(
     () => (state: WorkflowState) =>
@@ -188,6 +192,7 @@ export default function TriggerNode({
           isSoloPlan={isSoloPlan}
           onRestrictionNotice={onRestrictionNotice}
           defaultTimezone={defaultTimezone}
+          runAvailability={runAvailability}
         />
       )}
     </BaseNode>
@@ -211,7 +216,8 @@ function TriggerNodeContent({
   isFailed,
   isSoloPlan,
   onRestrictionNotice,
-  defaultTimezone
+  defaultTimezone,
+  runAvailability
 }: TriggerNodeContentProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -480,14 +486,20 @@ function TriggerNodeContent({
     [effectiveCanEdit, updateData]
   )
 
+  const runBlocked = Boolean(runAvailability?.disabled)
+  const runBlockedReason =
+    runAvailability?.reason ??
+    'Workspace run quota reached. Upgrade in Settings → Plan to continue running workflows.'
   const handleRun = useCallback(async () => {
+    if (runBlocked) return
+    if (!onRun) return
     setRunning(true)
     try {
-      await onRun?.(id, inputs)
+      await onRun(id, inputs)
     } finally {
       setRunning(false)
     }
-  }, [id, inputs, onRun])
+  }, [id, inputs, onRun, runBlocked])
 
   const repeatEnabled = !!scheduleConfig.repeat
 
@@ -590,7 +602,13 @@ function TriggerNodeContent({
         )}
         <button
           onClick={handleRun}
-          disabled={running || combinedHasValidationErrors}
+          disabled={
+            running ||
+            combinedHasValidationErrors ||
+            runBlocked ||
+            typeof onRun !== 'function'
+          }
+          title={runBlocked ? runBlockedReason : undefined}
           className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
         >
           {running ? 'Running...' : 'Run'}

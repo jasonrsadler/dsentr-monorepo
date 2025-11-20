@@ -12,6 +12,7 @@ import useActionNodeController, {
   type ActionNodeData
 } from './useActionNodeController'
 import useMessagingActionRestriction from './useMessagingActionRestriction'
+import type { RunAvailability } from '@/types/runAvailability'
 
 interface TeamsActionNodeProps {
   id: string
@@ -23,6 +24,7 @@ interface TeamsActionNodeProps {
   isSucceeded?: boolean
   isFailed?: boolean
   canEdit?: boolean
+  runAvailability?: RunAvailability
 }
 
 type TeamsActionNodeRenderProps = BaseActionNodeChildrenProps<ActionNodeData>
@@ -43,7 +45,8 @@ export default function TeamsActionNode({
   isRunning,
   isSucceeded,
   isFailed,
-  canEdit = true
+  canEdit = true,
+  runAvailability
 }: TeamsActionNodeProps) {
   return (
     <BaseActionNode<ActionNodeData>
@@ -56,6 +59,7 @@ export default function TeamsActionNode({
       isRunning={isRunning}
       isSucceeded={isSucceeded}
       isFailed={isFailed}
+      runAvailability={runAvailability}
     >
       {(baseProps) => (
         <TeamsActionNodeContent
@@ -159,10 +163,20 @@ function TeamsActionNodeContent({
         <button
           onClick={controller.handleTestAction}
           disabled={!controller.canRunTest || controller.isTestInvoking}
+          title={
+            !controller.canRunTest && controller.runState.blockedReason
+              ? controller.runState.blockedReason
+              : undefined
+          }
           className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
         >
           {controller.runButtonLabel}
         </button>
+        {!controller.canRunTest && controller.runState.blockedReason ? (
+          <p className="mt-1 text-xs text-amber-600">
+            {controller.runState.blockedReason}
+          </p>
+        ) : null}
 
         <AnimatePresence>
           {controller.expanded && (

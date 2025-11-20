@@ -7,6 +7,7 @@ pub mod early_access;
 pub mod microsoft;
 pub mod oauth;
 pub mod options;
+pub mod plan_limits;
 pub mod stripe;
 pub mod workflows;
 pub mod workspaces;

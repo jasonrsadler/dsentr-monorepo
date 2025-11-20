@@ -10,6 +10,12 @@ use crate::models::workflow_run_event::{NewWorkflowRunEvent, WorkflowRunEvent};
 use crate::models::workflow_schedule::WorkflowSchedule;
 use time::OffsetDateTime;
 
+#[derive(Debug)]
+pub struct CreateWorkflowRunOutcome {
+    pub run: WorkflowRun,
+    pub created: bool,
+}
+
 #[async_trait]
 #[cfg_attr(test, mockall::automock)]
 #[allow(clippy::too_many_arguments)]
@@ -114,7 +120,7 @@ pub trait WorkflowRepository: Send + Sync {
         workspace_id: Option<Uuid>,
         snapshot: Value,
         idempotency_key: Option<&str>,
-    ) -> Result<WorkflowRun, sqlx::Error>;
+    ) -> Result<CreateWorkflowRunOutcome, sqlx::Error>;
 
     async fn get_workflow_run(
         &self,

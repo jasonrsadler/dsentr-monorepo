@@ -14,6 +14,7 @@ use crate::{
         workspace::{WorkspaceRole, INVITATION_STATUS_PENDING, WORKSPACE_PLAN_SOLO},
     },
     responses::JsonResponse,
+    routes::plan_limits::workspace_limit_error_response,
     state,
 };
 
@@ -167,6 +168,13 @@ pub async fn handle_signup(
     if let Some(invite) = invite_record.clone() {
         match invite_decision {
             SignupInviteDecision::Join => {
+                if let Err(err) = state
+                    .ensure_workspace_can_add_members(invite.workspace_id, 1)
+                    .await
+                {
+                    return workspace_limit_error_response(err);
+                }
+
                 if let Err(err) = workspace_repo
                     .add_member(invite.workspace_id, user_id, invite.role)
                     .await

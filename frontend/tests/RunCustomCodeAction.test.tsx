@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import RunCustomCodeAction from '../src/components/workflow/Actions/RunCustomCodeAction'
+import RunCustomCodeActionNode from '../src/components/workflow/nodes/RunCustomCodeActionNode'
 import type { RunCustomCodeActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
@@ -287,5 +288,25 @@ describe('RunCustomCodeAction', () => {
         hasValidationErrors: false
       })
     })
+  })
+
+  it('disables test actions when run availability is blocked', async () => {
+    seedCustomCodeNode(createBaseParams())
+    render(
+      <RunCustomCodeActionNode
+        id={nodeId}
+        selected={false}
+        onRun={vi.fn()}
+        runAvailability={{
+          disabled: true,
+          reason: 'Monthly run limit reached.'
+        }}
+      />
+    )
+    const button = await screen.findByRole('button', { name: /test action/i })
+    expect(button).toBeDisabled()
+    expect(
+      screen.getByText(/monthly run limit reached/i)
+    ).toBeInTheDocument()
   })
 })

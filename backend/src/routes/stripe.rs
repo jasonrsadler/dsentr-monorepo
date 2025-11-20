@@ -50,6 +50,10 @@ fn extract_session_id(event: &serde_json::Value) -> Option<String> {
     extract_str(event, &["data", "object", "id"]).map(|s| s.to_string())
 }
 
+fn extract_i64(val: &serde_json::Value, path: &[&str]) -> Option<i64> {
+    jget(val, path)?.as_i64()
+}
+
 fn extract_failure_message(event: &serde_json::Value) -> Option<String> {
     // Try PaymentIntent last_payment_error.message
     if let Some(val) = jget(event, &["data", "object", "last_payment_error", "message"]) {
@@ -112,14 +116,15 @@ pub async fn webhook(
                     return Json(serde_json::json!({ "received": true })).into_response();
                 }
             };
+            let mut stripe_customer_id = extract_customer_id(payload);
 
             // Resolve user
             let mut user_id: Option<Uuid> = extract_checkout_user_id(payload);
             if user_id.is_none() {
-                if let Some(customer_id) = extract_customer_id(payload) {
+                if let Some(customer_id) = stripe_customer_id.as_deref() {
                     match app_state
                         .db
-                        .find_user_id_by_stripe_customer_id(&customer_id)
+                        .find_user_id_by_stripe_customer_id(customer_id)
                         .await
                     {
                         Ok(opt) => user_id = opt,
@@ -200,10 +205,10 @@ pub async fn webhook(
             let workspace_name = workspace_name_opt.unwrap_or_else(|| "My Workspace".to_string());
 
             // Persist customer id if present
-            if let Some(customer_id) = extract_customer_id(payload) {
+            if let Some(customer_id) = stripe_customer_id.as_deref() {
                 if let Err(err) = app_state
                     .db
-                    .set_user_stripe_customer_id(user_id, &customer_id)
+                    .set_user_stripe_customer_id(user_id, customer_id)
                     .await
                 {
                     warn!(?err, %user_id, customer_id, "failed to persist stripe customer id on checkout completion");
@@ -344,6 +349,39 @@ pub async fn webhook(
                 warn!(?err, %user_id, "failed to clear pending checkout after completion");
             }
 
+            if let Some(customer_id) = stripe_customer_id.as_deref() {
+                match app_state
+                    .stripe
+                    .get_active_subscription_for_customer(customer_id)
+                    .await
+                {
+                    Ok(Some(sub)) => {
+                        if let (Ok(period_start), Ok(period_end)) = (
+                            OffsetDateTime::from_unix_timestamp(sub.current_period_start),
+                            OffsetDateTime::from_unix_timestamp(sub.current_period_end),
+                        ) {
+                            app_state
+                                .sync_owned_workspace_billing_cycles(
+                                    user_id,
+                                    &sub.id,
+                                    period_start,
+                                    period_end,
+                                )
+                                .await;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!(
+                            ?err,
+                            %user_id,
+                            customer_id,
+                            "failed to sync billing period after checkout completion"
+                        );
+                    }
+                }
+            }
+
             info!(%user_id, workspace_id=%workspace.id, %session_id, "completed workspace upgrade");
             Json(serde_json::json!({ "received": true })).into_response()
         }
@@ -411,6 +449,7 @@ pub async fn webhook(
                         }
                     }
                 }
+                app_state.clear_owned_workspace_billing_cycles(uid).await;
 
                 warn!(%uid, evt_type, "recorded billing failure and cleared pending checkout");
             } else {
@@ -487,6 +526,7 @@ pub async fn webhook(
                         }
                     }
                 }
+                app_state.clear_owned_workspace_billing_cycles(uid).await;
 
                 info!(%uid, "processed subscription deletion: reverted plan to solo");
             } else {
@@ -524,10 +564,34 @@ pub async fn webhook(
                 let cancel_at_period_end =
                     extract_bool(payload, &["data", "object", "cancel_at_period_end"])
                         .unwrap_or(false);
+                let subscription_id =
+                    extract_str(payload, &["data", "object", "id"]).map(|s| s.to_string());
+                let period_bounds = match (
+                    extract_i64(payload, &["data", "object", "current_period_start"]),
+                    extract_i64(payload, &["data", "object", "current_period_end"]),
+                ) {
+                    (Some(start), Some(end)) => {
+                        let start_dt = OffsetDateTime::from_unix_timestamp(start).ok();
+                        let end_dt = OffsetDateTime::from_unix_timestamp(end).ok();
+                        if let (Some(start_dt), Some(end_dt)) = (start_dt, end_dt) {
+                            Some((start_dt, end_dt))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
 
                 match (status, cancel_at_period_end) {
                     // cancel at period end: keep Workspace until sub.deleted
                     ("active", true) | ("canceled", true) => {
+                        if let (Some((start, end)), Some(sub_id)) =
+                            (period_bounds.clone(), subscription_id.as_ref())
+                        {
+                            app_state
+                                .sync_owned_workspace_billing_cycles(uid, sub_id, start, end)
+                                .await;
+                        }
                         info!(
                             %uid,
                             status,
@@ -588,9 +652,17 @@ pub async fn webhook(
                                 }
                             }
                         }
+                        app_state.clear_owned_workspace_billing_cycles(uid).await;
                     }
 
                     _ => {
+                        if let (Some((start, end)), Some(sub_id)) =
+                            (period_bounds.clone(), subscription_id.as_ref())
+                        {
+                            app_state
+                                .sync_owned_workspace_billing_cycles(uid, sub_id, start, end)
+                                .await;
+                        }
                         info!(
                             %uid,
                             status,

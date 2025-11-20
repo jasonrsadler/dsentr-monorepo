@@ -4,6 +4,7 @@ use crate::db::{
     workspace_connection_repository::WorkspaceConnectionRepository,
     workspace_repository::WorkspaceRepository,
 };
+use crate::models::{plan::PlanTier, workspace::WorkspaceBillingCycle};
 use crate::services::oauth::{
     account_service::OAuthAccountService, github::service::GitHubOAuthService,
     google::service::GoogleOAuthService, workspace_service::WorkspaceOAuthService,
@@ -17,7 +18,9 @@ use crate::utils::{
 use reqwest::Client;
 use sqlx::PgPool;
 use std::sync::Arc;
-use tracing::error;
+use thiserror::Error;
+use time::{OffsetDateTime, Time};
+use tracing::{error, warn};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -38,6 +41,27 @@ pub struct AppState {
     pub worker_id: Arc<String>,
     pub worker_lease_seconds: i32,
     pub jwt_keys: Arc<JwtKeys>,
+}
+
+pub const WORKSPACE_MEMBER_LIMIT: i64 = 8;
+pub const WORKSPACE_MONTHLY_RUN_LIMIT: i64 = 10_000;
+
+#[derive(Clone, Copy, Debug)]
+pub struct WorkspaceRunQuotaTicket {
+    workspace_id: Uuid,
+    period_start: OffsetDateTime,
+}
+
+#[derive(Debug, Error)]
+pub enum WorkspaceLimitError {
+    #[error("Workspace plan required for this action")]
+    WorkspacePlanRequired,
+    #[error("Workspace member limit reached (max {limit})")]
+    MemberLimitReached { limit: i64 },
+    #[error("Workspace run limit reached (max {limit})")]
+    RunLimitReached { limit: i64 },
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
 }
 
 impl AppState {
@@ -91,7 +115,19 @@ impl AppState {
                     .get_active_subscription_for_customer(&customer_id)
                     .await
                 {
-                    Ok(Some(_sub)) => {
+                    Ok(Some(sub)) => {
+                        if let (Ok(period_start), Ok(period_end)) = (
+                            OffsetDateTime::from_unix_timestamp(sub.current_period_start),
+                            OffsetDateTime::from_unix_timestamp(sub.current_period_end),
+                        ) {
+                            self.sync_owned_workspace_billing_cycles(
+                                user_id,
+                                &sub.id,
+                                period_start,
+                                period_end,
+                            )
+                            .await;
+                        }
                         // Active subscription present → keep workspace tier
                         return db_tier;
                     }
@@ -115,6 +151,7 @@ impl AppState {
                                 }
                             }
                         }
+                        self.clear_owned_workspace_billing_cycles(user_id).await;
                         return NormalizedPlanTier::Solo;
                     }
                     Err(err) => {
@@ -127,6 +164,192 @@ impl AppState {
         }
 
         db_tier
+    }
+
+    pub async fn ensure_workspace_plan(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<PlanTier, WorkspaceLimitError> {
+        let plan = self
+            .workspace_repo
+            .get_plan(workspace_id)
+            .await
+            .map_err(WorkspaceLimitError::from)?;
+
+        if !matches!(plan, PlanTier::Workspace) {
+            return Err(WorkspaceLimitError::WorkspacePlanRequired);
+        }
+
+        Ok(plan)
+    }
+
+    pub async fn ensure_workspace_can_add_members(
+        &self,
+        workspace_id: Uuid,
+        seats_needed: i64,
+    ) -> Result<(), WorkspaceLimitError> {
+        self.ensure_workspace_plan(workspace_id).await?;
+        if seats_needed <= 0 {
+            return Ok(());
+        }
+
+        let current_members = self
+            .workspace_repo
+            .count_members(workspace_id)
+            .await
+            .map_err(WorkspaceLimitError::from)?;
+
+        if current_members + seats_needed > WORKSPACE_MEMBER_LIMIT {
+            return Err(WorkspaceLimitError::MemberLimitReached {
+                limit: WORKSPACE_MEMBER_LIMIT,
+            });
+        }
+
+        Ok(())
+    }
+
+    pub async fn consume_workspace_run_quota(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<WorkspaceRunQuotaTicket, WorkspaceLimitError> {
+        self.ensure_workspace_plan(workspace_id).await?;
+
+        let now = OffsetDateTime::now_utc();
+        let cycle = self
+            .workspace_repo
+            .get_workspace_billing_cycle(workspace_id)
+            .await
+            .map_err(WorkspaceLimitError::from)?;
+        let period_start = workspace_quota_period_start(cycle.as_ref(), now);
+        let update = self
+            .workspace_repo
+            .try_increment_workspace_run_quota(
+                workspace_id,
+                period_start,
+                WORKSPACE_MONTHLY_RUN_LIMIT,
+            )
+            .await
+            .map_err(WorkspaceLimitError::from)?;
+
+        if !update.allowed {
+            return Err(WorkspaceLimitError::RunLimitReached {
+                limit: WORKSPACE_MONTHLY_RUN_LIMIT,
+            });
+        }
+
+        Ok(WorkspaceRunQuotaTicket {
+            workspace_id,
+            period_start,
+        })
+    }
+
+    pub async fn release_workspace_run_quota(
+        &self,
+        ticket: WorkspaceRunQuotaTicket,
+    ) -> Result<(), WorkspaceLimitError> {
+        self.workspace_repo
+            .release_workspace_run_quota(ticket.workspace_id, ticket.period_start)
+            .await
+            .map_err(WorkspaceLimitError::from)
+    }
+
+    pub async fn sync_owned_workspace_billing_cycles(
+        &self,
+        owner_id: Uuid,
+        subscription_id: &str,
+        period_start: OffsetDateTime,
+        period_end: OffsetDateTime,
+    ) {
+        match self
+            .workspace_repo
+            .list_memberships_for_user(owner_id)
+            .await
+        {
+            Ok(memberships) => {
+                for membership in memberships.into_iter().filter(|m| {
+                    m.workspace.owner_id == owner_id
+                        && !NormalizedPlanTier::from_option(Some(m.workspace.plan.as_str()))
+                            .is_solo()
+                }) {
+                    if let Err(err) = self
+                        .workspace_repo
+                        .upsert_workspace_billing_cycle(
+                            membership.workspace.id,
+                            subscription_id,
+                            period_start,
+                            period_end,
+                        )
+                        .await
+                    {
+                        warn!(
+                            ?err,
+                            workspace_id = %membership.workspace.id,
+                            %owner_id,
+                            "failed to persist workspace billing cycle window"
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(
+                    ?err,
+                    %owner_id,
+                    "failed to list workspaces while syncing billing cycles"
+                );
+            }
+        }
+    }
+
+    pub async fn clear_owned_workspace_billing_cycles(&self, owner_id: Uuid) {
+        match self
+            .workspace_repo
+            .list_memberships_for_user(owner_id)
+            .await
+        {
+            Ok(memberships) => {
+                for membership in memberships
+                    .into_iter()
+                    .filter(|m| m.workspace.owner_id == owner_id)
+                {
+                    if let Err(err) = self
+                        .workspace_repo
+                        .clear_workspace_billing_cycle(membership.workspace.id)
+                        .await
+                    {
+                        warn!(
+                            ?err,
+                            workspace_id = %membership.workspace.id,
+                            %owner_id,
+                            "failed to clear workspace billing cycle window"
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(
+                    ?err,
+                    %owner_id,
+                    "failed to list workspaces while clearing billing cycles"
+                );
+            }
+        }
+    }
+}
+
+fn workspace_quota_period_start(
+    cycle: Option<&WorkspaceBillingCycle>,
+    now: OffsetDateTime,
+) -> OffsetDateTime {
+    if let Some(cycle) = cycle {
+        if now >= cycle.current_period_end {
+            cycle.current_period_end
+        } else {
+            cycle.current_period_start
+        }
+    } else {
+        now.replace_day(1)
+            .unwrap_or(now)
+            .replace_time(Time::MIDNIGHT)
     }
 }
 
@@ -163,6 +386,7 @@ mod tests {
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
     use crate::models::user::{OauthProvider, User, UserRole};
+    use crate::models::workspace::WorkspaceBillingCycle;
     use crate::services::{
         oauth::{
             account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
@@ -173,7 +397,7 @@ mod tests {
     use async_trait::async_trait;
     use reqwest::Client;
     use std::sync::Arc;
-    use time::OffsetDateTime;
+    use time::{Duration, OffsetDateTime};
 
     #[derive(Default)]
     struct NoopMailer;
@@ -297,5 +521,37 @@ mod tests {
         let (state, user_id) = build_state_with_user(None);
         let tier = state.resolve_plan_tier(user_id, Some("solo")).await;
         assert_eq!(tier, NormalizedPlanTier::Solo);
+    }
+
+    #[test]
+    fn workspace_quota_period_start_uses_billing_cycle_window() {
+        let cycle_start = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let cycle_end = cycle_start + Duration::days(30);
+        let cycle = WorkspaceBillingCycle {
+            workspace_id: Uuid::new_v4(),
+            stripe_subscription_id: "sub_test".into(),
+            current_period_start: cycle_start,
+            current_period_end: cycle_end,
+            synced_at: cycle_start,
+        };
+        let now = cycle_start + Duration::days(5);
+        let start = super::workspace_quota_period_start(Some(&cycle), now);
+        assert_eq!(start, cycle_start);
+    }
+
+    #[test]
+    fn workspace_quota_period_start_rolls_forward_after_cycle_end() {
+        let cycle_start = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let cycle_end = cycle_start + Duration::days(30);
+        let cycle = WorkspaceBillingCycle {
+            workspace_id: Uuid::new_v4(),
+            stripe_subscription_id: "sub_test".into(),
+            current_period_start: cycle_start,
+            current_period_end: cycle_end,
+            synced_at: cycle_start,
+        };
+        let after_cycle = cycle_end + Duration::seconds(10);
+        let start = super::workspace_quota_period_start(Some(&cycle), after_cycle);
+        assert_eq!(start, cycle_end);
     }
 }

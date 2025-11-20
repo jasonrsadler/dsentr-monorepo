@@ -87,6 +87,7 @@ import useActionNodeController, {
   type ActionNodeData
 } from '@/components/workflow/nodes/useActionNodeController'
 import useMessagingActionRestriction from '@/components/workflow/nodes/useMessagingActionRestriction'
+import type { RunAvailability } from '@/types/runAvailability'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
   'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'
@@ -118,6 +119,7 @@ type ActionNodeRendererProps = NodeProps<Node<ActionNodeData>> & {
   canEdit?: boolean
   planTier?: string | null
   onRestrictionNotice?: (message: string) => void
+  runAvailability?: RunAvailability
 }
 
 type WorkflowEdgeRendererProps = EdgeProps<WorkflowEdge>
@@ -466,6 +468,7 @@ interface FlowCanvasProps {
   planTier?: string | null
   onRestrictionNotice?: (message: string) => void
   canEdit?: boolean
+  runAvailability?: RunAvailability
 }
 
 export default function FlowCanvas({
@@ -477,7 +480,8 @@ export default function FlowCanvas({
   failedIds = new Set(),
   planTier,
   onRestrictionNotice,
-  canEdit = true
+  canEdit = true,
+  runAvailability
 }: FlowCanvasProps) {
   const nodes = useWorkflowStore(selectNodes)
   const edges = useWorkflowStore(selectEdges)
@@ -535,6 +539,10 @@ export default function FlowCanvas({
   useEffect(() => {
     invokeRunWorkflowRef.current = invokeRunWorkflow
   }, [invokeRunWorkflow])
+  const runAvailabilityRef = useRef<RunAvailability | undefined>(runAvailability)
+  useEffect(() => {
+    runAvailabilityRef.current = runAvailability
+  }, [runAvailability])
   const onRestrictionNoticeRef = useRef(onRestrictionNotice)
   useEffect(() => {
     onRestrictionNoticeRef.current = onRestrictionNotice
@@ -687,12 +695,14 @@ export default function FlowCanvas({
   >(() => {
     const createSharedRunProps = (): Pick<
       ActionNodeRendererProps,
-      'onRun' | 'canEdit'
+      'onRun' | 'canEdit' | 'runAvailability'
     > => ({
       onRun: async () => {
+        if (runAvailabilityRef.current?.disabled) return
         invokeRunWorkflowRef.current?.()
       },
-      canEdit: canEditRef.current
+      canEdit: canEditRef.current,
+      runAvailability: runAvailabilityRef.current
     })
 
     return {
@@ -821,6 +831,7 @@ export default function FlowCanvas({
           planTier={normalizedPlanTierRef.current}
           onRestrictionNotice={onRestrictionNoticeRef.current}
           canEdit={canEditRef.current}
+          runAvailability={runAvailability}
         />
       ),
       condition: (props: ConditionNodeRendererProps) => (
@@ -860,7 +871,7 @@ export default function FlowCanvas({
         return renderActionNode(subtype as keyof typeof actionRenderers, props)
       }
     }),
-    [determineActionSubtype, renderActionNode]
+    [determineActionSubtype, renderActionNode, runAvailability]
   )
 
   const onNodesChange = useCallback(

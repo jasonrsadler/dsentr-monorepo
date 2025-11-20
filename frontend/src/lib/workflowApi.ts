@@ -41,6 +41,17 @@ export interface PlanUsageSummary {
     limit?: number
     hidden?: number
   }
+  workspace?: {
+    runs?: {
+      used: number
+      limit?: number
+      period_start?: string
+    }
+    members?: {
+      used: number
+      limit?: number
+    }
+  }
 }
 
 async function handleJsonResponse(response: Response) {
@@ -444,6 +455,9 @@ export async function startWorkflowRun(
     )
     if (body?.violations) {
       ;(error as any).violations = body.violations
+    }
+    if (body?.code) {
+      ;(error as any).code = body.code
     }
     throw error
   }

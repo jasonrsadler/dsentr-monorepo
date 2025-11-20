@@ -293,8 +293,21 @@ pub async fn get_account_deletion_summary(
             .get_active_subscription_for_customer(customer_id)
             .await
         {
-            Ok(Some(_)) => {
+            Ok(Some(sub)) => {
                 has_active_subscription = true;
+                if let (Ok(period_start), Ok(period_end)) = (
+                    OffsetDateTime::from_unix_timestamp(sub.current_period_start),
+                    OffsetDateTime::from_unix_timestamp(sub.current_period_end),
+                ) {
+                    state
+                        .sync_owned_workspace_billing_cycles(
+                            context.user.id,
+                            &sub.id,
+                            period_start,
+                            period_end,
+                        )
+                        .await;
+                }
             }
             Ok(None) => {}
             Err(err) => {
@@ -429,6 +442,9 @@ pub async fn confirm_account_deletion(
                 {
                     Ok(()) => {
                         stripe_cancelled = true;
+                        state
+                            .clear_owned_workspace_billing_cycles(context.user.id)
+                            .await;
                     }
                     Err(err) => {
                         error!(?err, %customer_id, "failed to cancel Stripe subscription during account deletion");

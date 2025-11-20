@@ -1,5 +1,6 @@
 import { useState, useCallback, type ReactNode } from 'react'
 import BaseNode, { type BaseNodeRenderProps } from '../BaseNode'
+import type { RunAvailability } from '@/types/runAvailability'
 
 export type BaseActionNodeRunState = {
   canInvoke: boolean
@@ -8,6 +9,7 @@ export type BaseActionNodeRunState = {
   isSucceeded: boolean
   isFailed: boolean
   run: (params: unknown) => Promise<void>
+  blockedReason?: string | null
 }
 
 export type BaseActionNodeChildrenProps<TData extends Record<string, unknown>> =
@@ -27,6 +29,7 @@ interface BaseActionNodeProps<TData extends Record<string, unknown>> {
   isSucceeded?: boolean
   isFailed?: boolean
   children: (props: BaseActionNodeChildrenProps<TData>) => ReactNode
+  runAvailability?: RunAvailability
 }
 
 export default function BaseActionNode<TData extends Record<string, unknown>>({
@@ -40,10 +43,14 @@ export default function BaseActionNode<TData extends Record<string, unknown>>({
   isRunning,
   isSucceeded,
   isFailed,
-  children
+  children,
+  runAvailability
 }: BaseActionNodeProps<TData>) {
   const [isInvoking, setIsInvoking] = useState(false)
-  const canInvoke = typeof onRun === 'function'
+  const blocked = Boolean(runAvailability?.disabled)
+  const runBlockedReason =
+    runAvailability?.reason ?? 'Workspace run quota reached.'
+  const canInvoke = typeof onRun === 'function' && !blocked
 
   const handleRun = useCallback(
     async (params: unknown) => {
@@ -77,7 +84,8 @@ export default function BaseActionNode<TData extends Record<string, unknown>>({
             isRunning: Boolean(isRunning) || isInvoking,
             isSucceeded: Boolean(isSucceeded),
             isFailed: Boolean(isFailed),
-            run: handleRun
+            run: handleRun,
+            blockedReason: blocked ? runBlockedReason : null
           }
         })
       }

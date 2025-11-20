@@ -11,6 +11,7 @@ import BaseActionNode, {
 import useActionNodeController, {
   type ActionNodeData
 } from './useActionNodeController'
+import type { RunAvailability } from '@/types/runAvailability'
 
 type EmailActionNodeRenderProps = BaseActionNodeChildrenProps<ActionNodeData>
 
@@ -24,6 +25,7 @@ export interface EmailActionNodeProps {
   canEdit?: boolean
   providerName: string
   ServiceComponent: ComponentType<{ nodeId: string; canEdit?: boolean }>
+  runAvailability?: RunAvailability
 }
 
 export default function EmailActionNode({
@@ -35,7 +37,8 @@ export default function EmailActionNode({
   isFailed,
   canEdit = true,
   providerName,
-  ServiceComponent
+  ServiceComponent,
+  runAvailability
 }: EmailActionNodeProps) {
   return (
     <BaseActionNode<ActionNodeData>
@@ -46,6 +49,7 @@ export default function EmailActionNode({
       isRunning={isRunning}
       isSucceeded={isSucceeded}
       isFailed={isFailed}
+      runAvailability={runAvailability}
     >
       {(baseProps) => (
         <EmailActionNodeContent
@@ -144,10 +148,20 @@ function EmailActionNodeContent({
         <button
           onClick={controller.handleTestAction}
           disabled={!controller.canRunTest || controller.isTestInvoking}
+          title={
+            !controller.canRunTest && controller.runState.blockedReason
+              ? controller.runState.blockedReason
+              : undefined
+          }
           className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
         >
           {controller.runButtonLabel}
         </button>
+        {!controller.canRunTest && controller.runState.blockedReason ? (
+          <p className="mt-1 text-xs text-amber-600">
+            {controller.runState.blockedReason}
+          </p>
+        ) : null}
 
         <AnimatePresence>
           {controller.expanded && (

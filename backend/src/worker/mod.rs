@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::engine::{complete_run_with_retry, execute_run, ExecutorError};
 use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_schedule::WorkflowSchedule;
-use crate::state::AppState;
+use crate::state::{AppState, WorkspaceLimitError, WorkspaceRunQuotaTicket};
 #[cfg(test)]
 use crate::utils::jwt::JwtKeys;
 use crate::utils::schedule::{
@@ -304,22 +304,81 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     let connection_metadata = workflow_connection_metadata::collect(&snapshot);
     workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
 
-    let run = state
-        .workflow_repo
-        .create_workflow_run(
-            schedule.user_id,
-            schedule.workflow_id,
-            workflow.workspace_id,
-            snapshot,
-            None,
-        )
-        .await?;
+    let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
+    let mut skip_run = false;
+    if let Some(workspace_id) = workflow.workspace_id {
+        match state.consume_workspace_run_quota(workspace_id).await {
+            Ok(ticket) => workspace_quota = Some(ticket),
+            Err(WorkspaceLimitError::WorkspacePlanRequired) => {
+                warn!(
+                    worker_id = %state.worker_id,
+                    %workspace_id,
+                    schedule_id = %schedule.id,
+                    "skipping scheduled run because workspace reverted to the Solo plan"
+                );
+                skip_run = true;
+            }
+            Err(WorkspaceLimitError::RunLimitReached { limit }) => {
+                warn!(
+                    worker_id = %state.worker_id,
+                    %workspace_id,
+                    schedule_id = %schedule.id,
+                    %limit,
+                    "skipping scheduled run because workspace hit its monthly run allocation"
+                );
+                skip_run = true;
+            }
+            Err(WorkspaceLimitError::MemberLimitReached { limit }) => {
+                warn!(
+                    worker_id = %state.worker_id,
+                    %workspace_id,
+                    schedule_id = %schedule.id,
+                    %limit,
+                    "unexpected member limit error while triggering schedule"
+                );
+                skip_run = true;
+            }
+            Err(WorkspaceLimitError::Database(err)) => {
+                return Err(err);
+            }
+        }
+    }
 
-    let triggered_by = format!("schedule:{}", schedule.id);
-    let events =
-        workflow_connection_metadata::build_run_events(&run, &triggered_by, &connection_metadata);
-    for event in events {
-        state.workflow_repo.record_run_event(event).await?;
+    if !skip_run {
+        let outcome = match state
+            .workflow_repo
+            .create_workflow_run(
+                schedule.user_id,
+                schedule.workflow_id,
+                workflow.workspace_id,
+                snapshot,
+                None,
+            )
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                if let Some(ticket) = workspace_quota {
+                    let _ = state.release_workspace_run_quota(ticket).await;
+                }
+                return Err(err);
+            }
+        };
+
+        if let (Some(ticket), false) = (&workspace_quota, outcome.created) {
+            let _ = state.release_workspace_run_quota(*ticket).await;
+        }
+
+        let run = outcome.run;
+        let triggered_by = format!("schedule:{}", schedule.id);
+        let events = workflow_connection_metadata::build_run_events(
+            &run,
+            &triggered_by,
+            &connection_metadata,
+        );
+        for event in events {
+            state.workflow_repo.record_run_event(event).await?;
+        }
     }
 
     let now = Utc::now();
@@ -956,7 +1015,10 @@ mod tests {
                         updated_at: OffsetDateTime::now_utc(),
                     };
                     runs.lock().unwrap().push(run.clone());
-                    Ok(run)
+                    Ok(crate::db::workflow_repository::CreateWorkflowRunOutcome {
+                        run,
+                        created: true,
+                    })
                 })
             },
         );

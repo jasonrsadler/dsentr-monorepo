@@ -162,6 +162,7 @@ pub async fn stripe_webhook(
                     }
                 }
             }
+            app_state.clear_owned_workspace_billing_cycles(uid).await;
 
             warn!(%uid, evt_type, "recorded billing failure and cleared pending checkout");
         } else {

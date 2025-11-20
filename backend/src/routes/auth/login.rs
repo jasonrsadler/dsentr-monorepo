@@ -16,7 +16,7 @@ use axum_extra::extract::cookie::{Cookie, SameSite};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, to_value};
-use time::Duration as TimeDuration;
+use time::{Duration as TimeDuration, OffsetDateTime};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -198,7 +198,21 @@ pub async fn handle_me(
                         .get_active_subscription_for_customer(&customer_id)
                         .await
                     {
-                        Ok(Some(_)) => { /* active subscription present */ }
+                        Ok(Some(sub)) => {
+                            if let (Ok(period_start), Ok(period_end)) = (
+                                OffsetDateTime::from_unix_timestamp(sub.current_period_start),
+                                OffsetDateTime::from_unix_timestamp(sub.current_period_end),
+                            ) {
+                                app_state
+                                    .sync_owned_workspace_billing_cycles(
+                                        user.id,
+                                        &sub.id,
+                                        period_start,
+                                        period_end,
+                                    )
+                                    .await;
+                            }
+                        }
                         Ok(None) => should_revert = true,
                         Err(err) => {
                             tracing::warn!(?err, user_id=%user.id, "stripe subscription lookup failed during session check");
@@ -228,6 +242,9 @@ pub async fn handle_me(
                             }
                         }
                     }
+                    app_state
+                        .clear_owned_workspace_billing_cycles(user.id)
+                        .await;
                     // Refresh user after change for response
                     if let Ok(Some(u)) = app_state.db.find_public_user_by_id(user.id).await {
                         user = u;

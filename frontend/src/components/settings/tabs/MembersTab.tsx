@@ -19,6 +19,8 @@ import {
   type WorkspaceSecretOwnershipEntry
 } from '@/lib/optionsApi'
 import { useSecrets } from '@/contexts/SecretsContext'
+import { usePlanUsageStore } from '@/stores/planUsageStore'
+import { QuotaBanner } from '@/components/quota/QuotaBanner'
 
 const resolveMemberIdentity = (member: WorkspaceMember) => {
   const firstName = member.first_name?.trim() ?? ''
@@ -83,6 +85,38 @@ export default function MembersTab() {
   const canLeaveWorkspace = Boolean(resolvedWorkspaceId) && !isWorkspaceOwner
   const manageMembersPermissionMessage =
     'Only workspace admins or owners can manage members.'
+  const planUsage = usePlanUsageStore((state) => state.usage)
+  const refreshPlanUsage = usePlanUsageStore((state) => state.refresh)
+  const memberLimit = useMemo(() => {
+    if (planUsage?.workspace?.members?.limit) {
+      return planUsage.workspace.members.limit
+    }
+    return 8
+  }, [planUsage?.workspace?.members?.limit])
+  const memberUsage = useMemo(() => {
+    if (planUsage?.workspace?.members?.used != null) {
+      return planUsage.workspace.members.used
+    }
+    return members.length
+  }, [planUsage?.workspace?.members?.used, members.length])
+  const memberLimitReached =
+    planTier === 'workspace' && memberUsage >= memberLimit
+  const memberLimitApproaching =
+    planTier === 'workspace' &&
+    !memberLimitReached &&
+    memberUsage >= Math.max(0, memberLimit - 1)
+  const memberLimitMessage = `Workspace member limit reached. Remove a member to free a seat (${memberUsage}/${memberLimit}).`
+  const canInviteMembers = canManageMembers && !memberLimitReached
+  const openPlanSettings = useCallback(() => {
+    window.dispatchEvent(
+      new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+    )
+  }, [])
+  useEffect(() => {
+    if (planTier === 'workspace') {
+      void refreshPlanUsage()
+    }
+  }, [planTier, refreshPlanUsage])
 
   useEffect(() => {
     if (!resolvedWorkspaceId) {
@@ -196,8 +230,12 @@ export default function MembersTab() {
     if (
       !resolvedWorkspaceId ||
       !inviteEmail.trim() ||
-      !isWorkspaceAdminOrOwner
+      !isWorkspaceAdminOrOwner ||
+      memberLimitReached
     ) {
+      if (memberLimitReached) {
+        setError(memberLimitMessage)
+      }
       return
     }
     try {
@@ -211,6 +249,7 @@ export default function MembersTab() {
       setPendingInvites((prev) => filterPendingInvitations([inv, ...prev]))
       setInviteEmail('')
       setInviteRole('user')
+      void refreshPlanUsage()
     } catch (e: any) {
       setError(e.message || 'Failed to create invitation')
     } finally {
@@ -226,6 +265,7 @@ export default function MembersTab() {
         setError(null)
         await removeWorkspaceMember(resolvedWorkspaceId, uid)
         setMembers((prev) => prev.filter((m) => m.user_id !== uid))
+        await refreshPlanUsage().catch(() => undefined)
         try {
           await refreshSecrets()
         } catch (err) {
@@ -475,6 +515,20 @@ export default function MembersTab() {
             Upgrade to the workspace plan to invite additional members.
           </div>
         ) : null}
+        {planTier === 'workspace' &&
+        (memberLimitReached || memberLimitApproaching) ? (
+          <QuotaBanner
+            variant={memberLimitReached ? 'danger' : 'warning'}
+            title={
+              memberLimitReached
+                ? 'Workspace member limit reached'
+                : 'Workspace member limit nearly reached'
+            }
+            description={`Members: ${memberUsage} of ${memberLimit} seats in use.`}
+            actionLabel="Manage plan"
+            onAction={openPlanSettings}
+          />
+        ) : null}
 
         {notice ? (
           <div className="rounded-md border border-blue-300 bg-blue-50 p-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
@@ -496,11 +550,13 @@ export default function MembersTab() {
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="name@example.com"
-                disabled={!canManageMembers}
+                disabled={!canInviteMembers}
                 title={
                   !isWorkspaceAdminOrOwner
                     ? manageMembersPermissionMessage
-                    : undefined
+                    : memberLimitReached
+                      ? memberLimitMessage
+                      : undefined
                 }
                 className="mt-1 w-full rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
               />
@@ -510,11 +566,13 @@ export default function MembersTab() {
               <select
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value as any)}
-                disabled={!canManageMembers}
+                disabled={!canInviteMembers}
                 title={
                   !isWorkspaceAdminOrOwner
                     ? manageMembersPermissionMessage
-                    : undefined
+                    : memberLimitReached
+                      ? memberLimitMessage
+                      : undefined
                 }
                 className="mt-1 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
               >
@@ -531,22 +589,26 @@ export default function MembersTab() {
                 max={60}
                 value={inviteExpires}
                 onChange={(e) => setInviteExpires(Number(e.target.value))}
-                disabled={!canManageMembers}
+                disabled={!canInviteMembers}
                 title={
                   !isWorkspaceAdminOrOwner
                     ? manageMembersPermissionMessage
-                    : undefined
+                    : memberLimitReached
+                      ? memberLimitMessage
+                      : undefined
                 }
                 className="mt-1 w-24 rounded border px-2 py-1 bg-white dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-60"
               />
             </div>
             <button
               onClick={handleInvite}
-              disabled={!canManageMembers || busy}
+              disabled={!canInviteMembers || busy}
               title={
                 !isWorkspaceAdminOrOwner
                   ? manageMembersPermissionMessage
-                  : undefined
+                  : memberLimitReached
+                    ? memberLimitMessage
+                    : undefined
               }
               className="h-9 rounded bg-indigo-600 px-3 text-sm text-white disabled:opacity-50"
             >
@@ -636,7 +698,10 @@ export default function MembersTab() {
                     ? [...baseRoles, 'owner' as WorkspaceMember['role']]
                     : baseRoles
                 const disableSelect =
-                  busy || !canManageMembers || m.role === 'owner'
+                  busy ||
+                  !canManageMembers ||
+                  m.role === 'owner' ||
+                  memberLimitReached
                 const disableRemove =
                   busy ||
                   !canManageMembers ||
@@ -679,7 +744,9 @@ export default function MembersTab() {
                         title={
                           !isWorkspaceAdminOrOwner && m.role !== 'owner'
                             ? manageMembersPermissionMessage
-                            : undefined
+                            : memberLimitReached
+                              ? memberLimitMessage
+                              : undefined
                         }
                         className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 disabled:opacity-60"
                       >

@@ -20,10 +20,11 @@ impl MockStripeService {
         Self::default()
     }
 
-    pub fn with_active_subscription(self, period_end: i64) -> Self {
+    pub fn with_active_subscription(self, period_start: i64, period_end: i64) -> Self {
         let sub = SubscriptionInfo {
             id: make_id("sub_test"),
             status: "active".into(),
+            current_period_start: period_start,
             current_period_end: period_end,
             cancel_at: None,
             cancel_at_period_end: false,
@@ -129,6 +130,7 @@ impl StripeService for MockStripeService {
         let mut sub = guard.clone().unwrap_or(SubscriptionInfo {
             id: subscription_id.to_string(),
             status: "active".into(),
+            current_period_start: 0,
             current_period_end: 0,
             cancel_at: None,
             cancel_at_period_end: false,

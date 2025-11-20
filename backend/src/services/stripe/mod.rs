@@ -76,6 +76,8 @@ pub struct StripeEvent {
 pub struct SubscriptionInfo {
     pub id: String,
     pub status: String,
+    /// Unix timestamp (seconds) when the current period started
+    pub current_period_start: i64,
     /// Unix timestamp (seconds) when the current period ends
     pub current_period_end: i64,
     /// Unix timestamp (seconds) when the subscription will cancel, if set

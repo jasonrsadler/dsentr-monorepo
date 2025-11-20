@@ -39,6 +39,18 @@ pub struct Workspace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct WorkspaceBillingCycle {
+    pub workspace_id: Uuid,
+    pub stripe_subscription_id: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub current_period_start: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub current_period_end: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub synced_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct WorkspaceMember {
     pub workspace_id: Uuid,
     pub user_id: Uuid,

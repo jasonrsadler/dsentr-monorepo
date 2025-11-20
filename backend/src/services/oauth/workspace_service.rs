@@ -252,8 +252,10 @@ impl WorkspaceOAuthService {
             return Ok(());
         }
 
-        let mut processed_providers: Vec<ConnectedOAuthProvider> =
-            connections.iter().map(|connection| connection.provider).collect();
+        let mut processed_providers: Vec<ConnectedOAuthProvider> = connections
+            .iter()
+            .map(|connection| connection.provider)
+            .collect();
         processed_providers.sort_by_key(|provider| Self::provider_sort_key(*provider));
         processed_providers.dedup();
 
@@ -1471,10 +1473,7 @@ mod tests {
             connection_id: Uuid,
         ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
             let guard = self.connections.lock().unwrap();
-            Ok(guard
-                .iter()
-                .find(|conn| conn.id == connection_id)
-                .cloned())
+            Ok(guard.iter().find(|conn| conn.id == connection_id).cloned())
         }
 
         async fn list_for_workspace_provider(

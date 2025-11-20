@@ -12,6 +12,7 @@ import {
 } from '@/lib/orgWorkspaceApi'
 import { fetchWorkspaceSecretOwnership } from '@/lib/optionsApi'
 import type { WorkspaceMembershipSummary } from '@/lib/orgWorkspaceApi'
+import { usePlanUsageStore } from '@/stores/planUsageStore'
 
 vi.mock('@/lib/orgWorkspaceApi', async () => {
   const actual = await vi.importActual<typeof import('@/lib/orgWorkspaceApi')>(
@@ -69,6 +70,11 @@ function resetAuthStore() {
   )
 }
 
+const initialPlanUsageState = usePlanUsageStore.getState()
+function resetPlanUsageStore() {
+  usePlanUsageStore.setState(initialPlanUsageState, true)
+}
+
 const soloMembership: WorkspaceMembershipSummary = {
   workspace: {
     id: 'workspace-solo',
@@ -113,6 +119,7 @@ describe('MembersTab workspace actions', () => {
     window.localStorage.clear()
     vi.clearAllMocks()
     resetAuthStore()
+    resetPlanUsageStore()
     listMembersMock.mockResolvedValue([])
     listInvitesMock.mockResolvedValue([])
     leaveWorkspaceMock.mockResolvedValue(undefined)
@@ -124,6 +131,7 @@ describe('MembersTab workspace actions', () => {
 
   afterEach(() => {
     resetAuthStore()
+    resetPlanUsageStore()
   })
 
   it('disables the leave workspace action for owners', async () => {
@@ -553,5 +561,108 @@ describe('MembersTab workspace actions', () => {
         screen.queryByText(/confirm member removal/i)
       ).not.toBeInTheDocument()
     })
+  })
+
+  it('disables invites when the workspace member limit is reached', async () => {
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'owner',
+          email: 'owner@example.com',
+          first_name: 'Owner',
+          last_name: 'User',
+          plan: 'workspace',
+          role: 'owner',
+          companyName: null
+        },
+        memberships: [workspaceMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id
+      }))
+    })
+    usePlanUsageStore.setState((state) => ({
+      ...state,
+      usage: {
+        plan: 'workspace',
+        runs: { used: 0, period_start: '' },
+        workflows: { total: 0 },
+        workspace: {
+          members: { used: 8, limit: 8 }
+        }
+      }
+    }))
+    listMembersMock.mockResolvedValue(
+      Array.from({ length: 8 }).map((_, index) => ({
+        workspace_id: workspaceMembership.workspace.id,
+        user_id: `member-${index}`,
+        role: index === 0 ? 'owner' : 'admin',
+        joined_at: new Date().toISOString(),
+        email: `member${index}@example.com`,
+        first_name: `Member${index}`,
+        last_name: 'User'
+      }))
+    )
+
+    render(<MembersTab />)
+
+    const inviteInput = await screen.findByPlaceholderText(/name@example\.com/i)
+    expect(inviteInput).toBeDisabled()
+    const inviteButton = screen.getByRole('button', { name: /invite/i })
+    expect(inviteButton).toBeDisabled()
+    expect(
+      screen.getByTestId('quota-banner').textContent
+    ).toMatch(/member limit/i)
+  })
+
+  it('disables role changes when the member limit is reached', async () => {
+    act(() => {
+      useAuth.setState((state) => ({
+        ...state,
+        user: {
+          id: 'owner',
+          email: 'owner@example.com',
+          first_name: 'Owner',
+          last_name: 'User',
+          plan: 'workspace',
+          role: 'owner',
+          companyName: null
+        },
+        memberships: [workspaceMembership],
+        currentWorkspaceId: workspaceMembership.workspace.id
+      }))
+    })
+    usePlanUsageStore.setState((state) => ({
+      ...state,
+      usage: {
+        plan: 'workspace',
+        runs: { used: 0, period_start: '' },
+        workflows: { total: 0 },
+        workspace: {
+          members: { used: 8, limit: 8 }
+        }
+      }
+    }))
+    listMembersMock.mockResolvedValue(
+      Array.from({ length: 8 }).map((_, index) => ({
+        workspace_id: workspaceMembership.workspace.id,
+        user_id: `member-${index}`,
+        role: index === 0 ? 'owner' : 'admin',
+        joined_at: new Date().toISOString(),
+        email: `member${index}@example.com`,
+        first_name: `Member${index}`,
+        last_name: 'User'
+      }))
+    )
+
+    render(<MembersTab />)
+
+    const rows = await screen.findAllByRole('row')
+    const targetRow = rows.find((row) =>
+      within(row).queryByText('Member1 User')
+    )
+    expect(targetRow).toBeTruthy()
+    if (!targetRow) throw new Error('target row not found')
+    const roleSelect = within(targetRow).getByRole('combobox')
+    expect(roleSelect).toBeDisabled()
   })
 })

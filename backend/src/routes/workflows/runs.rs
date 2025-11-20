@@ -2,7 +2,10 @@ use super::{
     helpers::{enforce_solo_workflow_limit, plan_violation_response, SOLO_MONTHLY_RUN_LIMIT},
     prelude::*,
 };
-use crate::utils::workflow_connection_metadata;
+use crate::{
+    routes::plan_limits::workspace_limit_error_response, state::WorkspaceRunQuotaTicket,
+    utils::workflow_connection_metadata,
+};
 
 async fn fetch_workflow_for_member(
     app_state: &AppState,
@@ -54,7 +57,12 @@ pub async fn start_workflow_run(
             Err(response) => return response,
         };
     let owner_id = wf.user_id;
-    let plan_tier = if wf.workspace_id.is_some() {
+    let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
+    let plan_tier = if let Some(workspace_id) = wf.workspace_id {
+        match app_state.consume_workspace_run_quota(workspace_id).await {
+            Ok(ticket) => workspace_quota = Some(ticket),
+            Err(err) => return workspace_limit_error_response(err),
+        }
         NormalizedPlanTier::Workspace
     } else {
         app_state
@@ -157,7 +165,12 @@ pub async fn start_workflow_run(
         )
         .await
     {
-        Ok(run) => {
+        Ok(outcome) => {
+            if let (Some(ticket), false) = (&workspace_quota, outcome.created) {
+                let _ = app_state.release_workspace_run_quota(*ticket).await;
+            }
+
+            let run = outcome.run;
             if let Some(p) = priority {
                 let _ = app_state
                     .workflow_repo
@@ -185,6 +198,9 @@ pub async fn start_workflow_run(
                 .into_response()
         }
         Err(e) => {
+            if let Some(ticket) = workspace_quota {
+                let _ = app_state.release_workspace_run_quota(ticket).await;
+            }
             eprintln!("DB error creating workflow run: {:?}", e);
             JsonResponse::server_error("Failed to enqueue run").into_response()
         }
@@ -471,6 +487,14 @@ pub async fn rerun_workflow_run(
     let connection_metadata = workflow_connection_metadata::collect(&snapshot);
     workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
 
+    let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
+    if let Some(workspace_id) = workflow.workspace_id {
+        match app_state.consume_workspace_run_quota(workspace_id).await {
+            Ok(ticket) => workspace_quota = Some(ticket),
+            Err(err) => return workspace_limit_error_response(err),
+        }
+    }
+
     match app_state
         .workflow_repo
         .create_workflow_run(
@@ -482,7 +506,12 @@ pub async fn rerun_workflow_run(
         )
         .await
     {
-        Ok(run) => {
+        Ok(outcome) => {
+            if let (Some(ticket), false) = (&workspace_quota, outcome.created) {
+                let _ = app_state.release_workspace_run_quota(*ticket).await;
+            }
+
+            let run = outcome.run;
             let events = workflow_connection_metadata::build_run_events(
                 &run,
                 &triggered_by,
@@ -504,6 +533,9 @@ pub async fn rerun_workflow_run(
                 .into_response()
         }
         Err(e) => {
+            if let Some(ticket) = workspace_quota {
+                let _ = app_state.release_workspace_run_quota(ticket).await;
+            }
             eprintln!("DB error creating rerun: {:?}", e);
             JsonResponse::server_error("Failed to enqueue rerun").into_response()
         }

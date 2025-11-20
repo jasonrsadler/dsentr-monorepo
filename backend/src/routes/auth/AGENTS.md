@@ -27,3 +27,4 @@
 - OAuth login without existing account now redirects users to `/signup?oauth=…` with provider/email hints. This ensures they accept the Terms of Service before account creation. The Signup page parses these params to prefill fields and display a friendly notice.
 - Signup tests now wire WorkspaceOAuthService with the workspace repository dependency so membership enforcement matches production when exercising invite and plan flows.
 - Signup repository mocks now surface the shared `PlanTier` via the new `get_plan` helper so plan-aware backend services can reuse them without importing route modules.
+- Signup invite acceptance enforces workspace plan/member caps up front, surfacing the `workspace_plan_required`/`workspace_member_limit` response codes before provisioning the new account.

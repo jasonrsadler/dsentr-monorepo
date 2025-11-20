@@ -12,6 +12,7 @@ use tracing::{error, warn};
 use urlencoding::encode;
 use uuid::Uuid;
 
+use super::plan_limits::workspace_limit_error_response;
 use crate::{
     engine::actions::ensure_workspace_plan,
     models::oauth_token::ConnectedOAuthProvider,
@@ -20,8 +21,8 @@ use crate::{
         user::PublicUser,
         workflow::Workflow,
         workspace::{
-            Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole,
-            INVITATION_STATUS_PENDING,
+            Workspace, WorkspaceBillingCycle, WorkspaceInvitation, WorkspaceMembershipSummary,
+            WorkspaceRole, INVITATION_STATUS_PENDING,
         },
     },
     responses::JsonResponse,
@@ -212,6 +213,10 @@ async fn process_plan_change(
                     }
                 }
             }
+
+            app_state
+                .clear_owned_workspace_billing_cycles(user_id)
+                .await;
 
             let owned_membership = existing_memberships
                 .into_iter()
@@ -585,8 +590,14 @@ pub async fn get_onboarding_context(
             .await
         {
             has_active_subscription = true;
-            let renew_iso = time::OffsetDateTime::from_unix_timestamp(sub.current_period_end)
-                .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+            let period_start = time::OffsetDateTime::from_unix_timestamp(sub.current_period_start)
+                .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+            let period_end = time::OffsetDateTime::from_unix_timestamp(sub.current_period_end)
+                .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+            app_state
+                .sync_owned_workspace_billing_cycles(user_id, &sub.id, period_start, period_end)
+                .await;
+            let renew_iso = period_end
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_else(|_| String::new());
             let cancel_iso = sub.cancel_at.and_then(|ts| {
@@ -597,10 +608,14 @@ pub async fn get_onboarding_context(
                             .ok()
                     })
             });
+            let start_iso = period_start
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| String::new());
             billing["subscription"] = serde_json::json!({
                 "id": sub.id,
                 "status": sub.status,
                 "renews_at": renew_iso,
+                "cycle_started_at": start_iso,
                 "cancel_at": cancel_iso,
                 "cancel_at_period_end": sub.cancel_at_period_end,
             });
@@ -645,6 +660,9 @@ pub async fn get_onboarding_context(
                 memberships = list;
             }
         }
+        app_state
+            .clear_owned_workspace_billing_cycles(user_id)
+            .await;
     }
 
     Json(json!({
@@ -710,8 +728,17 @@ pub async fn resume_workspace_subscription(
         }
     };
 
-    let renew_iso = time::OffsetDateTime::from_unix_timestamp(updated.current_period_end)
-        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+    let period_start = time::OffsetDateTime::from_unix_timestamp(updated.current_period_start)
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    let period_end = time::OffsetDateTime::from_unix_timestamp(updated.current_period_end)
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    app_state
+        .sync_owned_workspace_billing_cycles(user_id, &updated.id, period_start, period_end)
+        .await;
+    let renew_iso = period_end
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| String::new());
+    let start_iso = period_start
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| String::new());
 
@@ -721,6 +748,7 @@ pub async fn resume_workspace_subscription(
             "id": updated.id,
             "status": updated.status,
             "renews_at": renew_iso,
+            "cycle_started_at": start_iso,
             "cancel_at": serde_json::Value::Null,
             "cancel_at_period_end": false,
         }
@@ -1089,6 +1117,14 @@ pub async fn add_workspace_member(
         )
         .into_response();
     }
+
+    if let Err(err) = app_state
+        .ensure_workspace_can_add_members(workspace_id, 1)
+        .await
+    {
+        return workspace_limit_error_response(err);
+    }
+
     match app_state
         .workspace_repo
         .add_member(workspace_id, payload.user_id, payload.role)
@@ -1532,6 +1568,13 @@ pub async fn create_workspace_invitation(
     if email.is_empty() {
         return JsonResponse::bad_request("Email is required").into_response();
     }
+
+    if let Err(err) = app_state
+        .ensure_workspace_can_add_members(workspace_id, 1)
+        .await
+    {
+        return workspace_limit_error_response(err);
+    }
     let expires_days = payload.expires_in_days.unwrap_or(14).clamp(1, 60);
     let expires_at = OffsetDateTime::now_utc() + time::Duration::days(expires_days.into());
 
@@ -1735,6 +1778,13 @@ pub async fn accept_invitation(
 
     if !invite.email.eq_ignore_ascii_case(&claims.email) {
         return JsonResponse::forbidden("Invitation email mismatch").into_response();
+    }
+
+    if let Err(err) = app_state
+        .ensure_workspace_can_add_members(invite.workspace_id, 1)
+        .await
+    {
+        return workspace_limit_error_response(err);
     }
 
     if let Err(err) = app_state
@@ -2011,7 +2061,7 @@ mod tests {
             NewWorkspaceAuditEvent, NewWorkspaceConnection, NoopWorkspaceConnectionRepository,
             StaleWorkspaceConnection, WorkspaceConnectionListing, WorkspaceConnectionRepository,
         },
-        workspace_repository::WorkspaceRepository,
+        workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate},
     };
     use crate::models::{
         oauth_token::{
@@ -2752,6 +2802,8 @@ mod tests {
         workspaces: Arc<Mutex<HashMap<Uuid, Workspace>>>,
         members: Arc<Mutex<HashMap<Uuid, Vec<WorkspaceMember>>>>,
         audits: Arc<Mutex<AuditEntries>>,
+        run_usage: Arc<Mutex<HashMap<(Uuid, i64), i64>>>,
+        billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
     }
 
     impl RecordingWorkspaceRepo {
@@ -2771,6 +2823,8 @@ mod tests {
                 workspaces: Arc::new(Mutex::new(workspace_map)),
                 members: Arc::new(Mutex::new(member_map)),
                 audits: Arc::new(Mutex::new(Vec::new())),
+                run_usage: Arc::new(Mutex::new(HashMap::new())),
+                billing_cycles: Arc::new(Mutex::new(HashMap::new())),
             }
         }
 
@@ -2794,6 +2848,14 @@ mod tests {
                 .get(&workspace_id)
                 .map(|list| list.iter().any(|member| member.user_id == user_id))
                 .unwrap_or(false)
+        }
+
+        fn billing_cycle(&self, workspace_id: Uuid) -> Option<WorkspaceBillingCycle> {
+            self.billing_cycles
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .cloned()
         }
 
         fn workspace_count(&self) -> usize {
@@ -2832,6 +2894,10 @@ mod tests {
                 return list.len() != before;
             }
             false
+        }
+
+        fn usage_key(workspace_id: Uuid, period_start: OffsetDateTime) -> (Uuid, i64) {
+            (workspace_id, period_start.unix_timestamp())
         }
     }
 
@@ -3005,6 +3071,17 @@ mod tests {
                 .unwrap_or_default())
         }
 
+        async fn count_members(&self, workspace_id: Uuid) -> Result<i64, sqlx::Error> {
+            let count = self
+                .members
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .map(|list| list.len())
+                .unwrap_or(0);
+            Ok(count as i64)
+        }
+
         async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
             Ok(self.member_exists(workspace_id, user_id))
         }
@@ -3088,6 +3165,97 @@ mod tests {
             _workspace_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             Ok(())
+        }
+
+        async fn try_increment_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+            max_runs: i64,
+        ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
+            let mut usage = self.run_usage.lock().unwrap();
+            let key = RecordingWorkspaceRepo::usage_key(workspace_id, period_start);
+            let entry = usage.entry(key).or_insert(0);
+            if *entry >= max_runs {
+                return Ok(WorkspaceRunQuotaUpdate {
+                    allowed: false,
+                    run_count: *entry,
+                });
+            }
+            *entry += 1;
+            Ok(WorkspaceRunQuotaUpdate {
+                allowed: true,
+                run_count: *entry,
+            })
+        }
+
+        async fn get_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+        ) -> Result<i64, sqlx::Error> {
+            let usage = self.run_usage.lock().unwrap();
+            let key = RecordingWorkspaceRepo::usage_key(workspace_id, period_start);
+            Ok(*usage.get(&key).unwrap_or(&0))
+        }
+
+        async fn release_workspace_run_quota(
+            &self,
+            workspace_id: Uuid,
+            period_start: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            let mut usage = self.run_usage.lock().unwrap();
+            let key = RecordingWorkspaceRepo::usage_key(workspace_id, period_start);
+            if let Some(entry) = usage.get_mut(&key) {
+                if *entry > 0 {
+                    *entry -= 1;
+                }
+                if *entry == 0 {
+                    usage.remove(&key);
+                }
+            }
+            Ok(())
+        }
+
+        async fn upsert_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+            subscription_id: &str,
+            period_start: OffsetDateTime,
+            period_end: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.billing_cycles.lock().unwrap();
+            guard.insert(
+                workspace_id,
+                WorkspaceBillingCycle {
+                    workspace_id,
+                    stripe_subscription_id: subscription_id.to_string(),
+                    current_period_start: period_start,
+                    current_period_end: period_end,
+                    synced_at: OffsetDateTime::now_utc(),
+                },
+            );
+            Ok(())
+        }
+
+        async fn clear_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            self.billing_cycles.lock().unwrap().remove(&workspace_id);
+            Ok(())
+        }
+
+        async fn get_workspace_billing_cycle(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Option<WorkspaceBillingCycle>, sqlx::Error> {
+            Ok(self
+                .billing_cycles
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .cloned())
         }
     }
 
@@ -3853,6 +4021,66 @@ mod tests {
         );
         assert_eq!(first["email"], Value::String(invite.email.clone()));
         assert_eq!(first["id"], Value::String(invite.id.to_string()));
+    }
+
+    #[tokio::test]
+    async fn create_workspace_invitation_errors_at_member_limit() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Growth".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let members: Vec<WorkspaceMember> = (0..8)
+            .map(|i| WorkspaceMember {
+                workspace_id,
+                user_id: if i == 0 { owner_id } else { Uuid::new_v4() },
+                role: if i == 0 {
+                    WorkspaceRole::Owner
+                } else {
+                    WorkspaceRole::User
+                },
+                joined_at: now,
+                email: format!("member{i}@example.com"),
+                first_name: format!("Member{i}"),
+                last_name: "User".into(),
+            })
+            .collect();
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
+        let state = state_with_components(
+            repo as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer),
+            Arc::new(MockDb::default()),
+            None,
+            None,
+        );
+
+        let response = create_workspace_invitation(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "owner@example.com")),
+            Path(workspace_id),
+            Json(CreateInvitationPayload {
+                email: "new@example.com".into(),
+                role: WorkspaceRole::User,
+                expires_in_days: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], Value::String("workspace_member_limit".into()));
     }
 
     #[tokio::test]
@@ -4686,6 +4914,105 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(connection_repo.deleted(), vec![connection.id]);
+    }
+
+    #[tokio::test]
+    async fn recording_repo_resets_run_quota_each_month() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc()
+            .replace_day(1)
+            .unwrap()
+            .replace_time(time::Time::MIDNIGHT);
+        let next_month = (now + time::Duration::days(40))
+            .replace_day(1)
+            .unwrap()
+            .replace_time(time::Time::MIDNIGHT);
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Ops".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let repo = RecordingWorkspaceRepo::seeded(workspace, Vec::new());
+        let limit = 2;
+        assert!(
+            repo.try_increment_workspace_run_quota(workspace_id, now, limit)
+                .await
+                .unwrap()
+                .allowed
+        );
+        assert!(
+            repo.try_increment_workspace_run_quota(workspace_id, now, limit)
+                .await
+                .unwrap()
+                .allowed
+        );
+        let capped = repo
+            .try_increment_workspace_run_quota(workspace_id, now, limit)
+            .await
+            .unwrap();
+        assert!(!capped.allowed);
+        assert_eq!(capped.run_count, limit);
+
+        // Next month starts fresh
+        let refreshed = repo
+            .try_increment_workspace_run_quota(workspace_id, next_month, limit)
+            .await
+            .unwrap();
+        assert!(refreshed.allowed);
+        assert_eq!(refreshed.run_count, 1);
+    }
+
+    #[tokio::test]
+    async fn recording_repo_release_allows_reuse() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc()
+            .replace_day(1)
+            .unwrap()
+            .replace_time(time::Time::MIDNIGHT);
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Ops".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let repo = RecordingWorkspaceRepo::seeded(workspace, Vec::new());
+        let limit = 1;
+        let ticket = repo
+            .try_increment_workspace_run_quota(workspace_id, now, limit)
+            .await
+            .unwrap();
+        assert!(ticket.allowed);
+
+        let capped = repo
+            .try_increment_workspace_run_quota(workspace_id, now, limit)
+            .await
+            .unwrap();
+        assert!(!capped.allowed);
+
+        repo.release_workspace_run_quota(workspace_id, now)
+            .await
+            .unwrap();
+
+        let after_release = repo
+            .try_increment_workspace_run_quota(workspace_id, now, limit)
+            .await
+            .unwrap();
+        assert!(after_release.allowed);
     }
 
     #[tokio::test]

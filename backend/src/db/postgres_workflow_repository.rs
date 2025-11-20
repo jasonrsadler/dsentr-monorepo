@@ -428,7 +428,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         workspace_id: Option<Uuid>,
         snapshot: Value,
         idempotency_key: Option<&str>,
-    ) -> Result<WorkflowRun, sqlx::Error> {
+    ) -> Result<CreateWorkflowRunOutcome, sqlx::Error> {
         // Try insert; if unique violation on idempotency, fetch existing
         let insert_res = sqlx::query_as!(
             WorkflowRun,
@@ -448,7 +448,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .await;
 
         match insert_res {
-            Ok(run) => Ok(run),
+            Ok(run) => Ok(CreateWorkflowRunOutcome { run, created: true }),
             Err(e) => {
                 // Check for unique violation (idempotency)
                 let is_unique = matches!(&e, sqlx::Error::Database(db)
@@ -474,7 +474,10 @@ impl WorkflowRepository for PostgresWorkflowRepository {
                     )
                     .fetch_one(&self.pool)
                     .await?;
-                    Ok(existing)
+                    Ok(CreateWorkflowRunOutcome {
+                        run: existing,
+                        created: false,
+                    })
                 } else {
                     Err(e)
                 }

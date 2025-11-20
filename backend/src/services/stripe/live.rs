@@ -156,6 +156,7 @@ impl StripeService for LiveStripeService {
             let info = crate::services::stripe::SubscriptionInfo {
                 id: sub.id.to_string(),
                 status,
+                current_period_start: sub.current_period_start,
                 current_period_end: sub.current_period_end,
                 cancel_at: sub.cancel_at,
                 cancel_at_period_end: sub.cancel_at_period_end,
@@ -180,6 +181,7 @@ impl StripeService for LiveStripeService {
         Ok(crate::services::stripe::SubscriptionInfo {
             id: sub.id.to_string(),
             status: sub.status.to_string(),
+            current_period_start: sub.current_period_start,
             current_period_end: sub.current_period_end,
             cancel_at: sub.cancel_at,
             cancel_at_period_end: sub.cancel_at_period_end,

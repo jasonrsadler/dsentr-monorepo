@@ -118,8 +118,12 @@ impl JsonResponse {
     }
 
     pub fn forbidden_with_code(msg: &str, code: &str) -> impl IntoResponse {
+        Self::error_with_code(StatusCode::FORBIDDEN, msg, code)
+    }
+
+    pub fn error_with_code(status: StatusCode, msg: &str, code: &str) -> impl IntoResponse {
         (
-            StatusCode::FORBIDDEN,
+            status,
             Json(JsonResponse {
                 status: "error".to_string(),
                 message: msg.to_string(),

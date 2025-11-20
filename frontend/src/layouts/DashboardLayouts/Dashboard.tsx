@@ -20,9 +20,7 @@ import {
   getWorkflow,
   createWorkflow as createWorkflowApi,
   updateWorkflow as updateWorkflowApi,
-  getPlanUsage,
   WorkflowRecord,
-  PlanUsageSummary,
   startWorkflowRun,
   getWorkflowRunStatus,
   cancelRun,
@@ -40,6 +38,9 @@ import {
   normalizeNodesForState
 } from './FlowCanvas.helpers'
 import type { WorkflowEdge, WorkflowNode } from './FlowCanvas'
+import { usePlanUsageStore } from '@/stores/planUsageStore'
+import { QuotaBanner } from '@/components/quota/QuotaBanner'
+import type { RunAvailability } from '@/types/runAvailability'
 
 const TriggerIcon = () => (
   <svg
@@ -153,6 +154,8 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
   }
 ] as const
 
+const WORKSPACE_RUN_LIMIT_FALLBACK = 10_000
+
 export default function Dashboard() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
   const [hiddenWorkflowCount, setHiddenWorkflowCount] = useState(0)
@@ -174,8 +177,6 @@ export default function Dashboard() {
   const overlayWatchTimerRef = useRef<any>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
   const [runToast, setRunToast] = useState<string | null>(null)
-  const [planUsage, setPlanUsage] = useState<PlanUsageSummary | null>(null)
-  const [planUsageError, setPlanUsageError] = useState<string | null>(null)
   const [lockBusy, setLockBusy] = useState(false)
   const userId = useAuth((state) => state.user?.id ?? null)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
@@ -194,22 +195,23 @@ export default function Dashboard() {
       ),
     [currentWorkspace?.workspace.plan, userPlan]
   )
-  const refreshPlanUsage = useCallback(async () => {
-    try {
-      const usage = await getPlanUsage()
-      setPlanUsage(usage)
-      setPlanUsageError(null)
-      if (planTier === 'solo') {
-        const hidden = usage.workflows.hidden ?? 0
-        setHiddenWorkflowCount(hidden)
-      } else {
-        setHiddenWorkflowCount(0)
-      }
-    } catch (error) {
-      console.error('Failed to load plan usage', error)
-      setPlanUsageError('Unable to load usage details right now.')
+  const planUsage = usePlanUsageStore((state) => state.usage)
+  const planUsageError = usePlanUsageStore((state) => state.error)
+  const refreshPlanUsage = usePlanUsageStore((state) => state.refresh)
+  const workspaceRunCapReached = usePlanUsageStore(
+    (state) => state.workspaceRunCapReached
+  )
+  const markWorkspaceRunCap = usePlanUsageStore(
+    (state) => state.markWorkspaceRunCap
+  )
+  useEffect(() => {
+    if (planTier === 'solo') {
+      const hidden = planUsage?.workflows?.hidden ?? 0
+      setHiddenWorkflowCount(hidden)
+    } else {
+      setHiddenWorkflowCount(0)
     }
-  }, [planTier])
+  }, [planTier, planUsage?.workflows?.hidden])
   const openPlanSettings = useCallback(() => {
     window.dispatchEvent(
       new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
@@ -250,19 +252,54 @@ export default function Dashboard() {
       ),
     [nodeRuns]
   )
-  const runsLimit = planUsage?.runs.limit ?? null
-  const runsUsed = planUsage?.runs.used ?? 0
-  // Some environments may omit the Solo limit from the API even when the UI is in Solo context.
-  // Mirror backend SOLO_MONTHLY_RUN_LIMIT (250) as a visual fallback to keep the bar meaningful.
-  const effectiveRunsLimit = useMemo(() => {
-    if (runsLimit && runsLimit > 0) return runsLimit
-    return planTier === 'solo' ? 250 : null
-  }, [runsLimit, planTier])
+  const workspaceRunUsage = planUsage?.workspace?.runs
+  const resolvedRunUsage = useMemo(() => {
+    if (planTier === 'workspace' && workspaceRunUsage) {
+      return workspaceRunUsage
+    }
+    return planUsage?.runs ?? null
+  }, [planTier, planUsage?.runs, workspaceRunUsage])
+  const runsUsed = resolvedRunUsage?.used ?? 0
+  const runsLimit = useMemo(() => {
+    if (resolvedRunUsage?.limit && resolvedRunUsage.limit > 0) {
+      return resolvedRunUsage.limit
+    }
+    if (planTier === 'workspace') {
+      return WORKSPACE_RUN_LIMIT_FALLBACK
+    }
+    if (planTier === 'solo') {
+      return 250
+    }
+    return null
+  }, [planTier, resolvedRunUsage?.limit])
   const runsPercent = useMemo(() => {
-    if (!effectiveRunsLimit || effectiveRunsLimit <= 0) return null
+    if (!runsLimit || runsLimit <= 0) return null
     if (runsUsed <= 0) return 0
-    return Math.min(100, (runsUsed / effectiveRunsLimit) * 100)
-  }, [effectiveRunsLimit, runsUsed])
+    return Math.min(100, (runsUsed / runsLimit) * 100)
+  }, [runsLimit, runsUsed])
+  const workspaceDisplayName =
+    currentWorkspace?.workspace.name?.trim() || 'Workspace'
+  const runAvailability = useMemo<RunAvailability | undefined>(() => {
+    if (workspaceRunCapReached) {
+      return {
+        disabled: true,
+        reason: `${workspaceDisplayName} has exhausted its monthly run allocation. Upgrade in Settings → Plan or wait for the next cycle.`
+      }
+    }
+    if (runsLimit && runsUsed >= runsLimit) {
+      return {
+        disabled: true,
+        reason: `${workspaceDisplayName} has used all ${runsLimit.toLocaleString()} runs available this month.`
+      }
+    }
+    return undefined
+  }, [workspaceDisplayName, workspaceRunCapReached, runsLimit, runsUsed])
+  const runLimitReached = Boolean(runAvailability?.disabled)
+  const runLimitApproaching =
+    !runLimitReached && runsLimit && runsPercent !== null && runsPercent >= 80
+  const runUsageDescription = runsLimit
+    ? `${workspaceDisplayName} has used ${runsUsed.toLocaleString()} of ${runsLimit.toLocaleString()} runs this month.`
+    : `${workspaceDisplayName} has exhausted its monthly run allocation.`
 
   const normalizeWorkflowData = useCallback((data: unknown) => {
     if (data && typeof data === 'object') {
@@ -417,7 +454,7 @@ export default function Dashboard() {
     }
 
     fetchWorkflows()
-    refreshPlanUsage()
+    void refreshPlanUsage()
   }, [
     normalizeWorkflowData,
     planTier,
@@ -897,6 +934,10 @@ export default function Dashboard() {
       window.alert('Please save the workflow before running.')
       return
     }
+    if (runAvailability?.disabled) {
+      setError(runAvailability.reason || 'Workspace run quota reached.')
+      return
+    }
     try {
       setActiveRun(null)
       setNodeRuns([])
@@ -904,7 +945,7 @@ export default function Dashboard() {
       setActiveRun(run)
       currentPollRunIdRef.current = run.id
       pollRun(currentWorkflow.id, run.id)
-      refreshPlanUsage()
+      void refreshPlanUsage()
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
       } catch (e) {
@@ -912,13 +953,25 @@ export default function Dashboard() {
       }
     } catch (e: any) {
       console.error('Failed to start run', e)
+      if ((e as any)?.code === 'workspace_run_limit') {
+        markWorkspaceRunCap()
+      }
       if (Array.isArray(e?.violations) && e.violations.length > 0) {
         setError(e.violations[0]?.message || e?.message || null)
       } else {
-        setError(e?.message || 'Failed to start run')
+        setError(
+          e?.message ||
+            'Failed to start run. Check your plan limits and try again.'
+        )
       }
     }
-  }, [currentWorkflow, pollRun, refreshPlanUsage])
+  }, [
+    currentWorkflow,
+    pollRun,
+    refreshPlanUsage,
+    runAvailability,
+    markWorkspaceRunCap
+  ])
 
   // Overlay: subscribe to SSE for active run to reduce client work
   useEffect(() => {
@@ -1935,6 +1988,26 @@ export default function Dashboard() {
             </div>
           )}
 
+          {(runLimitReached || runLimitApproaching) && (
+            <div className="px-4 pt-2">
+              <QuotaBanner
+                variant={runLimitReached ? 'danger' : 'warning'}
+                title={
+                  runLimitReached
+                    ? 'Workspace run limit reached'
+                    : 'Workspace run limit nearly reached'
+                }
+                description={
+                  runLimitReached
+                    ? runUsageDescription
+                    : `${runUsageDescription} Runs will pause once the limit is reached.`
+                }
+                actionLabel="Manage plan"
+                onAction={openPlanSettings}
+              />
+            </div>
+          )}
+
           {activePane === 'designer' ? (
             <div className="flex-1 min-h-0 flex">
               <ReactFlowProvider>
@@ -1948,6 +2021,7 @@ export default function Dashboard() {
                       succeededIds={succeededIds}
                       failedIds={failedIds}
                       planTier={planTier}
+                      runAvailability={runAvailability}
                       onRestrictionNotice={(message: string) =>
                         setError(message)
                       }

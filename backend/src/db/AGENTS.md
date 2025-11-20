@@ -34,3 +34,5 @@
 - Workspace repositories now expose a normalized `get_plan` helper (Postgres + mock implementations) returning the shared `PlanTier`, allowing services/tests to gate workspace-only features without probing route modules.
 - Workspace connection repositories now persist `owner_user_id` and `user_oauth_token_id`, update their unique constraints, and surface those fields through SQLx queries so traits, Postgres impls, and test doubles stay consistent with the new schema.
 - Workspace connection repositories add a `has_connections_for_owner_provider` helper so services can determine whether a personal OAuth token is still shared elsewhere before flipping the `is_shared` flag, and all Postgres/test implementations expose the new method.
+- Workspace repositories now provide member counting plus `workspace_run_usage` quota helpers (Postgres + mocks) so plan gating can atomically enforce seat and run limits without duplicating concurrency logic in routes or workers.
+- Workspace repositories now manage `workspace_billing_cycles` (upsert/get/clear) so Stripe subscription ids and current period windows are stored centrally for billing-aligned quota resets.

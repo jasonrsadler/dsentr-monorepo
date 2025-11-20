@@ -11,6 +11,7 @@ import BaseActionNode, {
 import useActionNodeController, {
   type ActionNodeData
 } from './useActionNodeController'
+import type { RunAvailability } from '@/types/runAvailability'
 
 type HttpRequestActionNodeRenderProps =
   BaseActionNodeChildrenProps<ActionNodeData>
@@ -23,6 +24,7 @@ interface HttpRequestActionNodeProps {
   isSucceeded?: boolean
   isFailed?: boolean
   canEdit?: boolean
+  runAvailability?: RunAvailability
 }
 
 type HttpRequestActionNodeContentProps = {
@@ -37,7 +39,8 @@ export default function HttpRequestActionNode({
   isRunning,
   isSucceeded,
   isFailed,
-  canEdit = true
+  canEdit = true,
+  runAvailability
 }: HttpRequestActionNodeProps) {
   return (
     <BaseActionNode<ActionNodeData>
@@ -50,6 +53,7 @@ export default function HttpRequestActionNode({
       isRunning={isRunning}
       isSucceeded={isSucceeded}
       isFailed={isFailed}
+      runAvailability={runAvailability}
     >
       {(baseProps) => (
         <HttpRequestActionNodeContent id={id} baseProps={baseProps} />
@@ -134,10 +138,20 @@ function HttpRequestActionNodeContent({
         <button
           onClick={controller.handleTestAction}
           disabled={!controller.canRunTest || controller.isTestInvoking}
+          title={
+            !controller.canRunTest && controller.runState.blockedReason
+              ? controller.runState.blockedReason
+              : undefined
+          }
           className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
         >
           {controller.runButtonLabel}
         </button>
+        {!controller.canRunTest && controller.runState.blockedReason ? (
+          <p className="mt-1 text-xs text-amber-600">
+            {controller.runState.blockedReason}
+          </p>
+        ) : null}
 
         <AnimatePresence>
           {controller.expanded && (

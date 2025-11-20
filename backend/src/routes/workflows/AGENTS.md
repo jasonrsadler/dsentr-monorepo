@@ -34,3 +34,4 @@ Operational notes:
 - Always call `AppState::resolve_plan_tier` before performing plan-gated operations; helpers assume it was run.
 - Responses use `JsonResponse` for errors; return structured JSON (`success`, payload) for success cases.
 - When modifying workflow data, invoke `sync_secrets_from_workflow` so new secrets propagate to the user's secret store.
+- Workflow run APIs and worker schedules now enforce workspace run quotas (10k runs/month) via the shared limit helpers, returning the `workspace_run_limit` response code when the allocation is exhausted.

@@ -4,8 +4,14 @@ use uuid::Uuid;
 
 use crate::models::{
     plan::PlanTier,
-    workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole},
+    workspace::{Workspace, WorkspaceBillingCycle, WorkspaceMembershipSummary, WorkspaceRole},
 };
+
+#[derive(Debug, Clone, Copy)]
+pub struct WorkspaceRunQuotaUpdate {
+    pub allowed: bool,
+    pub run_count: i64,
+}
 
 #[async_trait]
 pub trait WorkspaceRepository: Send + Sync {
@@ -66,6 +72,8 @@ pub trait WorkspaceRepository: Send + Sync {
         workspace_id: Uuid,
     ) -> Result<Vec<crate::models::workspace::WorkspaceMember>, sqlx::Error>;
 
+    async fn count_members(&self, workspace_id: Uuid) -> Result<i64, sqlx::Error>;
+
     async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error>;
 
     async fn list_memberships_for_user(
@@ -114,4 +122,38 @@ pub trait WorkspaceRepository: Send + Sync {
         &self,
         workspace_id: Uuid,
     ) -> Result<(), sqlx::Error>;
+
+    async fn try_increment_workspace_run_quota(
+        &self,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
+        max_runs: i64,
+    ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error>;
+
+    async fn get_workspace_run_quota(
+        &self,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
+    ) -> Result<i64, sqlx::Error>;
+
+    async fn release_workspace_run_quota(
+        &self,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn upsert_workspace_billing_cycle(
+        &self,
+        workspace_id: Uuid,
+        subscription_id: &str,
+        period_start: OffsetDateTime,
+        period_end: OffsetDateTime,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn clear_workspace_billing_cycle(&self, workspace_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn get_workspace_billing_cycle(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Option<WorkspaceBillingCycle>, sqlx::Error>;
 }

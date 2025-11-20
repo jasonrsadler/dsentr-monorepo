@@ -6,12 +6,15 @@ use uuid::Uuid;
 use crate::{
     models::{
         plan::PlanTier,
-        workspace::{Workspace, WorkspaceInvitation, WorkspaceMembershipSummary, WorkspaceRole},
+        workspace::{
+            Workspace, WorkspaceBillingCycle, WorkspaceInvitation, WorkspaceMembershipSummary,
+            WorkspaceRole,
+        },
     },
     utils::plan_limits::NormalizedPlanTier,
 };
 
-use super::workspace_repository::WorkspaceRepository;
+use super::workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate};
 
 pub struct PostgresWorkspaceRepository {
     pub pool: PgPool,
@@ -287,6 +290,20 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .await
     }
 
+    async fn count_members(&self, workspace_id: Uuid) -> Result<i64, sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            SELECT COUNT(*)::BIGINT as "count!: i64"
+            FROM workspace_members
+            WHERE workspace_id = $1
+            "#,
+            workspace_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.count)
+    }
+
     async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
         let exists = sqlx::query_scalar!(
             r#"
@@ -554,5 +571,221 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         .await?;
 
         Ok(())
+    }
+
+    async fn try_increment_workspace_run_quota(
+        &self,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
+        max_runs: i64,
+    ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        let existing = sqlx::query!(
+            r#"
+            SELECT run_count
+            FROM workspace_run_usage
+            WHERE workspace_id = $1
+              AND period_start = $2
+            FOR UPDATE
+            "#,
+            workspace_id,
+            period_start
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let current = existing.map(|row| row.run_count).unwrap_or(0);
+        let next = current + 1;
+        if next > max_runs {
+            tx.rollback().await?;
+            return Ok(WorkspaceRunQuotaUpdate {
+                allowed: false,
+                run_count: current,
+            });
+        }
+
+        if existing.is_some() {
+            sqlx::query!(
+                r#"
+                UPDATE workspace_run_usage
+                SET run_count = $3,
+                    updated_at = now()
+                WHERE workspace_id = $1
+                  AND period_start = $2
+                "#,
+                workspace_id,
+                period_start,
+                next
+            )
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query!(
+                r#"
+                INSERT INTO workspace_run_usage (workspace_id, period_start, run_count, updated_at)
+                VALUES ($1, $2, $3, now())
+                "#,
+                workspace_id,
+                period_start,
+                next
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(WorkspaceRunQuotaUpdate {
+            allowed: true,
+            run_count: next,
+        })
+    }
+
+    async fn get_workspace_run_quota(
+        &self,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
+    ) -> Result<i64, sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            SELECT run_count
+            FROM workspace_run_usage
+            WHERE workspace_id = $1
+              AND period_start = $2
+            "#,
+            workspace_id,
+            period_start
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| r.run_count).unwrap_or(0))
+    }
+
+    async fn release_workspace_run_quota(
+        &self,
+        workspace_id: Uuid,
+        period_start: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let existing = sqlx::query!(
+            r#"
+            SELECT run_count
+            FROM workspace_run_usage
+            WHERE workspace_id = $1
+              AND period_start = $2
+            FOR UPDATE
+            "#,
+            workspace_id,
+            period_start
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if let Some(row) = existing {
+            let current = row.run_count.max(0);
+            if current <= 1 {
+                sqlx::query!(
+                    r#"
+                    DELETE FROM workspace_run_usage
+                    WHERE workspace_id = $1
+                      AND period_start = $2
+                    "#,
+                    workspace_id,
+                    period_start
+                )
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                let new_count = current - 1;
+                sqlx::query!(
+                    r#"
+                    UPDATE workspace_run_usage
+                    SET run_count = $3,
+                        updated_at = now()
+                    WHERE workspace_id = $1
+                      AND period_start = $2
+                    "#,
+                    workspace_id,
+                    period_start,
+                    new_count
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn upsert_workspace_billing_cycle(
+        &self,
+        workspace_id: Uuid,
+        subscription_id: &str,
+        period_start: OffsetDateTime,
+        period_end: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            INSERT INTO workspace_billing_cycles (
+                workspace_id,
+                stripe_subscription_id,
+                current_period_start,
+                current_period_end,
+                synced_at
+            )
+            VALUES ($1, $2, $3, $4, now())
+            ON CONFLICT (workspace_id)
+            DO UPDATE
+            SET stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                current_period_start = EXCLUDED.current_period_start,
+                current_period_end = EXCLUDED.current_period_end,
+                synced_at = now()
+            "#,
+            workspace_id,
+            subscription_id,
+            period_start,
+            period_end
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn clear_workspace_billing_cycle(&self, workspace_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            DELETE FROM workspace_billing_cycles
+            WHERE workspace_id = $1
+            "#,
+            workspace_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn get_workspace_billing_cycle(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Option<WorkspaceBillingCycle>, sqlx::Error> {
+        sqlx::query_as!(
+            WorkspaceBillingCycle,
+            r#"
+            SELECT workspace_id,
+                   stripe_subscription_id,
+                   current_period_start,
+                   current_period_end,
+                   synced_at
+            FROM workspace_billing_cycles
+            WHERE workspace_id = $1
+            "#,
+            workspace_id
+        )
+        .fetch_optional(&self.pool)
+        .await
     }
 }

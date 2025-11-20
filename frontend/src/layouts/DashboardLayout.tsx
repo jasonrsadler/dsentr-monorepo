@@ -24,6 +24,7 @@ import { OAuthProvider } from '@/lib/oauthApi'
 import ProfileButton from '@/components/profile/ProfileButton'
 import ProfileModal from '@/components/profile/ProfileModal'
 import PendingInviteModal from '@/components/dashboard/PendingInviteModal'
+import { normalizePlanTier } from '@/lib/planTiers'
 
 export default function DashboardLayout() {
   const user = useAuth((state) => state.user)
@@ -128,13 +129,22 @@ export default function DashboardLayout() {
     [currentWorkspaceId, setCurrentWorkspaceId]
   )
 
-  const planLabel = useMemo(() => {
+  const planBadge = useMemo(() => {
     const planSource = currentWorkspace?.workspace.plan ?? user?.plan
     if (!planSource) return null
-    const normalized = planSource.trim()
-    if (!normalized) return null
-    return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+    const normalized = normalizePlanTier(planSource)
+    return normalized === 'workspace' ? 'Workspace plan' : 'Solo plan'
   }, [currentWorkspace?.workspace.plan, user?.plan])
+
+  const openPlanSettings = useCallback(() => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+      )
+    } catch {
+      /* ignore window dispatch errors */
+    }
+  }, [])
 
   const settingsTabs = useMemo(
     () => [
@@ -245,10 +255,19 @@ export default function DashboardLayout() {
                   )}
                 </div>
               ) : null}
-              {planLabel ? (
-                <span className="rounded-full border border-indigo-500 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:border-indigo-400 dark:text-indigo-300">
-                  {planLabel}
-                </span>
+              {planBadge ? (
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full border border-indigo-500 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:border-indigo-400 dark:text-indigo-300">
+                    {planBadge}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={openPlanSettings}
+                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-300 dark:hover:text-indigo-200"
+                  >
+                    Manage plan
+                  </button>
+                </div>
               ) : null}
               <span className="text-sm text-zinc-600 dark:text-zinc-300 leading-none">
                 {user.first_name} {user.last_name}
