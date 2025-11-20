@@ -12,6 +12,7 @@ import RunCustomCodeAction from '../src/components/workflow/Actions/RunCustomCod
 import RunCustomCodeActionNode from '../src/components/workflow/nodes/RunCustomCodeActionNode'
 import type { RunCustomCodeActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { TestFlowWrapper } from './helpers/TestFlowWrapper'
 
 const nodeId = 'run-custom'
 
@@ -137,9 +138,9 @@ describe('RunCustomCodeAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: RunCustomCodeActionParams }).params
-                  .code === 'return foo - bar'
+              'params' in payload &&
+              (payload as { params: RunCustomCodeActionParams }).params
+                .code === 'return foo - bar'
             )
         )
       ).toBe(true)
@@ -189,9 +190,9 @@ describe('RunCustomCodeAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: RunCustomCodeActionParams }).params
-                  .inputs?.[0]?.key === 'id'
+              'params' in payload &&
+              (payload as { params: RunCustomCodeActionParams }).params
+                .inputs?.[0]?.key === 'id'
             )
         )
       ).toBe(true)
@@ -243,9 +244,9 @@ describe('RunCustomCodeAction', () => {
             id === nodeId &&
             Boolean(
               payload &&
-                'params' in payload &&
-                (payload as { params: RunCustomCodeActionParams }).params
-                  .outputs?.[0]?.value === 'result'
+              'params' in payload &&
+              (payload as { params: RunCustomCodeActionParams }).params
+                .outputs?.[0]?.value === 'result'
             )
         )
       ).toBe(true)
@@ -292,21 +293,26 @@ describe('RunCustomCodeAction', () => {
 
   it('disables test actions when run availability is blocked', async () => {
     seedCustomCodeNode(createBaseParams())
+
     render(
-      <RunCustomCodeActionNode
-        id={nodeId}
-        selected={false}
-        onRun={vi.fn()}
-        runAvailability={{
-          disabled: true,
-          reason: 'Monthly run limit reached.'
-        }}
-      />
+      <TestFlowWrapper>
+        <RunCustomCodeActionNode
+          id={nodeId}
+          selected={false}
+          onRun={vi.fn()}
+          runAvailability={{
+            disabled: true,
+            reason: 'Monthly run limit reached.'
+          }}
+        />
+      </TestFlowWrapper>
     )
-    const button = await screen.findByRole('button', { name: /test action/i })
+
+
+    const button = screen.getByRole('button', { name: /Test Action/i })
     expect(button).toBeDisabled()
-    expect(
-      screen.getByText(/monthly run limit reached/i)
-    ).toBeInTheDocument()
+
+    expect(screen.getByText(/monthly run limit reached/i))
+      .toBeInTheDocument()
   })
 })

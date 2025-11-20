@@ -539,7 +539,9 @@ export default function FlowCanvas({
   useEffect(() => {
     invokeRunWorkflowRef.current = invokeRunWorkflow
   }, [invokeRunWorkflow])
-  const runAvailabilityRef = useRef<RunAvailability | undefined>(runAvailability)
+  const runAvailabilityRef = useRef<RunAvailability | undefined>(
+    runAvailability
+  )
   useEffect(() => {
     runAvailabilityRef.current = runAvailability
   }, [runAvailability])

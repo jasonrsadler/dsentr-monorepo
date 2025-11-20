@@ -306,7 +306,7 @@ describe('DashboardLayout workspace switcher', () => {
     )
 
     const header = await screen.findByRole('banner')
-    expect(within(header).getByText(/^Solo$/)).toBeInTheDocument()
+    expect(within(header).getByText(/Solo plan/i)).toBeInTheDocument()
 
     const switcher = await screen.findByLabelText(/workspace switcher/i)
     const userEventInstance = userEvent.setup()
@@ -316,7 +316,7 @@ describe('DashboardLayout workspace switcher', () => {
       expect(useAuth.getState().currentWorkspaceId).toBe('workspace-b')
     })
 
-    expect(within(header).getByText(/^Workspace$/)).toBeInTheDocument()
+    expect(within(header).getByText(/Workspace plan/i)).toBeInTheDocument()
   })
 
   it('prefers workspace specified in the query string when available', async () => {

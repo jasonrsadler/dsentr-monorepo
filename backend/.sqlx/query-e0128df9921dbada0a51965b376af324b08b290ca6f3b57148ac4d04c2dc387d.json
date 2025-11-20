@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM workspace_billing_cycles\n            WHERE workspace_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0128df9921dbada0a51965b376af324b08b290ca6f3b57148ac4d04c2dc387d"
+}

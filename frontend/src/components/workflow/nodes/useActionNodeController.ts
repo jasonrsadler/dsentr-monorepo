@@ -78,6 +78,7 @@ export interface ActionNodeController {
   isTestInvoking: boolean
   runButtonLabel: string
   handleTestAction: () => void
+  runState: BaseActionNodeRunState
 }
 
 export function useActionNodeController({
@@ -90,6 +91,17 @@ export function useActionNodeController({
   remove,
   runState
 }: UseActionNodeControllerOptions): ActionNodeController {
+  const safeRunState: BaseActionNodeRunState =
+    runState ?? {
+      canInvoke: false,
+      isInvoking: false,
+      isRunning: false,
+      isSucceeded: false,
+      isFailed: false,
+      run: async () => { },
+      blockedReason: null
+    }
+
   const meta = useActionMeta(id)
   const params = useActionParams<ActionNodeParams>(id, meta.actionType)
 
@@ -260,8 +272,8 @@ export function useActionNodeController({
   }, [])
 
   const canRunTest =
-    Boolean(runState?.canInvoke) && !combinedHasValidationErrors
-  const isTestInvoking = Boolean(runState?.isInvoking)
+    Boolean(safeRunState?.canInvoke) && !combinedHasValidationErrors
+  const isTestInvoking = Boolean(safeRunState?.isInvoking)
   const runButtonLabel = isTestInvoking ? 'Testing...' : 'Test Action'
 
   const sanitizedRunParams = useMemo(() => {
@@ -275,11 +287,10 @@ export function useActionNodeController({
   }, [params])
 
   const handleTestAction = useCallback(() => {
-    if (!runState) return
-    if (!runState.canInvoke) return
+    if (!safeRunState.canInvoke) return
     if (combinedHasValidationErrors) return
-    runState.run(sanitizedRunParams)
-  }, [runState, combinedHasValidationErrors, sanitizedRunParams])
+    safeRunState.run(sanitizedRunParams)
+  }, [safeRunState, combinedHasValidationErrors, sanitizedRunParams])
 
   const setValidationState = useCallback(
     (flag: boolean) => {
@@ -319,7 +330,8 @@ export function useActionNodeController({
     canRunTest,
     isTestInvoking,
     runButtonLabel,
-    handleTestAction
+    handleTestAction,
+    runState: safeRunState
   }
 }
 

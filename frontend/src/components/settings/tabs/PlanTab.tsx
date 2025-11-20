@@ -644,7 +644,9 @@ export default function PlanTab() {
           actionLabel="Manage members"
           onAction={() =>
             window.dispatchEvent(
-              new CustomEvent('open-plan-settings', { detail: { tab: 'members' } })
+              new CustomEvent('open-plan-settings', {
+                detail: { tab: 'members' }
+              })
             )
           }
         />

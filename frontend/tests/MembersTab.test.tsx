@@ -609,12 +609,12 @@ describe('MembersTab workspace actions', () => {
     expect(inviteInput).toBeDisabled()
     const inviteButton = screen.getByRole('button', { name: /invite/i })
     expect(inviteButton).toBeDisabled()
-    expect(
-      screen.getByTestId('quota-banner').textContent
-    ).toMatch(/member limit/i)
+    expect(screen.getByTestId('quota-banner').textContent).toMatch(
+      /member limit/i
+    )
   })
 
-  it('disables role changes when the member limit is reached', async () => {
+  it('allows role changes even when the member limit is reached', async () => {
     act(() => {
       useAuth.setState((state) => ({
         ...state,
@@ -631,6 +631,7 @@ describe('MembersTab workspace actions', () => {
         currentWorkspaceId: workspaceMembership.workspace.id
       }))
     })
+
     usePlanUsageStore.setState((state) => ({
       ...state,
       usage: {
@@ -642,6 +643,7 @@ describe('MembersTab workspace actions', () => {
         }
       }
     }))
+
     listMembersMock.mockResolvedValue(
       Array.from({ length: 8 }).map((_, index) => ({
         workspace_id: workspaceMembership.workspace.id,
@@ -656,13 +658,12 @@ describe('MembersTab workspace actions', () => {
 
     render(<MembersTab />)
 
-    const rows = await screen.findAllByRole('row')
-    const targetRow = rows.find((row) =>
-      within(row).queryByText('Member1 User')
-    )
-    expect(targetRow).toBeTruthy()
+    const targetLabel = await screen.findByText('Member1 User')
+    const targetRow = targetLabel.closest('tr')
     if (!targetRow) throw new Error('target row not found')
+
     const roleSelect = within(targetRow).getByRole('combobox')
-    expect(roleSelect).toBeDisabled()
+    expect(roleSelect).not.toBeDisabled()
   })
+
 })

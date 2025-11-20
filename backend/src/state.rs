@@ -44,7 +44,7 @@ pub struct AppState {
 }
 
 pub const WORKSPACE_MEMBER_LIMIT: i64 = 8;
-pub const WORKSPACE_MONTHLY_RUN_LIMIT: i64 = 10_000;
+pub const WORKSPACE_MONTHLY_RUN_LIMIT: i64 = 20_000;
 
 #[derive(Clone, Copy, Debug)]
 pub struct WorkspaceRunQuotaTicket {

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    DELETE FROM workspace_run_usage\n                    WHERE workspace_id = $1\n                      AND period_start = $2\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e6ef7c344571af495a534b79395ddd147f0c522ad8af7166915d003cf9a84b3a"
+}

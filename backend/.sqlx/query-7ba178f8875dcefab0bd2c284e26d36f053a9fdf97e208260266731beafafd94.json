@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO workspace_billing_cycles (\n                workspace_id,\n                stripe_subscription_id,\n                current_period_start,\n                current_period_end,\n                synced_at\n            )\n            VALUES ($1, $2, $3, $4, now())\n            ON CONFLICT (workspace_id)\n            DO UPDATE\n            SET stripe_subscription_id = EXCLUDED.stripe_subscription_id,\n                current_period_start = EXCLUDED.current_period_start,\n                current_period_end = EXCLUDED.current_period_end,\n                synced_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7ba178f8875dcefab0bd2c284e26d36f053a9fdf97e208260266731beafafd94"
+}

@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT workspace_id,\n                   stripe_subscription_id,\n                   current_period_start,\n                   current_period_end,\n                   synced_at\n            FROM workspace_billing_cycles\n            WHERE workspace_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "stripe_subscription_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "current_period_start",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "current_period_end",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "synced_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "37f327e25bc1cfa47421f8e2ac3bf798adccb92af491a9d3e1f4329beb4afa04"
+}
