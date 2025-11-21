@@ -16,6 +16,8 @@ pub struct SecretResponseEntry {
     pub owner_id: Uuid,
 }
 
+const SECRET_PLACEHOLDER: &str = "*****************";
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SecretIdentifier {
     pub group: String,
@@ -110,11 +112,11 @@ pub fn extend_response_store(
         let group_map = target.entry(group.clone()).or_default();
         for (service, entries) in services {
             let service_map = group_map.entry(service.clone()).or_default();
-            for (name, value) in entries {
+            for (name, _value) in entries {
                 service_map.insert(
                     name.clone(),
                     SecretResponseEntry {
-                        value: value.clone(),
+                        value: SECRET_PLACEHOLDER.to_string(),
                         owner_id,
                     },
                 );
