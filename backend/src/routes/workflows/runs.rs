@@ -37,6 +37,32 @@ pub struct StartWorkflowRunRequest {
     pub priority: Option<i32>,
 }
 
+fn redact_secrets(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                let key = k.to_lowercase();
+                if key.contains("secret")
+                    || key.contains("token")
+                    || key.contains("apikey")
+                    || key.contains("api_key")
+                    || key.contains("authorization")
+                {
+                    *v = serde_json::Value::String("********".to_string());
+                } else {
+                    redact_secrets(v);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                redact_secrets(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub async fn start_workflow_run(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -188,11 +214,16 @@ pub async fn start_workflow_run(
                     eprintln!("Failed to record workflow run event {}: {:?}", run.id, err);
                 }
             }
+            let mut safe_run = run.clone();
+            let mut safe_snapshot = safe_run.snapshot.clone();
+            redact_secrets(&mut safe_snapshot);
+            safe_run.snapshot = safe_snapshot;
+
             (
                 StatusCode::ACCEPTED,
                 Json(json!({
                     "success": true,
-                    "run": run
+                    "run": safe_run
                 })),
             )
                 .into_response()
