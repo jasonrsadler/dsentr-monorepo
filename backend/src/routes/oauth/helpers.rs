@@ -12,7 +12,7 @@ pub(crate) const OAUTH_PLAN_RESTRICTION_MESSAGE: &str =
     "OAuth integrations are available on workspace plans and above. Upgrade to connect accounts.";
 
 #[derive(Deserialize)]
-pub(crate) struct CallbackQuery {
+pub struct CallbackQuery {
     pub(crate) code: Option<String>,
     pub(crate) state: Option<String>,
     pub(crate) error: Option<String>,

@@ -22,12 +22,12 @@ use crate::{
 };
 
 #[derive(Deserialize)]
-pub(crate) struct SecretPayload {
+pub struct SecretPayload {
     value: String,
 }
 
 #[derive(Default, Deserialize)]
-pub(crate) struct SecretsQuery {
+pub struct SecretsQuery {
     #[serde(default)]
     workspace: Option<Uuid>,
 }
@@ -46,6 +46,7 @@ fn secret_key(app_state: &AppState) -> &[u8] {
     &app_state.config.api_secrets_encryption_key
 }
 
+#[allow(clippy::result_large_err)]
 fn decrypt_secret_store(
     app_state: &AppState,
     settings: &serde_json::Value,
