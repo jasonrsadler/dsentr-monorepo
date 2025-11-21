@@ -488,6 +488,7 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
@@ -714,6 +715,7 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
@@ -898,6 +900,7 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),
@@ -1076,6 +1079,7 @@ mod tests {
                 },
                 token_encryption_key: vec![0u8; 32],
             },
+            api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),

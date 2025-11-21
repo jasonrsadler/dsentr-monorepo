@@ -161,7 +161,7 @@ pub async fn request_account_deletion(
     };
 
     let secret_count = match state.db.get_user_settings(user.id).await {
-        Ok(settings) => count_user_secrets(&settings),
+        Ok(settings) => count_user_secrets(&settings, &state.config.api_secrets_encryption_key),
         Err(err) => {
             error!(?err, %user_id, "failed to load user settings for deletion summary");
             return JsonResponse::server_error("Failed to prepare account deletion")
@@ -272,7 +272,7 @@ pub async fn get_account_deletion_summary(
     };
 
     let secret_count = match state.db.get_user_settings(context.user.id).await {
-        Ok(settings) => count_user_secrets(&settings),
+        Ok(settings) => count_user_secrets(&settings, &state.config.api_secrets_encryption_key),
         Err(err) => {
             error!(%context.user.id, ?err, "failed to load secrets for deletion summary");
             return JsonResponse::server_error("Failed to load deletion details").into_response();
@@ -419,7 +419,7 @@ pub async fn confirm_account_deletion(
     };
 
     let secret_count = match state.db.get_user_settings(context.user.id).await {
-        Ok(settings) => count_user_secrets(&settings),
+        Ok(settings) => count_user_secrets(&settings, &state.config.api_secrets_encryption_key),
         Err(err) => {
             error!(%context.user.id, ?err, "failed to load secrets during deletion confirm");
             return JsonResponse::server_error("Failed to confirm account deletion")
@@ -526,9 +526,14 @@ pub async fn confirm_account_deletion(
     .into_response()
 }
 
-fn count_user_secrets(settings: &serde_json::Value) -> usize {
-    let store = read_secret_store(settings);
-    collect_secret_identifiers(&store).len()
+fn count_user_secrets(settings: &serde_json::Value, key: &[u8]) -> usize {
+    match read_secret_store(settings, key) {
+        Ok((store, _)) => collect_secret_identifiers(&store).len(),
+        Err(err) => {
+            error!(?err, "failed to decrypt user secrets while counting");
+            0
+        }
+    }
 }
 
 fn format_timestamp(timestamp: OffsetDateTime) -> String {

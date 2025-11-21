@@ -20,3 +20,4 @@
 
 ## Change Reasons
 - Plan limit and secret collectors now infer messaging integrations from `service`/`provider` fields because the legacy `platform` parameter has been retired from workflow nodes.
+- Secret store helpers now use `API_SECRETS_ENCRYPTION_KEY` for encrypting/decrypting stored API keys, signal when legacy plaintext values need rewriting, and support rotation with the shared helper script.

@@ -31,7 +31,9 @@ use crate::{
     state::AppState,
     utils::{
         plan_limits::NormalizedPlanTier,
-        secrets::{collect_secret_identifiers, read_secret_store, SecretIdentifier},
+        secrets::{
+            collect_secret_identifiers, read_secret_store, write_secret_store, SecretIdentifier,
+        },
     },
 };
 
@@ -1065,6 +1067,7 @@ pub async fn list_workspace_secret_ownership(
     };
 
     let mut ownership: BTreeMap<Uuid, Vec<SecretIdentifier>> = BTreeMap::new();
+    let encryption_key = &app_state.config.api_secrets_encryption_key;
 
     for member in members {
         let settings = match app_state.db.get_user_settings(member.user_id).await {
@@ -1081,7 +1084,48 @@ pub async fn list_workspace_secret_ownership(
             }
         };
 
-        let store = read_secret_store(&settings);
+        let (store, hint) = match read_secret_store(&settings, encryption_key) {
+            Ok(result) => result,
+            Err(err) => {
+                error!(
+                    ?err,
+                    %workspace_id,
+                    member_id = %member.user_id,
+                    "failed to decrypt workspace secrets while collecting ownership"
+                );
+                return JsonResponse::server_error("Failed to load workspace secrets")
+                    .into_response();
+            }
+        };
+
+        if hint.needs_rewrite {
+            let mut settings = settings;
+            if let Err(err) = write_secret_store(&mut settings, &store, encryption_key) {
+                error!(
+                    ?err,
+                    %workspace_id,
+                    member_id = %member.user_id,
+                    "failed to re-encrypt workspace secrets while collecting ownership"
+                );
+                return JsonResponse::server_error("Failed to load workspace secrets")
+                    .into_response();
+            }
+            if let Err(err) = app_state
+                .db
+                .update_user_settings(member.user_id, settings)
+                .await
+            {
+                error!(
+                    ?err,
+                    %workspace_id,
+                    member_id = %member.user_id,
+                    "failed to persist workspace secrets while collecting ownership"
+                );
+                return JsonResponse::server_error("Failed to load workspace secrets")
+                    .into_response();
+            }
+        }
+
         let identifiers = collect_secret_identifiers(&store);
         if !identifiers.is_empty() {
             ownership.insert(member.user_id, identifiers);
@@ -3387,6 +3431,7 @@ mod tests {
                 },
                 token_encryption_key: vec![0; 32],
             },
+            api_secrets_encryption_key: vec![1; 32],
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),

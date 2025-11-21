@@ -478,6 +478,7 @@ mod tests {
                 secret_key: "stub".into(),
                 webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             },
+            api_secrets_encryption_key: vec![2u8; 32],
             auth_cookie_secure: true,
             webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             jwt_issuer: "test-issuer".into(),

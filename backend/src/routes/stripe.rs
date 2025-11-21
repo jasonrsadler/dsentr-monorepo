@@ -1119,6 +1119,7 @@ mod tests {
                 },
                 token_encryption_key: vec![0; 32],
             },
+            api_secrets_encryption_key: vec![1; 32],
             stripe: StripeSettings {
                 client_id: "stub".into(),
                 secret_key: "stub".into(),

@@ -16,7 +16,8 @@ use crate::{
     utils::secrets::{
         collect_workflow_secrets, ensure_secret_exists, extend_response_store, read_secret_store,
         remove_named_secret, to_response_store, upsert_named_secret, write_secret_store,
-        SecretResponseStore, SecretUpsertOutcome, SecretValidationError,
+        SecretResponseStore, SecretStore, SecretStoreRead, SecretUpsertOutcome,
+        SecretValidationError,
     },
 };
 
@@ -39,6 +40,69 @@ fn canonicalize_key(input: &str) -> Result<String, Response> {
     } else {
         Ok(key)
     }
+}
+
+fn secret_key(app_state: &AppState) -> &[u8] {
+    &app_state.config.api_secrets_encryption_key
+}
+
+fn decrypt_secret_store(
+    app_state: &AppState,
+    settings: &serde_json::Value,
+    log_context: &str,
+    client_error: &str,
+) -> Result<(SecretStore, SecretStoreRead), Response> {
+    read_secret_store(settings, secret_key(app_state)).map_err(|err| {
+        eprintln!("{log_context}: {:?}", err);
+        JsonResponse::server_error(client_error).into_response()
+    })
+}
+
+async fn persist_secret_store(
+    app_state: &AppState,
+    user_id: Uuid,
+    mut settings: serde_json::Value,
+    store: &SecretStore,
+    log_context: &str,
+    client_error: &str,
+) -> Result<(), Response> {
+    write_secret_store(&mut settings, store, secret_key(app_state)).map_err(|err| {
+        eprintln!("{log_context}: {:?}", err);
+        JsonResponse::server_error(client_error).into_response()
+    })?;
+
+    app_state
+        .db
+        .update_user_settings(user_id, settings)
+        .await
+        .map_err(|err| {
+            eprintln!("{log_context}: {:?}", err);
+            JsonResponse::server_error(client_error).into_response()
+        })
+}
+
+async fn persist_if_needed(
+    app_state: &AppState,
+    user_id: Uuid,
+    settings: serde_json::Value,
+    store: &SecretStore,
+    hint: SecretStoreRead,
+    log_context: &str,
+    client_error: &str,
+) -> Result<(), Response> {
+    if !hint.needs_rewrite {
+        return Ok(());
+    }
+
+    persist_secret_store(
+        app_state,
+        user_id,
+        settings,
+        store,
+        log_context,
+        client_error,
+    )
+    .await
 }
 
 async fn ensure_workspace_membership(
@@ -96,7 +160,24 @@ async fn collect_workspace_secrets(
                 JsonResponse::server_error("Failed to load workspace secrets").into_response()
             })?;
 
-        let store = read_secret_store(&settings);
+        let (store, hint) = decrypt_secret_store(
+            app_state,
+            &settings,
+            "Failed to decrypt workspace secrets",
+            "Failed to load workspace secrets",
+        )?;
+
+        persist_if_needed(
+            app_state,
+            member.user_id,
+            settings,
+            &store,
+            hint,
+            "Failed to persist encrypted workspace secrets",
+            "Failed to load workspace secrets",
+        )
+        .await?;
+
         extend_response_store(&mut aggregate, &store, member.user_id);
     }
 
@@ -138,7 +219,30 @@ pub async fn list_secrets(
         }
     };
 
-    let store = read_secret_store(&settings);
+    let (store, hint) = match decrypt_secret_store(
+        &app_state,
+        &settings,
+        "Failed to decrypt user secrets",
+        "Failed to load secrets",
+    ) {
+        Ok(result) => result,
+        Err(resp) => return resp,
+    };
+
+    if let Err(resp) = persist_if_needed(
+        &app_state,
+        user_id,
+        settings,
+        &store,
+        hint,
+        "Failed to re-encrypt user secrets",
+        "Failed to load secrets",
+    )
+    .await
+    {
+        return resp;
+    }
+
     let secrets =
         serde_json::to_value(to_response_store(&store, user_id)).unwrap_or_else(|_| json!({}));
 
@@ -186,7 +290,7 @@ pub async fn upsert_secret(
         Err(resp) => return resp,
     };
 
-    let mut settings = match app_state.db.get_user_settings(user_id).await {
+    let settings = match app_state.db.get_user_settings(user_id).await {
         Ok(settings) => settings,
         Err(e) => {
             eprintln!("Failed to load user settings: {:?}", e);
@@ -194,7 +298,15 @@ pub async fn upsert_secret(
         }
     };
 
-    let mut store = read_secret_store(&settings);
+    let (mut store, _) = match decrypt_secret_store(
+        &app_state,
+        &settings,
+        "Failed to decrypt user secrets while saving",
+        "Failed to save secret",
+    ) {
+        Ok(result) => result,
+        Err(resp) => return resp,
+    };
     let outcome =
         match upsert_named_secret(&mut store, &group_key, &service_key, &name, &payload.value) {
             Ok(outcome) => outcome,
@@ -206,10 +318,17 @@ pub async fn upsert_secret(
             }
         };
 
-    write_secret_store(&mut settings, &store);
-    if let Err(e) = app_state.db.update_user_settings(user_id, settings).await {
-        eprintln!("Failed to persist user secrets: {:?}", e);
-        return JsonResponse::server_error("Failed to save secret").into_response();
+    if let Err(resp) = persist_secret_store(
+        &app_state,
+        user_id,
+        settings,
+        &store,
+        "Failed to persist encrypted user secrets",
+        "Failed to save secret",
+    )
+    .await
+    {
+        return resp;
     }
 
     if let Some((workspace_id, _role)) = workspace_context {
@@ -289,7 +408,6 @@ pub async fn delete_secret(
 
         let mut matched_owner: Option<Uuid> = None;
         let mut owner_settings = None;
-        let mut owner_store = None;
 
         for member in members {
             let settings = match app_state.db.get_user_settings(member.user_id).await {
@@ -304,12 +422,34 @@ pub async fn delete_secret(
                 }
             };
 
-            let mut store = read_secret_store(&settings);
+            let (mut store, hint) = match decrypt_secret_store(
+                &app_state,
+                &settings,
+                "Failed to decrypt workspace secrets while deleting",
+                "Failed to delete secret",
+            ) {
+                Ok(result) => result,
+                Err(resp) => return resp,
+            };
+
             if remove_named_secret(&mut store, &group_key, &service_key, &name) {
                 matched_owner = Some(member.user_id);
-                owner_settings = Some(settings);
-                owner_store = Some(store);
+                owner_settings = Some((settings, store));
                 break;
+            }
+
+            if let Err(resp) = persist_if_needed(
+                &app_state,
+                member.user_id,
+                settings,
+                &store,
+                hint,
+                "Failed to refresh workspace secret encryption",
+                "Failed to delete secret",
+            )
+            .await
+            {
+                return resp;
             }
         }
 
@@ -317,8 +457,7 @@ pub async fn delete_secret(
             return JsonResponse::not_found("Secret not found").into_response();
         };
 
-        let mut settings = owner_settings.expect("settings captured with owner");
-        let store = owner_store.expect("store captured with owner");
+        let (settings, store) = owner_settings.expect("settings captured with owner");
 
         let is_admin = matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin);
         if owner_id != user_id && !is_admin {
@@ -328,13 +467,17 @@ pub async fn delete_secret(
             .into_response();
         }
 
-        write_secret_store(&mut settings, &store);
-        if let Err(err) = app_state.db.update_user_settings(owner_id, settings).await {
-            eprintln!(
-                "Failed to persist workspace secrets after deletion (owner: {}): {:?}",
-                owner_id, err
-            );
-            return JsonResponse::server_error("Failed to delete secret").into_response();
+        if let Err(resp) = persist_secret_store(
+            &app_state,
+            owner_id,
+            settings,
+            &store,
+            "Failed to persist workspace secrets after deletion",
+            "Failed to delete secret",
+        )
+        .await
+        {
+            return resp;
         }
 
         let secrets = match collect_workspace_secrets(&app_state, workspace_id).await {
@@ -349,7 +492,7 @@ pub async fn delete_secret(
             .into_response();
     }
 
-    let mut settings = match app_state.db.get_user_settings(user_id).await {
+    let settings = match app_state.db.get_user_settings(user_id).await {
         Ok(settings) => settings,
         Err(e) => {
             eprintln!("Failed to load user settings: {:?}", e);
@@ -357,15 +500,45 @@ pub async fn delete_secret(
         }
     };
 
-    let mut store = read_secret_store(&settings);
-    if !remove_named_secret(&mut store, &group_key, &service_key, &name) {
+    let (mut store, hint) = match decrypt_secret_store(
+        &app_state,
+        &settings,
+        "Failed to decrypt user secrets while deleting",
+        "Failed to delete secret",
+    ) {
+        Ok(result) => result,
+        Err(resp) => return resp,
+    };
+
+    let removed = remove_named_secret(&mut store, &group_key, &service_key, &name);
+    if !removed {
+        if let Err(resp) = persist_if_needed(
+            &app_state,
+            user_id,
+            settings,
+            &store,
+            hint,
+            "Failed to refresh user secret encryption",
+            "Failed to delete secret",
+        )
+        .await
+        {
+            return resp;
+        }
         return JsonResponse::not_found("Secret not found").into_response();
     }
 
-    write_secret_store(&mut settings, &store);
-    if let Err(e) = app_state.db.update_user_settings(user_id, settings).await {
-        eprintln!("Failed to persist user secrets: {:?}", e);
-        return JsonResponse::server_error("Failed to delete secret").into_response();
+    if let Err(resp) = persist_secret_store(
+        &app_state,
+        user_id,
+        settings,
+        &store,
+        "Failed to persist user secrets after deletion",
+        "Failed to delete secret",
+    )
+    .await
+    {
+        return resp;
     }
 
     let secrets =
@@ -383,18 +556,31 @@ pub async fn sync_secrets_from_workflow(
     user_id: Uuid,
     workflow_data: &serde_json::Value,
 ) {
-    let Ok(mut settings) = app_state.db.get_user_settings(user_id).await else {
+    let Ok(settings) = app_state.db.get_user_settings(user_id).await else {
         return;
     };
-    let mut store = read_secret_store(&settings);
-    let mut changed = false;
+    let Ok((mut store, hint)) = read_secret_store(&settings, secret_key(app_state)) else {
+        eprintln!(
+            "Failed to decrypt secrets while syncing from workflow (user: {})",
+            user_id
+        );
+        return;
+    };
+    let mut changed = hint.needs_rewrite;
     for (group, service, value) in collect_workflow_secrets(workflow_data) {
         if ensure_secret_exists(&mut store, &group, &service, &value) {
             changed = true;
         }
     }
     if changed {
-        write_secret_store(&mut settings, &store);
+        let mut settings = settings;
+        if let Err(err) = write_secret_store(&mut settings, &store, secret_key(app_state)) {
+            eprintln!(
+                "Failed to encrypt secrets while syncing workflow (user: {}): {:?}",
+                user_id, err
+            );
+            return;
+        }
         if let Err(e) = app_state.db.update_user_settings(user_id, settings).await {
             eprintln!("Failed to sync workflow secrets: {:?}", e);
         }

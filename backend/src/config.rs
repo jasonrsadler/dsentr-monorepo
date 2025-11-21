@@ -45,6 +45,7 @@ pub struct Config {
     pub database_url: String,
     pub frontend_origin: String,
     pub oauth: OAuthSettings,
+    pub api_secrets_encryption_key: Vec<u8>,
     #[allow(dead_code)]
     pub stripe: StripeSettings,
     pub auth_cookie_secure: bool,
@@ -99,6 +100,13 @@ impl Config {
                 source,
             })?;
 
+        let api_secrets_key_b64 = require_env("API_SECRETS_ENCRYPTION_KEY")?;
+        let api_secrets_encryption_key =
+            decode_key(&api_secrets_key_b64).map_err(|source| ConfigError::SecretDecode {
+                name: "API_SECRETS_ENCRYPTION_KEY",
+                source,
+            })?;
+
         let stripe = StripeSettings {
             client_id: require_env("STRIPE_CLIENT_ID")?,
             secret_key: require_env("STRIPE_SECRET_KEY")?,
@@ -129,6 +137,7 @@ impl Config {
                 slack,
                 token_encryption_key,
             },
+            api_secrets_encryption_key,
             stripe,
             auth_cookie_secure,
             webhook_secret,
@@ -175,7 +184,7 @@ mod tests {
     use std::sync::Mutex;
     use std::{panic, panic::UnwindSafe};
 
-    const REQUIRED_VARS: [&str; 18] = [
+    const REQUIRED_VARS: [&str; 19] = [
         "DATABASE_URL",
         "FRONTEND_ORIGIN",
         "GOOGLE_INTEGRATIONS_CLIENT_ID",
@@ -188,6 +197,7 @@ mod tests {
         "SLACK_INTEGRATIONS_CLIENT_SECRET",
         "SLACK_INTEGRATIONS_REDIRECT_URI",
         "OAUTH_TOKEN_ENCRYPTION_KEY",
+        "API_SECRETS_ENCRYPTION_KEY",
         "STRIPE_CLIENT_ID",
         "STRIPE_SECRET_KEY",
         "STRIPE_WEBHOOK_SECRET",
@@ -275,6 +285,10 @@ mod tests {
         env::set_var("SLACK_INTEGRATIONS_REDIRECT_URI", "http://localhost/slack");
         let key = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
         env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", key);
+        env::set_var(
+            "API_SECRETS_ENCRYPTION_KEY",
+            base64::engine::general_purpose::STANDARD.encode([1u8; 32]),
+        );
         env::set_var("STRIPE_CLIENT_ID", "stripe-client-id");
         env::set_var("STRIPE_SECRET_KEY", "stripe-secret");
         env::set_var("STRIPE_WEBHOOK_SECRET", "stripe-webhook");
@@ -327,6 +341,21 @@ mod tests {
             match Config::from_env() {
                 Err(ConfigError::SecretDecode { name, .. }) => {
                     assert_eq!(name, "OAUTH_TOKEN_ENCRYPTION_KEY");
+                }
+                Err(other) => panic!("expected decode error, got {other:?}"),
+                Ok(_) => panic!("expected decode error, got Ok"),
+            }
+        });
+    }
+
+    #[test]
+    fn surfaces_api_secrets_decode_errors() {
+        with_env(|| {
+            populate_defaults();
+            env::set_var("API_SECRETS_ENCRYPTION_KEY", "short");
+            match Config::from_env() {
+                Err(ConfigError::SecretDecode { name, .. }) => {
+                    assert_eq!(name, "API_SECRETS_ENCRYPTION_KEY");
                 }
                 Err(other) => panic!("expected decode error, got {other:?}"),
                 Ok(_) => panic!("expected decode error, got Ok"),

@@ -30,16 +30,50 @@ pub enum SecretValidationError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SecretStoreRead {
+    /// True when legacy/plaintext secrets were encountered and should be re-encrypted.
+    pub needs_rewrite: bool,
+}
+
+const ENCRYPTED_PREFIX: &str = "enc:";
+
+fn decrypt_secret_value(
+    key: &[u8],
+    value: &str,
+) -> Result<(String, SecretStoreRead), crate::utils::encryption::EncryptionError> {
+    if let Some(ciphertext) = value.strip_prefix(ENCRYPTED_PREFIX) {
+        let decrypted = crate::utils::encryption::decrypt_secret(key, ciphertext)?;
+        return Ok((
+            decrypted,
+            SecretStoreRead {
+                needs_rewrite: false,
+            },
+        ));
+    }
+
+    Ok((
+        value.to_string(),
+        SecretStoreRead {
+            needs_rewrite: true,
+        },
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretUpsertOutcome {
     Created,
     Updated,
     Unchanged,
 }
 
-pub fn read_secret_store(settings: &Value) -> SecretStore {
+pub fn read_secret_store(
+    settings: &Value,
+    key: &[u8],
+) -> Result<(SecretStore, SecretStoreRead), crate::utils::encryption::EncryptionError> {
     let mut out: SecretStore = BTreeMap::new();
+    let mut needs_rewrite = false;
     let Some(obj) = settings.as_object() else {
-        return out;
+        return Ok((out, SecretStoreRead { needs_rewrite }));
     };
 
     if let Some(secrets) = obj.get("secrets").and_then(Value::as_object) {
@@ -51,7 +85,9 @@ pub fn read_secret_store(settings: &Value) -> SecretStore {
                     if let Some(entry_obj) = service_value.as_object() {
                         for (name, value) in entry_obj {
                             if let Some(val_str) = value.as_str() {
-                                entries.insert(name.clone(), val_str.to_string());
+                                let (plaintext, hint) = decrypt_secret_value(key, val_str)?;
+                                needs_rewrite |= hint.needs_rewrite;
+                                entries.insert(name.clone(), plaintext);
                             }
                         }
                     }
@@ -62,7 +98,7 @@ pub fn read_secret_store(settings: &Value) -> SecretStore {
         }
     }
 
-    out
+    Ok((out, SecretStoreRead { needs_rewrite }))
 }
 
 pub fn extend_response_store(
@@ -109,7 +145,11 @@ pub fn collect_secret_identifiers(store: &SecretStore) -> Vec<SecretIdentifier> 
     identifiers
 }
 
-pub fn write_secret_store(settings: &mut Value, store: &SecretStore) {
+pub fn write_secret_store(
+    settings: &mut Value,
+    store: &SecretStore,
+    key: &[u8],
+) -> Result<(), crate::utils::encryption::EncryptionError> {
     if !settings.is_object() {
         *settings = Value::Object(Map::new());
     }
@@ -123,7 +163,11 @@ pub fn write_secret_store(settings: &mut Value, store: &SecretStore) {
         for (service, entries) in services {
             let mut entry_map = Map::new();
             for (name, value) in entries {
-                entry_map.insert(name.clone(), Value::String(value.clone()));
+                let ciphertext = crate::utils::encryption::encrypt_secret(key, value)?;
+                entry_map.insert(
+                    name.clone(),
+                    Value::String(format!("{ENCRYPTED_PREFIX}{ciphertext}")),
+                );
             }
             service_map.insert(service.clone(), Value::Object(entry_map));
         }
@@ -131,6 +175,7 @@ pub fn write_secret_store(settings: &mut Value, store: &SecretStore) {
     }
 
     obj.insert("secrets".to_string(), Value::Object(groups));
+    Ok(())
 }
 
 pub fn upsert_named_secret(
@@ -441,6 +486,66 @@ fn push_if_some(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encrypts_and_decrypts_secret_store() {
+        let key = vec![7u8; 32];
+        let mut store = SecretStore::new();
+        store
+            .entry("email".into())
+            .or_default()
+            .entry("smtp".into())
+            .or_default()
+            .insert("primary".into(), "secret".into());
+
+        let mut settings = Value::Null;
+        write_secret_store(&mut settings, &store, &key).expect("encryption should succeed");
+
+        let stored_value = settings["secrets"]["email"]["smtp"]["primary"]
+            .as_str()
+            .expect("ciphertext persisted");
+        assert!(
+            stored_value.starts_with("enc:"),
+            "value should be encrypted"
+        );
+        assert_ne!(stored_value, "secret");
+
+        let (round_tripped, hint) =
+            read_secret_store(&settings, &key).expect("decryption should succeed");
+        assert!(!hint.needs_rewrite);
+        assert_eq!(
+            round_tripped
+                .get("email")
+                .and_then(|grp| grp.get("smtp"))
+                .and_then(|svc| svc.get("primary"))
+                .map(String::as_str),
+            Some("secret")
+        );
+    }
+
+    #[test]
+    fn plaintext_secrets_signal_rewrite() {
+        let key = vec![9u8; 32];
+        let settings = serde_json::json!({
+            "secrets": {
+                "messaging": {
+                    "slack": { "primary": "token" }
+                }
+            }
+        });
+
+        let (store, hint) =
+            read_secret_store(&settings, &key).expect("plaintext parsing should not fail");
+        assert!(hint.needs_rewrite);
+        assert_eq!(
+            store
+                .get("messaging")
+                .and_then(|svc| svc.get("slack"))
+                .and_then(|entries| entries.get("primary"))
+                .map(String::as_str),
+            Some("token")
+        );
+    }
 
     #[test]
     fn ensure_secret_exists_generates_unique_names() {
