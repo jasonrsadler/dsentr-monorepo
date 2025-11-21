@@ -655,7 +655,9 @@ mod tests {
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::{
         mock_db::{MockDb, StaticWorkspaceMembershipRepository},
-        workflow_repository::{CreateWorkflowRunOutcome, MockWorkflowRepository, WorkflowRepository},
+        workflow_repository::{
+            CreateWorkflowRunOutcome, MockWorkflowRepository, WorkflowRepository,
+        },
         workspace_connection_repository::NoopWorkspaceConnectionRepository,
         workspace_repository::WorkspaceRepository,
     };
@@ -664,8 +666,7 @@ mod tests {
     use crate::routes::auth::session::AuthSession;
     use crate::services::{
         oauth::{
-            github::mock_github_oauth::MockGitHubOAuth,
-            google::mock_google_oauth::MockGoogleOAuth,
+            github::mock_github_oauth::MockGitHubOAuth, google::mock_google_oauth::MockGoogleOAuth,
             workspace_service::WorkspaceOAuthService,
         },
         smtp_mailer::MockMailer,
@@ -791,7 +792,8 @@ mod tests {
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),
             github_oauth: Arc::new(MockGitHubOAuth::default()),
-            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(
+            ),
             workspace_oauth: WorkspaceOAuthService::test_stub(),
             stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
             http_client: Arc::new(Client::new()),
@@ -857,15 +859,16 @@ mod tests {
                 let wf = workflow_for_find.clone();
                 Box::pin(async move { Ok(Some(wf)) })
             });
-        repo.expect_create_workflow_run().returning(move |_, _, _, _, _| {
-            let run = run.clone();
-            Box::pin(async move {
-                Ok(CreateWorkflowRunOutcome {
-                    run,
-                    created: false,
+        repo.expect_create_workflow_run()
+            .returning(move |_, _, _, _, _| {
+                let run = run.clone();
+                Box::pin(async move {
+                    Ok(CreateWorkflowRunOutcome {
+                        run,
+                        created: false,
+                    })
                 })
-            })
-        });
+            });
         repo.expect_record_run_event()
             .returning(|_| Box::pin(async { Err(SqlxError::RowNotFound) }));
 
@@ -874,12 +877,7 @@ mod tests {
         let period_start = OffsetDateTime::now_utc() - Duration::days(60);
         let period_end = period_start + Duration::days(30);
         workspace_repo
-            .upsert_workspace_billing_cycle(
-                workspace_id,
-                "sub_123",
-                period_start,
-                period_end,
-            )
+            .upsert_workspace_billing_cycle(workspace_id, "sub_123", period_start, period_end)
             .await
             .unwrap();
 

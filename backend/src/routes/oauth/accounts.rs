@@ -2,18 +2,17 @@ use super::{
     helpers::{
         map_oauth_error, parse_provider, ConnectionOwnerPayload, ConnectionsResponse,
         PersonalConnectionPayload, ProviderGroupedConnections, RefreshResponse,
-        WorkspaceConnectionPayload,
+        WorkspaceConnectionPayload, OAUTH_PLAN_RESTRICTION_MESSAGE,
     },
     prelude::*,
 };
-use crate::models::workspace::WorkspaceRole;
 use axum::http::StatusCode;
 
 async fn ensure_workspace_membership(
     app_state: &AppState,
     user_id: Uuid,
     workspace_id: Uuid,
-) -> Result<WorkspaceRole, Response> {
+) -> Result<(), Response> {
     let memberships = app_state
         .workspace_repo
         .list_memberships_for_user(user_id)
@@ -23,11 +22,26 @@ async fn ensure_workspace_membership(
             JsonResponse::server_error("Failed to load workspace access").into_response()
         })?;
 
-    memberships
+    let membership = match memberships
         .into_iter()
         .find(|membership| membership.workspace.id == workspace_id)
-        .map(|membership| membership.role)
-        .ok_or_else(|| JsonResponse::forbidden("Workspace membership required").into_response())
+    {
+        Some(membership) => membership,
+        None => {
+            return Err(JsonResponse::forbidden("Workspace membership required").into_response())
+        }
+    };
+
+    let plan_tier = NormalizedPlanTier::from_option(Some(membership.workspace.plan.as_str()));
+    if plan_tier.is_solo() {
+        return Err(JsonResponse::forbidden_with_code(
+            OAUTH_PLAN_RESTRICTION_MESSAGE,
+            "workspace_plan_required",
+        )
+        .into_response());
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]

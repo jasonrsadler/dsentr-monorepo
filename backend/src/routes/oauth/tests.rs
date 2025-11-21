@@ -21,7 +21,9 @@ use crate::models::plan::PlanTier;
 use crate::models::user::UserRole;
 use crate::models::workspace::{
     Workspace, WorkspaceBillingCycle, WorkspaceMembershipSummary, WorkspaceRole,
+    WORKSPACE_PLAN_SOLO,
 };
+use crate::responses::JsonResponse;
 use crate::routes::auth::{
     claims::{Claims, TokenUse},
     session::AuthSession,
@@ -50,7 +52,7 @@ use super::{
     connect::{google_connect_start, slack_connect_start, ConnectQuery},
     helpers::{
         build_state_cookie, error_message_for_redirect, handle_callback, parse_provider,
-        CallbackQuery, GOOGLE_STATE_COOKIE, SLACK_STATE_COOKIE,
+        CallbackQuery, GOOGLE_STATE_COOKIE, OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_STATE_COOKIE,
     },
     prelude::ConnectedOAuthProvider,
 };
@@ -691,6 +693,41 @@ async fn list_connections_requires_membership() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn list_connections_rejects_solo_plan_workspace() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let workspace_id = Uuid::new_v4();
+
+    let state = build_list_connections_state(
+        config.clone(),
+        vec![(
+            user_id,
+            workspace_membership(workspace_id, WorkspaceRole::Admin, WORKSPACE_PLAN_SOLO),
+        )],
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let response = list_connections(
+        State(state),
+        AuthSession(claims_for(user_id)),
+        Query(ListConnectionsQuery {
+            workspace: workspace_id,
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let json: JsonResponse = serde_json::from_slice(&body).expect("response json");
+    assert_eq!(json.code.as_deref(), Some("workspace_plan_required"));
+    assert_eq!(json.message, OAUTH_PLAN_RESTRICTION_MESSAGE);
+    assert!(!json.success);
 }
 
 #[tokio::test]
