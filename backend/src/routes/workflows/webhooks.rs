@@ -60,7 +60,7 @@ pub async fn get_webhook_url(
     };
     match app_state
         .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
+        .find_workflow_for_member(user_id, workflow_id)
         .await
     {
         Ok(Some(wf)) => {
@@ -295,7 +295,7 @@ pub async fn get_webhook_config(
     };
     match app_state
         .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
+        .find_workflow_for_member(user_id, workflow_id)
         .await
     {
         Ok(Some(wf)) => {
@@ -336,7 +336,7 @@ pub async fn set_webhook_config(
     // Enforce plan gating: HMAC is only available on workspace plans
     match app_state
         .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
+        .find_workflow_for_member(user_id, workflow_id)
         .await
     {
         Ok(Some(wf)) => {
@@ -391,7 +391,7 @@ pub async fn regenerate_webhook_token(
         Ok(Some(new_salt)) => {
             let wf = app_state
                 .workflow_repo
-                .find_workflow_by_id(user_id, workflow_id)
+                .find_workflow_for_member(user_id, workflow_id)
                 .await;
             match wf {
                 Ok(Some(w)) => {
@@ -438,7 +438,7 @@ pub async fn regenerate_webhook_signing_key(
     // Load workflow (scoped to user)
     let wf = match app_state
         .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
+        .find_workflow_for_member(user_id, workflow_id)
         .await
     {
         Ok(Some(wf)) => wf,

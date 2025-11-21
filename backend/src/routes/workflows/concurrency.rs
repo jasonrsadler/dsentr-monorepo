@@ -15,9 +15,23 @@ pub async fn set_concurrency_limit(
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
-    let plan_tier = app_state
-        .resolve_plan_tier(user_id, claims.plan.as_deref())
-        .await;
+    let wf = match app_state
+        .workflow_repo
+        .find_workflow_for_member(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(w)) => w,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(_) => return JsonResponse::server_error("Failed").into_response(),
+    };
+
+    let plan_tier = match wf.workspace_id {
+        Some(ws_id) => match app_state.workspace_repo.find_workspace(ws_id).await {
+            Ok(Some(ws)) => NormalizedPlanTier::from_option(Some(ws.plan.as_str())),
+            _ => NormalizedPlanTier::Solo,
+        },
+        None => NormalizedPlanTier::Solo,
+    };
     if body.limit < 1 {
         return JsonResponse::bad_request("limit must be >= 1").into_response();
     }
@@ -31,7 +45,7 @@ pub async fn set_concurrency_limit(
     }
     match app_state
         .workflow_repo
-        .set_workflow_concurrency_limit(user_id, workflow_id, body.limit)
+        .set_workflow_concurrency_limit(wf.user_id, workflow_id, body.limit)
         .await
     {
         Ok(true) => Json(json!({"success": true, "limit": body.limit})).into_response(),

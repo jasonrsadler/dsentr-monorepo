@@ -16,7 +16,7 @@ pub async fn get_egress_allowlist(
     };
     match app_state
         .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
+        .find_workflow_for_member(user_id, workflow_id)
         .await
     {
         Ok(Some(wf)) => (

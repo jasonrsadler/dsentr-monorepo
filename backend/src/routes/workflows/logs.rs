@@ -12,7 +12,7 @@ pub async fn list_workflow_logs(
 
     let wf_meta = app_state
         .workflow_repo
-        .find_workflow_by_id(user_id, workflow_id)
+        .find_workflow_for_member(user_id, workflow_id)
         .await;
 
     let plan_tier = app_state
