@@ -169,14 +169,20 @@ export default function IntegrationsTab({
   useEffect(() => {
     let active = true
     ;(async () => {
+      if (isSoloPlan) {
+        setConnections({ personal: [], workspace: [] })
+        setError(null)
+        setLoading(false)
+        return
+      }
+
       setLoading(true)
-      // Ensure a clean slate between mounts or workspace switches
-      // so prior in-memory state from other renders/tests cannot
-      // leak into this view.
       setConnections(null)
+
       try {
         const data = await fetchConnections({ workspaceId })
         if (!active) return
+
         setConnections({
           personal: data.personal.map((p) => ({ ...p })),
           workspace: data.workspace.map((w) => ({ ...w }))
@@ -197,7 +203,7 @@ export default function IntegrationsTab({
     return () => {
       active = false
     }
-  }, [workspaceId])
+  }, [workspaceId, isSoloPlan])
 
   const noticeText = useMemo(() => {
     if (!notice) return null
