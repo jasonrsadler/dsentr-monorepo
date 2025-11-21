@@ -112,7 +112,7 @@ pub fn extend_response_store(
         let group_map = target.entry(group.clone()).or_default();
         for (service, entries) in services {
             let service_map = group_map.entry(service.clone()).or_default();
-            for (name, _value) in entries {
+            for name in entries.keys() {
                 service_map.insert(
                     name.clone(),
                     SecretResponseEntry {
@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn to_response_store_preserves_values_and_owner() {
+    fn to_response_store_masks_values_and_preserves_owner() {
         let mut store = SecretStore::new();
         store
             .entry("email".into())
@@ -613,7 +613,7 @@ mod tests {
             .and_then(|group| group.get("smtp"))
             .and_then(|svc| svc.get("primary"))
             .expect("entry exists");
-        assert_eq!(entry.value, "secret");
+        assert_eq!(entry.value, "*****************");
         assert_eq!(entry.owner_id, owner);
     }
 
