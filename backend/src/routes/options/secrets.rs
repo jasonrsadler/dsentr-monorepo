@@ -308,8 +308,31 @@ pub async fn upsert_secret(
         Ok(result) => result,
         Err(resp) => return resp,
     };
+    const MASK: &str = "********";
+
+    // If the client sends the mask placeholder,
+    // do not update the stored value.
+    let incoming_value = payload.value.trim();
+
+    if incoming_value == MASK {
+        // Do not overwrite the secret.
+        // Load the latest stored secrets and return them as-is.
+        let secrets =
+            serde_json::to_value(to_response_store(&store, user_id)).unwrap_or_else(|_| json!({}));
+
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "outcome": "unchanged",
+                "secrets": secrets
+            })),
+        )
+            .into_response();
+    }
+
     let outcome =
-        match upsert_named_secret(&mut store, &group_key, &service_key, &name, &payload.value) {
+        match upsert_named_secret(&mut store, &group_key, &service_key, &name, incoming_value) {
             Ok(outcome) => outcome,
             Err(SecretValidationError::EmptyName) => {
                 return JsonResponse::bad_request("Secret name cannot be empty").into_response()
