@@ -14,6 +14,7 @@ interface NodeSecretDropdownProps {
 interface SecretOption {
   name: string
   value: string
+  masked: string
 }
 
 // Reuse a stable empty object to avoid changing deps in hooks
@@ -54,7 +55,10 @@ export default function NodeSecretDropdown({
     ] ?? {}) as Record<string, SecretEntry>
     return Object.entries(serviceEntries).map(([name, entry]) => ({
       name,
-      value: entry?.value ?? ''
+      // stable identifier, not the secret value
+      value: `${group}:${service}:${name}`,
+      // keep the masked value for display
+      masked: entry?.value ?? ''
     }))
   }, [secretsMap, group, service])
 
@@ -103,7 +107,7 @@ export default function NodeSecretDropdown({
       setSaving(true)
       setError(null)
       await saveSecret(group, service, trimmedName, trimmedValue)
-      onChange(trimmedValue)
+      onChange(`${group}:${service}:${trimmedName}`)
       setCreating(false)
     } catch (err) {
       setError(
@@ -166,7 +170,7 @@ export default function NodeSecretDropdown({
                     {option.name}
                   </span>
                   <span className="text-[10px] text-zinc-500 dark:text-zinc-400 tracking-widest">
-                    {maskLabel(option.value)}
+                    {maskLabel(option.masked)}
                   </span>
                 </div>
               </li>
