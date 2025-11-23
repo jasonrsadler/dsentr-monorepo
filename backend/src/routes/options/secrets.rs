@@ -47,7 +47,7 @@ fn secret_key(app_state: &AppState) -> &[u8] {
 }
 
 #[allow(clippy::result_large_err)]
-fn decrypt_secret_store(
+pub fn decrypt_secret_store(
     app_state: &AppState,
     settings: &serde_json::Value,
     log_context: &str,
@@ -130,7 +130,7 @@ async fn ensure_workspace_membership(
         .ok_or_else(|| JsonResponse::forbidden("Workspace membership required").into_response())
 }
 
-async fn collect_workspace_secrets(
+pub async fn collect_workspace_secrets(
     app_state: &AppState,
     workspace_id: Uuid,
 ) -> Result<SecretResponseStore, Response> {

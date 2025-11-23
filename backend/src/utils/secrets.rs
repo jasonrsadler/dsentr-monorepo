@@ -485,6 +485,41 @@ fn push_if_some(
     }
 }
 
+pub fn hydrate_secrets_into_snapshot(snapshot: &mut Value, secret_store: &SecretStore) {
+    if let Some(nodes) = snapshot.get_mut("nodes").and_then(Value::as_array_mut) {
+        for node in nodes {
+            let data = match node.get_mut("data") {
+                Some(Value::Object(map)) => map,
+                _ => continue,
+            };
+            let params = match data.get_mut("params") {
+                Some(Value::Object(map)) => map,
+                _ => continue,
+            };
+
+            for (_k, v) in params.iter_mut() {
+                if let Some(s) = v.as_str() {
+                    // secret references follow group:service:name
+                    let parts: Vec<&str> = s.split(':').collect();
+                    if parts.len() == 3 {
+                        let group = parts[0];
+                        let service = parts[1];
+                        let name = parts[2];
+
+                        if let Some(service_map) = secret_store.get(group) {
+                            if let Some(entries) = service_map.get(service) {
+                                if let Some(plaintext) = entries.get(name) {
+                                    *v = Value::String(plaintext.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

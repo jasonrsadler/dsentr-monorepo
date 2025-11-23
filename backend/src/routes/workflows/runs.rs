@@ -3,8 +3,9 @@ use super::{
     prelude::*,
 };
 use crate::{
-    routes::plan_limits::workspace_limit_error_response, state::WorkspaceRunQuotaTicket,
-    utils::workflow_connection_metadata,
+    routes::{options::secrets::decrypt_secret_store, plan_limits::workspace_limit_error_response},
+    state::WorkspaceRunQuotaTicket,
+    utils::{secrets::hydrate_secrets_into_snapshot, workflow_connection_metadata},
 };
 
 async fn fetch_workflow_for_member(
@@ -82,7 +83,9 @@ pub async fn start_workflow_run(
             Ok(workflow) => workflow,
             Err(response) => return response,
         };
+
     let owner_id = wf.user_id;
+
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     let plan_tier = if let Some(workspace_id) = wf.workspace_id {
         match app_state.consume_workspace_run_quota(workspace_id).await {
@@ -132,6 +135,7 @@ pub async fn start_workflow_run(
             .replace_day(1)
             .unwrap_or(now)
             .replace_time(Time::MIDNIGHT);
+
         match app_state
             .workflow_repo
             .count_user_runs_since(owner_id, start_of_month)
@@ -153,19 +157,44 @@ pub async fn start_workflow_run(
         }
     }
 
-    // Extract once to avoid borrow/move conflict
     let (idempotency_key_owned, trigger_ctx, priority) = match payload {
         Some(Json(req)) => (req.idempotency_key, req.context, req.priority),
         None => (None, None, None),
     };
     let idempotency_key = idempotency_key_owned.as_deref();
 
-    // Snapshot the graph (immutable)
+    // Clone raw workflow JSON
     let mut snapshot = wf.data.clone();
+
     if let Some(ctx) = trigger_ctx {
         snapshot["_trigger_context"] = ctx;
     }
-    // Attach per-workflow egress allowlist for engine
+
+    // ---- SECRET HYDRATION FIX ----
+
+    let settings = match app_state.db.get_user_settings(owner_id).await {
+        Ok(val) => val,
+        Err(err) => {
+            eprintln!("Failed to load user settings: {:?}", err);
+            return JsonResponse::server_error("Failed to load secrets").into_response();
+        }
+    };
+
+    let (secret_store, _) = match decrypt_secret_store(
+        &app_state,
+        &settings,
+        "Failed to decrypt user secrets while starting run",
+        "Failed to start run",
+    ) {
+        Ok(tuple) => tuple,
+        Err(resp) => return resp,
+    };
+
+    // Put plaintext secrets directly into the snapshot
+    hydrate_secrets_into_snapshot(&mut snapshot, &secret_store);
+
+    // --------------------------------------
+
     snapshot["_egress_allowlist"] = serde_json::Value::Array(
         wf.egress_allowlist
             .iter()
@@ -177,6 +206,7 @@ pub async fn start_workflow_run(
     if let Some(obj) = snapshot.as_object_mut() {
         obj.remove("_connection_metadata");
     }
+
     let connection_metadata = workflow_connection_metadata::collect(&snapshot);
     workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
 
@@ -197,6 +227,7 @@ pub async fn start_workflow_run(
             }
 
             let run = outcome.run;
+
             if let Some(p) = priority {
                 let _ = app_state
                     .workflow_repo
@@ -204,16 +235,16 @@ pub async fn start_workflow_run(
                     .await;
             }
 
-            let events = workflow_connection_metadata::build_run_events(
+            for event in workflow_connection_metadata::build_run_events(
                 &run,
                 &triggered_by,
                 &connection_metadata,
-            );
-            for event in events {
+            ) {
                 if let Err(err) = app_state.workflow_repo.record_run_event(event).await {
                     eprintln!("Failed to record workflow run event {}: {:?}", run.id, err);
                 }
             }
+
             let mut safe_run = run.clone();
             let mut safe_snapshot = safe_run.snapshot.clone();
             redact_secrets(&mut safe_snapshot);
