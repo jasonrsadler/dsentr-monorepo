@@ -217,8 +217,16 @@ impl AppState {
     pub async fn consume_workspace_run_quota(
         &self,
         workspace_id: Uuid,
-    ) -> Result<WorkspaceRunQuotaTicket, WorkspaceLimitError> {
-        self.ensure_workspace_plan(workspace_id).await?;
+    ) -> Result<Option<WorkspaceRunQuotaTicket>, WorkspaceLimitError> {
+        let plan = self
+            .workspace_repo
+            .get_plan(workspace_id)
+            .await
+            .map_err(WorkspaceLimitError::from)?;
+
+        if !matches!(plan, PlanTier::Workspace) {
+            return Ok(None);
+        }
 
         let now = OffsetDateTime::now_utc();
         let cycle = self
@@ -244,14 +252,14 @@ impl AppState {
             );
         }
 
-        Ok(WorkspaceRunQuotaTicket {
+        Ok(Some(WorkspaceRunQuotaTicket {
             workspace_id,
             period_start,
             run_count: update.run_count,
             overage_count: update.overage_count,
             limit: run_limit,
             overage_incremented: update.overage_incremented,
-        })
+        }))
     }
 
     pub async fn release_workspace_run_quota(

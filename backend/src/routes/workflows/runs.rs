@@ -89,7 +89,7 @@ pub async fn start_workflow_run(
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     let plan_tier = if let Some(workspace_id) = wf.workspace_id {
         match app_state.consume_workspace_run_quota(workspace_id).await {
-            Ok(ticket) => {
+            Ok(Some(ticket)) => {
                 if ticket.run_count > ticket.limit {
                     tracing::warn!(
                         %workspace_id,
@@ -99,10 +99,11 @@ pub async fn start_workflow_run(
                     );
                 }
                 workspace_quota = Some(ticket);
+                NormalizedPlanTier::Workspace
             }
+            Ok(None) => NormalizedPlanTier::Solo,
             Err(err) => return workspace_limit_error_response(err),
         }
-        NormalizedPlanTier::Workspace
     } else {
         app_state
             .resolve_plan_tier(user_id, claims.plan.as_deref())
@@ -569,7 +570,8 @@ pub async fn rerun_workflow_run(
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     if let Some(workspace_id) = workflow.workspace_id {
         match app_state.consume_workspace_run_quota(workspace_id).await {
-            Ok(ticket) => workspace_quota = Some(ticket),
+            Ok(Some(ticket)) => workspace_quota = Some(ticket),
+            Ok(None) => {}
             Err(err) => return workspace_limit_error_response(err),
         }
     }
@@ -952,6 +954,68 @@ mod tests {
         let usage = workspace_repo.usage_for(workspace_id, period_start);
         assert_eq!(usage.run_count, 1);
         assert_eq!(usage.overage_count, 1);
+    }
+
+    #[tokio::test]
+    async fn start_workflow_run_allows_solo_workspace_without_quota_error() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let workflow = workflow_fixture(workspace_id, owner_id);
+        let workflow_for_find = workflow.clone();
+        let run = run_fixture(&workflow);
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_find_workflow_for_member()
+            .returning(move |user, workflow_id| {
+                let wf = workflow_for_find.clone();
+                assert_eq!(user, wf.user_id);
+                assert_eq!(workflow_id, wf.id);
+                Box::pin(async move { Ok(Some(wf)) })
+            });
+        repo.expect_create_workflow_run()
+            .returning(move |_, _, _, _, _| {
+                let run = run.clone();
+                Box::pin(async move { Ok(CreateWorkflowRunOutcome { run, created: true }) })
+            });
+        repo.expect_record_run_event()
+            .returning(|event| {
+                let recorded_at = event.recorded_at.unwrap_or_else(OffsetDateTime::now_utc);
+                Box::pin(async move {
+                    Ok(WorkflowRunEvent {
+                        id: Uuid::new_v4(),
+                        workflow_run_id: event.workflow_run_id,
+                        workflow_id: event.workflow_id,
+                        workspace_id: event.workspace_id,
+                        triggered_by: event.triggered_by,
+                        connection_type: event.connection_type,
+                        connection_id: event.connection_id,
+                        recorded_at,
+                    })
+                })
+            })
+            .times(0..);
+        repo.expect_count_user_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
+
+        let workspace_repo: Arc<StaticWorkspaceMembershipRepository> = Arc::new(
+            StaticWorkspaceMembershipRepository::with_plan(PlanTier::Solo),
+        );
+        let state = test_state(
+            Arc::new(repo),
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+        );
+
+        let mut claims = claims_fixture(owner_id, "member@example.com");
+        claims.plan = Some(PlanTier::Solo.as_str().to_string());
+
+        let response =
+            start_workflow_run(State(state), AuthSession(claims), Path(workflow.id), None).await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["success"], Value::Bool(true));
+        assert!(workspace_repo.last_period_starts().is_empty());
     }
 
     #[tokio::test]

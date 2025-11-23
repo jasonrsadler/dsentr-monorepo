@@ -787,6 +787,7 @@ pub struct NoopWorkspaceRepository;
 pub struct StaticWorkspaceMembershipRepository {
     allowed: bool,
     max_runs: Option<i64>,
+    plan: PlanTier,
     #[allow(clippy::type_complexity)]
     run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
     release_calls: Arc<Mutex<usize>>,
@@ -803,6 +804,7 @@ impl StaticWorkspaceMembershipRepository {
         Self {
             allowed: true,
             max_runs: None,
+            plan: PlanTier::Workspace,
             run_usage: Arc::new(Mutex::new(HashMap::new())),
             release_calls: Arc::new(Mutex::new(0)),
             period_starts: Arc::new(Mutex::new(Vec::new())),
@@ -818,6 +820,7 @@ impl StaticWorkspaceMembershipRepository {
         Self {
             allowed: false,
             max_runs: None,
+            plan: PlanTier::Workspace,
             run_usage: Arc::new(Mutex::new(HashMap::new())),
             release_calls: Arc::new(Mutex::new(0)),
             period_starts: Arc::new(Mutex::new(Vec::new())),
@@ -834,6 +837,14 @@ impl StaticWorkspaceMembershipRepository {
         Self {
             max_runs: Some(max_runs),
             ..base
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_plan(plan: PlanTier) -> Self {
+        Self {
+            plan,
+            ..Self::allowing()
         }
     }
 
@@ -1174,7 +1185,8 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
     }
 
     async fn get_plan(&self, workspace_id: Uuid) -> Result<PlanTier, sqlx::Error> {
-        self.inner.get_plan(workspace_id).await
+        let _ = workspace_id;
+        Ok(self.plan)
     }
 
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {

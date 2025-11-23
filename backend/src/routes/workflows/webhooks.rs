@@ -248,7 +248,7 @@ pub async fn webhook_trigger(
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     if let Some(workspace_id) = wf.workspace_id {
         match app_state.consume_workspace_run_quota(workspace_id).await {
-            Ok(ticket) => {
+            Ok(Some(ticket)) => {
                 if ticket.run_count > ticket.limit {
                     tracing::warn!(
                         %workspace_id,
@@ -259,6 +259,7 @@ pub async fn webhook_trigger(
                 }
                 workspace_quota = Some(ticket);
             }
+            Ok(None) => {}
             Err(err) => return workspace_limit_error_response(err),
         }
     }

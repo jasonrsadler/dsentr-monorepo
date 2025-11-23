@@ -308,7 +308,7 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     let mut skip_run = false;
     if let Some(workspace_id) = workflow.workspace_id {
         match state.consume_workspace_run_quota(workspace_id).await {
-            Ok(ticket) => {
+            Ok(Some(ticket)) => {
                 if ticket.run_count > ticket.limit {
                     warn!(
                         worker_id = %state.worker_id,
@@ -322,6 +322,7 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
                 }
                 workspace_quota = Some(ticket);
             }
+            Ok(None) => {}
             Err(WorkspaceLimitError::WorkspacePlanRequired) => {
                 warn!(
                     worker_id = %state.worker_id,

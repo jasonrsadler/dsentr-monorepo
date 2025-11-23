@@ -39,3 +39,4 @@
 - Workflow and workspace repositories were refreshed to fix build regressions: workflow repos import `CreateWorkflowRunOutcome` explicitly, and the Postgres workspace run quota helper avoids moving the optional row before checking it.
 - Expanded `StaticWorkspaceMembershipRepository` so tests can simulate run quotas and billing cycles, capture release counts, and assert how routes respond when workspaces are at or over their monthly allocations.
 - Workspace repositories expose pending-invitation counting so seat checks can reserve capacity for outstanding invites alongside existing members.
+- StaticWorkspaceMembershipRepository now carries a configurable plan tier so tests can emulate solo workspaces when exercising run gating and quota behavior.
