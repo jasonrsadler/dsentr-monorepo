@@ -29,6 +29,14 @@ export interface WorkflowLogEntry {
   diffs: any
 }
 
+export interface WorkspaceMemberRunUsage {
+  user_id: string
+  runs: number
+  first_name?: string | null
+  last_name?: string | null
+  email?: string | null
+}
+
 export interface PlanUsageSummary {
   plan: string
   runs: {
@@ -42,15 +50,19 @@ export interface PlanUsageSummary {
     hidden?: number
   }
   workspace?: {
+    id?: string
+    plan?: string
     runs?: {
       used: number
       limit?: number
+      overage?: number
       period_start?: string
     }
     members?: {
       used: number
       limit?: number
     }
+    member_usage?: WorkspaceMemberRunUsage[]
   }
 }
 
@@ -249,12 +261,50 @@ export async function getWorkflowLogs(workflowId: string): Promise<{
   return { workflow: data.workflow, logs: data.logs ?? [] }
 }
 
-export async function getPlanUsage(): Promise<PlanUsageSummary> {
-  const res = await fetch(`${API_BASE_URL}/api/workflows/usage`, {
-    credentials: 'include'
-  })
+export async function getPlanUsage(
+  workspaceId?: string | null
+): Promise<PlanUsageSummary> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/usage${buildWorkspaceQuery(workspaceId)}`,
+    {
+      credentials: 'include'
+    }
+  )
 
   const data = await handleJsonResponse(res)
+  const workspaceRuns = data?.workspace?.runs
+  const workspaceMembers = data?.workspace?.members
+  const workspaceMemberUsage = Array.isArray(data?.workspace?.member_usage)
+    ? (data.workspace.member_usage as any[]).reduce<WorkspaceMemberRunUsage[]>(
+        (acc, entry) => {
+          if (!entry || typeof entry !== 'object') return acc
+          const userId =
+            typeof (entry as any).user_id === 'string'
+              ? (entry as any).user_id
+              : undefined
+          if (!userId) return acc
+          acc.push({
+            user_id: userId,
+            runs: Number((entry as any).runs ?? 0),
+            first_name:
+              typeof (entry as any).first_name === 'string'
+                ? (entry as any).first_name
+                : undefined,
+            last_name:
+              typeof (entry as any).last_name === 'string'
+                ? (entry as any).last_name
+                : undefined,
+            email:
+              typeof (entry as any).email === 'string'
+                ? (entry as any).email
+                : undefined
+          })
+          return acc
+        },
+        []
+      )
+    : undefined
+
   return {
     plan: typeof data.plan === 'string' ? data.plan : 'solo',
     runs: {
@@ -276,7 +326,46 @@ export async function getPlanUsage(): Promise<PlanUsageSummary> {
         typeof data?.workflows?.hidden === 'number'
           ? data.workflows.hidden
           : undefined
-    }
+    },
+    workspace: data?.workspace
+      ? {
+          id:
+            typeof data?.workspace?.id === 'string'
+              ? data.workspace.id
+              : undefined,
+          plan:
+            typeof data.workspace.plan === 'string'
+              ? data.workspace.plan
+              : undefined,
+          runs: workspaceRuns
+            ? {
+                used: Number(workspaceRuns.used ?? 0),
+                limit:
+                  typeof workspaceRuns.limit === 'number'
+                    ? workspaceRuns.limit
+                    : undefined,
+                overage:
+                  typeof workspaceRuns.overage === 'number'
+                    ? workspaceRuns.overage
+                    : undefined,
+                period_start:
+                  typeof workspaceRuns.period_start === 'string'
+                    ? workspaceRuns.period_start
+                    : undefined
+              }
+            : undefined,
+          members: workspaceMembers
+            ? {
+                used: Number(workspaceMembers.used ?? 0),
+                limit:
+                  typeof workspaceMembers.limit === 'number'
+                    ? workspaceMembers.limit
+                    : undefined
+              }
+            : undefined,
+          member_usage: workspaceMemberUsage
+        }
+      : undefined
   }
 }
 

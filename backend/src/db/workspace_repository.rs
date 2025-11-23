@@ -12,6 +12,14 @@ use crate::models::{
 pub struct WorkspaceRunQuotaUpdate {
     pub allowed: bool,
     pub run_count: i64,
+    pub overage_count: i64,
+    pub overage_incremented: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WorkspaceRunUsage {
+    pub run_count: i64,
+    pub overage_count: i64,
 }
 
 #[async_trait]
@@ -141,12 +149,13 @@ pub trait WorkspaceRepository: Send + Sync {
         &self,
         workspace_id: Uuid,
         period_start: OffsetDateTime,
-    ) -> Result<i64, sqlx::Error>;
+    ) -> Result<WorkspaceRunUsage, sqlx::Error>;
 
     async fn release_workspace_run_quota(
         &self,
         workspace_id: Uuid,
         period_start: OffsetDateTime,
+        overage_decrement: bool,
     ) -> Result<(), sqlx::Error>;
 
     async fn upsert_workspace_billing_cycle(

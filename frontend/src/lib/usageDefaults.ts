@@ -1,0 +1,1 @@
+export const WORKSPACE_RUN_LIMIT_FALLBACK = 20_000

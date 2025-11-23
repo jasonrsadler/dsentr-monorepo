@@ -42,3 +42,5 @@ itly coordinated.
 - When `EMAIL_PROVIDER=sendgrid`:
   - Sends app emails via SendGrid HTTP API. SMTP env vars are not required to boot.
   - Workflow nodes that choose SMTP continue to send using per-node SMTP settings.
+
+- Workspace run usage now tracks overage counts per billing period, exposes overage in plan usage APIs, and allows over-limit runs while recording overage for billing/export flows.

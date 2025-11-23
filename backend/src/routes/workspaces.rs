@@ -2106,7 +2106,7 @@ mod tests {
             NewWorkspaceAuditEvent, NewWorkspaceConnection, NoopWorkspaceConnectionRepository,
             StaleWorkspaceConnection, WorkspaceConnectionListing, WorkspaceConnectionRepository,
         },
-        workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate},
+        workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate, WorkspaceRunUsage},
     };
     use crate::models::{
         oauth_token::{
@@ -2608,7 +2608,7 @@ mod tests {
         accepted: Arc<Mutex<Vec<Uuid>>>,
         declined: Arc<Mutex<Vec<Uuid>>>,
         workspace: Arc<Mutex<Option<Workspace>>>,
-        run_usage: Arc<Mutex<HashMap<(Uuid, i64), i64>>>,
+        run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
     }
 
@@ -2880,17 +2880,18 @@ mod tests {
         ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
             let mut usage = self.run_usage.lock().unwrap();
             let key = (workspace_id, period_start.unix_timestamp());
-            let entry = usage.entry(key).or_insert(0);
-            if *entry >= max_runs {
-                return Ok(WorkspaceRunQuotaUpdate {
-                    allowed: false,
-                    run_count: *entry,
-                });
+            let entry = usage.entry(key).or_insert((0, 0));
+            entry.0 += 1;
+            let mut overage_incremented = false;
+            if entry.0 > max_runs {
+                entry.1 += 1;
+                overage_incremented = true;
             }
-            *entry += 1;
             Ok(WorkspaceRunQuotaUpdate {
-                allowed: true,
-                run_count: *entry,
+                allowed: entry.0 <= max_runs,
+                run_count: entry.0,
+                overage_count: entry.1,
+                overage_incremented,
             })
         }
 
@@ -2898,24 +2899,38 @@ mod tests {
             &self,
             workspace_id: Uuid,
             period_start: OffsetDateTime,
-        ) -> Result<i64, sqlx::Error> {
+        ) -> Result<WorkspaceRunUsage, sqlx::Error> {
             let usage = self.run_usage.lock().unwrap();
             let key = (workspace_id, period_start.unix_timestamp());
-            Ok(*usage.get(&key).unwrap_or(&0))
+            Ok(usage
+                .get(&key)
+                .copied()
+                .map(|(runs, overage)| WorkspaceRunUsage {
+                    run_count: runs,
+                    overage_count: overage,
+                })
+                .unwrap_or(WorkspaceRunUsage {
+                    run_count: 0,
+                    overage_count: 0,
+                }))
         }
 
         async fn release_workspace_run_quota(
             &self,
             workspace_id: Uuid,
             period_start: OffsetDateTime,
+            overage_decrement: bool,
         ) -> Result<(), sqlx::Error> {
             let mut usage = self.run_usage.lock().unwrap();
             let key = (workspace_id, period_start.unix_timestamp());
             if let Some(entry) = usage.get_mut(&key) {
-                if *entry > 0 {
-                    *entry -= 1;
+                if entry.0 > 0 {
+                    entry.0 -= 1;
                 }
-                if *entry == 0 {
+                if overage_decrement && entry.1 > 0 {
+                    entry.1 -= 1;
+                }
+                if entry.0 == 0 && entry.1 == 0 {
                     usage.remove(&key);
                 }
             }
@@ -2968,7 +2983,7 @@ mod tests {
         workspaces: Arc<Mutex<HashMap<Uuid, Workspace>>>,
         members: Arc<Mutex<HashMap<Uuid, Vec<WorkspaceMember>>>>,
         audits: Arc<Mutex<AuditEntries>>,
-        run_usage: Arc<Mutex<HashMap<(Uuid, i64), i64>>>,
+        run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
         pending_invites: Arc<Mutex<HashMap<Uuid, i64>>>,
     }
@@ -3364,17 +3379,18 @@ mod tests {
         ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
             let mut usage = self.run_usage.lock().unwrap();
             let key = RecordingWorkspaceRepo::usage_key(workspace_id, period_start);
-            let entry = usage.entry(key).or_insert(0);
-            if *entry >= max_runs {
-                return Ok(WorkspaceRunQuotaUpdate {
-                    allowed: false,
-                    run_count: *entry,
-                });
+            let entry = usage.entry(key).or_insert((0, 0));
+            entry.0 += 1;
+            let mut overage_incremented = false;
+            if entry.0 > max_runs {
+                entry.1 += 1;
+                overage_incremented = true;
             }
-            *entry += 1;
             Ok(WorkspaceRunQuotaUpdate {
-                allowed: true,
-                run_count: *entry,
+                allowed: entry.0 <= max_runs,
+                run_count: entry.0,
+                overage_count: entry.1,
+                overage_incremented,
             })
         }
 
@@ -3382,24 +3398,38 @@ mod tests {
             &self,
             workspace_id: Uuid,
             period_start: OffsetDateTime,
-        ) -> Result<i64, sqlx::Error> {
+        ) -> Result<WorkspaceRunUsage, sqlx::Error> {
             let usage = self.run_usage.lock().unwrap();
             let key = RecordingWorkspaceRepo::usage_key(workspace_id, period_start);
-            Ok(*usage.get(&key).unwrap_or(&0))
+            Ok(usage
+                .get(&key)
+                .copied()
+                .map(|(runs, overage)| WorkspaceRunUsage {
+                    run_count: runs,
+                    overage_count: overage,
+                })
+                .unwrap_or(WorkspaceRunUsage {
+                    run_count: 0,
+                    overage_count: 0,
+                }))
         }
 
         async fn release_workspace_run_quota(
             &self,
             workspace_id: Uuid,
             period_start: OffsetDateTime,
+            overage_decrement: bool,
         ) -> Result<(), sqlx::Error> {
             let mut usage = self.run_usage.lock().unwrap();
             let key = RecordingWorkspaceRepo::usage_key(workspace_id, period_start);
             if let Some(entry) = usage.get_mut(&key) {
-                if *entry > 0 {
-                    *entry -= 1;
+                if entry.0 > 0 {
+                    entry.0 -= 1;
                 }
-                if *entry == 0 {
+                if overage_decrement && entry.1 > 0 {
+                    entry.1 -= 1;
+                }
+                if entry.0 == 0 && entry.1 == 0 {
                     usage.remove(&key);
                 }
             }
@@ -5212,7 +5242,9 @@ mod tests {
             .await
             .unwrap();
         assert!(!capped.allowed);
-        assert_eq!(capped.run_count, limit);
+        assert_eq!(capped.run_count, limit + 1);
+        assert_eq!(capped.overage_count, 1);
+        assert!(capped.overage_incremented);
 
         // Next month starts fresh
         let refreshed = repo
@@ -5221,6 +5253,7 @@ mod tests {
             .unwrap();
         assert!(refreshed.allowed);
         assert_eq!(refreshed.run_count, 1);
+        assert_eq!(refreshed.overage_count, 0);
     }
 
     #[tokio::test]
@@ -5257,15 +5290,23 @@ mod tests {
             .unwrap();
         assert!(!capped.allowed);
 
-        repo.release_workspace_run_quota(workspace_id, now)
+        repo.release_workspace_run_quota(workspace_id, now, capped.overage_incremented)
             .await
             .unwrap();
+        let usage_after_release = repo
+            .get_workspace_run_quota(workspace_id, now)
+            .await
+            .unwrap();
+        assert_eq!(usage_after_release.run_count, 1);
+        assert_eq!(usage_after_release.overage_count, 0);
 
         let after_release = repo
             .try_increment_workspace_run_quota(workspace_id, now, limit)
             .await
             .unwrap();
-        assert!(after_release.allowed);
+        assert!(!after_release.allowed);
+        assert_eq!(after_release.run_count, 2);
+        assert_eq!(after_release.overage_count, 1);
     }
 
     #[tokio::test]

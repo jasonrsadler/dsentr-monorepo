@@ -7,7 +7,7 @@ type PlanUsageState = {
   error: string | null
   workspaceRunCapReached: boolean
   setUsage: (usage: PlanUsageSummary | null) => void
-  refresh: () => Promise<PlanUsageSummary | null>
+  refresh: (workspaceId?: string | null) => Promise<PlanUsageSummary | null>
   markWorkspaceRunCap: () => void
 }
 
@@ -17,13 +17,13 @@ export const usePlanUsageStore = create<PlanUsageState>((set, get) => ({
   error: null,
   workspaceRunCapReached: false,
   setUsage: (usage) => set({ usage }),
-  refresh: async () => {
+  refresh: async (workspaceId?: string | null) => {
     if (get().loading) {
       return get().usage
     }
     set({ loading: true })
     try {
-      const usage = await getPlanUsage()
+      const usage = await getPlanUsage(workspaceId)
       set({ usage, error: null, workspaceRunCapReached: false })
       return usage
     } catch (error) {

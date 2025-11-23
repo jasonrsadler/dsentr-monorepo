@@ -1,5 +1,7 @@
 use crate::{
-    db::workflow_repository::{CreateWorkflowRunOutcome, WorkflowRepository},
+    db::workflow_repository::{
+        CreateWorkflowRunOutcome, WorkflowRepository, WorkspaceMemberRunCount,
+    },
     models::workflow::Workflow,
     models::workflow_dead_letter::WorkflowDeadLetter,
     models::workflow_log::WorkflowLog,
@@ -968,6 +970,49 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         .fetch_one(&self.pool)
         .await?;
         Ok(count.unwrap_or(0))
+    }
+
+    async fn count_workspace_runs_since(
+        &self,
+        workspace_id: Uuid,
+        since: OffsetDateTime,
+    ) -> Result<i64, sqlx::Error> {
+        let count = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM workflow_runs
+            WHERE workspace_id = $1 AND created_at >= $2
+            "#,
+        )
+        .bind(workspace_id)
+        .bind(since)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(count.unwrap_or(0))
+    }
+
+    async fn list_workspace_member_run_counts(
+        &self,
+        workspace_id: Uuid,
+        since: OffsetDateTime,
+    ) -> Result<Vec<WorkspaceMemberRunCount>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (Uuid, i64)>(
+            r#"
+            SELECT user_id, COUNT(*)::bigint as run_count
+            FROM workflow_runs
+            WHERE workspace_id = $1 AND created_at >= $2
+            GROUP BY user_id
+            "#,
+        )
+        .bind(workspace_id)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(user_id, run_count)| WorkspaceMemberRunCount { user_id, run_count })
+            .collect())
     }
 
     async fn set_workflow_concurrency_limit(

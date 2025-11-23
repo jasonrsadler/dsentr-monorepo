@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -14,7 +14,9 @@ use crate::{
     utils::plan_limits::NormalizedPlanTier,
 };
 
-use super::workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate};
+use super::workspace_repository::{
+    WorkspaceRepository, WorkspaceRunQuotaUpdate, WorkspaceRunUsage,
+};
 
 pub struct PostgresWorkspaceRepository {
     pub pool: PgPool,
@@ -602,63 +604,75 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
     ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
-        let existing = sqlx::query!(
+        let existing = sqlx::query(
             r#"
-            SELECT run_count
+            SELECT run_count, overage_count
             FROM workspace_run_usage
             WHERE workspace_id = $1
               AND period_start = $2
             FOR UPDATE
             "#,
-            workspace_id,
-            period_start
         )
+        .bind(workspace_id)
+        .bind(period_start)
         .fetch_optional(&mut *tx)
         .await?;
 
-        let current = existing.as_ref().map(|row| row.run_count).unwrap_or(0);
+        let current = existing
+            .as_ref()
+            .and_then(|row| row.try_get::<i64, _>("run_count").ok())
+            .unwrap_or(0);
+        let current_overage = existing
+            .as_ref()
+            .and_then(|row| row.try_get::<i64, _>("overage_count").ok())
+            .unwrap_or(0);
         let next = current + 1;
-        if next > max_runs {
-            tx.rollback().await?;
-            return Ok(WorkspaceRunQuotaUpdate {
-                allowed: false,
-                run_count: current,
-            });
-        }
+        let mut next_overage = current_overage;
+        let overage_incremented = if next > max_runs {
+            next_overage += 1;
+            true
+        } else {
+            false
+        };
 
         if existing.is_some() {
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 UPDATE workspace_run_usage
                 SET run_count = $3,
+                    overage_count = $4,
                     updated_at = now()
                 WHERE workspace_id = $1
                   AND period_start = $2
                 "#,
-                workspace_id,
-                period_start,
-                next
             )
+            .bind(workspace_id)
+            .bind(period_start)
+            .bind(next)
+            .bind(next_overage)
             .execute(&mut *tx)
             .await?;
         } else {
-            sqlx::query!(
+            sqlx::query(
                 r#"
-                INSERT INTO workspace_run_usage (workspace_id, period_start, run_count, updated_at)
-                VALUES ($1, $2, $3, now())
-                "#,
-                workspace_id,
-                period_start,
-                next
+                INSERT INTO workspace_run_usage (workspace_id, period_start, run_count, overage_count, updated_at)
+                VALUES ($1, $2, $3, $4, now())
+                "#
             )
+            .bind(workspace_id)
+            .bind(period_start)
+            .bind(next)
+            .bind(next_overage)
             .execute(&mut *tx)
             .await?;
         }
 
         tx.commit().await?;
         Ok(WorkspaceRunQuotaUpdate {
-            allowed: true,
+            allowed: next <= max_runs,
             run_count: next,
+            overage_count: next_overage,
+            overage_incremented,
         })
     }
 
@@ -666,71 +680,93 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         &self,
         workspace_id: Uuid,
         period_start: OffsetDateTime,
-    ) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query!(
+    ) -> Result<WorkspaceRunUsage, sqlx::Error> {
+        let row = sqlx::query(
             r#"
-            SELECT run_count
+            SELECT run_count, overage_count
             FROM workspace_run_usage
             WHERE workspace_id = $1
               AND period_start = $2
             "#,
-            workspace_id,
-            period_start
         )
+        .bind(workspace_id)
+        .bind(period_start)
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| r.run_count).unwrap_or(0))
+        Ok(match row {
+            Some(r) => WorkspaceRunUsage {
+                run_count: r.try_get::<i64, _>("run_count").unwrap_or(0),
+                overage_count: r.try_get::<i64, _>("overage_count").unwrap_or(0),
+            },
+            None => WorkspaceRunUsage {
+                run_count: 0,
+                overage_count: 0,
+            },
+        })
     }
 
     async fn release_workspace_run_quota(
         &self,
         workspace_id: Uuid,
         period_start: OffsetDateTime,
+        overage_decrement: bool,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let existing = sqlx::query!(
+        let existing = sqlx::query(
             r#"
-            SELECT run_count
+            SELECT run_count, overage_count
             FROM workspace_run_usage
             WHERE workspace_id = $1
               AND period_start = $2
             FOR UPDATE
             "#,
-            workspace_id,
-            period_start
         )
+        .bind(workspace_id)
+        .bind(period_start)
         .fetch_optional(&mut *tx)
         .await?;
 
         if let Some(row) = existing {
-            let current = row.run_count.max(0);
-            if current <= 1 {
-                sqlx::query!(
+            let current = row.try_get::<i64, _>("run_count").unwrap_or(0).max(0);
+            let mut current_overage = row.try_get::<i64, _>("overage_count").unwrap_or(0).max(0);
+            if current == 0 {
+                tx.rollback().await?;
+                return Ok(());
+            }
+
+            let next_count = current - 1;
+            if overage_decrement && current_overage > 0 {
+                current_overage -= 1;
+            }
+
+            if next_count == 0 && current_overage == 0 {
+                sqlx::query(
                     r#"
                     DELETE FROM workspace_run_usage
                     WHERE workspace_id = $1
                       AND period_start = $2
                     "#,
-                    workspace_id,
-                    period_start
                 )
+                .bind(workspace_id)
+                .bind(period_start)
                 .execute(&mut *tx)
                 .await?;
             } else {
-                let new_count = current - 1;
-                sqlx::query!(
+                sqlx::query(
                     r#"
                     UPDATE workspace_run_usage
                     SET run_count = $3,
+                        overage_count = $4,
                         updated_at = now()
                     WHERE workspace_id = $1
                       AND period_start = $2
                     "#,
-                    workspace_id,
-                    period_start,
-                    new_count
                 )
+                .bind(workspace_id)
+                .bind(period_start)
+                .bind(next_count)
+                .bind(current_overage)
                 .execute(&mut *tx)
                 .await?;
             }

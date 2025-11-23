@@ -709,7 +709,9 @@ mod tests {
     use tokio::time::sleep;
 
     use crate::db::oauth_token_repository::NewUserOAuthToken;
-    use crate::db::workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate};
+    use crate::db::workspace_repository::{
+        WorkspaceRepository, WorkspaceRunQuotaUpdate, WorkspaceRunUsage,
+    };
     use crate::models::plan::PlanTier;
     use crate::models::workspace::{
         Workspace, WorkspaceBillingCycle, WorkspaceInvitation, WorkspaceMember,
@@ -918,6 +920,8 @@ mod tests {
             Ok(WorkspaceRunQuotaUpdate {
                 allowed: true,
                 run_count: 1,
+                overage_count: 0,
+                overage_incremented: false,
             })
         }
 
@@ -925,14 +929,18 @@ mod tests {
             &self,
             _workspace_id: Uuid,
             _period_start: OffsetDateTime,
-        ) -> Result<i64, sqlx::Error> {
-            Ok(0)
+        ) -> Result<WorkspaceRunUsage, sqlx::Error> {
+            Ok(WorkspaceRunUsage {
+                run_count: 0,
+                overage_count: 0,
+            })
         }
 
         async fn release_workspace_run_quota(
             &self,
             _workspace_id: Uuid,
             _period_start: OffsetDateTime,
+            _overage_decrement: bool,
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }

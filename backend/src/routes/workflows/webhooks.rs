@@ -248,7 +248,17 @@ pub async fn webhook_trigger(
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     if let Some(workspace_id) = wf.workspace_id {
         match app_state.consume_workspace_run_quota(workspace_id).await {
-            Ok(ticket) => workspace_quota = Some(ticket),
+            Ok(ticket) => {
+                if ticket.run_count > ticket.limit {
+                    tracing::warn!(
+                        %workspace_id,
+                        run_count = ticket.run_count,
+                        overage_count = ticket.overage_count,
+                        "workspace run usage exceeded limit; recording overage"
+                    );
+                }
+                workspace_quota = Some(ticket);
+            }
             Err(err) => return workspace_limit_error_response(err),
         }
     }

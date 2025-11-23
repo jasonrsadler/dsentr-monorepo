@@ -31,6 +31,7 @@ import {
   type WorkflowNodeRunRecord
 } from '@/lib/workflowApi'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
+import { WORKSPACE_RUN_LIMIT_FALLBACK } from '@/lib/usageDefaults'
 import {
   cloneWorkflowData,
   hydrateIncomingEdges,
@@ -153,8 +154,6 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
     ]
   }
 ] as const
-
-const WORKSPACE_RUN_LIMIT_FALLBACK = 20_000
 
 export default function Dashboard() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
@@ -279,6 +278,12 @@ export default function Dashboard() {
   }, [runsLimit, runsUsed])
   const workspaceDisplayName =
     currentWorkspace?.workspace.name?.trim() || 'Workspace'
+  const workspaceRunsOverage =
+    workspaceRunUsage?.overage != null
+      ? workspaceRunUsage.overage
+      : runsLimit
+        ? Math.max(0, runsUsed - runsLimit)
+        : 0
   const runAvailability = useMemo<RunAvailability | undefined>(() => {
     if (workspaceRunCapReached) {
       return {
@@ -286,20 +291,55 @@ export default function Dashboard() {
         reason: `${workspaceDisplayName} has exhausted its monthly run allocation. Upgrade in Settings → Plan or wait for the next cycle.`
       }
     }
-    if (runsLimit && runsUsed >= runsLimit) {
+    if (planTier === 'solo' && runsLimit && runsUsed >= runsLimit) {
       return {
         disabled: true,
         reason: `${workspaceDisplayName} has used all ${runsLimit.toLocaleString()} runs available this month.`
       }
     }
     return undefined
-  }, [workspaceDisplayName, workspaceRunCapReached, runsLimit, runsUsed])
-  const runLimitReached = Boolean(runAvailability?.disabled)
+  }, [
+    workspaceDisplayName,
+    workspaceRunCapReached,
+    runsLimit,
+    runsUsed,
+    planTier
+  ])
+  const workspaceLimitReached =
+    planTier === 'workspace' && runsLimit && runsUsed >= runsLimit
+  const soloLimitReached =
+    planTier === 'solo' && runsLimit && runsUsed >= runsLimit
+  const runLimitReached =
+    Boolean(runAvailability?.disabled) ||
+    workspaceLimitReached ||
+    soloLimitReached
   const runLimitApproaching =
-    !runLimitReached && runsLimit && runsPercent !== null && runsPercent >= 80
+    !runLimitReached &&
+    runsLimit &&
+    runsPercent !== null &&
+    runsPercent >= (planTier === 'workspace' ? 90 : 80)
   const runUsageDescription = runsLimit
     ? `${workspaceDisplayName} has used ${runsUsed.toLocaleString()} of ${runsLimit.toLocaleString()} runs this month.`
     : `${workspaceDisplayName} has exhausted its monthly run allocation.`
+  const runLimitBannerTitle = runLimitReached
+    ? planTier === 'workspace'
+      ? 'Workspace run limit exceeded'
+      : 'Workspace run limit reached'
+    : 'Workspace run usage nearing limit'
+  const runLimitBannerDescription = (() => {
+    if (!runsLimit) return runUsageDescription
+    if (planTier === 'workspace') {
+      const overageDetail =
+        workspaceRunsOverage > 0
+          ? `${workspaceRunsOverage.toLocaleString()} runs are over the included limit. `
+          : ''
+      return `${runUsageDescription} ${overageDetail}Additional runs continue to execute and will be billed as overage.`
+    }
+    if (runLimitReached) {
+      return `${runUsageDescription} Runs will pause once the limit is reached.`
+    }
+    return `${runUsageDescription} Runs will pause once the limit is reached.`
+  })()
 
   const normalizeWorkflowData = useCallback((data: unknown) => {
     if (data && typeof data === 'object') {
@@ -454,7 +494,7 @@ export default function Dashboard() {
     }
 
     fetchWorkflows()
-    void refreshPlanUsage()
+    void refreshPlanUsage(activeWorkspaceId)
   }, [
     normalizeWorkflowData,
     planTier,
@@ -605,7 +645,7 @@ export default function Dashboard() {
 
       const normalized = normalizeWorkflowData(created.data ?? payload.data)
       pushGraphToStore(normalized, false)
-      await refreshPlanUsage()
+      await refreshPlanUsage(activeWorkspaceId)
     } catch (err) {
       console.error('Failed to create workflow', err)
       setError('Failed to create workflow.')
@@ -945,7 +985,7 @@ export default function Dashboard() {
       setActiveRun(run)
       currentPollRunIdRef.current = run.id
       pollRun(currentWorkflow.id, run.id)
-      void refreshPlanUsage()
+      void refreshPlanUsage(activeWorkspaceId)
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
       } catch (e) {
@@ -970,7 +1010,8 @@ export default function Dashboard() {
     pollRun,
     refreshPlanUsage,
     runAvailability,
-    markWorkspaceRunCap
+    markWorkspaceRunCap,
+    activeWorkspaceId
   ])
 
   // Overlay: subscribe to SSE for active run to reduce client work
@@ -1992,16 +2033,8 @@ export default function Dashboard() {
             <div className="px-4 pt-2">
               <QuotaBanner
                 variant={runLimitReached ? 'danger' : 'warning'}
-                title={
-                  runLimitReached
-                    ? 'Workspace run limit reached'
-                    : 'Workspace run limit nearly reached'
-                }
-                description={
-                  runLimitReached
-                    ? runUsageDescription
-                    : `${runUsageDescription} Runs will pause once the limit is reached.`
-                }
+                title={runLimitBannerTitle}
+                description={runLimitBannerDescription}
                 actionLabel="Manage plan"
                 onAction={openPlanSettings}
               />

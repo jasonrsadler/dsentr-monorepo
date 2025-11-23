@@ -16,6 +16,12 @@ pub struct CreateWorkflowRunOutcome {
     pub created: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct WorkspaceMemberRunCount {
+    pub user_id: Uuid,
+    pub run_count: i64,
+}
+
 #[async_trait]
 #[cfg_attr(test, mockall::automock)]
 #[allow(clippy::too_many_arguments)]
@@ -233,6 +239,18 @@ pub trait WorkflowRepository: Send + Sync {
         user_id: Uuid,
         since: OffsetDateTime,
     ) -> Result<i64, sqlx::Error>;
+
+    async fn count_workspace_runs_since(
+        &self,
+        workspace_id: Uuid,
+        since: OffsetDateTime,
+    ) -> Result<i64, sqlx::Error>;
+
+    async fn list_workspace_member_run_counts(
+        &self,
+        workspace_id: Uuid,
+        since: OffsetDateTime,
+    ) -> Result<Vec<WorkspaceMemberRunCount>, sqlx::Error>;
 
     // Concurrency & leasing
     async fn set_workflow_concurrency_limit(

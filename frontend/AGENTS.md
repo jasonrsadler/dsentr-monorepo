@@ -238,3 +238,5 @@ OAuth connections grouping (Google Sheets, Microsoft Teams):
 - Kept separate references to `personal` and `workspace` connection groups from the OAuth snapshot and iterated each group independently when rendering dropdowns ("Your connections" first, then "Workspace connections").
 - Updated validation to check the selected `scope/id` within the appropriate group and surface errors when the selection is missing or stale per group, without intermediate flattening logic.
 - Adjusted related unit tests to assert grouped behavior and guard against regressions.
+
+- Added workspace-only run usage bar in the dashboard header and a new Settings � Usage tab to show workspace totals, member run breakdowns, and overage indicators so over-limit runs remain visible for billing.

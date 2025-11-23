@@ -6,10 +6,10 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::user_repository::{UserId, UserRepository};
-use crate::db::workflow_repository::CreateWorkflowRunOutcome;
+use crate::db::workflow_repository::{CreateWorkflowRunOutcome, WorkspaceMemberRunCount};
 use crate::db::{
     workflow_repository::WorkflowRepository,
-    workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate},
+    workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate, WorkspaceRunUsage},
 };
 use crate::models::signup::SignupPayload;
 use crate::models::workflow::Workflow;
@@ -588,6 +588,22 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(0)
     }
 
+    async fn count_workspace_runs_since(
+        &self,
+        _workspace_id: Uuid,
+        _since: OffsetDateTime,
+    ) -> Result<i64, sqlx::Error> {
+        Ok(0)
+    }
+
+    async fn list_workspace_member_run_counts(
+        &self,
+        _workspace_id: Uuid,
+        _since: OffsetDateTime,
+    ) -> Result<Vec<WorkspaceMemberRunCount>, sqlx::Error> {
+        Ok(Vec::new())
+    }
+
     async fn set_workflow_concurrency_limit(
         &self,
         _user_id: Uuid,
@@ -770,7 +786,7 @@ pub struct NoopWorkspaceRepository;
 pub struct StaticWorkspaceMembershipRepository {
     allowed: bool,
     max_runs: Option<i64>,
-    run_usage: Arc<Mutex<HashMap<(Uuid, i64), i64>>>,
+    run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
     release_calls: Arc<Mutex<usize>>,
     period_starts: Arc<Mutex<Vec<OffsetDateTime>>>,
     billing_cycle: Arc<Mutex<Option<WorkspaceBillingCycle>>>,
@@ -827,9 +843,19 @@ impl StaticWorkspaceMembershipRepository {
     }
 
     #[allow(dead_code)]
-    pub fn usage_for(&self, workspace_id: Uuid, period_start: OffsetDateTime) -> i64 {
+    pub fn usage_for(&self, workspace_id: Uuid, period_start: OffsetDateTime) -> WorkspaceRunUsage {
         let key = (workspace_id, period_start.unix_timestamp());
-        *self.run_usage.lock().unwrap().get(&key).unwrap_or(&0)
+        let usage = self.run_usage.lock().unwrap();
+        match usage.get(&key).copied() {
+            Some((runs, overage)) => WorkspaceRunUsage {
+                run_count: runs,
+                overage_count: overage,
+            },
+            None => WorkspaceRunUsage {
+                run_count: 0,
+                overage_count: 0,
+            },
+        }
     }
 
     #[allow(dead_code)]
@@ -1071,6 +1097,8 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         Ok(WorkspaceRunQuotaUpdate {
             allowed: true,
             run_count: 1,
+            overage_count: 0,
+            overage_incremented: false,
         })
     }
 
@@ -1078,14 +1106,18 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
         &self,
         _workspace_id: Uuid,
         _period_start: OffsetDateTime,
-    ) -> Result<i64, sqlx::Error> {
-        Ok(0)
+    ) -> Result<WorkspaceRunUsage, sqlx::Error> {
+        Ok(WorkspaceRunUsage {
+            run_count: 0,
+            overage_count: 0,
+        })
     }
 
     async fn release_workspace_run_quota(
         &self,
         _workspace_id: Uuid,
         _period_start: OffsetDateTime,
+        _overage_decrement: bool,
     ) -> Result<(), sqlx::Error> {
         Ok(())
     }
@@ -1303,33 +1335,42 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
                 .unwrap()
                 .get(&(workspace_id, period_start.unix_timestamp()))
                 .copied()
-                .unwrap_or(0);
+                .unwrap_or((0, 0));
             return Ok(WorkspaceRunQuotaUpdate {
                 allowed: false,
-                run_count: current,
+                run_count: current.0,
+                overage_count: current.1,
+                overage_incremented: false,
             });
         }
 
         if let Some(limit) = self.max_runs {
             let mut usage = self.run_usage.lock().unwrap();
             let key = (workspace_id, period_start.unix_timestamp());
-            let entry = usage.entry(key).or_insert(0);
-            if *entry >= limit {
-                return Ok(WorkspaceRunQuotaUpdate {
-                    allowed: false,
-                    run_count: *entry,
-                });
+            let entry = usage.entry(key).or_insert((0, 0));
+            entry.0 += 1;
+            let mut overage_incremented = false;
+            if entry.0 > limit {
+                entry.1 += 1;
+                overage_incremented = true;
             }
-            *entry += 1;
             return Ok(WorkspaceRunQuotaUpdate {
-                allowed: true,
-                run_count: *entry,
+                allowed: entry.0 <= limit,
+                run_count: entry.0,
+                overage_count: entry.1,
+                overage_incremented,
             });
         }
 
+        let mut usage = self.run_usage.lock().unwrap();
+        let key = (workspace_id, period_start.unix_timestamp());
+        let entry = usage.entry(key).or_insert((0, 0));
+        entry.0 += 1;
         Ok(WorkspaceRunQuotaUpdate {
             allowed: self.allowed,
-            run_count: 1,
+            run_count: entry.0,
+            overage_count: entry.1,
+            overage_incremented: false,
         })
     }
 
@@ -1337,30 +1378,39 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
         &self,
         workspace_id: Uuid,
         period_start: OffsetDateTime,
-    ) -> Result<i64, sqlx::Error> {
-        if self.max_runs.is_some() {
-            let key = (workspace_id, period_start.unix_timestamp());
-            return Ok(*self.run_usage.lock().unwrap().get(&key).unwrap_or(&0));
-        }
-        Ok(0)
+    ) -> Result<WorkspaceRunUsage, sqlx::Error> {
+        let key = (workspace_id, period_start.unix_timestamp());
+        let usage = self.run_usage.lock().unwrap();
+        Ok(match usage.get(&key).copied() {
+            Some((runs, overage)) => WorkspaceRunUsage {
+                run_count: runs,
+                overage_count: overage,
+            },
+            None => WorkspaceRunUsage {
+                run_count: 0,
+                overage_count: 0,
+            },
+        })
     }
 
     async fn release_workspace_run_quota(
         &self,
         workspace_id: Uuid,
         period_start: OffsetDateTime,
+        overage_decrement: bool,
     ) -> Result<(), sqlx::Error> {
         *self.release_calls.lock().unwrap() += 1;
-        if self.max_runs.is_some() {
-            let mut usage = self.run_usage.lock().unwrap();
-            let key = (workspace_id, period_start.unix_timestamp());
-            if let Some(entry) = usage.get_mut(&key) {
-                if *entry > 0 {
-                    *entry -= 1;
-                }
-                if *entry == 0 {
-                    usage.remove(&key);
-                }
+        let mut usage = self.run_usage.lock().unwrap();
+        let key = (workspace_id, period_start.unix_timestamp());
+        if let Some(entry) = usage.get_mut(&key) {
+            if entry.0 > 0 {
+                entry.0 -= 1;
+            }
+            if overage_decrement && entry.1 > 0 {
+                entry.1 -= 1;
+            }
+            if entry.0 == 0 && entry.1 == 0 {
+                usage.remove(&key);
             }
         }
         Ok(())

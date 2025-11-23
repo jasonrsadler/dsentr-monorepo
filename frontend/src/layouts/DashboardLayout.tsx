@@ -15,15 +15,18 @@ import OptionsTab from '@/components/settings/tabs/OptionsTab'
 import IntegrationsTab, {
   IntegrationNotice
 } from '@/components/settings/tabs/IntegrationsTab'
+import UsageTab from '@/components/settings/tabs/UsageTab'
 import PlanTab from '@/components/settings/tabs/PlanTab'
 import MembersTab from '@/components/settings/tabs/MembersTab'
 import DangerZoneTab from '@/components/settings/tabs/DangerZoneTab'
 import { DSentrLogo } from '@/assets/svg-components/DSentrLogo'
 import { SecretsProvider } from '@/contexts/SecretsContext'
 import { OAuthProvider } from '@/lib/oauthApi'
+import { WORKSPACE_RUN_LIMIT_FALLBACK } from '@/lib/usageDefaults'
 import ProfileButton from '@/components/profile/ProfileButton'
 import ProfileModal from '@/components/profile/ProfileModal'
 import PendingInviteModal from '@/components/dashboard/PendingInviteModal'
+import { usePlanUsageStore } from '@/stores/planUsageStore'
 import { normalizePlanTier } from '@/lib/planTiers'
 
 export default function DashboardLayout() {
@@ -41,6 +44,8 @@ export default function DashboardLayout() {
     useState<IntegrationNotice | null>(null)
   const location = useLocation()
   const navigate = useNavigate()
+  const planUsage = usePlanUsageStore((state) => state.usage)
+  const refreshPlanUsage = usePlanUsageStore((state) => state.refresh)
   // Preferences removed
 
   const hasWorkspaces = memberships.length > 0
@@ -53,6 +58,47 @@ export default function DashboardLayout() {
     const name = currentWorkspace.workspace.name?.trim()
     return name || 'Unnamed workspace'
   }, [currentWorkspace])
+  const planTier = useMemo(
+    () =>
+      normalizePlanTier(
+        currentWorkspace?.workspace.plan ?? user?.plan ?? undefined
+      ),
+    [currentWorkspace?.workspace.plan, user?.plan]
+  )
+
+  useEffect(() => {
+    const workspaceId = currentWorkspace?.workspace.id ?? null
+    void refreshPlanUsage(workspaceId)
+  }, [currentWorkspace?.workspace.id, refreshPlanUsage])
+
+  const workspaceRunUsage = planUsage?.workspace?.runs
+  const workspaceUsageLimit =
+    workspaceRunUsage?.limit && workspaceRunUsage.limit > 0
+      ? workspaceRunUsage.limit
+      : WORKSPACE_RUN_LIMIT_FALLBACK
+  const workspaceUsageUsed = workspaceRunUsage?.used ?? 0
+  const workspaceUsagePercent =
+    workspaceUsageLimit && workspaceUsageLimit > 0
+      ? Math.min(100, (workspaceUsageUsed / workspaceUsageLimit) * 100)
+      : null
+  const workspaceUsageTone =
+    workspaceUsagePercent !== null && workspaceUsagePercent >= 100
+      ? 'danger'
+      : workspaceUsagePercent !== null && workspaceUsagePercent >= 90
+        ? 'warning'
+        : 'neutral'
+  const workspaceUsageBarClass =
+    workspaceUsageTone === 'danger'
+      ? 'bg-red-500'
+      : workspaceUsageTone === 'warning'
+        ? 'bg-amber-400'
+        : 'bg-indigo-500'
+  const workspaceUsageTextClass =
+    workspaceUsageTone === 'danger'
+      ? 'text-red-600 dark:text-red-300'
+      : workspaceUsageTone === 'warning'
+        ? 'text-amber-600 dark:text-amber-300'
+        : 'text-zinc-700 dark:text-zinc-200'
 
   useEffect(() => {
     if (memberships.length === 1) {
@@ -130,11 +176,9 @@ export default function DashboardLayout() {
   )
 
   const planBadge = useMemo(() => {
-    const planSource = currentWorkspace?.workspace.plan ?? user?.plan
-    if (!planSource) return null
-    const normalized = normalizePlanTier(planSource)
-    return normalized === 'workspace' ? 'Workspace plan' : 'Solo plan'
-  }, [currentWorkspace?.workspace.plan, user?.plan])
+    if (!planTier) return null
+    return planTier === 'workspace' ? 'Workspace plan' : 'Solo plan'
+  }, [planTier])
 
   const openPlanSettings = useCallback(() => {
     try {
@@ -146,9 +190,10 @@ export default function DashboardLayout() {
     }
   }, [])
 
-  const settingsTabs = useMemo(
-    () => [
+  const settingsTabs = useMemo(() => {
+    const base = [
       { key: 'plan', label: 'Plan & Billing' },
+      ...(planTier === 'workspace' ? [{ key: 'usage', label: 'Usage' }] : []),
       { key: 'members', label: 'Members' },
       { key: 'engine', label: 'Engine' },
       { key: 'logs', label: 'Logs' },
@@ -158,9 +203,9 @@ export default function DashboardLayout() {
       { key: 'integrations', label: 'Integrations' },
       { key: 'workflows', label: 'Workflows' },
       { key: 'danger', label: 'Danger Zone' }
-    ],
-    []
-  )
+    ]
+    return base
+  }, [planTier])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -213,76 +258,101 @@ export default function DashboardLayout() {
   return (
     <SecretsProvider>
       <div className="min-h-screen flex flex-col">
-        <header className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
-          <div className="flex items-center gap-1 font-bold tracking-tight text-xl text-zinc-900 dark:text-zinc-100">
-            <span className="leading-none">DSentr</span>
-            <span
-              className="inline-block align-middle"
-              style={{ height: '1em' }}
-            >
-              <DSentrLogo className="w-[1.5em] h-[1.5em]" />
-            </span>
-          </div>
-          {user && (
-            <div className="flex items-center gap-3">
-              {hasWorkspaces ? (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    Active workspace
-                  </span>
-                  {hasMultipleWorkspaces ? (
-                    <select
-                      aria-label="Workspace switcher"
-                      value={currentWorkspace?.workspace.id ?? ''}
-                      onChange={(event) =>
-                        handleWorkspaceChange(event.target.value)
-                      }
-                      className="px-2 py-1 border rounded-md bg-white text-sm dark:bg-zinc-800 dark:border-zinc-700"
-                    >
-                      {memberships.map((membership) => (
-                        <option
-                          key={membership.workspace.id}
-                          value={membership.workspace.id}
-                        >
-                          {membership.workspace.name || 'Unnamed workspace'}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span className="text-sm text-zinc-700 dark:text-zinc-200">
-                      {currentWorkspaceName}
-                    </span>
-                  )}
-                </div>
-              ) : null}
-              {planBadge ? (
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full border border-indigo-500 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:border-indigo-400 dark:text-indigo-300">
-                    {planBadge}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={openPlanSettings}
-                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-300 dark:hover:text-indigo-200"
-                  >
-                    Manage plan
-                  </button>
-                </div>
-              ) : null}
-              <span className="text-sm text-zinc-600 dark:text-zinc-300 leading-none">
-                {user.first_name} {user.last_name}
-              </span>
-              <NavigateButton
-                to="/logout"
-                className="px-3 py-2 text-sm leading-none h-9"
+        <header className="px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+          <div className="flex items-center gap-4 w-full">
+            <div className="flex items-center gap-1 font-bold tracking-tight text-xl text-zinc-900 dark:text-zinc-100">
+              <span className="leading-none">DSentr</span>
+              <span
+                className="inline-block align-middle"
+                style={{ height: '1em' }}
               >
-                Log out
-              </NavigateButton>
-              <ThemeToggle />
-              <ProfileButton onOpenProfile={() => setProfileOpen(true)} />
-              <SettingsButton onOpenSettings={() => setSettingsOpen(true)} />
+                <DSentrLogo className="w-[1.5em] h-[1.5em]" />
+              </span>
             </div>
-          )}
+            {planTier === 'workspace' && workspaceRunUsage ? (
+              <div
+                className="flex items-center gap-2 flex-1 max-w-md"
+                aria-label="Workspace run usage"
+              >
+                <div className="flex-1 h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${workspaceUsageBarClass}`}
+                    style={{
+                      width: `${workspaceUsagePercent ?? 0}%`,
+                      transition: 'width 150ms ease'
+                    }}
+                  />
+                </div>
+                <span
+                  className={`text-xs font-semibold ${workspaceUsageTextClass}`}
+                >
+                  {workspaceUsageUsed.toLocaleString()} /{' '}
+                  {workspaceUsageLimit.toLocaleString()}
+                </span>
+              </div>
+            ) : null}
+            <div className="flex-1" />
+            {user && (
+              <div className="flex items-center gap-3">
+                {hasWorkspaces ? (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      Active workspace
+                    </span>
+                    {hasMultipleWorkspaces ? (
+                      <select
+                        aria-label="Workspace switcher"
+                        value={currentWorkspace?.workspace.id ?? ''}
+                        onChange={(event) =>
+                          handleWorkspaceChange(event.target.value)
+                        }
+                        className="px-2 py-1 border rounded-md bg-white text-sm dark:bg-zinc-800 dark:border-zinc-700"
+                      >
+                        {memberships.map((membership) => (
+                          <option
+                            key={membership.workspace.id}
+                            value={membership.workspace.id}
+                          >
+                            {membership.workspace.name || 'Unnamed workspace'}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-sm text-zinc-700 dark:text-zinc-200">
+                        {currentWorkspaceName}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+                {planBadge ? (
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full border border-indigo-500 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:border-indigo-400 dark:text-indigo-300">
+                      {planBadge}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={openPlanSettings}
+                      className="text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-300 dark:hover:text-indigo-200"
+                    >
+                      Manage plan
+                    </button>
+                  </div>
+                ) : null}
+                <span className="text-sm text-zinc-600 dark:text-zinc-300 leading-none">
+                  {user.first_name} {user.last_name}
+                </span>
+                <NavigateButton
+                  to="/logout"
+                  className="px-3 py-2 text-sm leading-none h-9"
+                >
+                  Log out
+                </NavigateButton>
+                <ThemeToggle />
+                <ProfileButton onOpenProfile={() => setProfileOpen(true)} />
+                <SettingsButton onOpenSettings={() => setSettingsOpen(true)} />
+              </div>
+            )}
+          </div>
         </header>
 
         <main className="flex-1 bg-zinc-50 dark:bg-zinc-800">
@@ -308,6 +378,7 @@ export default function DashboardLayout() {
             if (key === 'logs') return <LogsTab />
             if (key === 'webhooks') return <WebhooksTab />
             if (key === 'options') return <OptionsTab />
+            if (key === 'usage') return <UsageTab />
             if (key === 'privacy') return <PrivacyTab />
             if (key === 'integrations') {
               return (

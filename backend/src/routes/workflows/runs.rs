@@ -89,7 +89,17 @@ pub async fn start_workflow_run(
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     let plan_tier = if let Some(workspace_id) = wf.workspace_id {
         match app_state.consume_workspace_run_quota(workspace_id).await {
-            Ok(ticket) => workspace_quota = Some(ticket),
+            Ok(ticket) => {
+                if ticket.run_count > ticket.limit {
+                    tracing::warn!(
+                        %workspace_id,
+                        run_count = ticket.run_count,
+                        overage_count = ticket.overage_count,
+                        "workspace run usage exceeded limit; recording overage"
+                    );
+                }
+                workspace_quota = Some(ticket);
+            }
             Err(err) => return workspace_limit_error_response(err),
         }
         NormalizedPlanTier::Workspace
@@ -730,7 +740,9 @@ mod tests {
         workspace_connection_repository::NoopWorkspaceConnectionRepository,
         workspace_repository::WorkspaceRepository,
     };
-    use crate::models::{plan::PlanTier, workflow_run::WorkflowRun};
+    use crate::models::{
+        plan::PlanTier, workflow_run::WorkflowRun, workflow_run_event::WorkflowRunEvent,
+    };
     use crate::routes::auth::claims::{Claims, TokenUse};
     use crate::routes::auth::session::AuthSession;
     use crate::services::{
@@ -745,7 +757,6 @@ mod tests {
     use axum::body::to_bytes;
     use reqwest::Client;
     use serde_json::Value;
-    use sqlx::Error as SqlxError;
     use std::sync::Arc;
     use time::{Duration, OffsetDateTime};
 
@@ -877,11 +888,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_workflow_run_returns_workspace_run_limit_error() {
+    async fn start_workflow_run_records_workspace_overage_without_blocking() {
         let workspace_id = Uuid::new_v4();
         let owner_id = Uuid::new_v4();
         let workflow = workflow_fixture(workspace_id, owner_id);
         let workflow_for_find = workflow.clone();
+        let run = run_fixture(&workflow);
 
         let mut repo = MockWorkflowRepository::new();
         repo.expect_find_workflow_for_member()
@@ -891,8 +903,28 @@ mod tests {
                 assert_eq!(workflow_id, wf.id);
                 Box::pin(async move { Ok(Some(wf)) })
             });
+        repo.expect_create_workflow_run()
+            .returning(move |_, _, _, _, _| {
+                let run = run.clone();
+                Box::pin(async move { Ok(CreateWorkflowRunOutcome { run, created: true }) })
+            });
         repo.expect_record_run_event()
-            .returning(|_| Box::pin(async { Err(SqlxError::RowNotFound) }));
+            .returning(|event| {
+                let recorded_at = event.recorded_at.unwrap_or_else(OffsetDateTime::now_utc);
+                Box::pin(async move {
+                    Ok(WorkflowRunEvent {
+                        id: Uuid::new_v4(),
+                        workflow_run_id: event.workflow_run_id,
+                        workflow_id: event.workflow_id,
+                        workspace_id: event.workspace_id,
+                        triggered_by: event.triggered_by,
+                        connection_type: event.connection_type,
+                        connection_id: event.connection_id,
+                        recorded_at,
+                    })
+                })
+            })
+            .times(0..);
 
         let workspace_repo: Arc<StaticWorkspaceMembershipRepository> =
             Arc::new(StaticWorkspaceMembershipRepository::with_run_limit(0));
@@ -909,12 +941,17 @@ mod tests {
         )
         .await;
 
-        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(response.status().is_success());
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["code"], Value::String("workspace_run_limit".into()));
+        assert_eq!(json["success"], Value::Bool(true));
         assert_eq!(workspace_repo.release_calls(), 0);
-        assert_eq!(workspace_repo.last_period_starts().len(), 1);
+        let periods = workspace_repo.last_period_starts();
+        assert_eq!(periods.len(), 1);
+        let period_start = periods[0];
+        let usage = workspace_repo.usage_for(workspace_id, period_start);
+        assert_eq!(usage.run_count, 1);
+        assert_eq!(usage.overage_count, 1);
     }
 
     #[tokio::test]
@@ -942,7 +979,22 @@ mod tests {
                 })
             });
         repo.expect_record_run_event()
-            .returning(|_| Box::pin(async { Err(SqlxError::RowNotFound) }));
+            .returning(|event| {
+                let recorded_at = event.recorded_at.unwrap_or_else(OffsetDateTime::now_utc);
+                Box::pin(async move {
+                    Ok(WorkflowRunEvent {
+                        id: Uuid::new_v4(),
+                        workflow_run_id: event.workflow_run_id,
+                        workflow_id: event.workflow_id,
+                        workspace_id: event.workspace_id,
+                        triggered_by: event.triggered_by,
+                        connection_type: event.connection_type,
+                        connection_id: event.connection_id,
+                        recorded_at,
+                    })
+                })
+            })
+            .times(0..);
 
         let workspace_repo: Arc<StaticWorkspaceMembershipRepository> =
             Arc::new(StaticWorkspaceMembershipRepository::with_run_limit(1));

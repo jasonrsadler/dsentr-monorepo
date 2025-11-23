@@ -47,6 +47,10 @@ pub struct AppState {
 pub struct WorkspaceRunQuotaTicket {
     workspace_id: Uuid,
     period_start: OffsetDateTime,
+    pub run_count: i64,
+    pub overage_count: i64,
+    pub limit: i64,
+    pub overage_incremented: bool,
 }
 
 #[derive(Debug, Error)]
@@ -230,12 +234,22 @@ impl AppState {
             .map_err(WorkspaceLimitError::from)?;
 
         if !update.allowed {
-            return Err(WorkspaceLimitError::RunLimitReached { limit: run_limit });
+            warn!(
+                %workspace_id,
+                run_count = update.run_count,
+                overage_count = update.overage_count,
+                %run_limit,
+                "workspace run usage exceeded limit; recording overage"
+            );
         }
 
         Ok(WorkspaceRunQuotaTicket {
             workspace_id,
             period_start,
+            run_count: update.run_count,
+            overage_count: update.overage_count,
+            limit: run_limit,
+            overage_incremented: update.overage_incremented,
         })
     }
 
@@ -244,7 +258,11 @@ impl AppState {
         ticket: WorkspaceRunQuotaTicket,
     ) -> Result<(), WorkspaceLimitError> {
         self.workspace_repo
-            .release_workspace_run_quota(ticket.workspace_id, ticket.period_start)
+            .release_workspace_run_quota(
+                ticket.workspace_id,
+                ticket.period_start,
+                ticket.overage_incremented,
+            )
             .await
             .map_err(WorkspaceLimitError::from)
     }
@@ -332,7 +350,7 @@ impl AppState {
     }
 }
 
-fn workspace_quota_period_start(
+pub(crate) fn workspace_quota_period_start(
     cycle: Option<&WorkspaceBillingCycle>,
     now: OffsetDateTime,
 ) -> OffsetDateTime {

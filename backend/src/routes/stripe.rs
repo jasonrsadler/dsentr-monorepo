@@ -739,7 +739,9 @@ mod tests {
         DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
     };
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
-    use crate::db::workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate};
+    use crate::db::workspace_repository::{
+        WorkspaceRepository, WorkspaceRunQuotaUpdate, WorkspaceRunUsage,
+    };
     use crate::models::plan::PlanTier;
     use crate::models::user::{OauthProvider, User, UserRole};
     use crate::models::workspace::{
@@ -766,7 +768,7 @@ mod tests {
         memberships: Arc<Mutex<Vec<WorkspaceMembershipSummary>>>,
         plan_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
         name_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
-        run_usage: Arc<Mutex<HashMap<(Uuid, i64), i64>>>,
+        run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
     }
 
@@ -1024,17 +1026,18 @@ mod tests {
         ) -> Result<WorkspaceRunQuotaUpdate, sqlx::Error> {
             let mut usage = self.run_usage.lock().unwrap();
             let key = (workspace_id, period_start.unix_timestamp());
-            let entry = usage.entry(key).or_insert(0);
-            if *entry >= max_runs {
-                return Ok(WorkspaceRunQuotaUpdate {
-                    allowed: false,
-                    run_count: *entry,
-                });
+            let entry = usage.entry(key).or_insert((0, 0));
+            entry.0 += 1;
+            let mut overage_incremented = false;
+            if entry.0 > max_runs {
+                entry.1 += 1;
+                overage_incremented = true;
             }
-            *entry += 1;
             Ok(WorkspaceRunQuotaUpdate {
-                allowed: true,
-                run_count: *entry,
+                allowed: entry.0 <= max_runs,
+                run_count: entry.0,
+                overage_count: entry.1,
+                overage_incremented,
             })
         }
 
@@ -1042,24 +1045,38 @@ mod tests {
             &self,
             workspace_id: Uuid,
             period_start: OffsetDateTime,
-        ) -> Result<i64, sqlx::Error> {
+        ) -> Result<WorkspaceRunUsage, sqlx::Error> {
             let usage = self.run_usage.lock().unwrap();
             let key = (workspace_id, period_start.unix_timestamp());
-            Ok(*usage.get(&key).unwrap_or(&0))
+            Ok(usage
+                .get(&key)
+                .copied()
+                .map(|(runs, overage)| WorkspaceRunUsage {
+                    run_count: runs,
+                    overage_count: overage,
+                })
+                .unwrap_or(WorkspaceRunUsage {
+                    run_count: 0,
+                    overage_count: 0,
+                }))
         }
 
         async fn release_workspace_run_quota(
             &self,
             workspace_id: Uuid,
             period_start: OffsetDateTime,
+            overage_decrement: bool,
         ) -> Result<(), sqlx::Error> {
             let mut usage = self.run_usage.lock().unwrap();
             let key = (workspace_id, period_start.unix_timestamp());
             if let Some(entry) = usage.get_mut(&key) {
-                if *entry > 0 {
-                    *entry -= 1;
+                if entry.0 > 0 {
+                    entry.0 -= 1;
                 }
-                if *entry == 0 {
+                if overage_decrement && entry.1 > 0 {
+                    entry.1 -= 1;
+                }
+                if entry.0 == 0 && entry.1 == 0 {
                     usage.remove(&key);
                 }
             }

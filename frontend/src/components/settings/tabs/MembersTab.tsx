@@ -114,9 +114,9 @@ export default function MembersTab() {
   }, [])
   useEffect(() => {
     if (planTier === 'workspace') {
-      void refreshPlanUsage()
+      void refreshPlanUsage(resolvedWorkspaceId)
     }
-  }, [planTier, refreshPlanUsage])
+  }, [planTier, refreshPlanUsage, resolvedWorkspaceId])
 
   useEffect(() => {
     if (!resolvedWorkspaceId) {
@@ -249,7 +249,7 @@ export default function MembersTab() {
       setPendingInvites((prev) => filterPendingInvitations([inv, ...prev]))
       setInviteEmail('')
       setInviteRole('user')
-      void refreshPlanUsage()
+      void refreshPlanUsage(resolvedWorkspaceId)
     } catch (e: any) {
       setError(e.message || 'Failed to create invitation')
     } finally {
@@ -265,7 +265,7 @@ export default function MembersTab() {
         setError(null)
         await removeWorkspaceMember(resolvedWorkspaceId, uid)
         setMembers((prev) => prev.filter((m) => m.user_id !== uid))
-        await refreshPlanUsage().catch(() => undefined)
+        await refreshPlanUsage(resolvedWorkspaceId).catch(() => undefined)
         try {
           await refreshSecrets()
         } catch (err) {

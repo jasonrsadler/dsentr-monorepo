@@ -17,8 +17,9 @@ The backend enforces several workspace-specific limits to keep Solo and Workspac
 - Inviting or adding members on Solo plans returns `403 Forbidden` with `code: "workspace_plan_required"`.
 
 ## Workspace run quota
-- Each workspace receives **10,000 workflow runs per calendar month**. Solo workspaces continue to use the existing personal limit (250 runs/month) tied to the workflow owner.
-- When a workspace run quota is exhausted, workflow APIs (manual runs, reruns, webhook triggers) respond with `429 Too Many Requests` and `code: "workspace_run_limit"`.
+- Each workspace includes **20,000 workflow runs per billing period by default** (configurable via `WORKSPACE_MONTHLY_RUN_LIMIT`). Solo workspaces continue to use the existing personal limit (250 runs/month) tied to the workflow owner.
+- Usage is tracked per billing cycle window in `workspace_run_usage.run_count`, and every run beyond the limit increments `workspace_run_usage.overage_count` for billing. Workflow execution continues even when the limit is exceeded.
+- Clients should rely on `/api/workflows/usage?workspace={id}` for workspace run usage and member-level breakdowns instead of expecting `workspace_run_limit` errors during execution.
 
 ## Error payload contract
 - All limit-related errors follow the standard `JsonResponse` envelope with a `code` field describing the violation.

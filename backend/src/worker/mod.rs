@@ -308,7 +308,20 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     let mut skip_run = false;
     if let Some(workspace_id) = workflow.workspace_id {
         match state.consume_workspace_run_quota(workspace_id).await {
-            Ok(ticket) => workspace_quota = Some(ticket),
+            Ok(ticket) => {
+                if ticket.run_count > ticket.limit {
+                    warn!(
+                        worker_id = %state.worker_id,
+                        %workspace_id,
+                        overage_count = ticket.overage_count,
+                        run_count = ticket.run_count,
+                        %schedule.id,
+                        %ticket.limit,
+                        "workspace run overage recorded for scheduled run"
+                    );
+                }
+                workspace_quota = Some(ticket);
+            }
             Err(WorkspaceLimitError::WorkspacePlanRequired) => {
                 warn!(
                     worker_id = %state.worker_id,
@@ -324,9 +337,8 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
                     %workspace_id,
                     schedule_id = %schedule.id,
                     %limit,
-                    "skipping scheduled run because workspace hit its monthly run allocation"
+                    "workspace run usage exceeded limit; continuing and recording overage"
                 );
-                skip_run = true;
             }
             Err(WorkspaceLimitError::MemberLimitReached { limit }) => {
                 warn!(

@@ -75,11 +75,12 @@ export default function PlanTab() {
   const [isResuming, setIsResuming] = useState(false)
   const workspaceEditedRef = useRef(false)
   const isWorkspaceOwner = currentWorkspace?.role === 'owner'
+  const currentWorkspaceId = currentWorkspace?.workspace.id ?? null
   const planUsage = usePlanUsageStore((state) => state.usage)
   const refreshPlanUsage = usePlanUsageStore((state) => state.refresh)
   useEffect(() => {
-    void refreshPlanUsage()
-  }, [refreshPlanUsage])
+    void refreshPlanUsage(currentWorkspaceId)
+  }, [currentWorkspaceId, refreshPlanUsage])
   const planRunUsage = planUsage?.workspace?.runs ?? planUsage?.runs ?? null
   const planRunLimit = planRunUsage?.limit
   const planRunUsed = planRunUsage?.used ?? 0
