@@ -117,7 +117,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::{extract_session_id, require_session, AuthSession, SessionIdError};
-    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
+    use crate::config::{
+        Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
+        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+    };
     use crate::db::{
         mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
         workspace_connection_repository::NoopWorkspaceConnectionRepository,
@@ -170,6 +173,8 @@ mod tests {
             webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             jwt_issuer: "test-issuer".into(),
             jwt_audience: "test-audience".into(),
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
         });
 
         AppState {

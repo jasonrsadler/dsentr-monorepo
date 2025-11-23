@@ -6,7 +6,10 @@ use axum::{
 use axum_extra::extract::cookie::CookieJar;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
+use crate::config::{
+    Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
+    DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+};
 use crate::db::{
     mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
     oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository},
@@ -89,6 +92,8 @@ fn stub_config() -> Arc<Config> {
         webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
         jwt_issuer: "test-issuer".into(),
         jwt_audience: "test-audience".into(),
+        workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+        workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
     })
 }
 
@@ -1303,6 +1308,10 @@ impl WorkspaceRepository for MembershipWorkspaceRepo {
             .filter(|(_, membership)| membership.workspace.id == workspace_id)
             .count();
         Ok(count as i64)
+    }
+
+    async fn count_pending_workspace_invitations(&self, _workspace_id: Uuid) -> Result<i64, Error> {
+        Ok(0)
     }
 
     async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, Error> {

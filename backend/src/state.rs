@@ -43,9 +43,6 @@ pub struct AppState {
     pub jwt_keys: Arc<JwtKeys>,
 }
 
-pub const WORKSPACE_MEMBER_LIMIT: i64 = 8;
-pub const WORKSPACE_MONTHLY_RUN_LIMIT: i64 = 20_000;
-
 #[derive(Clone, Copy, Debug)]
 pub struct WorkspaceRunQuotaTicket {
     workspace_id: Uuid,
@@ -189,19 +186,23 @@ impl AppState {
         seats_needed: i64,
     ) -> Result<(), WorkspaceLimitError> {
         self.ensure_workspace_plan(workspace_id).await?;
-        if seats_needed <= 0 {
-            return Ok(());
-        }
-
+        let seats_needed = seats_needed.max(0);
+        let member_limit = self.config.workspace_member_limit;
         let current_members = self
             .workspace_repo
             .count_members(workspace_id)
             .await
             .map_err(WorkspaceLimitError::from)?;
+        let pending_invites = self
+            .workspace_repo
+            .count_pending_workspace_invitations(workspace_id)
+            .await
+            .map_err(WorkspaceLimitError::from)?;
+        let total_reserved = current_members + pending_invites;
 
-        if current_members + seats_needed > WORKSPACE_MEMBER_LIMIT {
+        if total_reserved + seats_needed > member_limit {
             return Err(WorkspaceLimitError::MemberLimitReached {
-                limit: WORKSPACE_MEMBER_LIMIT,
+                limit: member_limit,
             });
         }
 
@@ -221,20 +222,15 @@ impl AppState {
             .await
             .map_err(WorkspaceLimitError::from)?;
         let period_start = workspace_quota_period_start(cycle.as_ref(), now);
+        let run_limit = self.config.workspace_monthly_run_limit;
         let update = self
             .workspace_repo
-            .try_increment_workspace_run_quota(
-                workspace_id,
-                period_start,
-                WORKSPACE_MONTHLY_RUN_LIMIT,
-            )
+            .try_increment_workspace_run_quota(workspace_id, period_start, run_limit)
             .await
             .map_err(WorkspaceLimitError::from)?;
 
         if !update.allowed {
-            return Err(WorkspaceLimitError::RunLimitReached {
-                limit: WORKSPACE_MONTHLY_RUN_LIMIT,
-            });
+            return Err(WorkspaceLimitError::RunLimitReached { limit: run_limit });
         }
 
         Ok(WorkspaceRunQuotaTicket {
@@ -483,6 +479,8 @@ mod tests {
             webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             jwt_issuer: "test-issuer".into(),
             jwt_audience: "test-audience".into(),
+            workspace_member_limit: crate::config::DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: crate::config::DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
         });
 
         let state = AppState {

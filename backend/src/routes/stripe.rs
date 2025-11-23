@@ -734,7 +734,10 @@ pub async fn webhook(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
+    use crate::config::{
+        Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
+        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+    };
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
     use crate::db::workspace_repository::{WorkspaceRepository, WorkspaceRunQuotaUpdate};
     use crate::models::plan::PlanTier;
@@ -940,6 +943,13 @@ mod tests {
             Ok(count as i64)
         }
 
+        async fn count_pending_workspace_invitations(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<i64, sqlx::Error> {
+            Ok(0)
+        }
+
         async fn is_member(
             &self,
             _workspace_id: Uuid,
@@ -1129,6 +1139,8 @@ mod tests {
             webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             jwt_issuer: "test-issuer".into(),
             jwt_audience: "test-audience".into(),
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
         })
     }
 

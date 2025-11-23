@@ -774,6 +774,8 @@ pub struct StaticWorkspaceMembershipRepository {
     release_calls: Arc<Mutex<usize>>,
     period_starts: Arc<Mutex<Vec<OffsetDateTime>>>,
     billing_cycle: Arc<Mutex<Option<WorkspaceBillingCycle>>>,
+    member_counts: Arc<Mutex<HashMap<Uuid, i64>>>,
+    pending_invites: Arc<Mutex<HashMap<Uuid, i64>>>,
     inner: NoopWorkspaceRepository,
 }
 
@@ -787,6 +789,8 @@ impl StaticWorkspaceMembershipRepository {
             release_calls: Arc::new(Mutex::new(0)),
             period_starts: Arc::new(Mutex::new(Vec::new())),
             billing_cycle: Arc::new(Mutex::new(None)),
+            member_counts: Arc::new(Mutex::new(HashMap::new())),
+            pending_invites: Arc::new(Mutex::new(HashMap::new())),
             inner: NoopWorkspaceRepository,
         }
     }
@@ -800,6 +804,8 @@ impl StaticWorkspaceMembershipRepository {
             release_calls: Arc::new(Mutex::new(0)),
             period_starts: Arc::new(Mutex::new(Vec::new())),
             billing_cycle: Arc::new(Mutex::new(None)),
+            member_counts: Arc::new(Mutex::new(HashMap::new())),
+            pending_invites: Arc::new(Mutex::new(HashMap::new())),
             inner: NoopWorkspaceRepository,
         }
     }
@@ -834,6 +840,22 @@ impl StaticWorkspaceMembershipRepository {
     #[allow(dead_code)]
     pub fn last_period_starts(&self) -> Vec<OffsetDateTime> {
         self.period_starts.lock().unwrap().clone()
+    }
+
+    #[allow(dead_code)]
+    pub fn set_member_count(&self, workspace_id: Uuid, count: i64) {
+        self.member_counts
+            .lock()
+            .unwrap()
+            .insert(workspace_id, count);
+    }
+
+    #[allow(dead_code)]
+    pub fn set_pending_invites(&self, workspace_id: Uuid, count: i64) {
+        self.pending_invites
+            .lock()
+            .unwrap()
+            .insert(workspace_id, count);
     }
 }
 
@@ -947,6 +969,13 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
     }
 
     async fn count_members(&self, _workspace_id: Uuid) -> Result<i64, sqlx::Error> {
+        Ok(0)
+    }
+
+    async fn count_pending_workspace_invitations(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<i64, sqlx::Error> {
         Ok(0)
     }
 
@@ -1166,7 +1195,26 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
     }
 
     async fn count_members(&self, workspace_id: Uuid) -> Result<i64, sqlx::Error> {
-        self.inner.count_members(workspace_id).await
+        let count = *self
+            .member_counts
+            .lock()
+            .unwrap()
+            .get(&workspace_id)
+            .unwrap_or(&0);
+        Ok(count)
+    }
+
+    async fn count_pending_workspace_invitations(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<i64, sqlx::Error> {
+        let count = *self
+            .pending_invites
+            .lock()
+            .unwrap()
+            .get(&workspace_id)
+            .unwrap_or(&0);
+        Ok(count)
     }
 
     async fn is_member(&self, _workspace_id: Uuid, _user_id: Uuid) -> Result<bool, sqlx::Error> {

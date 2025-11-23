@@ -30,6 +30,7 @@ itly coordinated.
   - Default behavior is opt-in: if the key is missing, the API returns `allow: true`.
   - Signup now accepts an optional `settings` JSON object so onboarding can persist the initial preference.
   - Migration `202511071_1_user_privacy_default.sql` backfills the default `true` for existing users where the key is absent.
+- Workspace plan quotas can be tuned via `WORKSPACE_MEMBER_LIMIT` and `WORKSPACE_MONTHLY_RUN_LIMIT`, and pending invitations now count toward the workspace seat cap.
 
 ## App Email Delivery
 - Environment variables:

@@ -1825,7 +1825,7 @@ pub async fn accept_invitation(
     }
 
     if let Err(err) = app_state
-        .ensure_workspace_can_add_members(invite.workspace_id, 1)
+        .ensure_workspace_can_add_members(invite.workspace_id, 0)
         .await
     {
         return workspace_limit_error_response(err);
@@ -2759,6 +2759,23 @@ mod tests {
             Ok(count as i64)
         }
 
+        async fn count_pending_workspace_invitations(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<i64, sqlx::Error> {
+            let invite = self.invitation.lock().unwrap();
+            let count = invite
+                .as_ref()
+                .filter(|invite| {
+                    invite.workspace_id == workspace_id
+                        && invite.status == crate::models::workspace::INVITATION_STATUS_PENDING
+                        && invite.expires_at > OffsetDateTime::now_utc()
+                })
+                .map(|_| 1)
+                .unwrap_or(0);
+            Ok(count)
+        }
+
         async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
             let members = self.members.lock().unwrap();
             Ok(members
@@ -2953,6 +2970,7 @@ mod tests {
         audits: Arc<Mutex<AuditEntries>>,
         run_usage: Arc<Mutex<HashMap<(Uuid, i64), i64>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
+        pending_invites: Arc<Mutex<HashMap<Uuid, i64>>>,
     }
 
     impl RecordingWorkspaceRepo {
@@ -2974,6 +2992,7 @@ mod tests {
                 audits: Arc::new(Mutex::new(Vec::new())),
                 run_usage: Arc::new(Mutex::new(HashMap::new())),
                 billing_cycles: Arc::new(Mutex::new(HashMap::new())),
+                pending_invites: Arc::new(Mutex::new(HashMap::new())),
             }
         }
 
@@ -3048,6 +3067,13 @@ mod tests {
 
         fn usage_key(workspace_id: Uuid, period_start: OffsetDateTime) -> (Uuid, i64) {
             (workspace_id, period_start.unix_timestamp())
+        }
+
+        fn set_pending_invites(&self, workspace_id: Uuid, count: i64) {
+            self.pending_invites
+                .lock()
+                .unwrap()
+                .insert(workspace_id, count);
         }
     }
 
@@ -3230,6 +3256,19 @@ mod tests {
                 .map(|list| list.len())
                 .unwrap_or(0);
             Ok(count as i64)
+        }
+
+        async fn count_pending_workspace_invitations(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<i64, sqlx::Error> {
+            let count = *self
+                .pending_invites
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .unwrap_or(&0);
+            Ok(count)
         }
 
         async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
@@ -3441,6 +3480,8 @@ mod tests {
             webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             jwt_issuer: "test-issuer".into(),
             jwt_audience: "test-audience".into(),
+            workspace_member_limit: crate::config::DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: crate::config::DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
         })
     }
 
@@ -4210,6 +4251,67 @@ mod tests {
         let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
         let state = state_with_components(
             repo as Arc<dyn WorkspaceRepository>,
+            Arc::new(NoopMailer),
+            Arc::new(MockDb::default()),
+            None,
+            None,
+        );
+
+        let response = create_workspace_invitation(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "owner@example.com")),
+            Path(workspace_id),
+            Json(CreateInvitationPayload {
+                email: "new@example.com".into(),
+                role: WorkspaceRole::User,
+                expires_in_days: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], Value::String("workspace_member_limit".into()));
+    }
+
+    #[tokio::test]
+    async fn create_workspace_invitation_counts_pending_invites_toward_limit() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Growth".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: PlanTier::Workspace.as_str().to_string(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let members: Vec<WorkspaceMember> = (0..5)
+            .map(|i| WorkspaceMember {
+                workspace_id,
+                user_id: if i == 0 { owner_id } else { Uuid::new_v4() },
+                role: if i == 0 {
+                    WorkspaceRole::Owner
+                } else {
+                    WorkspaceRole::User
+                },
+                joined_at: now,
+                email: format!("member{i}@example.com"),
+                first_name: format!("Member{i}"),
+                last_name: "User".into(),
+            })
+            .collect();
+
+        let repo = Arc::new(RecordingWorkspaceRepo::seeded(workspace, members));
+        repo.set_pending_invites(workspace_id, 3);
+        let state = state_with_components(
+            repo.clone() as Arc<dyn WorkspaceRepository>,
             Arc::new(NoopMailer),
             Arc::new(MockDb::default()),
             None,

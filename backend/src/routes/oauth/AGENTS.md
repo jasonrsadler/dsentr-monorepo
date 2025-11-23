@@ -25,3 +25,4 @@
 - Workspace OAuth tests now cover the shared `get_plan` repository helper so plan-aware services can reuse the mocks without referring back to route modules.
 - OAuth route tests and repository stubs now understand multiple workspace connection records so connection-id scoped flows (Microsoft Teams) can assert the selected connection still belongs to the requesting workspace before issuing tokens.
 - OAuth integrations listing now blocks Solo-plan workspaces and returns a `workspace_plan_required` error so Settings integrations stay premium-only even when a user belongs to other Workspace plans.
+- OAuth route test repositories now implement pending-invite counting to satisfy workspace seat checks that treat invitations as reserved seats.

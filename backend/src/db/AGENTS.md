@@ -38,3 +38,4 @@
 - Workspace repositories now manage `workspace_billing_cycles` (upsert/get/clear) so Stripe subscription ids and current period windows are stored centrally for billing-aligned quota resets.
 - Workflow and workspace repositories were refreshed to fix build regressions: workflow repos import `CreateWorkflowRunOutcome` explicitly, and the Postgres workspace run quota helper avoids moving the optional row before checking it.
 - Expanded `StaticWorkspaceMembershipRepository` so tests can simulate run quotas and billing cycles, capture release counts, and assert how routes respond when workspaces are at or over their monthly allocations.
+- Workspace repositories expose pending-invitation counting so seat checks can reserve capacity for outstanding invites alongside existing members.

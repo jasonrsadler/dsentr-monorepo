@@ -75,6 +75,11 @@ pub trait WorkspaceRepository: Send + Sync {
 
     async fn count_members(&self, workspace_id: Uuid) -> Result<i64, sqlx::Error>;
 
+    async fn count_pending_workspace_invitations(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<i64, sqlx::Error>;
+
     async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error>;
 
     async fn list_memberships_for_user(

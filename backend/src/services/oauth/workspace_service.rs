@@ -828,6 +828,13 @@ mod tests {
             Ok(0)
         }
 
+        async fn count_pending_workspace_invitations(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<i64, sqlx::Error> {
+            Ok(0)
+        }
+
         async fn is_member(
             &self,
             _workspace_id: Uuid,

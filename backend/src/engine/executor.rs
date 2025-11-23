@@ -720,7 +720,10 @@ pub(crate) async fn complete_run_with_retry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
+    use crate::config::{
+        Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
+        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+    };
     use crate::db::mock_db::{MockDb, NoopWorkspaceRepository};
     use crate::db::workflow_repository::{MockWorkflowRepository, WorkflowRepository};
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
@@ -779,6 +782,8 @@ mod tests {
             webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             jwt_issuer: "test-issuer".into(),
             jwt_audience: "test-audience".into(),
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
         });
 
         let workflow_repo: Arc<dyn WorkflowRepository> = Arc::new(repo);

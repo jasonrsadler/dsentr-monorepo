@@ -15,7 +15,7 @@ pub(crate) fn workspace_limit_error_response(err: WorkspaceLimitError) -> Respon
         .into_response(),
         WorkspaceLimitError::MemberLimitReached { limit } => {
             let message = format!(
-                "Workspace plans support up to {limit} members. Remove an existing member or contact support to increase your limit."
+                "Workspace plans support up to {limit} combined members and pending invitations. Remove an existing member or revoke invites to free up seats."
             );
             JsonResponse::error_with_code(
                 StatusCode::BAD_REQUEST,

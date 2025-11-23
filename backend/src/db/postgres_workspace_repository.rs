@@ -304,6 +304,27 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         Ok(row.count)
     }
 
+    async fn count_pending_workspace_invitations(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<i64, sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            SELECT COUNT(*)::BIGINT as "count!: i64"
+            FROM workspace_invitations
+            WHERE workspace_id = $1
+              AND status = $2
+              AND expires_at > now()
+            "#,
+            workspace_id,
+            crate::models::workspace::INVITATION_STATUS_PENDING
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row.count)
+    }
+
     async fn is_member(&self, workspace_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
         let exists = sqlx::query_scalar!(
             r#"

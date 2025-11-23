@@ -31,3 +31,4 @@
 - AppState now syncs/clears workspace billing cycle metadata (subscription id plus current period start/end) and run quota checks consume those persisted anchors instead of hardcoding calendar-month resets.
 - Added unit coverage for workspace quota period calculations so billing-aligned run windows roll over at the correct boundary even when the current clock is past the stored cycle.
 - Added a dedicated `API_SECRETS_ENCRYPTION_KEY` path (and rotation tooling) for encrypting settings secrets separately from OAuth tokens.
+- Workspace member/run limits now load from `WORKSPACE_MEMBER_LIMIT` and `WORKSPACE_MONTHLY_RUN_LIMIT` with validation, and AppState uses these config values when enforcing quotas.

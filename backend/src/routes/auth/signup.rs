@@ -169,7 +169,7 @@ pub async fn handle_signup(
         match invite_decision {
             SignupInviteDecision::Join => {
                 if let Err(err) = state
-                    .ensure_workspace_can_add_members(invite.workspace_id, 1)
+                    .ensure_workspace_can_add_members(invite.workspace_id, 0)
                     .await
                 {
                     return workspace_limit_error_response(err);
@@ -235,7 +235,10 @@ mod tests {
     type WorkspaceRecord = (Vec<Workspace>, MembershipRecords, Vec<Uuid>, Vec<Uuid>);
 
     use crate::{
-        config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings},
+        config::{
+            Config, OAuthProviderConfig, OAuthSettings, StripeSettings,
+            DEFAULT_WORKSPACE_MEMBER_LIMIT, DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+        },
         db::{
             mock_db::{NoopWorkflowRepository, NoopWorkspaceRepository},
             user_repository::{UserId, UserRepository},
@@ -296,6 +299,8 @@ mod tests {
             webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             jwt_issuer: "test-issuer".into(),
             jwt_audience: "test-audience".into(),
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
         })
     }
 
@@ -746,6 +751,23 @@ mod tests {
                 .filter(|(ws_id, _, _)| *ws_id == workspace_id)
                 .count();
             Ok(count as i64)
+        }
+
+        async fn count_pending_workspace_invitations(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<i64, sqlx::Error> {
+            let invite = self.invite.lock().unwrap();
+            let count = invite
+                .as_ref()
+                .filter(|invite| {
+                    invite.workspace_id == workspace_id
+                        && invite.status == crate::models::workspace::INVITATION_STATUS_PENDING
+                        && invite.expires_at > OffsetDateTime::now_utc()
+                })
+                .map(|_| 1)
+                .unwrap_or(0);
+            Ok(count)
         }
 
         async fn is_member(

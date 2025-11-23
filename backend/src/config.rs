@@ -3,6 +3,9 @@ use std::{collections::HashSet, env};
 use crate::utils::encryption::{decode_key, EncryptionError};
 use thiserror::Error;
 
+pub const DEFAULT_WORKSPACE_MEMBER_LIMIT: i64 = 8;
+pub const DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT: i64 = 20_000;
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("missing required environment variable: {name}")]
@@ -15,16 +18,18 @@ pub enum ConfigError {
     },
     #[error("{name} is too weak: {reason}")]
     WeakSecret { name: &'static str, reason: String },
+    #[error("invalid value for {name}: {reason}")]
+    InvalidEnvVar { name: &'static str, reason: String },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OAuthProviderConfig {
     pub client_id: String,
     pub client_secret: String,
     pub redirect_uri: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct StripeSettings {
     pub client_id: String,
@@ -32,7 +37,7 @@ pub struct StripeSettings {
     pub webhook_secret: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OAuthSettings {
     pub google: OAuthProviderConfig,
     pub microsoft: OAuthProviderConfig,
@@ -40,7 +45,7 @@ pub struct OAuthSettings {
     pub token_encryption_key: Vec<u8>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub database_url: String,
     pub frontend_origin: String,
@@ -52,6 +57,8 @@ pub struct Config {
     pub webhook_secret: String,
     pub jwt_issuer: String,
     pub jwt_audience: String,
+    pub workspace_member_limit: i64,
+    pub workspace_monthly_run_limit: i64,
 }
 
 impl Config {
@@ -127,6 +134,12 @@ impl Config {
 
         let jwt_issuer = require_env("JWT_ISSUER")?;
         let jwt_audience = require_env("JWT_AUDIENCE")?;
+        let workspace_member_limit =
+            parse_positive_env_i64("WORKSPACE_MEMBER_LIMIT", DEFAULT_WORKSPACE_MEMBER_LIMIT)?;
+        let workspace_monthly_run_limit = parse_positive_env_i64(
+            "WORKSPACE_MONTHLY_RUN_LIMIT",
+            DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+        )?;
 
         Ok(Config {
             database_url,
@@ -143,6 +156,8 @@ impl Config {
             webhook_secret,
             jwt_issuer,
             jwt_audience,
+            workspace_member_limit,
+            workspace_monthly_run_limit,
         })
     }
 }
@@ -176,9 +191,36 @@ fn validate_webhook_secret(secret: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+fn parse_positive_env_i64(name: &'static str, default: i64) -> Result<i64, ConfigError> {
+    match env::var(name) {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Ok(default);
+            }
+            let value = trimmed
+                .parse::<i64>()
+                .map_err(|err| ConfigError::InvalidEnvVar {
+                    name,
+                    reason: err.to_string(),
+                })?;
+            if value <= 0 {
+                return Err(ConfigError::InvalidEnvVar {
+                    name,
+                    reason: "must be greater than zero".to_string(),
+                });
+            }
+            Ok(value)
+        }
+        Err(_) => Ok(default),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Config, ConfigError};
+    use super::{
+        Config, ConfigError, DEFAULT_WORKSPACE_MEMBER_LIMIT, DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+    };
     use base64::Engine as _;
     use std::env;
     use std::sync::Mutex;
@@ -206,7 +248,11 @@ mod tests {
         "JWT_AUDIENCE",
     ];
 
-    const OPTIONAL_VARS: [&str; 1] = ["AUTH_COOKIE_SECURE"]; // allow tests to run without ambient overrides
+    const OPTIONAL_VARS: [&str; 3] = [
+        "AUTH_COOKIE_SECURE",
+        "WORKSPACE_MEMBER_LIMIT",
+        "WORKSPACE_MONTHLY_RUN_LIMIT",
+    ]; // allow tests to run without ambient overrides
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -295,6 +341,14 @@ mod tests {
         env::set_var("WEBHOOK_SECRET", "0123456789abcdef0123456789ABCDEF");
         env::set_var("JWT_ISSUER", "dsentr.test");
         env::set_var("JWT_AUDIENCE", "dsentr.api");
+        env::set_var(
+            "WORKSPACE_MEMBER_LIMIT",
+            DEFAULT_WORKSPACE_MEMBER_LIMIT.to_string(),
+        );
+        env::set_var(
+            "WORKSPACE_MONTHLY_RUN_LIMIT",
+            DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT.to_string(),
+        );
     }
 
     #[test]
@@ -320,6 +374,14 @@ mod tests {
             assert!(config.auth_cookie_secure);
             assert_eq!(config.jwt_issuer, "dsentr.test");
             assert_eq!(config.jwt_audience, "dsentr.api");
+            assert_eq!(
+                config.workspace_member_limit,
+                DEFAULT_WORKSPACE_MEMBER_LIMIT
+            );
+            assert_eq!(
+                config.workspace_monthly_run_limit,
+                DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT
+            );
         });
     }
 
@@ -330,6 +392,31 @@ mod tests {
             env::set_var("AUTH_COOKIE_SECURE", "false");
             let config = Config::from_env().expect("config should load");
             assert!(!config.auth_cookie_secure);
+        });
+    }
+
+    #[test]
+    fn rejects_invalid_workspace_limits() {
+        with_env(|| {
+            populate_defaults();
+            env::set_var("WORKSPACE_MEMBER_LIMIT", "not-a-number");
+            match Config::from_env() {
+                Err(ConfigError::InvalidEnvVar { name, .. }) => {
+                    assert_eq!(name, "WORKSPACE_MEMBER_LIMIT");
+                }
+                other => panic!("expected invalid env error, got {other:?}"),
+            }
+        });
+
+        with_env(|| {
+            populate_defaults();
+            env::set_var("WORKSPACE_MONTHLY_RUN_LIMIT", "0");
+            match Config::from_env() {
+                Err(ConfigError::InvalidEnvVar { name, .. }) => {
+                    assert_eq!(name, "WORKSPACE_MONTHLY_RUN_LIMIT");
+                }
+                other => panic!("expected invalid env error, got {other:?}"),
+            }
         });
     }
 

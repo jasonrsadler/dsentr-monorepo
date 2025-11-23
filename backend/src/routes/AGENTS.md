@@ -51,6 +51,7 @@
 - Added regression tests that cover invite acceptance at the member cap plus workflow run starts at the run cap, ensuring the proper status codes, error payloads, and quota release behavior when idempotent requests reuse existing runs.
 - Workspaces/auth/account/billing routes now sync or clear `workspace_billing_cycles` based on Stripe subscription data, expose `cycle_started_at` alongside `renews_at`, and wipe stored cycle windows whenever a workspace downgrades back to Solo so quota evaluation matches the real billing window.
 - Route mocks now implement the expanded workspace repository surface (member counts, run quotas, billing cycles) and default missing plans to Workspace so invite/signup paths hit plan-limit guards without panicking in tests.
+- Workspace member caps reserve seats for pending invitations and read limits from `WORKSPACE_MEMBER_LIMIT`/`WORKSPACE_MONTHLY_RUN_LIMIT` so deployments can tune quotas without code changes.
 
 ## New (Stripe billing plan lifecycle)
 - Workspace subscribers now see renewal/reversion dates surfaced in the Plans tab. `GET /api/workspaces/onboarding` attaches `billing.subscription` with:

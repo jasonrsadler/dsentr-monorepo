@@ -25,3 +25,4 @@
 - Added `ensure_run_membership` in `mod.rs` and wired Slack, Teams, and Sheets workspace branches through it so we short-circuit with a `Forbidden` error (and dedicated tests) before touching shared OAuth tokens or external APIs when a run's actor is no longer a workspace member.
 - Workspace connection contexts for Slack, Teams, and Sheets now emit the `owner_user_id` (replacing the old `created_by` semantics) so downstream logs/tests know which member shared the credential.
 - Google Chat messaging tests now assert the expected failure directly instead of a tautological check, quieting clippy while keeping the stub-less path covered.
+- Action test configs include workspace quota fields so env-driven member/run limits remain wired through the shared AppState helpers.
