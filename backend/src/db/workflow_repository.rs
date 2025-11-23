@@ -240,6 +240,7 @@ pub trait WorkflowRepository: Send + Sync {
         since: OffsetDateTime,
     ) -> Result<i64, sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn count_workspace_runs_since(
         &self,
         workspace_id: Uuid,

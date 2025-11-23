@@ -26,3 +26,4 @@
 - Workspace connection contexts for Slack, Teams, and Sheets now emit the `owner_user_id` (replacing the old `created_by` semantics) so downstream logs/tests know which member shared the credential.
 - Google Chat messaging tests now assert the expected failure directly instead of a tautological check, quieting clippy while keeping the stub-less path covered.
 - Action test configs include workspace quota fields so env-driven member/run limits remain wired through the shared AppState helpers.
+- Email actions stop returning provider message IDs as `selectedNext` values; executor now falls back to outgoing edges when a selected next node is missing so downstream nodes still run after email sends.

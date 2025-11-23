@@ -60,6 +60,7 @@ pub enum WorkspaceLimitError {
     #[error("Workspace member limit reached (max {limit})")]
     MemberLimitReached { limit: i64 },
     #[error("Workspace run limit reached (max {limit})")]
+    #[allow(dead_code)]
     RunLimitReached { limit: i64 },
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),

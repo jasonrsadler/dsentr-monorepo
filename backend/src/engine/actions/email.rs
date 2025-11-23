@@ -473,7 +473,7 @@ pub(crate) async fn execute_email(
                     "status": status.as_u16(),
                     "message_id": message_id.clone()
                 }),
-                message_id,
+                None,
             ))
         }
         "mailgun" => {
@@ -633,7 +633,7 @@ pub(crate) async fn execute_email(
                     "status": status.as_u16(),
                     "message_id": message_id.clone()
                 }),
-                message_id,
+                None,
             ))
         }
         "amazon_ses" => {
@@ -835,7 +835,7 @@ pub(crate) async fn execute_email(
                             "message_id": message_id.clone(),
                             "version": "v1"
                         }),
-                        message_id,
+                        None,
                     ))
                 }
                 _ => {
@@ -930,7 +930,7 @@ pub(crate) async fn execute_email(
                             "message_id": message_id.clone(),
                             "version": "v2"
                         }),
-                        message_id,
+                        None,
                     ))
                 }
             }
@@ -1588,7 +1588,7 @@ mod tests {
             .await
             .expect("sendgrid email should succeed");
 
-        assert_eq!(next, Some("abc123".to_string()));
+        assert!(next.is_none());
         assert_eq!(output["sent"], true);
         assert_eq!(output["service"], "SendGrid");
         assert_eq!(output["status"], 202);
@@ -1774,7 +1774,8 @@ mod tests {
 
         assert_eq!(output["service"], "Mailgun");
         assert_eq!(output["status"], 200);
-        assert_eq!(next, Some("<2024.mailgun>".to_string()));
+        assert_eq!(output["message_id"], "<2024.mailgun>");
+        assert!(next.is_none());
 
         let req = rx.recv().await.expect("request should be recorded");
         handle.abort();
@@ -1847,7 +1848,8 @@ mod tests {
 
         assert_eq!(output["service"], "Mailgun");
         assert_eq!(output["status"], 200);
-        assert_eq!(next, Some("<queued>".to_string()));
+        assert_eq!(output["message_id"], "<queued>");
+        assert!(next.is_none());
 
         let req = rx.recv().await.expect("request should be recorded");
         handle.abort();
@@ -1983,7 +1985,7 @@ mod tests {
         assert_eq!(output["status"], 200);
         assert_eq!(output["version"], "v2");
         assert_eq!(output["message_id"], "0001");
-        assert_eq!(next, Some("0001".to_string()));
+        assert!(next.is_none());
 
         let req = rx.recv().await.expect("request should be recorded");
         handle.abort();
@@ -2104,7 +2106,7 @@ mod tests {
 
         assert_eq!(output["version"], "v1");
         assert_eq!(output["message_id"], "m-123");
-        assert_eq!(next, Some("m-123".to_string()));
+        assert!(next.is_none());
 
         let req = rx.recv().await.expect("request should be recorded");
         handle.abort();

@@ -588,6 +588,7 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(0)
     }
 
+    #[allow(dead_code)]
     async fn count_workspace_runs_since(
         &self,
         _workspace_id: Uuid,
@@ -786,6 +787,7 @@ pub struct NoopWorkspaceRepository;
 pub struct StaticWorkspaceMembershipRepository {
     allowed: bool,
     max_runs: Option<i64>,
+    #[allow(clippy::type_complexity)]
     run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
     release_calls: Arc<Mutex<usize>>,
     period_starts: Arc<Mutex<Vec<OffsetDateTime>>>,

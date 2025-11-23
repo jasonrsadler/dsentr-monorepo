@@ -972,6 +972,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         Ok(count.unwrap_or(0))
     }
 
+    #[allow(dead_code)]
     async fn count_workspace_runs_since(
         &self,
         workspace_id: Uuid,

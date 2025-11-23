@@ -292,7 +292,6 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) -> Result<(), Execut
             continue;
         };
         let kind = node.kind.as_str();
-        let mut next_nodes: Vec<String> = vec![];
 
         let running = state
             .workflow_repo
@@ -375,45 +374,23 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) -> Result<(), Execut
                     context.insert(alias, outputs.clone());
                 }
 
-                match selected_next {
-                    Some(next_id) => next_nodes.push(next_id),
-                    None => {
-                        if kind == "condition" {
-                            let desired_handle = outputs
-                                .get("result")
-                                .and_then(|v| v.as_bool())
-                                .map(|is_true| if is_true { "cond-true" } else { "cond-false" });
-
-                            if let Some(handle) = desired_handle {
-                                next_nodes.extend(
-                                    graph
-                                        .outgoing(&node_id)
-                                        .iter()
-                                        .filter(|edge| {
-                                            edge.source_handle.as_deref() == Some(handle)
-                                        })
-                                        .map(|edge| edge.target.clone()),
-                                );
-                            } else {
-                                next_nodes.extend(
-                                    graph
-                                        .outgoing(&node_id)
-                                        .iter()
-                                        .map(|edge| edge.target.clone()),
-                                );
-                            }
-                        } else {
-                            next_nodes.extend(
-                                graph
-                                    .outgoing(&node_id)
-                                    .iter()
-                                    .map(|edge| edge.target.clone()),
-                            );
-                        }
-                    }
+                let resolution =
+                    resolve_next_nodes(&graph, &node_id, kind, &outputs, selected_next);
+                if let Some(invalid) = resolution.invalid_selected {
+                    warn!(
+                        %run.id,
+                        workflow_id = %run.workflow_id,
+                        node_id = %node.id,
+                        invalid_selected_next = %invalid,
+                        "Executor received selectedNext that does not exist in the graph; using outgoing edges instead"
+                    );
+                }
+                for next in resolution.nodes.into_iter().rev() {
+                    stack.push(next);
                 }
             }
             Err(err_msg) => {
+                let mut next_nodes: Vec<String> = vec![];
                 if let Some(nr) = running {
                     let _ = state
                         .workflow_repo
@@ -452,11 +429,11 @@ pub async fn execute_run(state: AppState, run: WorkflowRun) -> Result<(), Execut
                             .map(|edge| edge.target.clone()),
                     );
                 }
-            }
-        }
 
-        for next in next_nodes.into_iter().rev() {
-            stack.push(next);
+                for next in next_nodes.into_iter().rev() {
+                    stack.push(next);
+                }
+            }
         }
     }
 
@@ -490,6 +467,80 @@ fn context_keys(node: &super::graph::Node) -> (String, Option<String>) {
         }
     } else {
         (node.id.clone(), None)
+    }
+}
+
+#[derive(Debug)]
+struct NextResolution {
+    nodes: Vec<String>,
+    invalid_selected: Option<String>,
+}
+
+fn resolve_next_nodes(
+    graph: &Graph,
+    node_id: &str,
+    kind: &str,
+    outputs: &Value,
+    selected_next: Option<String>,
+) -> NextResolution {
+    let mut nodes: Vec<String> = vec![];
+
+    let push_outgoing = |targets: &mut Vec<String>| {
+        if kind == "condition" {
+            let desired_handle = outputs
+                .get("result")
+                .and_then(|v| v.as_bool())
+                .map(|is_true| if is_true { "cond-true" } else { "cond-false" });
+
+            if let Some(handle) = desired_handle {
+                targets.extend(
+                    graph
+                        .outgoing(node_id)
+                        .iter()
+                        .filter(|edge| edge.source_handle.as_deref() == Some(handle))
+                        .map(|edge| edge.target.clone()),
+                );
+            } else {
+                targets.extend(
+                    graph
+                        .outgoing(node_id)
+                        .iter()
+                        .map(|edge| edge.target.clone()),
+                );
+            }
+        } else {
+            targets.extend(
+                graph
+                    .outgoing(node_id)
+                    .iter()
+                    .map(|edge| edge.target.clone()),
+            );
+        }
+    };
+
+    match selected_next {
+        Some(next_id) => {
+            if graph.nodes.contains_key(&next_id) {
+                nodes.push(next_id);
+                NextResolution {
+                    nodes,
+                    invalid_selected: None,
+                }
+            } else {
+                push_outgoing(&mut nodes);
+                NextResolution {
+                    nodes,
+                    invalid_selected: Some(next_id),
+                }
+            }
+        }
+        None => {
+            push_outgoing(&mut nodes);
+            NextResolution {
+                nodes,
+                invalid_selected: None,
+            }
+        }
     }
 }
 
@@ -842,6 +893,57 @@ mod tests {
         let hosts = collect_snapshot_allowlist(Some(&snapshot));
 
         assert_eq!(hosts, vec!["api.example.com", "example.com"]);
+    }
+
+    #[test]
+    fn resolve_next_nodes_prefers_valid_selected_next() {
+        let graph = Graph::from_snapshot(&json!({
+            "nodes": [
+                {"id": "n1", "type": "action", "data": {}},
+                {"id": "n2", "type": "action", "data": {}},
+                {"id": "n3", "type": "action", "data": {}}
+            ],
+            "edges": [
+                {"id": "e1", "source": "n1", "target": "n2"},
+                {"id": "e2", "source": "n1", "target": "n3"}
+            ]
+        }))
+        .expect("graph should build");
+
+        let outputs = json!({});
+        let resolution =
+            resolve_next_nodes(&graph, "n1", "action", &outputs, Some("n3".to_string()));
+
+        assert_eq!(resolution.nodes, vec!["n3"]);
+        assert!(resolution.invalid_selected.is_none());
+    }
+
+    #[test]
+    fn resolve_next_nodes_falls_back_when_selected_missing() {
+        let graph = Graph::from_snapshot(&json!({
+            "nodes": [
+                {"id": "cond-1", "type": "condition", "data": {}},
+                {"id": "true-branch", "type": "action", "data": {}},
+                {"id": "false-branch", "type": "action", "data": {}}
+            ],
+            "edges": [
+                {"id": "true-edge", "source": "cond-1", "target": "true-branch", "sourceHandle": "cond-true"},
+                {"id": "false-edge", "source": "cond-1", "target": "false-branch", "sourceHandle": "cond-false"}
+            ]
+        }))
+        .expect("graph should build");
+
+        let outputs = json!({"result": true});
+        let resolution = resolve_next_nodes(
+            &graph,
+            "cond-1",
+            "condition",
+            &outputs,
+            Some("missing".into()),
+        );
+
+        assert_eq!(resolution.nodes, vec!["true-branch"]);
+        assert_eq!(resolution.invalid_selected.as_deref(), Some("missing"));
     }
 
     fn base_run(node_type: &str, data: serde_json::Value) -> WorkflowRun {
