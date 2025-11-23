@@ -486,38 +486,41 @@ fn push_if_some(
 }
 
 pub fn hydrate_secrets_into_snapshot(snapshot: &mut Value, secret_store: &SecretStore) {
-    if let Some(nodes) = snapshot.get_mut("nodes").and_then(Value::as_array_mut) {
-        for node in nodes {
-            let data = match node.get_mut("data") {
-                Some(Value::Object(map)) => map,
-                _ => continue,
-            };
-            let params = match data.get_mut("params") {
-                Some(Value::Object(map)) => map,
-                _ => continue,
-            };
+    fn hydrate_value(v: &mut Value, store: &SecretStore) {
+        match v {
+            Value::String(s) => {
+                // Must match EXACTLY group:service:name with no extra parts.
+                let mut parts = s.split(':');
+                let g = parts.next();
+                let s2 = parts.next();
+                let n = parts.next();
+                let extra = parts.next();
 
-            for (_k, v) in params.iter_mut() {
-                if let Some(s) = v.as_str() {
-                    // secret references follow group:service:name
-                    let parts: Vec<&str> = s.split(':').collect();
-                    if parts.len() == 3 {
-                        let group = parts[0];
-                        let service = parts[1];
-                        let name = parts[2];
-
-                        if let Some(service_map) = secret_store.get(group) {
-                            if let Some(entries) = service_map.get(service) {
-                                if let Some(plaintext) = entries.get(name) {
-                                    *v = Value::String(plaintext.clone());
-                                }
+                if let (Some(group), Some(service), Some(name), None) = (g, s2, n, extra) {
+                    if let Some(svc_map) = store.get(group) {
+                        if let Some(entries) = svc_map.get(service) {
+                            if let Some(plaintext) = entries.get(name) {
+                                *v = Value::String(plaintext.clone());
                             }
                         }
                     }
                 }
             }
+            Value::Object(map) => {
+                for (_k, val) in map.iter_mut() {
+                    hydrate_value(val, store);
+                }
+            }
+            Value::Array(arr) => {
+                for elem in arr.iter_mut() {
+                    hydrate_value(elem, store);
+                }
+            }
+            _ => {}
         }
     }
+
+    hydrate_value(snapshot, secret_store);
 }
 
 #[cfg(test)]

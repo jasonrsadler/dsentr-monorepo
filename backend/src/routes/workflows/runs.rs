@@ -294,16 +294,23 @@ pub async fn get_workflow_run_status(
         .await
     {
         Ok(Some(run)) => {
+            // clone and redact
+            let mut safe_run = run.clone();
+            let mut safe_snapshot = safe_run.snapshot.clone();
+            redact_secrets(&mut safe_snapshot);
+            safe_run.snapshot = safe_snapshot;
+
             let nodes_res = app_state
                 .workflow_repo
                 .list_workflow_node_runs(owner_id, workflow_id, run_id)
                 .await;
+
             match nodes_res {
                 Ok(node_runs) => (
                     StatusCode::OK,
                     Json(json!({
                         "success": true,
-                        "run": run,
+                        "run": safe_run,
                         "node_runs": node_runs
                     })),
                 )
