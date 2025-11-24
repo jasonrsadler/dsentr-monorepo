@@ -369,6 +369,15 @@ async fn process_plan_change(
 
             let price_id = std::env::var("STRIPE_WORKSPACE_PRICE_ID")
                 .unwrap_or_else(|_| "price_test".to_string());
+            let overage_price_id = match std::env::var("STRIPE_OVERAGE_PRICE_ID") {
+                Ok(val) if !val.trim().is_empty() => val,
+                _ => {
+                    tracing::error!("missing STRIPE_OVERAGE_PRICE_ID for workspace upgrade");
+                    return Err(
+                        JsonResponse::server_error("Billing is not configured").into_response()
+                    );
+                }
+            };
             let success_url = format!(
                 "{}/dashboard?billing=success&session_id={{CHECKOUT_SESSION_ID}}",
                 app_state.config.frontend_origin
@@ -382,6 +391,18 @@ async fn process_plan_change(
             metadata.insert("plan".to_string(), PlanTier::Workspace.as_str().to_string());
             metadata.insert("workspace_name".to_string(), workspace_name.to_string());
             metadata.insert("user_id".to_string(), user_id.to_string());
+            let mut line_items = vec![crate::services::stripe::CheckoutLineItem {
+                price: price_id,
+                quantity: Some(1),
+            }];
+            if workspace_id.is_none() {
+                // Workspace plan subscriptions always attach the metered overage item; existing
+                // workspaces will already carry their subscription item id for idempotency.
+                line_items.push(crate::services::stripe::CheckoutLineItem {
+                    price: overage_price_id,
+                    quantity: None,
+                });
+            }
 
             let session = match app_state
                 .stripe
@@ -389,10 +410,7 @@ async fn process_plan_change(
                     success_url,
                     cancel_url,
                     mode: crate::services::stripe::CheckoutMode::Subscription,
-                    line_items: vec![crate::services::stripe::CheckoutLineItem {
-                        price: price_id,
-                        quantity: 1,
-                    }],
+                    line_items,
                     client_reference_id: Some(user_id.to_string()),
                     customer: Some(customer_id.clone()),
                     metadata: Some(metadata),
@@ -2610,6 +2628,7 @@ mod tests {
         workspace: Arc<Mutex<Option<Workspace>>>,
         run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
+        overage_items: Arc<Mutex<HashMap<Uuid, Option<String>>>>,
     }
 
     impl TestWorkspaceRepo {
@@ -2622,6 +2641,7 @@ mod tests {
                 workspace: Arc::new(Mutex::new(None)),
                 run_usage: Arc::new(Mutex::new(HashMap::new())),
                 billing_cycles: Arc::new(Mutex::new(HashMap::new())),
+                overage_items: Arc::new(Mutex::new(HashMap::new())),
             }
         }
 
@@ -2701,6 +2721,31 @@ mod tests {
         ) -> Result<Option<crate::models::workspace::Workspace>, sqlx::Error> {
             let stored = self.workspace.lock().unwrap();
             Ok(stored.as_ref().filter(|ws| ws.id == workspace_id).cloned())
+        }
+
+        async fn set_stripe_overage_item_id(
+            &self,
+            workspace_id: Uuid,
+            subscription_item_id: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            self.overage_items
+                .lock()
+                .unwrap()
+                .insert(workspace_id, subscription_item_id.map(|s| s.to_string()));
+            Ok(())
+        }
+
+        async fn get_stripe_overage_item_id(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Option<String>, sqlx::Error> {
+            Ok(self
+                .overage_items
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .cloned()
+                .flatten())
         }
 
         async fn add_member(
@@ -3106,6 +3151,7 @@ mod tests {
                 created_by,
                 owner_id: created_by,
                 plan: plan.to_string(),
+                stripe_overage_item_id: None,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
                 deleted_at: None,
@@ -3160,6 +3206,29 @@ mod tests {
             workspace_id: Uuid,
         ) -> Result<Option<Workspace>, sqlx::Error> {
             Ok(self.workspaces.lock().unwrap().get(&workspace_id).cloned())
+        }
+
+        async fn set_stripe_overage_item_id(
+            &self,
+            workspace_id: Uuid,
+            subscription_item_id: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            if let Some(ws) = self.workspaces.lock().unwrap().get_mut(&workspace_id) {
+                ws.stripe_overage_item_id = subscription_item_id.map(|s| s.to_string());
+            }
+            Ok(())
+        }
+
+        async fn get_stripe_overage_item_id(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Option<String>, sqlx::Error> {
+            Ok(self
+                .workspaces
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .and_then(|ws| ws.stripe_overage_item_id.clone()))
         }
 
         async fn add_member(
@@ -3696,6 +3765,7 @@ mod tests {
             created_by: user_id,
             owner_id: user_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3791,6 +3861,7 @@ mod tests {
             created_by: user_id,
             owner_id: user_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3862,6 +3933,7 @@ mod tests {
             created_by: user_id,
             owner_id: user_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -3920,6 +3992,7 @@ mod tests {
             created_by: user_id,
             owner_id: user_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4023,6 +4096,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4126,6 +4200,7 @@ mod tests {
             created_by: user_id,
             owner_id: user_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4210,6 +4285,7 @@ mod tests {
             created_by: invite.created_by,
             owner_id: invite.created_by,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4257,6 +4333,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4317,6 +4394,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4379,6 +4457,7 @@ mod tests {
             created_by: invite.created_by,
             owner_id: invite.created_by,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4455,6 +4534,8 @@ mod tests {
         let user_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
         let now = OffsetDateTime::now_utc();
+        std::env::set_var("STRIPE_WORKSPACE_PRICE_ID", "price_base_test");
+        std::env::set_var("STRIPE_OVERAGE_PRICE_ID", "price_overage_test");
 
         let workspace = Workspace {
             id: workspace_id,
@@ -4462,6 +4543,7 @@ mod tests {
             created_by: user_id,
             owner_id: user_id,
             plan: PlanTier::Solo.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4526,6 +4608,8 @@ mod tests {
 
         let user_id = Uuid::new_v4();
         let now = OffsetDateTime::now_utc();
+        std::env::set_var("STRIPE_WORKSPACE_PRICE_ID", "price_base_test");
+        std::env::set_var("STRIPE_OVERAGE_PRICE_ID", "price_overage_test");
 
         // Prepare DB with a solo user (plan None/solo), and empty settings
         let db = Arc::new(MockDb {
@@ -4590,6 +4674,10 @@ mod tests {
         );
         let expected = user_id.to_string();
         assert_eq!(req.client_reference_id.as_deref(), Some(expected.as_str()));
+        assert_eq!(req.line_items.len(), 2);
+        let prices: Vec<_> = req.line_items.iter().map(|li| li.price.as_str()).collect();
+        assert!(prices.contains(&"price_base_test"));
+        assert!(prices.contains(&"price_overage_test"));
 
         // Plan should not be mutated during initiation (only at webhook success)
         assert_eq!(*db.update_user_plan_calls.lock().unwrap(), 0);
@@ -4664,6 +4752,7 @@ mod tests {
             created_by: user_id,
             owner_id: user_id,
             plan: PlanTier::Solo.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4740,6 +4829,7 @@ mod tests {
             created_by: user_id,
             owner_id: user_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4838,6 +4928,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4917,6 +5008,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -4998,6 +5090,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -5063,6 +5156,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -5147,6 +5241,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -5218,6 +5313,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -5271,6 +5367,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -5322,6 +5419,7 @@ mod tests {
             created_by: owner_id,
             owner_id,
             plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,

@@ -775,6 +775,21 @@ mod tests {
             unimplemented!()
         }
 
+        async fn set_stripe_overage_item_id(
+            &self,
+            _workspace_id: Uuid,
+            _subscription_item_id: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn get_stripe_overage_item_id(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Option<String>, sqlx::Error> {
+            unimplemented!()
+        }
+
         async fn add_member(
             &self,
             _workspace_id: Uuid,

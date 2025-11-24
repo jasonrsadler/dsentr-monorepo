@@ -117,6 +117,8 @@ pub async fn webhook(
                 }
             };
             let stripe_customer_id = extract_customer_id(payload);
+            let subscription_id =
+                extract_str(payload, &["data", "object", "subscription"]).map(|s| s.to_string());
 
             // Resolve user
             let mut user_id: Option<Uuid> = extract_checkout_user_id(payload);
@@ -203,6 +205,13 @@ pub async fn webhook(
                 }
             }
             let workspace_name = workspace_name_opt.unwrap_or_else(|| "My Workspace".to_string());
+            let overage_price_id = match std::env::var("STRIPE_OVERAGE_PRICE_ID") {
+                Ok(val) if !val.trim().is_empty() => val,
+                _ => {
+                    error!(%user_id, "STRIPE_OVERAGE_PRICE_ID is not configured");
+                    return JsonResponse::server_error("Billing is not configured").into_response();
+                }
+            };
 
             // Persist customer id if present
             if let Some(customer_id) = stripe_customer_id.as_deref() {
@@ -212,6 +221,31 @@ pub async fn webhook(
                     .await
                 {
                     warn!(?err, %user_id, customer_id, "failed to persist stripe customer id on checkout completion");
+                }
+            }
+
+            let mut subscription_info: Option<crate::services::stripe::SubscriptionInfo> = None;
+            if let Some(sub_id) = subscription_id.as_deref() {
+                match app_state.stripe.get_subscription(sub_id).await {
+                    Ok(sub) => subscription_info = Some(sub),
+                    Err(err) => {
+                        error!(?err, %user_id, subscription_id=sub_id, "failed to load subscription for checkout completion");
+                        return JsonResponse::server_error("Failed to finalize subscription")
+                            .into_response();
+                    }
+                }
+            } else if let Some(customer_id) = stripe_customer_id.as_deref() {
+                match app_state
+                    .stripe
+                    .get_active_subscription_for_customer(customer_id)
+                    .await
+                {
+                    Ok(opt) => subscription_info = opt,
+                    Err(err) => {
+                        error!(?err, %user_id, customer_id, "failed to load active subscription during checkout completion");
+                        return JsonResponse::server_error("Failed to finalize subscription")
+                            .into_response();
+                    }
                 }
             }
 
@@ -280,7 +314,7 @@ pub async fn webhook(
                 }
             }
 
-            let workspace = match workspace {
+            let mut workspace = match workspace {
                 Some(ws) => ws,
                 None => match app_state
                     .workspace_repo
@@ -325,6 +359,42 @@ pub async fn webhook(
                 }
             }
 
+            if workspace.stripe_overage_item_id.is_none() {
+                let sub = match subscription_info.as_ref() {
+                    Some(sub) => sub,
+                    None => {
+                        error!(%user_id, workspace_id=%workspace.id, "subscription missing for checkout completion");
+                        return JsonResponse::server_error("Subscription not found for workspace")
+                            .into_response();
+                    }
+                };
+                let overage_item_id = match sub
+                    .items
+                    .iter()
+                    .find(|item| item.price_id == overage_price_id)
+                {
+                    Some(item) => item.id.clone(),
+                    None => {
+                        error!(%user_id, workspace_id=%workspace.id, "subscription missing overage item");
+                        return JsonResponse::server_error(
+                            "Subscription is missing metered overage item",
+                        )
+                        .into_response();
+                    }
+                };
+
+                if let Err(err) = app_state
+                    .workspace_repo
+                    .set_stripe_overage_item_id(workspace.id, Some(&overage_item_id))
+                    .await
+                {
+                    error!(?err, %user_id, workspace_id=%workspace.id, "failed to persist overage subscription item id");
+                    return JsonResponse::server_error("Failed to persist subscription state")
+                        .into_response();
+                }
+                workspace.stripe_overage_item_id = Some(overage_item_id);
+            }
+
             // Mark onboarding complete if not already
             if let Err(err) = app_state
                 .db
@@ -349,7 +419,21 @@ pub async fn webhook(
                 warn!(?err, %user_id, "failed to clear pending checkout after completion");
             }
 
-            if let Some(customer_id) = stripe_customer_id.as_deref() {
+            if let Some(sub) = subscription_info.as_ref() {
+                if let (Ok(period_start), Ok(period_end)) = (
+                    OffsetDateTime::from_unix_timestamp(sub.current_period_start),
+                    OffsetDateTime::from_unix_timestamp(sub.current_period_end),
+                ) {
+                    app_state
+                        .sync_owned_workspace_billing_cycles(
+                            user_id,
+                            &sub.id,
+                            period_start,
+                            period_end,
+                        )
+                        .await;
+                }
+            } else if let Some(customer_id) = stripe_customer_id.as_deref() {
                 match app_state
                     .stripe
                     .get_active_subscription_for_customer(customer_id)
@@ -749,7 +833,7 @@ mod tests {
         WorkspaceRole,
     };
     use crate::services::smtp_mailer::MockMailer;
-    use crate::services::stripe::MockStripeService;
+    use crate::services::stripe::{MockStripeService, SubscriptionInfo, SubscriptionItemInfo};
     use crate::state::{test_pg_pool, AppState};
     use crate::utils::{jwt::JwtKeys, plan_limits::NormalizedPlanTier};
     use axum::extract::State as AxumState;
@@ -770,6 +854,7 @@ mod tests {
         name_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
         run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
+        overage_items: Arc<Mutex<HashMap<Uuid, Option<String>>>>,
     }
 
     #[async_trait::async_trait]
@@ -787,6 +872,7 @@ mod tests {
                 created_by,
                 owner_id: created_by,
                 plan: plan.to_string(),
+                stripe_overage_item_id: None,
                 created_at: now,
                 updated_at: now,
                 deleted_at: None,
@@ -818,6 +904,7 @@ mod tests {
                     created_by: Uuid::nil(),
                     owner_id: Uuid::nil(),
                     plan: "workspace".into(),
+                    stripe_overage_item_id: None,
                     created_at: now,
                     updated_at: now,
                     deleted_at: None,
@@ -854,6 +941,7 @@ mod tests {
                     created_by: Uuid::nil(),
                     owner_id: Uuid::nil(),
                     plan: plan.to_string(),
+                    stripe_overage_item_id: None,
                     created_at: now,
                     updated_at: now,
                     deleted_at: None,
@@ -883,6 +971,49 @@ mod tests {
             _workspace_id: Uuid,
         ) -> Result<Option<Workspace>, sqlx::Error> {
             Ok(None)
+        }
+
+        async fn set_stripe_overage_item_id(
+            &self,
+            workspace_id: Uuid,
+            subscription_item_id: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            if let Some(ws) = self
+                .workspaces
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|w| w.id == workspace_id)
+            {
+                ws.stripe_overage_item_id = subscription_item_id.map(|s| s.to_string());
+            }
+            self.overage_items
+                .lock()
+                .unwrap()
+                .insert(workspace_id, subscription_item_id.map(|s| s.to_string()));
+            Ok(())
+        }
+
+        async fn get_stripe_overage_item_id(
+            &self,
+            workspace_id: Uuid,
+        ) -> Result<Option<String>, sqlx::Error> {
+            if let Some(ws) = self
+                .workspaces
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|w| w.id == workspace_id)
+            {
+                return Ok(ws.stripe_overage_item_id.clone());
+            }
+            Ok(self
+                .overage_items
+                .lock()
+                .unwrap()
+                .get(&workspace_id)
+                .cloned()
+                .flatten())
         }
 
         async fn add_member(
@@ -1173,12 +1304,14 @@ mod tests {
         let user_id = Uuid::new_v4();
         let session_id = "cs_test_123";
         let now = OffsetDateTime::now_utc();
+        std::env::set_var("STRIPE_OVERAGE_PRICE_ID", "price_overage_test");
         let personal_workspace = Workspace {
             id: Uuid::new_v4(),
             name: "Owner's Workspace".into(),
             created_by: user_id,
             owner_id: user_id,
             plan: WORKSPACE_PLAN_SOLO.into(),
+            stripe_overage_item_id: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -1232,6 +1365,21 @@ mod tests {
         }
 
         let stripe = Arc::new(MockStripeService::new());
+        {
+            let mut guard = stripe.active_subscription.lock().unwrap();
+            *guard = Some(SubscriptionInfo {
+                id: "sub_123".into(),
+                status: "active".into(),
+                current_period_start: now.unix_timestamp(),
+                current_period_end: (now + time::Duration::days(30)).unix_timestamp(),
+                cancel_at: None,
+                cancel_at_period_end: false,
+                items: vec![SubscriptionItemInfo {
+                    id: "si_over".into(),
+                    price_id: "price_overage_test".into(),
+                }],
+            });
+        }
         let state = AppState {
             db: db.clone(),
             workflow_repo: Arc::new(NoopWorkflowRepository),
@@ -1304,12 +1452,148 @@ mod tests {
         assert_eq!(stored[0].id, personal_workspace.id);
         assert_eq!(stored[0].plan, "workspace");
         assert_eq!(stored[0].name, "Acme Co");
+        assert_eq!(stored[0].stripe_overage_item_id.as_deref(), Some("si_over"));
+    }
+
+    #[tokio::test]
+    async fn webhook_checkout_completion_is_idempotent_with_existing_overage_item() {
+        let user_id = Uuid::new_v4();
+        let session_id = "cs_test_existing";
+        let now = OffsetDateTime::now_utc();
+        std::env::set_var("STRIPE_OVERAGE_PRICE_ID", "price_overage_test");
+        let personal_workspace = Workspace {
+            id: Uuid::new_v4(),
+            name: "Owner's Workspace".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: WORKSPACE_PLAN_SOLO.into(),
+            stripe_overage_item_id: Some("si_existing".into()),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: Some("workspace".into()),
+                company_name: None,
+                stripe_customer_id: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: None,
+                created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
+            }),
+            ..Default::default()
+        });
+
+        let workspace_repo = Arc::new(TestWorkspaceRepo::default());
+        workspace_repo
+            .workspaces
+            .lock()
+            .unwrap()
+            .push(personal_workspace.clone());
+        workspace_repo
+            .memberships
+            .lock()
+            .unwrap()
+            .push(WorkspaceMembershipSummary {
+                workspace: personal_workspace.clone(),
+                role: WorkspaceRole::Owner,
+            });
+
+        {
+            let mut settings = db.user_settings.lock().unwrap();
+            *settings = serde_json::json!({
+                "billing": {
+                    "pending_checkout": {
+                        "session_id": session_id,
+                        "plan_tier": "workspace",
+                        "workspace_name": "Acme Co"
+                    }
+                }
+            });
+        }
+
+        let stripe = Arc::new(MockStripeService::new());
+        {
+            let mut guard = stripe.active_subscription.lock().unwrap();
+            *guard = Some(SubscriptionInfo {
+                id: "sub_retry".into(),
+                status: "active".into(),
+                current_period_start: now.unix_timestamp(),
+                current_period_end: (now + time::Duration::days(30)).unix_timestamp(),
+                cancel_at: None,
+                cancel_at_period_end: false,
+                items: vec![SubscriptionItemInfo {
+                    id: "si_new_overage".into(),
+                    price_id: "price_overage_test".into(),
+                }],
+            });
+        }
+        let state = AppState {
+            db: db.clone(),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: workspace_repo.clone(),
+            workspace_connection_repo: Arc::new(
+                crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
+            ),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(
+                crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),
+            ),
+            github_oauth: Arc::new(
+                crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth::default(),
+            ),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(
+            ),
+            workspace_oauth:
+                crate::services::oauth::workspace_service::WorkspaceOAuthService::test_stub(),
+            stripe: stripe.clone(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
+            worker_id: Arc::new("test-worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        };
+
+        let body = serde_json::json!({
+            "id": "evt_retry",
+            "type": "checkout.session.completed",
+            "data": { "object": { "id": session_id, "metadata": { "user_id": user_id.to_string(), "workspace_name": "Acme Co" }, "customer": "cus_retry" } }
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert("Stripe-Signature", HeaderValue::from_static("t=1,v1=stub"));
+
+        let resp = webhook(
+            AxumState(state),
+            headers,
+            axum::body::Bytes::from(serde_json::to_vec(&body).unwrap()),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let settings = db.user_settings.lock().unwrap().clone();
+        assert!(settings["billing"]["pending_checkout"].is_null());
+
+        let stored = workspace_repo.workspaces.lock().unwrap().clone();
+        assert_eq!(
+            stored[0].stripe_overage_item_id.as_deref(),
+            Some("si_existing")
+        );
     }
 
     #[tokio::test]
     async fn webhook_checkout_session_completed_creates_workspace_when_missing_personal() {
         let user_id = Uuid::new_v4();
         let session_id = "cs_test_missing";
+        let now = OffsetDateTime::now_utc();
+        std::env::set_var("STRIPE_OVERAGE_PRICE_ID", "price_overage_test");
         let db = Arc::new(MockDb {
             find_user_result: Some(User {
                 id: user_id,
@@ -1344,6 +1628,21 @@ mod tests {
 
         let workspace_repo = Arc::new(TestWorkspaceRepo::default());
         let stripe = Arc::new(MockStripeService::new());
+        {
+            let mut guard = stripe.active_subscription.lock().unwrap();
+            *guard = Some(SubscriptionInfo {
+                id: "sub_new".into(),
+                status: "active".into(),
+                current_period_start: now.unix_timestamp(),
+                current_period_end: (now + time::Duration::days(30)).unix_timestamp(),
+                cancel_at: None,
+                cancel_at_period_end: false,
+                items: vec![SubscriptionItemInfo {
+                    id: "si_over".into(),
+                    price_id: "price_overage_test".into(),
+                }],
+            });
+        }
         let state = AppState {
             db: db.clone(),
             workflow_repo: Arc::new(NoopWorkflowRepository),
@@ -1378,7 +1677,8 @@ mod tests {
                 "object": {
                     "id": session_id,
                     "client_reference_id": user_id.to_string(),
-                    "metadata": {"workspace_name": "New Co"}
+                    "metadata": {"workspace_name": "New Co"},
+                    "subscription": "sub_new"
                 }
             }
         });
@@ -1403,6 +1703,8 @@ mod tests {
         let added = workspace_repo.added_members.lock().unwrap().clone();
         assert_eq!(added.len(), 1);
         assert_eq!(added[0].1, user_id);
+        let stored = workspace_repo.workspaces.lock().unwrap().clone();
+        assert_eq!(stored[0].stripe_overage_item_id.as_deref(), Some("si_over"));
     }
 
     #[tokio::test]
@@ -1421,6 +1723,7 @@ mod tests {
                     created_by: user_id,
                     owner_id: user_id,
                     plan: "workspace".into(),
+                    stripe_overage_item_id: None,
                     created_at: OffsetDateTime::now_utc(),
                     updated_at: OffsetDateTime::now_utc(),
                     deleted_at: None,

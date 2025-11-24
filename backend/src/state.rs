@@ -252,6 +252,43 @@ impl AppState {
             );
         }
 
+        if update.overage_incremented {
+            match self
+                .workspace_repo
+                .get_stripe_overage_item_id(workspace_id)
+                .await
+            {
+                Ok(Some(item_id)) => {
+                    let stripe = self.stripe.clone();
+                    tokio::spawn(async move {
+                        if let Err(err) = stripe
+                            .create_usage_record(
+                                &item_id,
+                                1,
+                                OffsetDateTime::now_utc().unix_timestamp(),
+                            )
+                            .await
+                        {
+                            warn!(?err, %workspace_id, "failed to report overage usage");
+                        }
+                    });
+                }
+                Ok(None) => {
+                    warn!(
+                        %workspace_id,
+                        "workspace missing overage subscription item id; skipping usage reporting"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        %workspace_id,
+                        "failed to load overage subscription item id; skipping usage reporting"
+                    );
+                }
+            }
+        }
+
         Ok(Some(WorkspaceRunQuotaTicket {
             workspace_id,
             period_start,
@@ -406,7 +443,10 @@ pub fn test_pg_pool() -> Arc<PgPool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
+    use crate::db::mock_db::{
+        MockDb, NoopWorkflowRepository, NoopWorkspaceRepository,
+        StaticWorkspaceMembershipRepository,
+    };
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
     use crate::models::user::{OauthProvider, User, UserRole};
     use crate::models::workspace::WorkspaceBillingCycle;
@@ -421,6 +461,7 @@ mod tests {
     use reqwest::Client;
     use std::sync::Arc;
     use time::{Duration, OffsetDateTime};
+    use tokio::time::sleep;
 
     #[derive(Default)]
     struct NoopMailer;
@@ -579,5 +620,69 @@ mod tests {
         let after_cycle = cycle_end + Duration::seconds(10);
         let start = super::workspace_quota_period_start(Some(&cycle), after_cycle);
         assert_eq!(start, cycle_end);
+    }
+
+    #[tokio::test]
+    async fn consume_workspace_run_quota_reports_overage_usage() {
+        let workspace_id = Uuid::new_v4();
+        let repo: Arc<StaticWorkspaceMembershipRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::with_run_limit(1));
+        repo.set_stripe_overage_item_id(workspace_id, Some("si_overage"))
+            .await
+            .unwrap();
+
+        let stripe = Arc::new(crate::services::stripe::MockStripeService::new());
+        let (state, _user_id) = build_state_with_user(Some("workspace"));
+        let state = AppState {
+            workspace_repo: repo.clone() as Arc<dyn WorkspaceRepository>,
+            stripe: stripe.clone(),
+            ..state
+        };
+
+        // First run is within limit; no usage report
+        let first = state
+            .consume_workspace_run_quota(workspace_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!first.overage_incremented);
+        sleep(std::time::Duration::from_millis(5)).await;
+        assert!(stripe.usage_records.lock().unwrap().is_empty());
+
+        // Second run exceeds the limit and should emit one usage record
+        let second = state
+            .consume_workspace_run_quota(workspace_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(second.overage_incremented);
+        sleep(std::time::Duration::from_millis(5)).await;
+        let records = stripe.usage_records.lock().unwrap().clone();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0, "si_overage");
+        assert_eq!(records[0].1, 1);
+    }
+
+    #[tokio::test]
+    async fn consume_workspace_run_quota_skips_usage_reporting_for_solo_plan() {
+        let workspace_id = Uuid::new_v4();
+        let repo: Arc<StaticWorkspaceMembershipRepository> = Arc::new(
+            StaticWorkspaceMembershipRepository::with_plan(PlanTier::Solo),
+        );
+        let stripe = Arc::new(crate::services::stripe::MockStripeService::new());
+        let (state, _user_id) = build_state_with_user(Some("workspace"));
+        let state = AppState {
+            workspace_repo: repo.clone() as Arc<dyn WorkspaceRepository>,
+            stripe: stripe.clone(),
+            ..state
+        };
+
+        let ticket = state
+            .consume_workspace_run_quota(workspace_id)
+            .await
+            .unwrap();
+        assert!(ticket.is_none());
+        sleep(std::time::Duration::from_millis(5)).await;
+        assert!(stripe.usage_records.lock().unwrap().is_empty());
     }
 }

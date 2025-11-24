@@ -22,3 +22,4 @@
 - WorkspaceOAuthService test doubles now implement the shared `get_plan` helper so future plan-aware logic can exercise the service without depending on route-only enums.
 - Workspace OAuth handling now keeps per-connection records keyed by connection ID: promotions always insert new rows without pruning other members, removal/unshare only clears personal tokens when no other workspace connections exist for that provider, and token retrieval helpers consume explicit connection IDs so callers can manage multiple shared integrations safely.
 - WorkspaceOAuthService test doubles now stub the new workspace quota/billing methods and membership defaults so the expanded repository trait compiles cleanly across routes, services, and mocks.
+- Workspace OAuth service tests implement the new overage subscription item accessors on workspace repositories so billing schema changes compile without affecting OAuth behavior.

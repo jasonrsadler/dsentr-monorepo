@@ -767,6 +767,7 @@ mod tests {
                 created_by: Uuid::new_v4(),
                 owner_id: Uuid::new_v4(),
                 plan: plan.to_string(),
+                stripe_overage_item_id: None,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
                 deleted_at: None,

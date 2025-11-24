@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO workspaces (name, created_by, owner_id, plan, created_at, updated_at)\n            VALUES ($1, $2, $2, $3, now(), now())\n            RETURNING id,\n                      name,\n                      created_by,\n                      owner_id,\n                      plan,\n                      created_at,\n                      updated_at,\n                      deleted_at as \"deleted_at?: OffsetDateTime\"\n            ",
+  "query": "\n            UPDATE workspaces\n            SET plan = $2,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING id,\n                      name,\n                      created_by,\n                      owner_id,\n                      plan,\n                      stripe_overage_item_id,\n                      created_at,\n                      updated_at,\n                      deleted_at as \"deleted_at?: OffsetDateTime\"\n            ",
   "describe": {
     "columns": [
       {
@@ -30,23 +30,27 @@
       },
       {
         "ordinal": 5,
+        "name": "stripe_overage_item_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "deleted_at?: OffsetDateTime",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Uuid",
         "Text"
       ]
@@ -57,10 +61,11 @@
       false,
       false,
       false,
+      true,
       false,
       false,
       true
     ]
   },
-  "hash": "fcd7736a8e57dc99c9deb314231ce2a51803bcd2cc82d2039ef05ef44617f9e6"
+  "hash": "53df48e2628673b3369d2495e29905ed4bd43297cffdd417d1d16a5f0057a79d"
 }

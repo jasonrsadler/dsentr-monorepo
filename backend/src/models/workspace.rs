@@ -30,6 +30,8 @@ pub struct Workspace {
     pub created_by: Uuid,
     pub owner_id: Uuid,
     pub plan: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stripe_overage_item_id: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]

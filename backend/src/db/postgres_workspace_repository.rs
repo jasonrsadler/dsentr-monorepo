@@ -40,6 +40,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                       created_by,
                       owner_id,
                       plan,
+                      stripe_overage_item_id,
                       created_at,
                       updated_at,
                       deleted_at as "deleted_at?: OffsetDateTime"
@@ -68,6 +69,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                       created_by,
                       owner_id,
                       plan,
+                      stripe_overage_item_id,
                       created_at,
                       updated_at,
                       deleted_at as "deleted_at?: OffsetDateTime"
@@ -96,6 +98,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                       created_by,
                       owner_id,
                       plan,
+                      stripe_overage_item_id,
                       created_at,
                       updated_at,
                       deleted_at as "deleted_at?: OffsetDateTime"
@@ -132,6 +135,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                    created_by,
                    owner_id,
                    plan,
+                   stripe_overage_item_id,
                    created_at,
                    updated_at,
                    deleted_at as "deleted_at?: OffsetDateTime"
@@ -142,6 +146,45 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
         )
         .fetch_optional(&self.pool)
         .await
+    }
+
+    async fn set_stripe_overage_item_id(
+        &self,
+        workspace_id: Uuid,
+        subscription_item_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE workspaces
+            SET stripe_overage_item_id = $2,
+                updated_at = now()
+            WHERE id = $1
+            "#,
+            workspace_id,
+            subscription_item_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn get_stripe_overage_item_id(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            SELECT stripe_overage_item_id
+            FROM workspaces
+            WHERE id = $1
+            "#,
+            workspace_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.and_then(|r| r.stripe_overage_item_id))
     }
 
     async fn add_member(
@@ -364,10 +407,11 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                    w.created_by,
                    w.owner_id,
                    w.plan,
-                   w.created_at,
-                   w.updated_at,
-                   w.deleted_at as "deleted_at?: OffsetDateTime",
-                    m.role as "role: WorkspaceRole"
+                   w.stripe_overage_item_id,
+                    w.created_at,
+                    w.updated_at,
+                    w.deleted_at as "deleted_at?: OffsetDateTime",
+                     m.role as "role: WorkspaceRole"
             FROM workspace_members m
             JOIN workspaces w ON w.id = m.workspace_id
             WHERE m.user_id = $1
@@ -388,6 +432,7 @@ impl WorkspaceRepository for PostgresWorkspaceRepository {
                     created_by: row.created_by,
                     owner_id: row.owner_id,
                     plan: row.plan,
+                    stripe_overage_item_id: row.stripe_overage_item_id,
                     created_at: row.created_at,
                     updated_at: row.updated_at,
                     deleted_at: row.deleted_at,

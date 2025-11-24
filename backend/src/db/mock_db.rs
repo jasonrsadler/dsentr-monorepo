@@ -795,6 +795,7 @@ pub struct StaticWorkspaceMembershipRepository {
     billing_cycle: Arc<Mutex<Option<WorkspaceBillingCycle>>>,
     member_counts: Arc<Mutex<HashMap<Uuid, i64>>>,
     pending_invites: Arc<Mutex<HashMap<Uuid, i64>>>,
+    overage_items: Arc<Mutex<HashMap<Uuid, Option<String>>>>,
     inner: NoopWorkspaceRepository,
 }
 
@@ -811,6 +812,7 @@ impl StaticWorkspaceMembershipRepository {
             billing_cycle: Arc::new(Mutex::new(None)),
             member_counts: Arc::new(Mutex::new(HashMap::new())),
             pending_invites: Arc::new(Mutex::new(HashMap::new())),
+            overage_items: Arc::new(Mutex::new(HashMap::new())),
             inner: NoopWorkspaceRepository,
         }
     }
@@ -827,6 +829,7 @@ impl StaticWorkspaceMembershipRepository {
             billing_cycle: Arc::new(Mutex::new(None)),
             member_counts: Arc::new(Mutex::new(HashMap::new())),
             pending_invites: Arc::new(Mutex::new(HashMap::new())),
+            overage_items: Arc::new(Mutex::new(HashMap::new())),
             inner: NoopWorkspaceRepository,
         }
     }
@@ -912,6 +915,7 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
             created_by,
             owner_id: created_by,
             plan: plan.to_string(),
+            stripe_overage_item_id: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
             deleted_at: None,
@@ -929,6 +933,7 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
             created_by: Uuid::nil(),
             owner_id: Uuid::nil(),
             plan: WORKSPACE_PLAN_TEAM.to_string(),
+            stripe_overage_item_id: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
             deleted_at: None,
@@ -946,6 +951,7 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
             created_by: Uuid::nil(),
             owner_id: Uuid::nil(),
             plan: plan.to_string(),
+            stripe_overage_item_id: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
             deleted_at: None,
@@ -957,6 +963,21 @@ impl WorkspaceRepository for NoopWorkspaceRepository {
     }
 
     async fn find_workspace(&self, _workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn set_stripe_overage_item_id(
+        &self,
+        _workspace_id: Uuid,
+        _subscription_item_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn get_stripe_overage_item_id(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
         Ok(None)
     }
 
@@ -1191,6 +1212,31 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
 
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
         self.inner.find_workspace(workspace_id).await
+    }
+
+    async fn set_stripe_overage_item_id(
+        &self,
+        workspace_id: Uuid,
+        subscription_item_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        self.overage_items
+            .lock()
+            .unwrap()
+            .insert(workspace_id, subscription_item_id.map(|s| s.to_string()));
+        Ok(())
+    }
+
+    async fn get_stripe_overage_item_id(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
+        Ok(self
+            .overage_items
+            .lock()
+            .unwrap()
+            .get(&workspace_id)
+            .cloned()
+            .flatten())
     }
 
     async fn add_member(

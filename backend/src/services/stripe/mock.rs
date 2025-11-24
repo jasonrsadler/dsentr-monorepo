@@ -13,6 +13,7 @@ pub struct MockStripeService {
     pub last_create_requests: Arc<Mutex<Vec<CreateCheckoutSessionRequest>>>,
     pub events: Arc<Mutex<Vec<StripeEvent>>>,
     pub active_subscription: Arc<Mutex<Option<SubscriptionInfo>>>,
+    pub usage_records: Arc<Mutex<Vec<(String, i64, i64)>>>,
 }
 
 impl MockStripeService {
@@ -28,6 +29,7 @@ impl MockStripeService {
             current_period_end: period_end,
             cancel_at: None,
             cancel_at_period_end: false,
+            items: Vec::new(),
         };
         *self.active_subscription.lock().unwrap() = Some(sub);
         self
@@ -134,6 +136,7 @@ impl StripeService for MockStripeService {
             current_period_end: 0,
             cancel_at: None,
             cancel_at_period_end: false,
+            items: Vec::new(),
         });
         sub.cancel_at_period_end = cancel_at_period_end;
         if cancel_at_period_end && sub.cancel_at.is_none() && sub.current_period_end > 0 {
@@ -141,6 +144,27 @@ impl StripeService for MockStripeService {
         }
         *guard = Some(sub.clone());
         Ok(sub)
+    }
+
+    async fn get_subscription(
+        &self,
+        subscription_id: &str,
+    ) -> Result<SubscriptionInfo, StripeServiceError> {
+        let guard = self.active_subscription.lock().unwrap();
+        if let Some(sub) = guard.clone() {
+            if sub.id == subscription_id {
+                return Ok(sub);
+            }
+        }
+        Ok(SubscriptionInfo {
+            id: subscription_id.to_string(),
+            status: "active".into(),
+            current_period_start: 0,
+            current_period_end: 0,
+            cancel_at: None,
+            cancel_at_period_end: false,
+            items: Vec::new(),
+        })
     }
 
     async fn cancel_subscription_immediately(
@@ -153,6 +177,20 @@ impl StripeService for MockStripeService {
                 *guard = None;
             }
         }
+        Ok(())
+    }
+
+    async fn create_usage_record(
+        &self,
+        subscription_item_id: &str,
+        quantity: i64,
+        timestamp: i64,
+    ) -> Result<(), StripeServiceError> {
+        self.usage_records.lock().unwrap().push((
+            subscription_item_id.to_string(),
+            quantity,
+            timestamp,
+        ));
         Ok(())
     }
 }

@@ -40,3 +40,4 @@
 - Expanded `StaticWorkspaceMembershipRepository` so tests can simulate run quotas and billing cycles, capture release counts, and assert how routes respond when workspaces are at or over their monthly allocations.
 - Workspace repositories expose pending-invitation counting so seat checks can reserve capacity for outstanding invites alongside existing members.
 - StaticWorkspaceMembershipRepository now carries a configurable plan tier so tests can emulate solo workspaces when exercising run gating and quota behavior.
+- Workspace repositories persist `stripe_overage_item_id` for workspaces, expose getters/setters (including mock support), and SQLx queries return the new column so Stripe metered usage can be reported.

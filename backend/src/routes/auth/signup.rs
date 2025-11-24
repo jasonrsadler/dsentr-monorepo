@@ -616,6 +616,7 @@ mod tests {
                 created_by,
                 owner_id: created_by,
                 plan: plan.to_string(),
+                stripe_overage_item_id: None,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
                 deleted_at: None,
@@ -635,6 +636,7 @@ mod tests {
                 created_by: Uuid::nil(),
                 owner_id: Uuid::nil(),
                 plan: WORKSPACE_PLAN_SOLO.to_string(),
+                stripe_overage_item_id: None,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
                 deleted_at: None,
@@ -652,6 +654,7 @@ mod tests {
                 created_by: Uuid::nil(),
                 owner_id: Uuid::nil(),
                 plan: plan.to_string(),
+                stripe_overage_item_id: None,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
                 deleted_at: None,
@@ -677,6 +680,21 @@ mod tests {
             &self,
             _workspace_id: Uuid,
         ) -> Result<Option<Workspace>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn set_stripe_overage_item_id(
+            &self,
+            _workspace_id: Uuid,
+            _subscription_item_id: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn get_stripe_overage_item_id(
+            &self,
+            _workspace_id: Uuid,
+        ) -> Result<Option<String>, sqlx::Error> {
             Ok(None)
         }
 

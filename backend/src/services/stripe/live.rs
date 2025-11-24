@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use super::{
     CheckoutLineItem, CheckoutMode, CheckoutSession, CreateCheckoutSessionRequest, StripeEvent,
-    StripeService, StripeServiceError,
+    StripeService, StripeServiceError, SubscriptionInfo, SubscriptionItemInfo,
 };
 use async_trait::async_trait;
 
@@ -35,12 +35,48 @@ fn map_mode(mode: CheckoutMode) -> stripe::CheckoutSessionMode {
 fn map_line_items(items: &[CheckoutLineItem]) -> Vec<stripe::CreateCheckoutSessionLineItems> {
     items
         .iter()
-        .map(|li| stripe::CreateCheckoutSessionLineItems {
-            price: Some(li.price.clone()),
-            quantity: Some(li.quantity),
-            ..Default::default()
+        .map(|li| {
+            if let Some(qty) = li.quantity {
+                stripe::CreateCheckoutSessionLineItems {
+                    price: Some(li.price.clone()),
+                    quantity: Some(qty),
+                    ..Default::default()
+                }
+            } else {
+                stripe::CreateCheckoutSessionLineItems {
+                    price: Some(li.price.clone()),
+                    // omit quantity entirely for metered items
+                    quantity: None,
+                    ..Default::default()
+                }
+            }
         })
         .collect()
+}
+
+fn map_subscription(sub: stripe::Subscription) -> SubscriptionInfo {
+    let items = sub
+        .items
+        .data
+        .into_iter()
+        .filter_map(|item| {
+            let price_id = item.price.as_ref().map(|price| price.id.to_string())?;
+            Some(SubscriptionItemInfo {
+                id: item.id.to_string(),
+                price_id,
+            })
+        })
+        .collect();
+
+    SubscriptionInfo {
+        id: sub.id.to_string(),
+        status: sub.status.to_string(),
+        current_period_start: sub.current_period_start,
+        current_period_end: sub.current_period_end,
+        cancel_at: sub.cancel_at,
+        cancel_at_period_end: sub.cancel_at_period_end,
+        items,
+    }
 }
 
 #[async_trait]
@@ -140,6 +176,7 @@ impl StripeService for LiveStripeService {
         list_params.customer = Some(cust_id);
         // Keep it simple: Stripe will default to status='all'. We'll filter in code for active/trialing.
         list_params.limit = Some(10);
+        list_params.expand = &["data.items.data.price"];
 
         let subs = stripe::Subscription::list(&self.client, &list_params).await?;
         for sub in subs.data.into_iter() {
@@ -153,18 +190,23 @@ impl StripeService for LiveStripeService {
                 continue;
             }
 
-            let info = crate::services::stripe::SubscriptionInfo {
-                id: sub.id.to_string(),
-                status,
-                current_period_start: sub.current_period_start,
-                current_period_end: sub.current_period_end,
-                cancel_at: sub.cancel_at,
-                cancel_at_period_end: sub.cancel_at_period_end,
-            };
+            let mut info = map_subscription(sub);
+            info.status = status;
             return Ok(Some(info));
         }
 
         Ok(None)
+    }
+
+    async fn get_subscription(
+        &self,
+        subscription_id: &str,
+    ) -> Result<crate::services::stripe::SubscriptionInfo, StripeServiceError> {
+        let sub_id = subscription_id
+            .parse::<stripe::SubscriptionId>()
+            .map_err(|e| StripeServiceError::Other(e.to_string()))?;
+        let sub = stripe::Subscription::retrieve(&self.client, &sub_id, &[]).await?;
+        Ok(map_subscription(sub))
     }
 
     async fn set_subscription_cancel_at_period_end(
@@ -178,14 +220,7 @@ impl StripeService for LiveStripeService {
         let mut params = stripe::UpdateSubscription::new();
         params.cancel_at_period_end = Some(cancel_at_period_end);
         let sub = stripe::Subscription::update(&self.client, &sub_id, params).await?;
-        Ok(crate::services::stripe::SubscriptionInfo {
-            id: sub.id.to_string(),
-            status: sub.status.to_string(),
-            current_period_start: sub.current_period_start,
-            current_period_end: sub.current_period_end,
-            cancel_at: sub.cancel_at,
-            cancel_at_period_end: sub.cancel_at_period_end,
-        })
+        Ok(map_subscription(sub))
     }
 
     async fn cancel_subscription_immediately(
@@ -196,6 +231,30 @@ impl StripeService for LiveStripeService {
             .parse::<stripe::SubscriptionId>()
             .map_err(|e| StripeServiceError::Other(e.to_string()))?;
         stripe::Subscription::cancel(&self.client, &sub_id, Default::default()).await?;
+        Ok(())
+    }
+
+    async fn create_usage_record(
+        &self,
+        subscription_item_id: &str,
+        quantity: i64,
+        timestamp: i64,
+    ) -> Result<(), StripeServiceError> {
+        let item_id = subscription_item_id
+            .parse::<stripe::SubscriptionItemId>()
+            .map_err(|e| StripeServiceError::Other(e.to_string()))?;
+        #[allow(clippy::needless_update)]
+        stripe::UsageRecord::create(
+            &self.client,
+            &item_id,
+            stripe::CreateUsageRecord {
+                quantity: quantity as u64,
+                timestamp: Some(timestamp),
+                action: Some(stripe::UsageRecordAction::Increment),
+                ..Default::default()
+            },
+        )
+        .await?;
         Ok(())
     }
 }

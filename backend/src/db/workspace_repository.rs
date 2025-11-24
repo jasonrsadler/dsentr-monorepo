@@ -50,6 +50,17 @@ pub trait WorkspaceRepository: Send + Sync {
     #[allow(dead_code)]
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error>;
 
+    async fn set_stripe_overage_item_id(
+        &self,
+        workspace_id: Uuid,
+        subscription_item_id: Option<&str>,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn get_stripe_overage_item_id(
+        &self,
+        workspace_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error>;
+
     async fn add_member(
         &self,
         workspace_id: Uuid,

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workspaces\n            SET stripe_overage_item_id = $2,\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cb3df7397f7465bbc2047c0658addcb5d1f9b2a9d34ad6378461d14ec19da366"
+}

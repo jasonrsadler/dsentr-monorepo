@@ -171,6 +171,7 @@ fn workspace_membership(
             created_by: Uuid::new_v4(),
             owner_id: Uuid::new_v4(),
             plan: plan.to_string(),
+            stripe_overage_item_id: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
             deleted_at: None,
@@ -1255,6 +1256,21 @@ impl WorkspaceRepository for MembershipWorkspaceRepo {
     }
 
     async fn find_workspace(&self, _workspace_id: Uuid) -> Result<Option<Workspace>, Error> {
+        unimplemented!()
+    }
+
+    async fn set_stripe_overage_item_id(
+        &self,
+        _workspace_id: Uuid,
+        _subscription_item_id: Option<&str>,
+    ) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn get_stripe_overage_item_id(
+        &self,
+        _workspace_id: Uuid,
+    ) -> Result<Option<String>, Error> {
         unimplemented!()
     }
 

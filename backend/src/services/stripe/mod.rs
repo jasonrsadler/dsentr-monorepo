@@ -45,7 +45,7 @@ pub enum CheckoutMode {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CheckoutLineItem {
     pub price: String,
-    pub quantity: u64,
+    pub quantity: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -83,6 +83,13 @@ pub struct SubscriptionInfo {
     /// Unix timestamp (seconds) when the subscription will cancel, if set
     pub cancel_at: Option<i64>,
     pub cancel_at_period_end: bool,
+    pub items: Vec<SubscriptionItemInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubscriptionItemInfo {
+    pub id: String,
+    pub price_id: String,
 }
 
 #[async_trait]
@@ -111,6 +118,11 @@ pub trait StripeService: Send + Sync {
         customer_id: &str,
     ) -> Result<Option<SubscriptionInfo>, StripeServiceError>;
 
+    async fn get_subscription(
+        &self,
+        subscription_id: &str,
+    ) -> Result<SubscriptionInfo, StripeServiceError>;
+
     async fn set_subscription_cancel_at_period_end(
         &self,
         subscription_id: &str,
@@ -120,6 +132,13 @@ pub trait StripeService: Send + Sync {
     async fn cancel_subscription_immediately(
         &self,
         subscription_id: &str,
+    ) -> Result<(), StripeServiceError>;
+
+    async fn create_usage_record(
+        &self,
+        subscription_item_id: &str,
+        quantity: i64,
+        timestamp: i64,
     ) -> Result<(), StripeServiceError>;
 }
 
@@ -144,7 +163,7 @@ mod tests {
             mode: CheckoutMode::Subscription,
             line_items: vec![CheckoutLineItem {
                 price: "price_123".into(),
-                quantity: 1,
+                quantity: Some(1),
             }],
             client_reference_id: Some("00000000-0000-0000-0000-000000000000".into()),
             customer: Some("cus_test_123".into()),
@@ -174,7 +193,7 @@ mod tests {
         assert_eq!(first.customer, req.customer);
         assert_eq!(first.line_items.len(), 1);
         assert_eq!(first.line_items[0].price, "price_123");
-        assert_eq!(first.line_items[0].quantity, 1);
+        assert_eq!(first.line_items[0].quantity, Some(1));
     }
 
     #[test]
@@ -195,7 +214,7 @@ mod tests {
             mode: CheckoutMode::Subscription,
             line_items: vec![CheckoutLineItem {
                 price: "price_123".into(),
-                quantity: 1,
+                quantity: Some(1),
             }],
             client_reference_id: None,
             customer: Some("not_a_customer_id".into()),

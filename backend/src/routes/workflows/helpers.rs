@@ -332,6 +332,7 @@ mod tests {
                 created_by: owner_id,
                 owner_id,
                 plan: "workspace".into(),
+                stripe_overage_item_id: None,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
                 deleted_at: None,

@@ -45,3 +45,4 @@ itly coordinated.
   - Workflow nodes that choose SMTP continue to send using per-node SMTP settings.
 
 - Workspace run usage now tracks overage counts per billing period, exposes overage in plan usage APIs, and allows over-limit runs while recording overage for billing/export flows.
+- Workspace overage billing now persists Stripe subscription item ids, attaches the metered price during workspace upgrades, and reports over-limit usage to Stripe while leaving solo plans unchanged.

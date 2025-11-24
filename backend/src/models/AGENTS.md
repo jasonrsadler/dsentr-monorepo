@@ -28,3 +28,4 @@
 - Added a shared `plan` module that exposes the `PlanTier` enum so repositories and services can reason about plan tiers without depending on route-layer definitions.
 - Workspace connection models now expose `owner_user_id` and `user_oauth_token_id` so API consumers and SQLx structs stay aligned with the new migration data.
 - Introduced the `WorkspaceBillingCycle` struct so repositories/routes can persist subscription ids plus current period start/end timestamps for billing-aware quota calculations.
+- Workspace model now includes an optional `stripe_overage_item_id` so subscription item ids for metered overage billing can be stored and surfaced across repositories and routes.

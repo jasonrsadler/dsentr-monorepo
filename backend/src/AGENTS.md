@@ -33,3 +33,4 @@
 - Added a dedicated `API_SECRETS_ENCRYPTION_KEY` path (and rotation tooling) for encrypting settings secrets separately from OAuth tokens.
 - Workspace member/run limits now load from `WORKSPACE_MEMBER_LIMIT` and `WORKSPACE_MONTHLY_RUN_LIMIT` with validation, and AppState uses these config values when enforcing quotas.
 - Workspace run quota checks now return `None` for solo-plan workspaces so run handlers can apply solo limits without blocking execution behind workspace-only gating.
+- Workspace overage billing now records Stripe subscription item ids and reports metered usage for over-limit workspace runs without impacting solo plans.

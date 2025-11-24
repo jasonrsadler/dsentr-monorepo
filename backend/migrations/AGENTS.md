@@ -37,3 +37,4 @@
 - Added owner/token metadata to `workspace_connections` plus a composite uniqueness constraint so multiple shared credentials per provider can coexist without colliding on `(workspace_id, provider)`.
 - Added `workspace_run_usage` table to track monthly per-workspace run counts with indexed period windows so plan quota enforcement can atomically increment without race conditions.
 - Added `workspace_billing_cycles` to capture each workspace's Stripe subscription id plus current period start/end so run quota resets can track the actual billing window instead of calendar months.
+- Added `stripe_overage_item_id` to `workspaces` so metered Stripe subscription items can be stored for overage usage reporting.
