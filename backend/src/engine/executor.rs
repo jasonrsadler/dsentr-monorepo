@@ -10,7 +10,10 @@ use uuid::Uuid;
 use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_run_event::NewWorkflowRunEvent;
 use crate::state::AppState;
-use crate::utils::workflow_connection_metadata;
+use crate::utils::{
+    secrets::{hydrate_secrets_into_snapshot, read_secret_store},
+    workflow_connection_metadata,
+};
 
 use super::actions::{execute_action, execute_condition, execute_trigger};
 use super::graph::Graph;
@@ -55,8 +58,19 @@ impl ExecutorError {
     }
 }
 
-pub async fn execute_run(state: AppState, run: WorkflowRun) -> Result<(), ExecutorError> {
+pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), ExecutorError> {
     let triggered_by = format!("worker:{}", state.worker_id.as_ref());
+    if let Err(err_msg) = hydrate_run_secrets(&state, &mut run).await {
+        warn!(
+            run_id = %run.id,
+            workflow_id = %run.workflow_id,
+            user_id = %run.user_id,
+            worker_id = %state.worker_id,
+            "executor: failing run during secret hydration: {err_msg}"
+        );
+        complete_run_with_retry(&state, run.id, "failed", Some(&err_msg)).await?;
+        return Ok(());
+    }
     let metadata = workflow_connection_metadata::collect(&run.snapshot);
     let events = workflow_connection_metadata::build_run_events(&run, &triggered_by, &metadata);
     for event in events {
@@ -588,6 +602,39 @@ where
             }
         }
     }
+}
+
+async fn hydrate_run_secrets(state: &AppState, run: &mut WorkflowRun) -> Result<(), String> {
+    let settings = state
+        .db
+        .get_user_settings(run.user_id)
+        .await
+        .map_err(|err| {
+            warn!(
+                run_id = %run.id,
+                workflow_id = %run.workflow_id,
+                user_id = %run.user_id,
+                ?err,
+                "executor: failed to load user settings for secrets"
+            );
+            "Failed to load workflow secrets".to_string()
+        })?;
+
+    let (secret_store, _) = read_secret_store(&settings, &state.config.api_secrets_encryption_key)
+        .map_err(|err| {
+            warn!(
+                run_id = %run.id,
+                workflow_id = %run.workflow_id,
+                user_id = %run.user_id,
+                ?err,
+                "executor: failed to decrypt workflow secrets"
+            );
+            "Failed to decrypt workflow secrets".to_string()
+        })?;
+
+    hydrate_secrets_into_snapshot(&mut run.snapshot, &secret_store);
+
+    Ok(())
 }
 
 fn parse_host_list(raw: &str) -> Vec<String> {

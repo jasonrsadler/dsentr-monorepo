@@ -40,3 +40,4 @@ Operational notes:
 ## Change Reasons
 - Workflow run endpoints now treat solo-plan workspaces as solo for quota gating, avoiding workspace-plan errors and adding regression coverage for the `/run` path.
 - Plan usage endpoint now returns personal/solo usage when a workspace query targets a non-Workspace plan so solo workspaces don't receive 403 errors.
+- Workflow run execution now hydrates secrets for scheduled and webhook-triggered runs while responses (run listings, downloads, and webhook acknowledgements) redact sensitive fields so plaintext API keys are never returned to clients.

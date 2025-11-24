@@ -3,6 +3,7 @@ use super::{
     prelude::*,
 };
 use crate::{
+    models::{workflow_node_run::WorkflowNodeRun, workflow_run::WorkflowRun},
     routes::{options::secrets::decrypt_secret_store, plan_limits::workspace_limit_error_response},
     state::WorkspaceRunQuotaTicket,
     utils::{secrets::hydrate_secrets_into_snapshot, workflow_connection_metadata},
@@ -38,7 +39,7 @@ pub struct StartWorkflowRunRequest {
     pub priority: Option<i32>,
 }
 
-fn redact_secrets(value: &mut serde_json::Value) {
+pub(crate) fn redact_secrets(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
             for (k, v) in map.iter_mut() {
@@ -62,6 +63,23 @@ fn redact_secrets(value: &mut serde_json::Value) {
         }
         _ => {}
     }
+}
+
+pub(crate) fn redact_run(mut run: WorkflowRun) -> WorkflowRun {
+    redact_secrets(&mut run.snapshot);
+    run
+}
+
+pub(crate) fn redact_node_runs(mut node_runs: Vec<WorkflowNodeRun>) -> Vec<WorkflowNodeRun> {
+    for nr in node_runs.iter_mut() {
+        if let Some(inputs) = nr.inputs.as_mut() {
+            redact_secrets(inputs);
+        }
+        if let Some(outputs) = nr.outputs.as_mut() {
+            redact_secrets(outputs);
+        }
+    }
+    node_runs
 }
 
 pub async fn start_workflow_run(
@@ -256,10 +274,7 @@ pub async fn start_workflow_run(
                 }
             }
 
-            let mut safe_run = run.clone();
-            let mut safe_snapshot = safe_run.snapshot.clone();
-            redact_secrets(&mut safe_snapshot);
-            safe_run.snapshot = safe_snapshot;
+            let safe_run = redact_run(run.clone());
 
             (
                 StatusCode::ACCEPTED,
@@ -305,27 +320,25 @@ pub async fn get_workflow_run_status(
         .await
     {
         Ok(Some(run)) => {
-            // clone and redact
-            let mut safe_run = run.clone();
-            let mut safe_snapshot = safe_run.snapshot.clone();
-            redact_secrets(&mut safe_snapshot);
-            safe_run.snapshot = safe_snapshot;
-
+            let safe_run = redact_run(run.clone());
             let nodes_res = app_state
                 .workflow_repo
                 .list_workflow_node_runs(owner_id, workflow_id, run_id)
                 .await;
 
             match nodes_res {
-                Ok(node_runs) => (
-                    StatusCode::OK,
-                    Json(json!({
-                        "success": true,
-                        "run": safe_run,
-                        "node_runs": node_runs
-                    })),
-                )
-                    .into_response(),
+                Ok(node_runs) => {
+                    let safe_node_runs = redact_node_runs(node_runs);
+                    (
+                        StatusCode::OK,
+                        Json(json!({
+                            "success": true,
+                            "run": safe_run,
+                            "node_runs": safe_node_runs
+                        })),
+                    )
+                        .into_response()
+                }
                 Err(e) => {
                     eprintln!("DB error listing node runs: {:?}", e);
                     JsonResponse::server_error("Failed to fetch run status").into_response()
@@ -408,11 +421,14 @@ pub async fn list_active_runs(
         .list_active_runs(owner_id, workflow_scope)
         .await
     {
-        Ok(runs) => (
-            StatusCode::OK,
-            Json(json!({ "success": true, "runs": runs })),
-        )
-            .into_response(),
+        Ok(runs) => {
+            let safe_runs: Vec<WorkflowRun> = runs.into_iter().map(redact_run).collect();
+            (
+                StatusCode::OK,
+                Json(json!({ "success": true, "runs": safe_runs })),
+            )
+                .into_response()
+        }
         Err(e) => {
             eprintln!("DB error listing active runs: {:?}", e);
             JsonResponse::server_error("Failed to list runs").into_response()
@@ -461,11 +477,14 @@ pub async fn list_runs_for_workflow(
         )
         .await
     {
-        Ok(runs) => (
-            StatusCode::OK,
-            Json(json!({ "success": true, "runs": runs, "page": page, "per_page": per_page })),
-        )
-            .into_response(),
+        Ok(runs) => {
+            let safe_runs: Vec<WorkflowRun> = runs.into_iter().map(redact_run).collect();
+            (
+                StatusCode::OK,
+                Json(json!({ "success": true, "runs": safe_runs, "page": page, "per_page": per_page })),
+            )
+                .into_response()
+        }
         Err(e) => {
             eprintln!("DB error listing runs: {:?}", e);
             JsonResponse::server_error("Failed to list runs").into_response()
@@ -607,9 +626,10 @@ pub async fn rerun_workflow_run(
                 }
             }
 
+            let safe_run = redact_run(run);
             (
                 StatusCode::ACCEPTED,
-                Json(json!({"success": true, "run": run})),
+                Json(json!({"success": true, "run": safe_run})),
             )
                 .into_response()
         }
@@ -701,13 +721,15 @@ pub async fn download_run_json(
 
     match run_opt {
         Ok(Some(run)) => {
+            let safe_run = redact_run(run);
             let nodes_res = app_state
                 .workflow_repo
                 .list_workflow_node_runs(workflow.user_id, workflow_id, run_id)
                 .await;
             match nodes_res {
                 Ok(node_runs) => {
-                    let payload = json!({"run": run, "node_runs": node_runs});
+                    let safe_node_runs = redact_node_runs(node_runs);
+                    let payload = json!({"run": safe_run, "node_runs": safe_node_runs});
                     let body = axum::Json(payload);
                     let mut resp = body.into_response();
                     resp.headers_mut().insert(

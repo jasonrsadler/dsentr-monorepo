@@ -1,4 +1,4 @@
-use super::prelude::*;
+use super::{prelude::*, runs::redact_run};
 use crate::config::MIN_WEBHOOK_SECRET_LENGTH;
 use crate::{
     routes::plan_limits::workspace_limit_error_response, state::WorkspaceRunQuotaTicket,
@@ -273,9 +273,10 @@ pub async fn webhook_trigger(
             if let (Some(ticket), false) = (&workspace_quota, outcome.created) {
                 let _ = app_state.release_workspace_run_quota(*ticket).await;
             }
+            let safe_run = redact_run(outcome.run);
             (
                 StatusCode::ACCEPTED,
-                Json(json!({"success": true, "run": outcome.run})),
+                Json(json!({"success": true, "run": safe_run})),
             )
                 .into_response()
         }
