@@ -9,6 +9,7 @@ use tracing::error;
 use uuid::Uuid;
 
 use crate::models::oauth_token::ConnectedOAuthProvider;
+use crate::models::workspace::WorkspaceMembershipSummary;
 use crate::responses::JsonResponse;
 use crate::routes::auth::claims::Claims;
 use crate::routes::auth::session::AuthSession;
@@ -20,6 +21,7 @@ use crate::services::microsoft::{
 use crate::services::oauth::account_service::StoredOAuthToken;
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
 use crate::state::AppState;
+use crate::utils::plan_limits::NormalizedPlanTier;
 
 use crate::engine::actions::ensure_run_membership;
 use crate::engine::actions::ensure_workspace_plan;
@@ -184,59 +186,56 @@ pub async fn list_channel_members(
         Err(resp) => return resp,
     };
 
-    // Reject personal-scope usage entirely
-    if let Some(scope) = &query.scope {
-        if scope.trim().eq_ignore_ascii_case("user") {
-            return JsonResponse::forbidden("Teams is only available on the Workspace plan")
-                .into_response();
-        }
-    }
-
-    // Workspace scope is required
-    let workspace_conn_id = match (&query.scope, &query.connection_id) {
-        (Some(scope), Some(conn_id)) if scope.trim().eq_ignore_ascii_case("workspace") => conn_id,
-        _ => {
-            return JsonResponse::bad_request(
-                "Workspace connection scope and connection_id are required for Teams",
-            )
-            .into_response();
-        }
-    };
-
-    // Resolve workspace_id from OAuth connection
-    let connection = match state
-        .workspace_oauth
-        .get_connection(
-            user_id,
-            *workspace_conn_id,
-            ConnectedOAuthProvider::Microsoft,
-        )
-        .await
-    {
-        Ok(conn) => conn,
-        Err(_) => {
-            return JsonResponse::forbidden(
-                "Teams connection not found or not allowed for this workspace",
-            )
-            .into_response();
-        }
-    };
-
-    let workspace_id = connection.workspace_id;
-
-    // Ensure plan and membership
-    if let Err(msg) = ensure_workspace_plan(&state, workspace_id).await {
-        return JsonResponse::forbidden(&msg).into_response();
-    }
-
-    if let Err(msg) = ensure_run_membership(&state, workspace_id, user_id).await {
-        return JsonResponse::forbidden(&msg).into_response();
-    };
-
-    // Now fetch the token the old way
-    let token = match ensure_microsoft_token(&state, user_id, &query).await {
-        Ok(token) => token,
+    let requested_scope = match determine_scope(&query) {
+        Ok(scope) => scope,
         Err(resp) => return resp,
+    };
+
+    let token = match requested_scope {
+        RequestedScope::Workspace(workspace_conn_id) => {
+            let connection = match state
+                .workspace_oauth
+                .get_connection(
+                    user_id,
+                    workspace_conn_id,
+                    ConnectedOAuthProvider::Microsoft,
+                )
+                .await
+            {
+                Ok(conn) => conn,
+                Err(_) => {
+                    return JsonResponse::forbidden(
+                        "Teams connection not found or not allowed for this workspace",
+                    )
+                    .into_response();
+                }
+            };
+
+            let workspace_id = connection.workspace_id;
+
+            if let Err(msg) = ensure_workspace_plan(&state, workspace_id).await {
+                return JsonResponse::forbidden(&msg).into_response();
+            }
+
+            if let Err(msg) = ensure_run_membership(&state, workspace_id, user_id).await {
+                return JsonResponse::forbidden(&msg).into_response();
+            };
+
+            match ensure_microsoft_token(&state, user_id, &query).await {
+                Ok(token) => token,
+                Err(resp) => return resp,
+            }
+        }
+        RequestedScope::Personal => {
+            if let Err(resp) = ensure_workspace_plan_membership(&state, user_id).await {
+                return resp;
+            }
+
+            match ensure_microsoft_token(&state, user_id, &query).await {
+                Ok(token) => token,
+                Err(resp) => return resp,
+            }
+        }
     };
 
     // Validate inputs
@@ -292,6 +291,29 @@ async fn ensure_microsoft_token(
             .await
             .map_err(map_oauth_error),
     }
+}
+
+fn has_workspace_plan_membership(memberships: &[WorkspaceMembershipSummary]) -> bool {
+    memberships.iter().any(|membership| {
+        !NormalizedPlanTier::from_option(Some(membership.workspace.plan.as_str())).is_solo()
+    })
+}
+
+async fn ensure_workspace_plan_membership(state: &AppState, user_id: Uuid) -> Result<(), Response> {
+    let memberships = state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+        .map_err(|err| {
+            error!(?err, %user_id, "Failed to load workspace memberships");
+            JsonResponse::server_error("Failed to verify workspace access").into_response()
+        })?;
+
+    if has_workspace_plan_membership(&memberships) {
+        return Ok(());
+    }
+
+    Err(JsonResponse::forbidden("Teams is only available on the Workspace plan").into_response())
 }
 
 fn graph_error_response(err: MicrosoftGraphError) -> Response {
@@ -451,6 +473,7 @@ mod tests {
         workspace_repository::WorkspaceRepository,
     };
     use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken, WorkspaceConnection};
+    use crate::models::workspace::{Workspace, WorkspaceMembershipSummary, WorkspaceRole};
     use crate::services::{
         oauth::{
             account_service::OAuthAccountService,
@@ -732,6 +755,26 @@ mod tests {
         )
     }
 
+    fn workspace_membership(
+        workspace_id: Uuid,
+        role: WorkspaceRole,
+        plan: &str,
+    ) -> WorkspaceMembershipSummary {
+        WorkspaceMembershipSummary {
+            workspace: Workspace {
+                id: workspace_id,
+                name: "Workspace".into(),
+                created_by: Uuid::new_v4(),
+                owner_id: Uuid::new_v4(),
+                plan: plan.to_string(),
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+                deleted_at: None,
+            },
+            role,
+        }
+    }
+
     #[tokio::test]
     async fn ensure_microsoft_token_defaults_to_personal_connection() {
         let config = stub_config();
@@ -872,5 +915,27 @@ mod tests {
         .expect_err("should return a not found response");
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn detects_workspace_plan_membership() {
+        let memberships = vec![workspace_membership(
+            Uuid::new_v4(),
+            WorkspaceRole::User,
+            "workspace",
+        )];
+
+        assert!(has_workspace_plan_membership(&memberships));
+    }
+
+    #[test]
+    fn rejects_solo_only_memberships() {
+        let memberships = vec![workspace_membership(
+            Uuid::new_v4(),
+            WorkspaceRole::Owner,
+            "solo",
+        )];
+
+        assert!(!has_workspace_plan_membership(&memberships));
     }
 }
