@@ -194,6 +194,7 @@ export default function Dashboard() {
       ),
     [currentWorkspace?.workspace.plan, userPlan]
   )
+  const usageWorkspaceId = planTier === 'workspace' ? activeWorkspaceId : null
   const planUsage = usePlanUsageStore((state) => state.usage)
   const planUsageError = usePlanUsageStore((state) => state.error)
   const refreshPlanUsage = usePlanUsageStore((state) => state.refresh)
@@ -271,6 +272,8 @@ export default function Dashboard() {
     }
     return null
   }, [planTier, resolvedRunUsage?.limit])
+  const runsRemaining =
+    runsLimit != null ? Math.max(0, runsLimit - runsUsed) : null
   const runsPercent = useMemo(() => {
     if (!runsLimit || runsLimit <= 0) return null
     if (runsUsed <= 0) return 0
@@ -494,13 +497,14 @@ export default function Dashboard() {
     }
 
     fetchWorkflows()
-    void refreshPlanUsage(activeWorkspaceId)
+    void refreshPlanUsage(usageWorkspaceId)
   }, [
     normalizeWorkflowData,
     planTier,
     refreshPlanUsage,
-    activeWorkspaceId,
-    pushGraphToStore
+    usageWorkspaceId,
+    pushGraphToStore,
+    activeWorkspaceId
   ])
 
   const doSelectWorkflow = useCallback(
@@ -645,7 +649,7 @@ export default function Dashboard() {
 
       const normalized = normalizeWorkflowData(created.data ?? payload.data)
       pushGraphToStore(normalized, false)
-      await refreshPlanUsage(activeWorkspaceId)
+      await refreshPlanUsage(usageWorkspaceId)
     } catch (err) {
       console.error('Failed to create workflow', err)
       setError('Failed to create workflow.')
@@ -661,8 +665,9 @@ export default function Dashboard() {
     planTier,
     refreshPlanUsage,
     canEditCurrentWorkflow,
-    activeWorkspaceId,
-    pushGraphToStore
+    usageWorkspaceId,
+    pushGraphToStore,
+    activeWorkspaceId
   ])
 
   const stopPolling = useCallback(() => {
@@ -985,7 +990,7 @@ export default function Dashboard() {
       setActiveRun(run)
       currentPollRunIdRef.current = run.id
       pollRun(currentWorkflow.id, run.id)
-      void refreshPlanUsage(activeWorkspaceId)
+      void refreshPlanUsage(usageWorkspaceId)
       try {
         window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
       } catch (e) {
@@ -1011,7 +1016,7 @@ export default function Dashboard() {
     refreshPlanUsage,
     runAvailability,
     markWorkspaceRunCap,
-    activeWorkspaceId
+    usageWorkspaceId
   ])
 
   // Overlay: subscribe to SSE for active run to reduce client work
@@ -1363,8 +1368,8 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between">
                   <span>
                     {runsLimit
-                      ? `You have used ${runsUsed} of ${runsLimit} monthly runs.`
-                      : `You have used ${runsUsed} runs this month.`}
+                      ? `You have ${(runsRemaining != null ? runsRemaining : runsLimit).toLocaleString()} runs remaining this month (${runsUsed.toLocaleString()} of ${runsLimit.toLocaleString()} used).`
+                      : `You have used ${runsUsed.toLocaleString()} runs this month.`}
                   </span>
                   <button
                     type="button"

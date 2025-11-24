@@ -78,9 +78,11 @@ export default function PlanTab() {
   const currentWorkspaceId = currentWorkspace?.workspace.id ?? null
   const planUsage = usePlanUsageStore((state) => state.usage)
   const refreshPlanUsage = usePlanUsageStore((state) => state.refresh)
+  const usageWorkspaceId =
+    effectivePlan === 'workspace' ? currentWorkspaceId : null
   useEffect(() => {
-    void refreshPlanUsage(currentWorkspaceId)
-  }, [currentWorkspaceId, refreshPlanUsage])
+    void refreshPlanUsage(usageWorkspaceId)
+  }, [refreshPlanUsage, usageWorkspaceId])
   const planRunUsage = planUsage?.workspace?.runs ?? planUsage?.runs ?? null
   const planRunLimit = planRunUsage?.limit
   const planRunUsed = planRunUsage?.used ?? 0

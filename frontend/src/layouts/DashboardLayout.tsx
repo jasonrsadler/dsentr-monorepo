@@ -65,11 +65,12 @@ export default function DashboardLayout() {
       ),
     [currentWorkspace?.workspace.plan, user?.plan]
   )
+  const usageWorkspaceId =
+    planTier === 'workspace' ? (currentWorkspace?.workspace.id ?? null) : null
 
   useEffect(() => {
-    const workspaceId = currentWorkspace?.workspace.id ?? null
-    void refreshPlanUsage(workspaceId)
-  }, [currentWorkspace?.workspace.id, refreshPlanUsage])
+    void refreshPlanUsage(usageWorkspaceId)
+  }, [refreshPlanUsage, usageWorkspaceId])
 
   const workspaceRunUsage = planUsage?.workspace?.runs
   const workspaceUsageLimit =
