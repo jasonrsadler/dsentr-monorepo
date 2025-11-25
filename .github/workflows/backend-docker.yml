@@ -1,0 +1,61 @@
+name: Backend CI + Docker Deploy
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  backend-ci-docker-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked --all
+
+      # --- Switch to repo root for Docker ---
+      - name: Move back to repo root
+        run: cd ../
+
+      - name: Log in to Docker registry
+        run: |
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login \
+            -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f backend/Dockerfile \
+            -t ${{ secrets.DOCKER_REPO }}:${{ github.sha }} \
+            .
+
+      - name: Tag latest
+        run: |
+          docker tag ${{ secrets.DOCKER_REPO }}:${{ github.sha }} \
+                     ${{ secrets.DOCKER_REPO }}:latest
+
+      - name: Push images
+        run: |
+          docker push ${{ secrets.DOCKER_REPO }}:${{ github.sha }}
+          docker push ${{ secrets.DOCKER_REPO }}:latest
+
+      - name: Trigger Render Deploy
+        if: github.ref == 'refs/heads/master'
+        run: |
+          curl -X POST "${{ secrets.RENDER_DOCKER_DEPLOY_HOOK_URL }}"
