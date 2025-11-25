@@ -28,6 +28,7 @@ import ProfileModal from '@/components/profile/ProfileModal'
 import PendingInviteModal from '@/components/dashboard/PendingInviteModal'
 import { usePlanUsageStore } from '@/stores/planUsageStore'
 import { normalizePlanTier } from '@/lib/planTiers'
+import HelpButton from '@/components/help/HelpButton'
 
 export default function DashboardLayout() {
   const user = useAuth((state) => state.user)
@@ -351,6 +352,7 @@ export default function DashboardLayout() {
                 <ThemeToggle />
                 <ProfileButton onOpenProfile={() => setProfileOpen(true)} />
                 <SettingsButton onOpenSettings={() => setSettingsOpen(true)} />
+                <HelpButton />
               </div>
             )}
           </div>

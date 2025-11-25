@@ -51,6 +51,16 @@ export function MobileNav() {
             >
               How It Works
             </NavLink>
+            <a
+              href="https://docs.dsentr.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Documentation"
+              className={`${linkClass} text-zinc-700 dark:text-zinc-300`}
+              onClick={() => setOpen(false)}
+            >
+              Documentation
+            </a>
           </nav>
         </div>
       )}

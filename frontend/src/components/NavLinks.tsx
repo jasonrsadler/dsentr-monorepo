@@ -35,6 +35,15 @@ export function NavLinks() {
       >
         How it works
       </NavLink>
+      <a
+        href="https://docs.dsentr.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Documentation"
+        className="text-white hover:text-primary transition-all ease-in-out duration-300"
+      >
+        Documentation
+      </a>
     </nav>
   )
 }
