@@ -852,6 +852,7 @@ mod tests {
         memberships: Arc<Mutex<Vec<WorkspaceMembershipSummary>>>,
         plan_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
         name_updates: Arc<Mutex<Vec<(Uuid, String)>>>,
+        #[allow(clippy::type_complexity)]
         run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
         overage_items: Arc<Mutex<HashMap<Uuid, Option<String>>>>,

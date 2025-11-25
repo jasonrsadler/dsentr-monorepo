@@ -2626,6 +2626,7 @@ mod tests {
         accepted: Arc<Mutex<Vec<Uuid>>>,
         declined: Arc<Mutex<Vec<Uuid>>>,
         workspace: Arc<Mutex<Option<Workspace>>>,
+        #[allow(clippy::type_complexity)]
         run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
         overage_items: Arc<Mutex<HashMap<Uuid, Option<String>>>>,
@@ -3028,6 +3029,7 @@ mod tests {
         workspaces: Arc<Mutex<HashMap<Uuid, Workspace>>>,
         members: Arc<Mutex<HashMap<Uuid, Vec<WorkspaceMember>>>>,
         audits: Arc<Mutex<AuditEntries>>,
+        #[allow(clippy::type_complexity)]
         run_usage: Arc<Mutex<HashMap<(Uuid, i64), (i64, i64)>>>,
         billing_cycles: Arc<Mutex<HashMap<Uuid, WorkspaceBillingCycle>>>,
         pending_invites: Arc<Mutex<HashMap<Uuid, i64>>>,
