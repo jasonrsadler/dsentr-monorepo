@@ -18,9 +18,9 @@
 - Introduced workspace OAuth service for cloning encrypted tokens into workspace-level connections and emitting audit events.
 - Added `stripe` service: unified trait for creating Checkout Sessions, verifying webhooks safely, and retrieving events; live implementation wraps `async-stripe` and mock captures calls for deterministic tests.
  - Extended StripeService to support customer creation (`create_customer`) and enriched Checkout Session requests with `customer` and `metadata` fields so routes can associate sessions with users and desired workspace upgrades.
- - New: subscription helpers for plan lifecycle – `get_active_subscription_for_customer` and `set_subscription_cancel_at_period_end` – so routes can display renewal dates and schedule downgrades at period end without immediate plan changes. The mock tracks a synthetic `active_subscription` to keep tests deterministic.
+ - New: subscription helpers for plan lifecycle — `get_active_subscription_for_customer` and `set_subscription_cancel_at_period_end` — so routes can display renewal dates and schedule downgrades at period end without immediate plan changes. The mock tracks a synthetic `active_subscription` to keep tests deterministic.
 - Stripe `SubscriptionInfo` now exposes `current_period_start`, and both live/mocked clients populate it so routes/AppState can persist billing cycle anchors for quota resets.
-- Stripe service now returns subscription item ids and supports creating usage records (live + mock) so metered overage reporting can target specific subscription items.
+- Stripe service now reports overage usage via billing meter events (`create_meter_event`), posting the configured event name with customer id/value payloads; the mock records emitted meter events for assertion in tests.
 - Tests: added unit tests for the Stripe service validating request construction (via the mock capturing last requests) and error mapping (invalid webhook signature, invalid customer id parsing) without hitting the network.
 - Workspace OAuth service adds connection purge helpers plus dedicated mocks/tests so member removals can revoke shared tokens and audit deletions consistently.
 - Workspace OAuth workflows now persist `owner_user_id`/`user_oauth_token_id` on shared connections and ensure permission checks, mocks, and decrypt helpers respect the new ownership contract.

@@ -796,6 +796,7 @@ pub struct StaticWorkspaceMembershipRepository {
     member_counts: Arc<Mutex<HashMap<Uuid, i64>>>,
     pending_invites: Arc<Mutex<HashMap<Uuid, i64>>>,
     overage_items: Arc<Mutex<HashMap<Uuid, Option<String>>>>,
+    workspace_owners: Arc<Mutex<HashMap<Uuid, Uuid>>>,
     inner: NoopWorkspaceRepository,
 }
 
@@ -813,6 +814,7 @@ impl StaticWorkspaceMembershipRepository {
             member_counts: Arc::new(Mutex::new(HashMap::new())),
             pending_invites: Arc::new(Mutex::new(HashMap::new())),
             overage_items: Arc::new(Mutex::new(HashMap::new())),
+            workspace_owners: Arc::new(Mutex::new(HashMap::new())),
             inner: NoopWorkspaceRepository,
         }
     }
@@ -830,6 +832,7 @@ impl StaticWorkspaceMembershipRepository {
             member_counts: Arc::new(Mutex::new(HashMap::new())),
             pending_invites: Arc::new(Mutex::new(HashMap::new())),
             overage_items: Arc::new(Mutex::new(HashMap::new())),
+            workspace_owners: Arc::new(Mutex::new(HashMap::new())),
             inner: NoopWorkspaceRepository,
         }
     }
@@ -898,6 +901,14 @@ impl StaticWorkspaceMembershipRepository {
             .lock()
             .unwrap()
             .insert(workspace_id, count);
+    }
+
+    #[allow(dead_code)]
+    pub fn set_workspace_owner(&self, workspace_id: Uuid, owner_id: Uuid) {
+        self.workspace_owners
+            .lock()
+            .unwrap()
+            .insert(workspace_id, owner_id);
     }
 }
 
@@ -1211,7 +1222,32 @@ impl WorkspaceRepository for StaticWorkspaceMembershipRepository {
     }
 
     async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>, sqlx::Error> {
-        self.inner.find_workspace(workspace_id).await
+        let owner_id = self
+            .workspace_owners
+            .lock()
+            .unwrap()
+            .get(&workspace_id)
+            .copied()
+            .unwrap_or(Uuid::nil());
+        let overage_item = self
+            .overage_items
+            .lock()
+            .unwrap()
+            .get(&workspace_id)
+            .cloned()
+            .flatten();
+
+        Ok(Some(Workspace {
+            id: workspace_id,
+            name: "Static Workspace".into(),
+            created_by: owner_id,
+            owner_id,
+            plan: self.plan.as_str().to_string(),
+            stripe_overage_item_id: overage_item,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            deleted_at: None,
+        }))
     }
 
     async fn set_stripe_overage_item_id(

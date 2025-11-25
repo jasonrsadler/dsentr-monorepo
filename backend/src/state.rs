@@ -253,38 +253,82 @@ impl AppState {
         }
 
         if update.overage_incremented {
-            match self
-                .workspace_repo
-                .get_stripe_overage_item_id(workspace_id)
-                .await
-            {
-                Ok(Some(item_id)) => {
-                    let stripe = self.stripe.clone();
-                    tokio::spawn(async move {
-                        if let Err(err) = stripe
-                            .create_usage_record(
-                                &item_id,
-                                1,
-                                OffsetDateTime::now_utc().unix_timestamp(),
-                            )
+            let event_name = match std::env::var("STRIPE_WORKSPACE_METER_EVENT_NAME") {
+                Ok(val) if !val.trim().is_empty() => Some(val),
+                _ => {
+                    warn!(
+                        %workspace_id,
+                        "workspace meter event name is not configured; skipping usage reporting"
+                    );
+                    None
+                }
+            };
+
+            if let Some(event_name) = event_name {
+                match self.workspace_repo.find_workspace(workspace_id).await {
+                    Ok(Some(workspace)) => {
+                        if workspace.stripe_overage_item_id.is_none() {
+                            warn!(
+                                %workspace_id,
+                                "workspace missing overage subscription item id; reporting meter usage without it"
+                            );
+                        }
+
+                        let customer_id = match self
+                            .db
+                            .get_user_stripe_customer_id(workspace.owner_id)
                             .await
                         {
-                            warn!(?err, %workspace_id, "failed to report overage usage");
+                            Ok(Some(id)) => Some(id),
+                            Ok(None) => {
+                                warn!(
+                                    %workspace_id,
+                                    "workspace owner is missing stripe customer id; skipping usage reporting"
+                                );
+                                None
+                            }
+                            Err(err) => {
+                                warn!(
+                                    ?err,
+                                    %workspace_id,
+                                    "failed to load stripe customer id for workspace owner; skipping usage reporting"
+                                );
+                                None
+                            }
+                        };
+
+                        if let Some(customer_id) = customer_id {
+                            let stripe = self.stripe.clone();
+                            let overage_item_id = workspace.stripe_overage_item_id.clone();
+                            tokio::spawn(async move {
+                                if let Err(err) = stripe
+                                    .create_meter_event(
+                                        &event_name,
+                                        &customer_id,
+                                        1,
+                                        OffsetDateTime::now_utc().unix_timestamp(),
+                                        overage_item_id.as_deref(),
+                                    )
+                                    .await
+                                {
+                                    warn!(?err, %workspace_id, "failed to report overage usage");
+                                }
+                            });
                         }
-                    });
-                }
-                Ok(None) => {
-                    warn!(
-                        %workspace_id,
-                        "workspace missing overage subscription item id; skipping usage reporting"
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        ?err,
-                        %workspace_id,
-                        "failed to load overage subscription item id; skipping usage reporting"
-                    );
+                    }
+                    Ok(None) => {
+                        warn!(
+                            %workspace_id,
+                            "workspace not found while reporting overage usage; skipping meter event"
+                        );
+                    }
+                    Err(err) => {
+                        warn!(
+                            ?err,
+                            %workspace_id,
+                            "failed to load workspace while reporting overage usage"
+                        );
+                    }
                 }
             }
         }
@@ -497,6 +541,11 @@ mod tests {
 
     fn build_state_with_user(plan: Option<&str>) -> (AppState, Uuid) {
         let user_id = Uuid::new_v4();
+        let stripe_customer_id = if plan == Some("workspace") {
+            Some("cus_test_meter".to_string())
+        } else {
+            None
+        };
         let db = MockDb {
             find_user_result: Some(User {
                 id: user_id,
@@ -507,12 +556,13 @@ mod tests {
                 role: Some(UserRole::User),
                 plan: plan.map(|p| p.to_string()),
                 company_name: None,
-                stripe_customer_id: None,
+                stripe_customer_id: stripe_customer_id.clone(),
                 oauth_provider: Some(OauthProvider::Email),
                 onboarded_at: Some(OffsetDateTime::now_utc()),
                 created_at: OffsetDateTime::now_utc(),
                 is_verified: true,
             }),
+            stripe_customer_id: std::sync::Mutex::new(stripe_customer_id),
             ..Default::default()
         };
 
@@ -577,8 +627,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_plan_tier_uses_database_plan_for_upgraded_user() {
+    async fn resolve_plan_tier_downgrades_when_no_active_subscription() {
         let (state, user_id) = build_state_with_user(Some("workspace"));
+        let tier = state.resolve_plan_tier(user_id, Some("solo")).await;
+        assert_eq!(tier, NormalizedPlanTier::Solo);
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_tier_uses_database_plan_for_upgraded_user() {
+        let user_id = Uuid::new_v4();
+
+        // Build test DB that says workspace plan but has no Stripe customer id
+        let db = MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "user@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Plan".into(),
+                last_name: "Tester".into(),
+                role: Some(UserRole::User),
+                plan: Some("workspace".into()),
+                company_name: None,
+                stripe_customer_id: None, // << key fix
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: Some(OffsetDateTime::now_utc()),
+                created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
+            }),
+            stripe_customer_id: std::sync::Mutex::new(None),
+            ..Default::default()
+        };
+
+        // Build AppState, replacing db only
+        let (mut state, _) = build_state_with_user(None);
+        state.db = Arc::new(db);
+
         let tier = state.resolve_plan_tier(user_id, Some("solo")).await;
         assert_eq!(tier, NormalizedPlanTier::Workspace);
     }
@@ -624,6 +707,7 @@ mod tests {
 
     #[tokio::test]
     async fn consume_workspace_run_quota_reports_overage_usage() {
+        std::env::set_var("STRIPE_WORKSPACE_METER_EVENT_NAME", "workspace.run.overage");
         let workspace_id = Uuid::new_v4();
         let repo: Arc<StaticWorkspaceMembershipRepository> =
             Arc::new(StaticWorkspaceMembershipRepository::with_run_limit(1));
@@ -632,7 +716,8 @@ mod tests {
             .unwrap();
 
         let stripe = Arc::new(crate::services::stripe::MockStripeService::new());
-        let (state, _user_id) = build_state_with_user(Some("workspace"));
+        let (state, user_id) = build_state_with_user(Some("workspace"));
+        repo.set_workspace_owner(workspace_id, user_id);
         let state = AppState {
             workspace_repo: repo.clone() as Arc<dyn WorkspaceRepository>,
             stripe: stripe.clone(),
@@ -647,7 +732,7 @@ mod tests {
             .unwrap();
         assert!(!first.overage_incremented);
         sleep(std::time::Duration::from_millis(5)).await;
-        assert!(stripe.usage_records.lock().unwrap().is_empty());
+        assert!(stripe.meter_events.lock().unwrap().is_empty());
 
         // Second run exceeds the limit and should emit one usage record
         let second = state
@@ -657,20 +742,27 @@ mod tests {
             .unwrap();
         assert!(second.overage_incremented);
         sleep(std::time::Duration::from_millis(5)).await;
-        let records = stripe.usage_records.lock().unwrap().clone();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0, "si_overage");
-        assert_eq!(records[0].1, 1);
+        let events = stripe.meter_events.lock().unwrap().clone();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_name, "workspace.run.overage");
+        assert_eq!(events[0].stripe_customer_id, "cus_test_meter");
+        assert_eq!(events[0].value, 1);
+        assert_eq!(
+            events[0].subscription_item_id.as_deref(),
+            Some("si_overage")
+        );
     }
 
     #[tokio::test]
     async fn consume_workspace_run_quota_skips_usage_reporting_for_solo_plan() {
+        std::env::set_var("STRIPE_WORKSPACE_METER_EVENT_NAME", "workspace.run.overage");
         let workspace_id = Uuid::new_v4();
         let repo: Arc<StaticWorkspaceMembershipRepository> = Arc::new(
             StaticWorkspaceMembershipRepository::with_plan(PlanTier::Solo),
         );
         let stripe = Arc::new(crate::services::stripe::MockStripeService::new());
-        let (state, _user_id) = build_state_with_user(Some("workspace"));
+        let (state, user_id) = build_state_with_user(Some("workspace"));
+        repo.set_workspace_owner(workspace_id, user_id);
         let state = AppState {
             workspace_repo: repo.clone() as Arc<dyn WorkspaceRepository>,
             stripe: stripe.clone(),
@@ -683,6 +775,6 @@ mod tests {
             .unwrap();
         assert!(ticket.is_none());
         sleep(std::time::Duration::from_millis(5)).await;
-        assert!(stripe.usage_records.lock().unwrap().is_empty());
+        assert!(stripe.meter_events.lock().unwrap().is_empty());
     }
 }

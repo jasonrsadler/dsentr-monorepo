@@ -134,11 +134,13 @@ pub trait StripeService: Send + Sync {
         subscription_id: &str,
     ) -> Result<(), StripeServiceError>;
 
-    async fn create_usage_record(
+    async fn create_meter_event(
         &self,
-        subscription_item_id: &str,
-        quantity: i64,
+        event_name: &str,
+        stripe_customer_id: &str,
+        value: i64,
         timestamp: i64,
+        subscription_item_id: Option<&str>,
     ) -> Result<(), StripeServiceError>;
 }
 
@@ -148,7 +150,7 @@ mod mock;
 #[allow(unused_imports)]
 pub use live::LiveStripeService;
 #[allow(unused_imports)]
-pub use mock::MockStripeService;
+pub use mock::{MockStripeService, RecordedMeterEvent};
 
 #[cfg(test)]
 mod tests {

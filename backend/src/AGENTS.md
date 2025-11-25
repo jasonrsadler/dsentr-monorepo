@@ -34,3 +34,4 @@
 - Workspace member/run limits now load from `WORKSPACE_MEMBER_LIMIT` and `WORKSPACE_MONTHLY_RUN_LIMIT` with validation, and AppState uses these config values when enforcing quotas.
 - Workspace run quota checks now return `None` for solo-plan workspaces so run handlers can apply solo limits without blocking execution behind workspace-only gating.
 - Workspace overage billing now records Stripe subscription item ids and reports metered usage for over-limit workspace runs without impacting solo plans.
+- Workspace overage reporting now emits Stripe billing meter events (using the configured meter event name and the workspace owner's Stripe customer id) instead of legacy usage records.

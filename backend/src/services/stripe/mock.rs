@@ -4,8 +4,18 @@ use super::{
     SubscriptionInfo,
 };
 use async_trait::async_trait;
+use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RecordedMeterEvent {
+    pub event_name: String,
+    pub stripe_customer_id: String,
+    pub value: i64,
+    pub timestamp: i64,
+    pub subscription_item_id: Option<String>,
+}
 
 #[derive(Clone, Default)]
 pub struct MockStripeService {
@@ -13,7 +23,7 @@ pub struct MockStripeService {
     pub last_create_requests: Arc<Mutex<Vec<CreateCheckoutSessionRequest>>>,
     pub events: Arc<Mutex<Vec<StripeEvent>>>,
     pub active_subscription: Arc<Mutex<Option<SubscriptionInfo>>>,
-    pub usage_records: Arc<Mutex<Vec<(String, i64, i64)>>>,
+    pub meter_events: Arc<Mutex<Vec<RecordedMeterEvent>>>,
 }
 
 impl MockStripeService {
@@ -180,17 +190,21 @@ impl StripeService for MockStripeService {
         Ok(())
     }
 
-    async fn create_usage_record(
+    async fn create_meter_event(
         &self,
-        subscription_item_id: &str,
-        quantity: i64,
+        event_name: &str,
+        stripe_customer_id: &str,
+        value: i64,
         timestamp: i64,
+        subscription_item_id: Option<&str>,
     ) -> Result<(), StripeServiceError> {
-        self.usage_records.lock().unwrap().push((
-            subscription_item_id.to_string(),
-            quantity,
+        self.meter_events.lock().unwrap().push(RecordedMeterEvent {
+            event_name: event_name.to_string(),
+            stripe_customer_id: stripe_customer_id.to_string(),
+            value,
             timestamp,
-        ));
+            subscription_item_id: subscription_item_id.map(|s| s.to_string()),
+        });
         Ok(())
     }
 }

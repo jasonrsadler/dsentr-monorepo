@@ -56,6 +56,7 @@ pub trait WorkspaceRepository: Send + Sync {
         subscription_item_id: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn get_stripe_overage_item_id(
         &self,
         workspace_id: Uuid,

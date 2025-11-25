@@ -4,6 +4,7 @@ use super::{
     StripeService, StripeServiceError, SubscriptionInfo, SubscriptionItemInfo,
 };
 use async_trait::async_trait;
+use serde::Serialize;
 
 pub struct LiveStripeService {
     client: stripe::Client,
@@ -234,27 +235,41 @@ impl StripeService for LiveStripeService {
         Ok(())
     }
 
-    async fn create_usage_record(
+    async fn create_meter_event(
         &self,
-        subscription_item_id: &str,
-        quantity: i64,
+        event_name: &str,
+        stripe_customer_id: &str,
+        value: i64,
         timestamp: i64,
+        subscription_item_id: Option<&str>,
     ) -> Result<(), StripeServiceError> {
-        let item_id = subscription_item_id
-            .parse::<stripe::SubscriptionItemId>()
-            .map_err(|e| StripeServiceError::Other(e.to_string()))?;
-        #[allow(clippy::needless_update)]
-        stripe::UsageRecord::create(
-            &self.client,
-            &item_id,
-            stripe::CreateUsageRecord {
-                quantity: quantity as u64,
-                timestamp: Some(timestamp),
-                action: Some(stripe::UsageRecordAction::Increment),
-                ..Default::default()
-            },
-        )
-        .await?;
+        #[derive(Serialize)]
+        struct CreateMeterEvent<'a> {
+            event_name: &'a str,
+            payload: std::collections::HashMap<String, String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            timestamp: Option<i64>,
+        }
+
+        let mut payload = std::collections::HashMap::new();
+        payload.insert(
+            "stripe_customer_id".to_string(),
+            stripe_customer_id.to_string(),
+        );
+        payload.insert("value".to_string(), value.to_string());
+        if let Some(sub_item_id) = subscription_item_id {
+            payload.insert("subscription_item_id".to_string(), sub_item_id.to_string());
+        }
+
+        let params = CreateMeterEvent {
+            event_name,
+            payload,
+            timestamp: Some(timestamp),
+        };
+
+        self.client
+            .post_form::<serde_json::Value, _>("billing/meter_events", params)
+            .await?;
         Ok(())
     }
 }
