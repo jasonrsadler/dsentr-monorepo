@@ -1,0 +1,11 @@
+# ignore everything by default
+**
+
+# allow backend folder only
+!/backend
+
+# ignore backend build artifacts
+backend/target
+
+# ignore git
+.git

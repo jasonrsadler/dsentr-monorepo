@@ -9,9 +9,6 @@ on:
 jobs:
   backend-ci-docker-deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
 
     steps:
       - name: Checkout repo
@@ -25,13 +22,11 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: backend
 
       - name: Tests
         run: cargo test --locked --all
-
-      # --- Switch to repo root for Docker ---
-      - name: Move back to repo root
-        run: cd ../
+        working-directory: backend
 
       - name: Log in to Docker registry
         run: |
@@ -58,4 +53,4 @@ jobs:
       - name: Trigger Render Deploy
         if: github.ref == 'refs/heads/master'
         run: |
-          curl -X POST "${{ secrets.RENDER_DOCKER_DEPLOY_HOOK_URL }}"
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
