@@ -43,3 +43,4 @@
 - Workspace repositories persist `stripe_overage_item_id` for workspaces, expose getters/setters (including mock support), and SQLx queries return the new column so Stripe metered usage can be reported.
 - StaticWorkspaceMembershipRepository now tracks workspace owners so meter-event billing tests can surface the correct Stripe customer id when emitting usage to Stripe.
 - User repository adds an issue-report insert helper (with Postgres + mock implementations) so support submissions capture user/workspace metadata in the database.
+- Added a Stripe event log repository (Postgres + mock) to persist processed webhook event ids for webhook idempotency.

@@ -64,6 +64,7 @@
 - Webhook handling updated to revert plans when the subscription actually cancels:
   - On `customer.subscription.deleted`, we map the `customer` to a user, set `users.plan = "solo"`, and downgrade any owned workspaces to `"solo"`.
 - Workspace upgrades now include the metered overage price (via `STRIPE_OVERAGE_PRICE_ID`) in Checkout, and webhook completion extracts/persists the overage subscription item id on the workspace while remaining idempotent when the item is already stored.
+- Stripe webhooks now record processed event ids inside a transaction-backed log so duplicate deliveries short-circuit without reapplying billing mutations; tests cover repeated checkout and subscription events.
 
 ### New endpoint: resume subscription
 - `POST /api/workspaces/billing/subscription/resume` clears `cancel_at_period_end` on the active Stripe subscription for the authenticated user�?Ts Stripe customer. Returns the updated renewal date so clients can refresh UI.

@@ -94,24 +94,33 @@ impl StripeService for MockStripeService {
         payload: &[u8],
         _signature_header: &str,
     ) -> Result<StripeEvent, StripeServiceError> {
+        // Parse incoming payload
         let val: serde_json::Value = serde_json::from_slice(payload)
             .map_err(|e| StripeServiceError::Serde(e.to_string()))?;
-        let id = match val.get("id").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => make_id("evt"),
-        };
+
+        // Stripe always has an ID, otherwise generate one
+        let id = val
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| make_id("evt"));
+
+        // Stripe always has a type
         let ty = val
             .get("type")
             .or_else(|| val.get("type_"))
             .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
         let evt = StripeEvent {
             id,
             r#type: ty,
-            payload: val,
+            payload: val.clone(),
         };
+
         self.events.lock().unwrap().push(evt.clone());
+
         Ok(evt)
     }
 

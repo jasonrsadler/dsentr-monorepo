@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::db::{
-    user_repository::UserRepository, workflow_repository::WorkflowRepository,
+    stripe_event_log_repository::StripeEventLogRepository, user_repository::UserRepository,
+    workflow_repository::WorkflowRepository,
     workspace_connection_repository::WorkspaceConnectionRepository,
     workspace_repository::WorkspaceRepository,
 };
@@ -29,6 +30,7 @@ pub struct AppState {
     pub workflow_repo: Arc<dyn WorkflowRepository>,
     pub workspace_repo: Arc<dyn WorkspaceRepository>,
     pub workspace_connection_repo: Arc<dyn WorkspaceConnectionRepository>,
+    pub stripe_event_log_repo: Arc<dyn StripeEventLogRepository>,
     pub db_pool: Arc<PgPool>,
     pub mailer: Arc<dyn Mailer>,
     pub google_oauth: Arc<dyn GoogleOAuthService>,
@@ -491,6 +493,7 @@ mod tests {
         MockDb, NoopWorkflowRepository, NoopWorkspaceRepository,
         StaticWorkspaceMembershipRepository,
     };
+    use crate::db::mock_stripe_event_log_repository::MockStripeEventLogRepository;
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
     use crate::models::user::{OauthProvider, User, UserRole};
     use crate::models::workspace::WorkspaceBillingCycle;
@@ -606,6 +609,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo: Arc::new(NoopWorkspaceRepository),
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
             db_pool: test_pg_pool(),
             mailer: Arc::new(NoopMailer),
             google_oauth: Arc::new(MockGoogleOAuth::default()),

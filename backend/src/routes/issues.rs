@@ -173,6 +173,7 @@ mod tests {
         DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
     };
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository, StaticWorkspaceMembershipRepository};
+    use crate::db::mock_stripe_event_log_repository::MockStripeEventLogRepository;
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
     use crate::models::{
         plan::PlanTier,
@@ -279,6 +280,7 @@ mod tests {
             workflow_repo: Arc::new(NoopWorkflowRepository),
             workspace_repo,
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
             db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),

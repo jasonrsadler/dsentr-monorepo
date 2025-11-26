@@ -36,3 +36,4 @@
 - Workspace overage billing now records Stripe subscription item ids and reports metered usage for over-limit workspace runs without impacting solo plans.
 - Workspace overage reporting now emits Stripe billing meter events (using the configured meter event name and the workspace owner's Stripe customer id) instead of legacy usage records.
 - Main bootstrap now mounts the authenticated issue-report submission route so support tickets are captured alongside existing API groups.
+- AppState wires a Stripe event log repository so webhook handlers can record processed event ids for idempotent billing flows.

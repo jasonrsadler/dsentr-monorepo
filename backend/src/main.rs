@@ -27,6 +27,7 @@ use chrono::Utc;
 use config::Config;
 use db::oauth_token_repository::UserOAuthTokenRepository;
 use db::postgres_oauth_token_repository::PostgresUserOAuthTokenRepository;
+use db::postgres_stripe_event_log_repository::PostgresStripeEventLogRepository;
 use db::postgres_user_repository::PostgresUserRepository;
 use db::postgres_workflow_repository::PostgresWorkflowRepository;
 use db::postgres_workspace_connection_repository::PostgresWorkspaceConnectionRepository;
@@ -84,7 +85,8 @@ use utils::{
 };
 
 use crate::db::{
-    user_repository::UserRepository, workflow_repository::WorkflowRepository,
+    stripe_event_log_repository::StripeEventLogRepository, user_repository::UserRepository,
+    workflow_repository::WorkflowRepository,
     workspace_connection_repository::WorkspaceConnectionRepository,
     workspace_repository::WorkspaceRepository,
 };
@@ -278,6 +280,9 @@ async fn main() -> Result<()> {
     let workspace_connection_repo = Arc::new(PostgresWorkspaceConnectionRepository {
         pool: pg_pool.clone(),
     }) as Arc<dyn WorkspaceConnectionRepository>;
+    let stripe_event_log_repo = Arc::new(PostgresStripeEventLogRepository {
+        pool: pg_pool.clone(),
+    }) as Arc<dyn StripeEventLogRepository>;
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_accounts = Arc::new(OAuthAccountService::new(
         oauth_repo.clone(),
@@ -303,6 +308,7 @@ async fn main() -> Result<()> {
         workflow_repo,
         workspace_repo,
         workspace_connection_repo,
+        stripe_event_log_repo,
         db_pool: shared_pg_pool.clone(),
         mailer,
         google_oauth,

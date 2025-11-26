@@ -758,6 +758,7 @@ mod tests {
     use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
     use crate::db::{
         mock_db::{MockDb, StaticWorkspaceMembershipRepository},
+        mock_stripe_event_log_repository::MockStripeEventLogRepository,
         workflow_repository::{
             CreateWorkflowRunOutcome, MockWorkflowRepository, WorkflowRepository,
         },
@@ -895,6 +896,7 @@ mod tests {
             workflow_repo,
             workspace_repo,
             workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
             db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(MockGoogleOAuth::default()),

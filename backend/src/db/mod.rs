@@ -1,10 +1,13 @@
 pub mod mock_db;
+pub mod mock_stripe_event_log_repository;
 pub mod oauth_token_repository;
 pub mod postgres_oauth_token_repository;
+pub mod postgres_stripe_event_log_repository;
 pub mod postgres_user_repository;
 pub mod postgres_workflow_repository;
 pub mod postgres_workspace_connection_repository;
 pub mod postgres_workspace_repository;
+pub mod stripe_event_log_repository;
 pub mod user_repository;
 pub mod workflow_repository;
 pub mod workspace_connection_repository;

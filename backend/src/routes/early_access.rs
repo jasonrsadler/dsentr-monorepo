@@ -44,6 +44,7 @@ mod tests {
         },
         db::{
             mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
+            mock_stripe_event_log_repository::MockStripeEventLogRepository,
             workspace_connection_repository::NoopWorkspaceConnectionRepository,
         },
         services::{
@@ -106,6 +107,7 @@ mod tests {
                 workflow_repo: Arc::new(NoopWorkflowRepository),
                 workspace_repo: Arc::new(NoopWorkspaceRepository),
                 workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+                stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
                 db_pool: test_pg_pool(),
                 mailer: Arc::new(MockMailer::default()),
                 github_oauth: Arc::new(MockGitHubOAuth::default()),

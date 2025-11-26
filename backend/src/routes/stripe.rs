@@ -81,31 +81,11 @@ fn extract_bool(root: &serde_json::Value, path: &[&str]) -> Option<bool> {
     current.as_bool()
 }
 
-// POST /api/stripe/webhook
-pub async fn webhook(
-    State(app_state): State<AppState>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
+async fn handle_stripe_event(
+    app_state: &AppState,
+    evt_type: &str,
+    payload: &serde_json::Value,
 ) -> Response {
-    let sig = match headers
-        .get("Stripe-Signature")
-        .and_then(|h| h.to_str().ok())
-    {
-        Some(s) => s,
-        None => return JsonResponse::bad_request("Missing Stripe-Signature").into_response(),
-    };
-
-    let evt = match app_state.stripe.verify_webhook(&body, sig) {
-        Ok(e) => e,
-        Err(err) => {
-            warn!(?err, "stripe webhook verification failed");
-            return (StatusCode::BAD_REQUEST, "invalid webhook").into_response();
-        }
-    };
-
-    let evt_type = evt.r#type.as_str();
-    let payload = &evt.payload;
-
     match evt_type {
         // Primary success signal for Checkout-based upgrades
         "checkout.session.completed" => {
@@ -815,6 +795,93 @@ pub async fn webhook(
     }
 }
 
+// POST /api/stripe/webhook
+pub async fn webhook(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let sig = match headers
+        .get("Stripe-Signature")
+        .and_then(|h| h.to_str().ok())
+    {
+        Some(s) => s,
+        None => return JsonResponse::bad_request("Missing Stripe-Signature").into_response(),
+    };
+
+    let evt = match app_state.stripe.verify_webhook(&body, sig) {
+        Ok(e) => e,
+        Err(err) => {
+            warn!(?err, "stripe webhook verification failed");
+            return (StatusCode::BAD_REQUEST, "invalid webhook").into_response();
+        }
+    };
+
+    let event_id = evt.id.clone();
+    let evt_type = evt.r#type.as_str();
+    let payload = &evt.payload;
+
+    let mut tx = match app_state.db_pool.begin().await {
+        Ok(tx) => tx,
+        Err(err) => {
+            error!(?err, %event_id, "failed to start webhook transaction");
+            return JsonResponse::server_error("Failed to process webhook").into_response();
+        }
+    };
+
+    let conn: &mut sqlx::PgConnection = &mut *tx;
+    if let Err(err) = sqlx::query::<sqlx::Postgres>("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(&event_id)
+        .execute(conn)
+        .await
+    {
+        warn!(?err, %event_id, "failed to acquire advisory lock for stripe event");
+    }
+
+    match app_state
+        .stripe_event_log_repo
+        .has_processed_event(&event_id, &mut tx)
+        .await
+    {
+        Ok(true) => {
+            if let Err(err) = tx.commit().await {
+                warn!(?err, %event_id, "failed to commit no-op webhook transaction");
+            }
+            return Json(serde_json::json!({ "received": true })).into_response();
+        }
+        Err(err) => {
+            error!(?err, %event_id, "failed to check stripe event log");
+            let _ = tx.rollback().await;
+            return JsonResponse::server_error("Failed to process webhook").into_response();
+        }
+        Ok(false) => {}
+    }
+
+    let response = handle_stripe_event(&app_state, evt_type, payload).await;
+
+    if response.status().is_success() {
+        if let Err(err) = app_state
+            .stripe_event_log_repo
+            .record_event(&event_id, &mut tx)
+            .await
+        {
+            error!(?err, %event_id, "failed to record stripe event");
+            let _ = tx.rollback().await;
+            return JsonResponse::server_error("Failed to persist webhook status").into_response();
+        }
+
+        if let Err(err) = tx.commit().await {
+            error!(?err, %event_id, "failed to commit stripe webhook transaction");
+            return JsonResponse::server_error("Failed to finalize webhook").into_response();
+        }
+
+        response
+    } else {
+        let _ = tx.rollback().await;
+        response
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -823,6 +890,7 @@ mod tests {
         DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
     };
     use crate::db::mock_db::{MockDb, NoopWorkflowRepository};
+    use crate::db::mock_stripe_event_log_repository::MockStripeEventLogRepository;
     use crate::db::workspace_repository::{
         WorkspaceRepository, WorkspaceRunQuotaUpdate, WorkspaceRunUsage,
     };
@@ -1388,6 +1456,7 @@ mod tests {
             workspace_connection_repo: Arc::new(
                 crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
             ),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
             db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(
@@ -1543,6 +1612,7 @@ mod tests {
             workspace_connection_repo: Arc::new(
                 crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
             ),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
             db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(
@@ -1651,6 +1721,7 @@ mod tests {
             workspace_connection_repo: Arc::new(
                 crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
             ),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
             db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(
@@ -1771,6 +1842,7 @@ mod tests {
             workspace_connection_repo: Arc::new(
                 crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
             ),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
             db_pool: test_pg_pool(),
             mailer: Arc::new(MockMailer::default()),
             google_oauth: Arc::new(
@@ -1822,5 +1894,269 @@ mod tests {
         // At least one workspace plan update recorded
         // update: grace period DOES NOT update the plan right away
         assert!(workspace_repo.plan_updates.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn webhook_duplicate_checkout_event_is_skipped_after_logging() {
+        let user_id = Uuid::new_v4();
+        let session_id = "cs_test_dupe";
+        let now = OffsetDateTime::now_utc();
+        std::env::set_var("STRIPE_OVERAGE_PRICE_ID", "price_overage_test");
+        let personal_workspace = Workspace {
+            id: Uuid::new_v4(),
+            name: "Owner's Workspace".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: WORKSPACE_PLAN_SOLO.into(),
+            stripe_overage_item_id: None,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: None,
+                company_name: None,
+                stripe_customer_id: None,
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: None,
+                created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
+            }),
+            ..Default::default()
+        });
+
+        let workspace_repo = Arc::new(TestWorkspaceRepo::default());
+        workspace_repo
+            .workspaces
+            .lock()
+            .unwrap()
+            .push(personal_workspace.clone());
+        workspace_repo
+            .memberships
+            .lock()
+            .unwrap()
+            .push(WorkspaceMembershipSummary {
+                workspace: personal_workspace.clone(),
+                role: WorkspaceRole::Owner,
+            });
+
+        {
+            let mut settings = db.user_settings.lock().unwrap();
+            *settings = serde_json::json!({
+                "billing": {
+                    "pending_checkout": {
+                        "session_id": session_id,
+                        "plan_tier": "workspace",
+                        "workspace_name": "Acme Co"
+                    }
+                }
+            });
+        }
+
+        let stripe = Arc::new(MockStripeService::new());
+        {
+            let mut guard = stripe.active_subscription.lock().unwrap();
+            *guard = Some(SubscriptionInfo {
+                id: "sub_dupe".into(),
+                status: "active".into(),
+                current_period_start: now.unix_timestamp(),
+                current_period_end: (now + time::Duration::days(30)).unix_timestamp(),
+                cancel_at: None,
+                cancel_at_period_end: false,
+                items: vec![SubscriptionItemInfo {
+                    id: "si_over".into(),
+                    price_id: "price_overage_test".into(),
+                }],
+            });
+        }
+        let stripe_event_log_repo = Arc::new(MockStripeEventLogRepository::default());
+        let state = AppState {
+            db: db.clone(),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: workspace_repo.clone(),
+            workspace_connection_repo: Arc::new(
+                crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
+            ),
+            stripe_event_log_repo: stripe_event_log_repo.clone(),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(
+                crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),
+            ),
+            github_oauth: Arc::new(
+                crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth::default(),
+            ),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(
+            ),
+            workspace_oauth:
+                crate::services::oauth::workspace_service::WorkspaceOAuthService::test_stub(),
+            stripe: stripe.clone(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
+            worker_id: Arc::new("test-worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        };
+
+        let body = serde_json::json!({
+            "id": "evt_dupe",
+            "type": "checkout.session.completed",
+            "data": { "object": { "id": session_id, "metadata": { "user_id": user_id.to_string(), "workspace_name": "Acme Co" }, "customer": "cus_dupe" } }
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert("Stripe-Signature", HeaderValue::from_static("t=1,v1=stub"));
+
+        let resp1 = webhook(
+            AxumState(state.clone()),
+            headers.clone(),
+            axum::body::Bytes::from(serde_json::to_vec(&body).unwrap()),
+        )
+        .await;
+        let resp2 = webhook(
+            AxumState(state),
+            headers,
+            axum::body::Bytes::from(serde_json::to_vec(&body).unwrap()),
+        )
+        .await;
+        assert_eq!(resp1.status(), StatusCode::OK);
+        assert_eq!(resp2.status(), StatusCode::OK);
+
+        assert_eq!(*db.update_user_plan_calls.lock().unwrap(), 1);
+        assert_eq!(
+            workspace_repo.plan_updates.lock().unwrap().len(),
+            1,
+            "workspace plan updated only once"
+        );
+        assert_eq!(
+            workspace_repo.name_updates.lock().unwrap().len(),
+            1,
+            "workspace rename applied only once"
+        );
+        assert_eq!(
+            *stripe_event_log_repo.inserts.lock().unwrap(),
+            1,
+            "event log recorded once"
+        );
+    }
+
+    #[tokio::test]
+    async fn webhook_subscription_deleted_is_idempotent_by_event_id() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+        let workspace_repo = Arc::new(TestWorkspaceRepo::default());
+        workspace_repo
+            .memberships
+            .lock()
+            .unwrap()
+            .push(WorkspaceMembershipSummary {
+                workspace: Workspace {
+                    id: workspace_id,
+                    name: "Team".into(),
+                    created_by: user_id,
+                    owner_id: user_id,
+                    plan: "workspace".into(),
+                    stripe_overage_item_id: None,
+                    created_at: now,
+                    updated_at: now,
+                    deleted_at: None,
+                },
+                role: WorkspaceRole::Owner,
+            });
+
+        let db = Arc::new(MockDb {
+            find_user_result: Some(User {
+                id: user_id,
+                email: "owner@example.com".into(),
+                password_hash: String::new(),
+                first_name: "Owner".into(),
+                last_name: "User".into(),
+                role: Some(UserRole::User),
+                plan: Some("workspace".into()),
+                company_name: None,
+                stripe_customer_id: Some("cus_del".into()),
+                oauth_provider: Some(OauthProvider::Email),
+                onboarded_at: None,
+                created_at: OffsetDateTime::now_utc(),
+                is_verified: true,
+            }),
+            ..Default::default()
+        });
+        {
+            let mut guard = db.stripe_customer_id.lock().unwrap();
+            *guard = Some("cus_del".into());
+        }
+
+        let stripe = Arc::new(MockStripeService::new());
+        let stripe_event_log_repo = Arc::new(MockStripeEventLogRepository::default());
+        let state = AppState {
+            db: db.clone(),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: workspace_repo.clone(),
+            workspace_connection_repo: Arc::new(
+                crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository,
+            ),
+            stripe_event_log_repo: stripe_event_log_repo.clone(),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(
+                crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth::default(),
+            ),
+            github_oauth: Arc::new(
+                crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth::default(),
+            ),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(
+            ),
+            workspace_oauth:
+                crate::services::oauth::workspace_service::WorkspaceOAuthService::test_stub(),
+            stripe: stripe.clone(),
+            http_client: Arc::new(Client::new()),
+            config: test_config(),
+            worker_id: Arc::new("test-worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        };
+
+        let body = serde_json::json!({
+            "id": "evt_delete_dupe",
+            "type": "customer.subscription.deleted",
+            "data": { "object": { "customer": "cus_del" } }
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert("Stripe-Signature", HeaderValue::from_static("t=1,v1=stub"));
+
+        let resp1 = webhook(
+            AxumState(state.clone()),
+            headers.clone(),
+            axum::body::Bytes::from(serde_json::to_vec(&body).unwrap()),
+        )
+        .await;
+        let resp2 = webhook(
+            AxumState(state),
+            headers,
+            axum::body::Bytes::from(serde_json::to_vec(&body).unwrap()),
+        )
+        .await;
+
+        assert_eq!(resp1.status(), StatusCode::OK);
+        assert_eq!(resp2.status(), StatusCode::OK);
+        assert_eq!(*db.update_user_plan_calls.lock().unwrap(), 1);
+        assert_eq!(
+            workspace_repo.plan_updates.lock().unwrap().len(),
+            1,
+            "workspace downgraded only once"
+        );
+        assert_eq!(
+            *stripe_event_log_repo.inserts.lock().unwrap(),
+            1,
+            "event log recorded only once"
+        );
     }
 }

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO stripe_event_log (event_id)\n            VALUES ($1)\n            ON CONFLICT (event_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "379ddb20bcaa4c8482e839604e3c8a333cc059c1cd6cca042598cf4ed75af598"
+}
