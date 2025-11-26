@@ -1,3 +1,4 @@
+use crate::models::issue_report::NewIssueReport;
 use crate::models::user::{OauthProvider, PublicUser, User};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -42,6 +43,7 @@ pub struct MockDb {
     pub stripe_customer_id: Mutex<Option<String>>,
     pub update_user_plan_calls: Mutex<usize>,
     pub terms_acceptances: Mutex<Vec<(Uuid, String, OffsetDateTime)>>,
+    pub issue_reports: Mutex<Vec<NewIssueReport>>,
 }
 
 impl Default for MockDb {
@@ -57,6 +59,7 @@ impl Default for MockDb {
             stripe_customer_id: Mutex::new(None),
             update_user_plan_calls: Mutex::new(0),
             terms_acceptances: Mutex::new(vec![]),
+            issue_reports: Mutex::new(vec![]),
         }
     }
 }
@@ -258,6 +261,11 @@ impl UserRepository for MockDb {
                 serde_json::json!(OffsetDateTime::now_utc()),
             );
         }
+        Ok(())
+    }
+
+    async fn create_issue_report(&self, report: NewIssueReport) -> Result<(), sqlx::Error> {
+        self.issue_reports.lock().unwrap().push(report);
         Ok(())
     }
 

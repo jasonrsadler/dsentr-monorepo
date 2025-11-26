@@ -27,3 +27,4 @@
 - Workflow > Trigger: trigger type dropdown
 
 Styles live in `src/css/globals.css` under `.themed-scroll` and were previously used by `SettingsModal`.
+- Added support components (header issue button and modal) so users can submit issue reports with their account/workspace context to the backend.

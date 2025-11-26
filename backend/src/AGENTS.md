@@ -35,3 +35,4 @@
 - Workspace run quota checks now return `None` for solo-plan workspaces so run handlers can apply solo limits without blocking execution behind workspace-only gating.
 - Workspace overage billing now records Stripe subscription item ids and reports metered usage for over-limit workspace runs without impacting solo plans.
 - Workspace overage reporting now emits Stripe billing meter events (using the configured meter event name and the workspace owner's Stripe customer id) instead of legacy usage records.
+- Main bootstrap now mounts the authenticated issue-report submission route so support tickets are captured alongside existing API groups.

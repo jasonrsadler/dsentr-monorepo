@@ -26,6 +26,8 @@ import { WORKSPACE_RUN_LIMIT_FALLBACK } from '@/lib/usageDefaults'
 import ProfileButton from '@/components/profile/ProfileButton'
 import ProfileModal from '@/components/profile/ProfileModal'
 import PendingInviteModal from '@/components/dashboard/PendingInviteModal'
+import IssueReportModal from '@/components/support/IssueReportModal'
+import ReportIssueButton from '@/components/support/ReportIssueButton'
 import { usePlanUsageStore } from '@/stores/planUsageStore'
 import { normalizePlanTier } from '@/lib/planTiers'
 import HelpButton from '@/components/help/HelpButton'
@@ -38,6 +40,7 @@ export default function DashboardLayout() {
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [issueReportOpen, setIssueReportOpen] = useState(false)
   const [initialSettingsTab, setInitialSettingsTab] = useState<
     string | undefined
   >(undefined)
@@ -352,6 +355,7 @@ export default function DashboardLayout() {
                 <ThemeToggle />
                 <ProfileButton onOpenProfile={() => setProfileOpen(true)} />
                 <SettingsButton onOpenSettings={() => setSettingsOpen(true)} />
+                <ReportIssueButton onOpen={() => setIssueReportOpen(true)} />
                 <HelpButton />
               </div>
             )}
@@ -362,6 +366,10 @@ export default function DashboardLayout() {
           <Outlet />
         </main>
 
+        <IssueReportModal
+          open={issueReportOpen}
+          onClose={() => setIssueReportOpen(false)}
+        />
         <ProfileModal
           open={profileOpen}
           onClose={() => setProfileOpen(false)}

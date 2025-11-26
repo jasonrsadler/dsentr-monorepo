@@ -292,6 +292,13 @@ mod tests {
             Ok(())
         }
 
+        async fn create_issue_report(
+            &self,
+            _report: crate::models::issue_report::NewIssueReport,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
+
         async fn upsert_account_deletion_token(
             &self,
             _user_id: Uuid,

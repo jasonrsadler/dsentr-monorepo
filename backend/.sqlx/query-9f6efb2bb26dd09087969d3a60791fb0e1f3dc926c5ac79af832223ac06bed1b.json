@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO issue_reports (\n                user_id,\n                workspace_id,\n                user_email,\n                user_name,\n                user_plan,\n                user_role,\n                workspace_plan,\n                workspace_role,\n                description,\n                metadata\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9f6efb2bb26dd09087969d3a60791fb0e1f3dc926c5ac79af832223ac06bed1b"
+}

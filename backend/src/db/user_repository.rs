@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::models::{
     account_deletion::{AccountDeletionAuditInsert, AccountDeletionContext, AccountDeletionCounts},
+    issue_report::NewIssueReport,
     signup::SignupPayload,
     user::{OauthProvider, PublicUser, User},
 };
@@ -106,6 +107,8 @@ pub trait UserRepository: Send + Sync {
         user_id: Uuid,
         message: &str,
     ) -> Result<(), sqlx::Error>;
+
+    async fn create_issue_report(&self, report: NewIssueReport) -> Result<(), sqlx::Error>;
 
     async fn upsert_account_deletion_token(
         &self,

@@ -5,6 +5,7 @@ use crate::{
             AccountDeletionAuditInsert, AccountDeletionContext, AccountDeletionCounts,
             AccountDeletionToken,
         },
+        issue_report::NewIssueReport,
         signup::SignupPayload,
         user::{OauthProvider, PublicUser, User},
     },
@@ -467,6 +468,40 @@ impl UserRepository for PostgresUserRepository {
             );
         }
         self.update_user_settings(user_id, settings).await
+    }
+
+    async fn create_issue_report(&self, report: NewIssueReport) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            INSERT INTO issue_reports (
+                user_id,
+                workspace_id,
+                user_email,
+                user_name,
+                user_plan,
+                user_role,
+                workspace_plan,
+                workspace_role,
+                description,
+                metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            "#,
+            report.user_id,
+            report.workspace_id,
+            report.user_email,
+            report.user_name,
+            report.user_plan,
+            report.user_role,
+            report.workspace_plan,
+            report.workspace_role,
+            report.description,
+            report.metadata
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     async fn upsert_account_deletion_token(

@@ -48,6 +48,7 @@ use routes::{
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
+    issues::submit_issue_report,
     microsoft::{list_channel_members, list_team_channels, list_teams},
     oauth::{
         disconnect_connection, google_connect_callback, google_connect_start, list_connections,
@@ -621,6 +622,12 @@ async fn main() -> Result<()> {
     );
 
     let invite_routes = invite_private_routes.merge(invite_public_routes);
+
+    let issue_routes = Router::new()
+        .route("/issues", post(submit_issue_report))
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
+
     let dashboard_routes = Router::new()
         .route("/api/dashboard", get(dashboard_handler))
         .layer(session_guard.clone());
@@ -648,6 +655,7 @@ async fn main() -> Result<()> {
         .nest("/api/workspaces", workspace_routes)
         .merge(dashboard_routes)
         .merge(Router::new().nest("/api", invite_routes))
+        .merge(Router::new().nest("/api", issue_routes))
         .nest("/api/oauth", oauth_routes)
         .nest("/api/microsoft", microsoft_routes)
         .nest("/api/options", options_routes)

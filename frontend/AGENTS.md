@@ -240,3 +240,4 @@ OAuth connections grouping (Google Sheets, Microsoft Teams):
 - Adjusted related unit tests to assert grouped behavior and guard against regressions.
 
 - Added workspace-only run usage bar in the dashboard header and a new Settings � Usage tab to show workspace totals, member run breakdowns, and overage indicators so over-limit runs remain visible for billing.
+- Added a support entry point in the dashboard header plus an issue-report modal that submits user/workspace context to the backend for troubleshooting.

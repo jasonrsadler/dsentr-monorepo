@@ -68,3 +68,4 @@
 ### New endpoint: resume subscription
 - `POST /api/workspaces/billing/subscription/resume` clears `cancel_at_period_end` on the active Stripe subscription for the authenticated user�?Ts Stripe customer. Returns the updated renewal date so clients can refresh UI.
 - Workspace membership removal/leave flows now call the workspace OAuth purge helper and have regression tests to ensure shared connections are deleted when members depart or workspaces convert to Solo.
+- Added `POST /api/issues` so authenticated users can submit issue reports that persist user/workspace context for support investigations.
