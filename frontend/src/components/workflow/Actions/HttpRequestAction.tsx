@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react'
+import { AlertTriangle } from 'lucide-react'
 
 import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/ui/InputFields/NodeInputField'
@@ -11,6 +12,7 @@ import {
   useActionParams
 } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { API_BASE_URL } from '@/lib/config'
 
 interface HttpRequestActionProps {
   nodeId: string
@@ -150,6 +152,44 @@ export default function HttpRequestAction({
     updateNodeData(nodeId, { hasValidationErrors })
   }, [hasValidationErrors, nodeId, updateNodeData])
 
+  const apiBaseUrl = useMemo<URL | string | null>(() => {
+    const raw = (API_BASE_URL ?? '').trim()
+    if (!raw) return null
+    try {
+      return new URL(raw)
+    } catch {
+      return raw.replace(/\/+$/, '')
+    }
+  }, [])
+
+  const urlTargetsApiBase = useMemo(() => {
+    if (!apiBaseUrl) return false
+
+    const rawUrl = params.url?.trim()
+    if (!rawUrl) return false
+
+    const normalizePath = (path: string) => path.replace(/\/+$/, '') || '/'
+
+    if (apiBaseUrl instanceof URL) {
+      try {
+        const target = new URL(rawUrl)
+        const baseOrigin = `${apiBaseUrl.protocol}//${apiBaseUrl.host}`
+        const targetOrigin = `${target.protocol}//${target.host}`
+
+        if (baseOrigin !== targetOrigin) return false
+
+        const basePath = normalizePath(apiBaseUrl.pathname || '/')
+        const targetPath = normalizePath(target.pathname || '/')
+        return basePath === '/' || targetPath.startsWith(basePath)
+      } catch {
+        return false
+      }
+    }
+
+    const normalizedTarget = rawUrl.replace(/\/+$/, '')
+    return apiBaseUrl.length > 0 && normalizedTarget === apiBaseUrl
+  }, [apiBaseUrl, params.url])
+
   const handleUrlChange = useCallback(
     (value: string) => {
       commitParamsPatch({ url: value })
@@ -259,6 +299,25 @@ export default function HttpRequestAction({
       />
       {validation.errors.url && (
         <p className={errorClass}>{validation.errors.url}</p>
+      )}
+      {urlTargetsApiBase && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+          <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-300" />
+          <div className="space-y-1">
+            <p className="font-semibold text-amber-900 dark:text-amber-100">
+              This URL points at your DSentr API.
+            </p>
+            <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+              Calling DSentr workflow webhooks from inside a workflow can create
+              a loop that rapidly consumes your runs and may incur overage
+              charges.
+            </p>
+            <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+              Use an external endpoint or add guards to prevent the workflow
+              from re-triggering itself.
+            </p>
+          </div>
+        </div>
       )}
 
       <NodeDropdownField
