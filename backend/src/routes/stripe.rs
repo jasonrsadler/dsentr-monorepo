@@ -546,7 +546,9 @@ async fn handle_stripe_event(
             }
 
             if let Some(uid) = user_id {
-                // Update personal plan back to solo
+                if let Err(err) = app_state.db.clear_stripe_customer_id(uid).await {
+                    warn!(?err, %uid, "failed to clear stale stripe_customer_id");
+                } // Update personal plan back to solo
                 if let Err(err) = app_state.db.update_user_plan(uid, "solo").await {
                     warn!(?err, %uid, "failed to set user plan to solo on subscription deletion");
                 }

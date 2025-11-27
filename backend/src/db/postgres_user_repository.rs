@@ -811,4 +811,18 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map(|_| ())
     }
+
+    async fn clear_stripe_customer_id(&self, user_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE users
+            SET stripe_customer_id = NULL
+            WHERE id = $1
+            "#,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }

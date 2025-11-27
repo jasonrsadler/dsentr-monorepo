@@ -367,6 +367,10 @@ mod tests {
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }
+
+        async fn clear_stripe_customer_id(&self, _user_id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
     }
 
     fn make_app(behavior: MockBehavior) -> Router {

@@ -303,6 +303,12 @@ impl UserRepository for MockDb {
     async fn delete_verification_tokens_for_user(&self, _user_id: Uuid) -> Result<(), sqlx::Error> {
         Ok(())
     }
+
+    async fn clear_stripe_customer_id(&self, _user_id: Uuid) -> Result<(), sqlx::Error> {
+        let mut guard = self.stripe_customer_id.lock().unwrap();
+        *guard = None;
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
