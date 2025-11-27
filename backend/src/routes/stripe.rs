@@ -821,63 +821,86 @@ pub async fn webhook(
     let evt_type = evt.r#type.as_str();
     let payload = &evt.payload;
 
-    let mut tx = match app_state.db_pool.begin().await {
-        Ok(tx) => tx,
-        Err(err) => {
-            error!(?err, %event_id, "failed to start webhook transaction");
-            return JsonResponse::server_error("Failed to process webhook").into_response();
+    // Start tx only if the repo wants one
+    let mut tx_opt = if app_state.stripe_event_log_repo.supports_transactions() {
+        match app_state.db_pool.begin().await {
+            Ok(tx) => Some(tx),
+            Err(err) => {
+                error!(?err, %event_id, "failed to start webhook transaction");
+                return JsonResponse::server_error("Failed to process webhook").into_response();
+            }
         }
+    } else {
+        None
     };
 
-    let conn: &mut sqlx::PgConnection = &mut *tx;
-    if let Err(err) = sqlx::query::<sqlx::Postgres>("SELECT pg_advisory_xact_lock(hashtext($1))")
-        .bind(&event_id)
-        .execute(conn)
-        .await
-    {
-        warn!(?err, %event_id, "failed to acquire advisory lock for stripe event");
+    // Advisory lock only when we have a real transaction
+    if let Some(tx) = tx_opt.as_mut() {
+        if !cfg!(test) {
+            let conn: &mut sqlx::PgConnection = &mut *tx;
+            if let Err(err) =
+                sqlx::query::<sqlx::Postgres>("SELECT pg_advisory_xact_lock(hashtext($1))")
+                    .bind(&event_id)
+                    .execute(conn)
+                    .await
+            {
+                warn!(?err, %event_id, "failed to acquire advisory lock for stripe event");
+            }
+        }
     }
 
+    // Idempotency check
     match app_state
         .stripe_event_log_repo
-        .has_processed_event(&event_id, &mut tx)
+        .has_processed_event(&event_id, tx_opt.as_mut())
         .await
     {
         Ok(true) => {
-            if let Err(err) = tx.commit().await {
-                warn!(?err, %event_id, "failed to commit no-op webhook transaction");
+            if let Some(tx) = tx_opt.take() {
+                if let Err(err) = tx.commit().await {
+                    warn!(?err, %event_id, "failed to commit no-op webhook transaction");
+                }
             }
             return Json(serde_json::json!({ "received": true })).into_response();
         }
         Err(err) => {
             error!(?err, %event_id, "failed to check stripe event log");
-            let _ = tx.rollback().await;
+            if let Some(tx) = tx_opt.take() {
+                let _ = tx.rollback().await;
+            }
             return JsonResponse::server_error("Failed to process webhook").into_response();
         }
         Ok(false) => {}
     }
 
+    // Main handler
     let response = handle_stripe_event(&app_state, evt_type, payload).await;
 
     if response.status().is_success() {
         if let Err(err) = app_state
             .stripe_event_log_repo
-            .record_event(&event_id, &mut tx)
+            .record_event(&event_id, tx_opt.as_mut())
             .await
         {
             error!(?err, %event_id, "failed to record stripe event");
-            let _ = tx.rollback().await;
+            if let Some(tx) = tx_opt.take() {
+                let _ = tx.rollback().await;
+            }
             return JsonResponse::server_error("Failed to persist webhook status").into_response();
         }
 
-        if let Err(err) = tx.commit().await {
-            error!(?err, %event_id, "failed to commit stripe webhook transaction");
-            return JsonResponse::server_error("Failed to finalize webhook").into_response();
+        if let Some(tx) = tx_opt.take() {
+            if let Err(err) = tx.commit().await {
+                error!(?err, %event_id, "failed to commit stripe webhook transaction");
+                return JsonResponse::server_error("Failed to finalize webhook").into_response();
+            }
         }
 
         response
     } else {
-        let _ = tx.rollback().await;
+        if let Some(tx) = tx_opt.take() {
+            let _ = tx.rollback().await;
+        }
         response
     }
 }

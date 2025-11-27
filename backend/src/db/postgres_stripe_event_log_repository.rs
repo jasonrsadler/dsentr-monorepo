@@ -1,18 +1,25 @@
-use crate::db::stripe_event_log_repository::StripeEventLogRepository;
 use async_trait::async_trait;
-use sqlx::{PgConnection, PgPool, Postgres, Transaction};
+use sqlx::{PgConnection, Postgres, Transaction};
 
-pub struct PostgresStripeEventLogRepository {
-    pub pool: PgPool,
-}
+use crate::db::stripe_event_log_repository::StripeEventLogRepository;
+
+pub struct PostgresStripeEventLogRepository {}
 
 #[async_trait]
 impl StripeEventLogRepository for PostgresStripeEventLogRepository {
+    fn supports_transactions(&self) -> bool {
+        true
+    }
+
     async fn has_processed_event(
         &self,
         event_id: &str,
-        tx: &mut Transaction<'_, Postgres>,
+        tx: Option<&mut Transaction<'_, Postgres>>,
     ) -> Result<bool, sqlx::Error> {
+        let tx = tx.ok_or_else(|| {
+            sqlx::Error::Protocol("transaction required for stripe event log".into())
+        })?;
+
         let conn: &mut PgConnection = &mut *tx;
         let exists = sqlx::query_scalar::<Postgres, i64>(
             "SELECT 1 FROM stripe_event_log WHERE event_id = $1",
@@ -28,13 +35,17 @@ impl StripeEventLogRepository for PostgresStripeEventLogRepository {
     async fn record_event(
         &self,
         event_id: &str,
-        tx: &mut Transaction<'_, Postgres>,
+        tx: Option<&mut Transaction<'_, Postgres>>,
     ) -> Result<(), sqlx::Error> {
+        let tx = tx.ok_or_else(|| {
+            sqlx::Error::Protocol("transaction required for stripe event log".into())
+        })?;
+
         let conn: &mut PgConnection = &mut *tx;
         sqlx::query::<Postgres>(
             r#"
-            INSERT INTO stripe_event_log (event_id)
-            VALUES ($1)
+            INSERT INTO stripe_event_log (event_id, processed_at)
+            VALUES ($1, NOW())
             ON CONFLICT (event_id) DO NOTHING
             "#,
         )

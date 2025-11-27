@@ -5,25 +5,25 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
+#[allow(dead_code)]
 pub struct MockStripeEventLogRepository {
     events: Arc<Mutex<HashSet<String>>>,
     pub checks: Arc<Mutex<usize>>,
     pub inserts: Arc<Mutex<usize>>,
 }
 
-impl MockStripeEventLogRepository {
-    #[allow(dead_code)]
-    pub fn recorded_events(&self) -> Vec<String> {
-        self.events.lock().unwrap().iter().cloned().collect()
-    }
-}
+impl MockStripeEventLogRepository {}
 
 #[async_trait]
 impl StripeEventLogRepository for MockStripeEventLogRepository {
+    fn supports_transactions(&self) -> bool {
+        false
+    }
+
     async fn has_processed_event(
         &self,
         event_id: &str,
-        _tx: &mut Transaction<'_, Postgres>,
+        _tx: Option<&mut Transaction<'_, Postgres>>,
     ) -> Result<bool, sqlx::Error> {
         let mut guard = self.checks.lock().unwrap();
         *guard += 1;
@@ -33,7 +33,7 @@ impl StripeEventLogRepository for MockStripeEventLogRepository {
     async fn record_event(
         &self,
         event_id: &str,
-        _tx: &mut Transaction<'_, Postgres>,
+        _tx: Option<&mut Transaction<'_, Postgres>>,
     ) -> Result<(), sqlx::Error> {
         let mut guard = self.inserts.lock().unwrap();
         *guard += 1;

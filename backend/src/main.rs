@@ -280,9 +280,8 @@ async fn main() -> Result<()> {
     let workspace_connection_repo = Arc::new(PostgresWorkspaceConnectionRepository {
         pool: pg_pool.clone(),
     }) as Arc<dyn WorkspaceConnectionRepository>;
-    let stripe_event_log_repo = Arc::new(PostgresStripeEventLogRepository {
-        pool: pg_pool.clone(),
-    }) as Arc<dyn StripeEventLogRepository>;
+    let stripe_event_log_repo =
+        Arc::new(PostgresStripeEventLogRepository {}) as Arc<dyn StripeEventLogRepository>;
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_accounts = Arc::new(OAuthAccountService::new(
         oauth_repo.clone(),
