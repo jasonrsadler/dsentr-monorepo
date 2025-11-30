@@ -42,3 +42,4 @@ Operational notes:
 - Plan usage endpoint now returns personal/solo usage when a workspace query targets a non-Workspace plan so solo workspaces don't receive 403 errors.
 - Workflow run execution now hydrates secrets for scheduled and webhook-triggered runs while responses (run listings, downloads, and webhook acknowledgements) redact sensitive fields so plaintext API keys are never returned to clients.
 - Workflow helper tests populate `stripe_overage_item_id` on workspace fixtures so billing overage schema updates compile across plan usage helpers.
+- Run creation endpoints (manual, rerun, webhook) enforce runaway workflow protection per workspace and return `429` with `{"error":"runaway_protection_triggered"}` when the recent-run limit is exceeded.

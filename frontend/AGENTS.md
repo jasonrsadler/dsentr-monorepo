@@ -34,6 +34,9 @@ seCallback`, `useMemo`) to prevent infinite renders.
 SheetsAction credential fallback guard:
 - Prevent Sheets action nodes from silently auto-selecting the personal Google credential after a shared workspace credential disappears. Track when we clear a workspace selection and suppress the automatic fallback so users must explicitly pick another connection, keeping React Flow updates bounded.
 
+Runaway workflow protection toggle:
+- Settings �+' Workflows now surfaces a Runaway Protection checkbox that reads/writes `workflows.runaway_protection_enabled` via `/api/options/user-settings` with optimistic updates so workspaces can disable runaway run blocking when needed.
+
 OAuth connections response normalization:
 - `fetchConnections` now tolerates API responses where `personal`/`workspace` are provided as flat arrays instead of provider buckets by grouping entries client-side. This keeps the cached snapshot populated for tests and production regardless of response shape.
 

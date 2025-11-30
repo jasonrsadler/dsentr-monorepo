@@ -56,10 +56,10 @@
             "name": "workspace_role",
             "kind": {
               "Enum": [
+                "owner",
                 "admin",
                 "user",
-                "viewer",
-                "owner"
+                "viewer"
               ]
             }
           }

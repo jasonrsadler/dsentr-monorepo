@@ -5,7 +5,12 @@ use std::sync::Arc;
 
 use crate::engine::{complete_run_with_retry, execute_run, ExecutorError};
 use crate::models::workflow_run::WorkflowRun;
+use crate::models::workflow_run_event::NewWorkflowRunEvent;
 use crate::models::workflow_schedule::WorkflowSchedule;
+use crate::runaway_protection::{
+    enforce_runaway_protection, runaway_protection_enabled, RunawayProtectionError,
+    RUNAWAY_PROTECTION_ERROR,
+};
 use crate::state::{AppState, WorkspaceLimitError, WorkspaceRunQuotaTicket};
 #[cfg(test)]
 use crate::utils::jwt::JwtKeys;
@@ -161,12 +166,93 @@ fn run_deadline_duration(lease_seconds: i32) -> Duration {
     }
 }
 
+async fn block_run_if_runaway(state: &AppState, run: &WorkflowRun) -> Result<bool, ExecutorError> {
+    let Some(workspace_id) = run.workspace_id else {
+        return Ok(false);
+    };
+
+    let settings = match state.db.get_user_settings(run.user_id).await {
+        Ok(val) => val,
+        Err(err) => {
+            warn!(
+                run_id = %run.id,
+                workflow_id = %run.workflow_id,
+                %workspace_id,
+                ?err,
+                "worker: failed to load user settings for runaway protection check"
+            );
+            complete_run_with_retry(state, run.id, "failed", Some(RUNAWAY_PROTECTION_ERROR))
+                .await?;
+            return Ok(true);
+        }
+    };
+
+    if !runaway_protection_enabled(&settings, workspace_id) {
+        return Ok(false);
+    }
+
+    match enforce_runaway_protection(state, workspace_id, &settings).await {
+        Ok(()) => Ok(false),
+        Err(RunawayProtectionError::RunawayProtectionTriggered { count, limit }) => {
+            warn!(
+                run_id = %run.id,
+                workflow_id = %run.workflow_id,
+                %workspace_id,
+                %count,
+                %limit,
+                worker_id = %state.worker_id,
+                "runaway protection triggered; failing run without execution"
+            );
+            let event = NewWorkflowRunEvent {
+                workflow_run_id: run.id,
+                workflow_id: run.workflow_id,
+                workspace_id: run.workspace_id,
+                triggered_by: format!("worker:{}", state.worker_id.as_ref()),
+                connection_type: Some(RUNAWAY_PROTECTION_ERROR.to_string()),
+                connection_id: None,
+                recorded_at: None,
+            };
+            if let Err(err) = state.workflow_repo.record_run_event(event).await {
+                warn!(
+                    ?err,
+                    run_id = %run.id,
+                    workflow_id = %run.workflow_id,
+                    "failed to record runaway protection run event"
+                );
+            }
+            complete_run_with_retry(state, run.id, "failed", Some(RUNAWAY_PROTECTION_ERROR))
+                .await?;
+            Ok(true)
+        }
+        Err(RunawayProtectionError::Database(err)) => {
+            warn!(
+                ?err,
+                run_id = %run.id,
+                workflow_id = %run.workflow_id,
+                %workspace_id,
+                "worker: runaway protection enforcement failed"
+            );
+            complete_run_with_retry(state, run.id, "failed", Some(RUNAWAY_PROTECTION_ERROR))
+                .await?;
+            Ok(true)
+        }
+    }
+}
+
 async fn run_with_deadline(
     state: AppState,
     run: WorkflowRun,
     deadline: Duration,
 ) -> (Uuid, Result<(), ExecutorError>) {
     let run_id = run.id;
+
+    let blocked = match block_run_if_runaway(&state, &run).await {
+        Ok(blocked) => blocked,
+        Err(err) => return (run_id, Err(err)),
+    };
+    if blocked {
+        return (run_id, Ok(()));
+    }
 
     if deadline.is_zero() {
         return (run_id, execute_run(state, run).await);
@@ -266,6 +352,19 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
         }
     };
 
+    let settings = match state.db.get_user_settings(schedule.user_id).await {
+        Ok(val) => val,
+        Err(err) => {
+            warn!(
+                worker_id = %state.worker_id,
+                user_id = %schedule.user_id,
+                ?err,
+                "worker: failed to load user settings for schedule"
+            );
+            Value::Object(Default::default())
+        }
+    };
+
     let mut snapshot = workflow.data.clone();
     snapshot["_egress_allowlist"] = Value::Array(
         workflow
@@ -307,52 +406,72 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     let mut skip_run = false;
     if let Some(workspace_id) = workflow.workspace_id {
-        match state.consume_workspace_run_quota(workspace_id).await {
-            Ok(Some(ticket)) => {
-                if ticket.run_count > ticket.limit {
+        match enforce_runaway_protection(state, workspace_id, &settings).await {
+            Ok(()) => {}
+            Err(RunawayProtectionError::RunawayProtectionTriggered { count, limit }) => {
+                warn!(
+                    worker_id = %state.worker_id,
+                    %workspace_id,
+                    %schedule.id,
+                    %count,
+                    %limit,
+                    "runaway protection blocked scheduled run creation"
+                );
+                skip_run = true;
+            }
+            Err(RunawayProtectionError::Database(err)) => {
+                return Err(err);
+            }
+        }
+
+        if !skip_run {
+            match state.consume_workspace_run_quota(workspace_id).await {
+                Ok(Some(ticket)) => {
+                    if ticket.run_count > ticket.limit {
+                        warn!(
+                            worker_id = %state.worker_id,
+                            %workspace_id,
+                            overage_count = ticket.overage_count,
+                            run_count = ticket.run_count,
+                            %schedule.id,
+                            %ticket.limit,
+                            "workspace run overage recorded for scheduled run"
+                        );
+                    }
+                    workspace_quota = Some(ticket);
+                }
+                Ok(None) => {}
+                Err(WorkspaceLimitError::WorkspacePlanRequired) => {
                     warn!(
                         worker_id = %state.worker_id,
                         %workspace_id,
-                        overage_count = ticket.overage_count,
-                        run_count = ticket.run_count,
-                        %schedule.id,
-                        %ticket.limit,
-                        "workspace run overage recorded for scheduled run"
+                        schedule_id = %schedule.id,
+                        "skipping scheduled run because workspace reverted to the Solo plan"
+                    );
+                    skip_run = true;
+                }
+                Err(WorkspaceLimitError::RunLimitReached { limit }) => {
+                    warn!(
+                        worker_id = %state.worker_id,
+                        %workspace_id,
+                        schedule_id = %schedule.id,
+                        %limit,
+                        "workspace run usage exceeded limit; continuing and recording overage"
                     );
                 }
-                workspace_quota = Some(ticket);
-            }
-            Ok(None) => {}
-            Err(WorkspaceLimitError::WorkspacePlanRequired) => {
-                warn!(
-                    worker_id = %state.worker_id,
-                    %workspace_id,
-                    schedule_id = %schedule.id,
-                    "skipping scheduled run because workspace reverted to the Solo plan"
-                );
-                skip_run = true;
-            }
-            Err(WorkspaceLimitError::RunLimitReached { limit }) => {
-                warn!(
-                    worker_id = %state.worker_id,
-                    %workspace_id,
-                    schedule_id = %schedule.id,
-                    %limit,
-                    "workspace run usage exceeded limit; continuing and recording overage"
-                );
-            }
-            Err(WorkspaceLimitError::MemberLimitReached { limit }) => {
-                warn!(
-                    worker_id = %state.worker_id,
-                    %workspace_id,
-                    schedule_id = %schedule.id,
-                    %limit,
-                    "unexpected member limit error while triggering schedule"
-                );
-                skip_run = true;
-            }
-            Err(WorkspaceLimitError::Database(err)) => {
-                return Err(err);
+                Err(WorkspaceLimitError::MemberLimitReached { limit }) => {
+                    warn!(
+                        worker_id = %state.worker_id,
+                        %workspace_id,
+                        schedule_id = %schedule.id,
+                        %limit,
+                        "unexpected member limit error while triggering schedule"
+                    );
+                    skip_run = true;
+                }
+                Err(WorkspaceLimitError::Database(err)) => {
+                    return Err(err);
+                }
             }
         }
     }
@@ -420,16 +539,18 @@ mod tests {
     use super::*;
     use crate::config::{
         Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
-        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT, RUNAWAY_LIMIT_5MIN,
     };
-    use crate::db::mock_db::{MockDb, NoopWorkspaceRepository};
+    use crate::db::mock_db::{
+        MockDb, NoopWorkspaceRepository, StaticWorkspaceMembershipRepository,
+    };
     use crate::db::mock_stripe_event_log_repository::MockStripeEventLogRepository;
     use crate::db::workflow_repository::{MockWorkflowRepository, WorkflowRepository};
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
     use crate::models::workflow::Workflow;
     use crate::models::workflow_node_run::WorkflowNodeRun;
     use crate::models::workflow_run::WorkflowRun;
-    use crate::models::workflow_run_event::WorkflowRunEvent;
+    use crate::models::workflow_run_event::{NewWorkflowRunEvent, WorkflowRunEvent};
     use crate::models::workflow_schedule::WorkflowSchedule;
     use crate::services::oauth::account_service::OAuthAccountService;
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
@@ -472,6 +593,8 @@ mod tests {
             .returning(|_| Box::pin(async { Ok(Vec::new()) }));
         repo.expect_requeue_expired_leases()
             .returning(|| Box::pin(async { Ok(0) }));
+        repo.expect_count_workspace_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
         let run_queue = Arc::new(Mutex::new(VecDeque::from([run.clone()])));
         let run_queue_claim = Arc::clone(&run_queue);
         repo.expect_claim_next_eligible_run()
@@ -517,6 +640,7 @@ mod tests {
             jwt_audience: "test-audience".into(),
             workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
             workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
         });
 
         AppState {
@@ -640,6 +764,8 @@ mod tests {
             .returning(|_| Box::pin(async { Ok(Vec::new()) }));
         repo.expect_requeue_expired_leases()
             .returning(|| Box::pin(async { Ok(0) }));
+        repo.expect_count_workspace_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
         let runs_queue_claim = Arc::clone(&runs_queue);
         repo.expect_claim_next_eligible_run()
             .returning(move |_, _| {
@@ -747,6 +873,7 @@ mod tests {
             jwt_audience: "test-audience".into(),
             workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
             workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
         });
 
         let state = AppState {
@@ -839,6 +966,8 @@ mod tests {
             .returning(|_| Box::pin(async { Ok(Vec::new()) }));
         repo.expect_requeue_expired_leases()
             .returning(|| Box::pin(async { Ok(0) }));
+        repo.expect_count_workspace_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
         repo.expect_claim_next_eligible_run()
             .returning(move |_, _| {
                 let q = Arc::clone(&claim_queue);
@@ -935,6 +1064,7 @@ mod tests {
             jwt_audience: "test-audience".into(),
             workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
             workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
         });
 
         let state = AppState {
@@ -1023,6 +1153,9 @@ mod tests {
                 let workflow = workflow_clone.clone();
                 Box::pin(async move { Ok(Some(workflow)) })
             });
+        repo.expect_count_workspace_runs_since()
+            .times(1)
+            .returning(|_, _| Box::pin(async { Ok(0) }));
 
         let runs_clone = runs.clone();
         repo.expect_create_workflow_run().returning(
@@ -1117,6 +1250,7 @@ mod tests {
             jwt_audience: "test-audience".into(),
             workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
             workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
         });
 
         let state = AppState {
@@ -1190,5 +1324,271 @@ mod tests {
         assert_eq!(recorded_runs[0].workflow_id, workflow_id);
 
         assert!(marks.lock().unwrap().contains(&schedule.id));
+    }
+
+    #[tokio::test]
+    async fn scheduled_run_respects_runaway_protection_before_quota() {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let workflow_id = Uuid::new_v4();
+
+        let workflow = Workflow {
+            id: workflow_id,
+            user_id,
+            workspace_id: Some(workspace_id),
+            name: "schedule runaway guard".into(),
+            description: None,
+            data: json!({
+                "nodes": [{"id": "trigger", "type": "trigger", "data": {"label": "Trigger"}}],
+                "edges": []
+            }),
+            concurrency_limit: 1,
+            egress_allowlist: vec![],
+            require_hmac: false,
+            hmac_replay_window_sec: 300,
+            webhook_salt: Uuid::new_v4(),
+            locked_by: None,
+            locked_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_find_workflow_by_id()
+            .returning(move |user, id| {
+                assert_eq!(user, user_id);
+                assert_eq!(id, workflow_id);
+                let wf = workflow.clone();
+                Box::pin(async move { Ok(Some(wf)) })
+            });
+        repo.expect_count_workspace_runs_since()
+            .times(1)
+            .returning(|_, _| Box::pin(async { Ok(RUNAWAY_LIMIT_5MIN + 10) }));
+        repo.expect_create_workflow_run().times(0);
+        repo.expect_record_run_event().times(0);
+        repo.expect_mark_schedule_run()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+        repo.expect_disable_workflow_schedule().times(0);
+
+        let workflow_repo: Arc<dyn WorkflowRepository> = Arc::new(repo);
+        let workspace_repo = StaticWorkspaceMembershipRepository::allowing();
+        let config = Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+            api_secrets_encryption_key: vec![1u8; 32],
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
+        });
+
+        let state = AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo,
+            workspace_repo: Arc::new(workspace_repo.clone()),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        };
+
+        let schedule = WorkflowSchedule {
+            id: Uuid::new_v4(),
+            workflow_id,
+            user_id,
+            config: json!({
+                "startDate": "2024-01-01",
+                "startTime": "00:00",
+                "timezone": "UTC"
+            }),
+            next_run_at: Some(OffsetDateTime::now_utc() + TimeDuration::minutes(5)),
+            last_run_at: None,
+            enabled: true,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        trigger_schedule(&state, schedule)
+            .await
+            .expect("schedule processing should complete");
+
+        assert!(
+            workspace_repo.last_period_starts().is_empty(),
+            "quota should not increment when runaway protection blocks the run"
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_blocks_run_and_records_event_when_over_limit() {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let workflow_id = Uuid::new_v4();
+        let run = WorkflowRun {
+            id: Uuid::new_v4(),
+            user_id,
+            workflow_id,
+            workspace_id: Some(workspace_id),
+            snapshot: json!({"nodes": [], "edges": []}),
+            status: "running".into(),
+            error: None,
+            idempotency_key: None,
+            started_at: OffsetDateTime::now_utc(),
+            finished_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        #[allow(clippy::type_complexity)]
+        let completions: Arc<Mutex<Vec<(Uuid, String, Option<String>)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let recorded_events: Arc<Mutex<Vec<NewWorkflowRunEvent>>> =
+            Arc::new(Mutex::new(Vec::new()));
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_count_workspace_runs_since()
+            .times(1)
+            .returning(|_, _| Box::pin(async { Ok(RUNAWAY_LIMIT_5MIN + 1) }));
+
+        let events_clone = Arc::clone(&recorded_events);
+        repo.expect_record_run_event().returning(move |event| {
+            let events = Arc::clone(&events_clone);
+            Box::pin(async move {
+                events.lock().unwrap().push(event.clone());
+                Ok(WorkflowRunEvent {
+                    id: Uuid::new_v4(),
+                    workflow_run_id: event.workflow_run_id,
+                    workflow_id: event.workflow_id,
+                    workspace_id: event.workspace_id,
+                    triggered_by: event.triggered_by,
+                    connection_type: event.connection_type.clone(),
+                    connection_id: event.connection_id,
+                    recorded_at: event.recorded_at.unwrap_or_else(OffsetDateTime::now_utc),
+                })
+            })
+        });
+
+        let completion_log = Arc::clone(&completions);
+        repo.expect_complete_workflow_run()
+            .times(1)
+            .returning(move |run_id, status, error| {
+                let log = Arc::clone(&completion_log);
+                let status_owned = status.to_string();
+                let error_owned = error.map(|e| e.to_string());
+                Box::pin(async move {
+                    log.lock()
+                        .unwrap()
+                        .push((run_id, status_owned, error_owned));
+                    Ok(())
+                })
+            });
+
+        let workflow_repo: Arc<dyn WorkflowRepository> = Arc::new(repo);
+        let config = Arc::new(Config {
+            database_url: String::new(),
+            frontend_origin: "http://localhost".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                token_encryption_key: vec![0u8; 32],
+            },
+            api_secrets_encryption_key: vec![1u8; 32],
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: 1,
+        });
+
+        let state = AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo,
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: OAuthAccountService::test_stub(),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        };
+
+        let (_, result) = run_with_deadline(state, run, Duration::from_secs(5)).await;
+        assert!(result.is_ok());
+
+        let completions = completions.lock().unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].1, "failed");
+        assert_eq!(completions[0].2.as_deref(), Some(RUNAWAY_PROTECTION_ERROR));
+
+        let events = recorded_events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].connection_type.as_deref(),
+            Some(RUNAWAY_PROTECTION_ERROR)
+        );
+        assert_eq!(events[0].workspace_id, Some(workspace_id));
     }
 }

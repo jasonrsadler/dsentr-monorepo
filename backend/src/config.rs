@@ -5,6 +5,7 @@ use thiserror::Error;
 
 pub const DEFAULT_WORKSPACE_MEMBER_LIMIT: i64 = 8;
 pub const DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT: i64 = 20_000;
+pub const RUNAWAY_LIMIT_5MIN: i64 = 500;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -59,6 +60,7 @@ pub struct Config {
     pub jwt_audience: String,
     pub workspace_member_limit: i64,
     pub workspace_monthly_run_limit: i64,
+    pub runaway_limit_5min: i64,
 }
 
 impl Config {
@@ -140,6 +142,7 @@ impl Config {
             "WORKSPACE_MONTHLY_RUN_LIMIT",
             DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
         )?;
+        let runaway_limit_5min = parse_positive_env_i64("RUNAWAY_LIMIT_5MIN", RUNAWAY_LIMIT_5MIN)?;
 
         Ok(Config {
             database_url,
@@ -158,6 +161,7 @@ impl Config {
             jwt_audience,
             workspace_member_limit,
             workspace_monthly_run_limit,
+            runaway_limit_5min,
         })
     }
 }
@@ -220,6 +224,7 @@ fn parse_positive_env_i64(name: &'static str, default: i64) -> Result<i64, Confi
 mod tests {
     use super::{
         Config, ConfigError, DEFAULT_WORKSPACE_MEMBER_LIMIT, DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+        RUNAWAY_LIMIT_5MIN,
     };
     use base64::Engine as _;
     use std::env;
@@ -248,10 +253,11 @@ mod tests {
         "JWT_AUDIENCE",
     ];
 
-    const OPTIONAL_VARS: [&str; 3] = [
+    const OPTIONAL_VARS: [&str; 4] = [
         "AUTH_COOKIE_SECURE",
         "WORKSPACE_MEMBER_LIMIT",
         "WORKSPACE_MONTHLY_RUN_LIMIT",
+        "RUNAWAY_LIMIT_5MIN",
     ]; // allow tests to run without ambient overrides
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
@@ -349,6 +355,7 @@ mod tests {
             "WORKSPACE_MONTHLY_RUN_LIMIT",
             DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT.to_string(),
         );
+        env::set_var("RUNAWAY_LIMIT_5MIN", RUNAWAY_LIMIT_5MIN.to_string());
     }
 
     #[test]
@@ -382,6 +389,7 @@ mod tests {
                 config.workspace_monthly_run_limit,
                 DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT
             );
+            assert_eq!(config.runaway_limit_5min, RUNAWAY_LIMIT_5MIN);
         });
     }
 

@@ -1,6 +1,8 @@
 import { API_BASE_URL } from './config'
 import { getCsrfToken } from './csrfCache'
 
+export const RUNAWAY_PROTECTION_ERROR = 'runaway_protection_triggered'
+
 export interface WorkflowRecord {
   id: string
   name: string
@@ -539,14 +541,22 @@ export async function startWorkflowRun(
     /* ignore */
   }
   if (!res.ok || (body && body.success === false)) {
-    const error = new Error(
-      body?.message || res.statusText || 'Failed to start run'
-    )
+    const errorCode =
+      typeof body?.error === 'string'
+        ? body.error
+        : typeof body?.code === 'string'
+          ? body.code
+          : undefined
+    const message =
+      errorCode === RUNAWAY_PROTECTION_ERROR
+        ? 'Runaway protection triggered. Check for workflow loops and try again in a few minutes.'
+        : body?.message || res.statusText || 'Failed to start run'
+    const error = new Error(message)
     if (body?.violations) {
       ;(error as any).violations = body.violations
     }
-    if (body?.code) {
-      ;(error as any).code = body.code
+    if (errorCode) {
+      ;(error as any).code = errorCode
     }
     throw error
   }

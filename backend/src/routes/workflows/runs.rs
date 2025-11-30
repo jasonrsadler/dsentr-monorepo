@@ -5,6 +5,9 @@ use super::{
 use crate::{
     models::{workflow_node_run::WorkflowNodeRun, workflow_run::WorkflowRun},
     routes::{options::secrets::decrypt_secret_store, plan_limits::workspace_limit_error_response},
+    runaway_protection::{
+        enforce_runaway_protection, RunawayProtectionError, RUNAWAY_PROTECTION_ERROR,
+    },
     state::WorkspaceRunQuotaTicket,
     utils::{secrets::hydrate_secrets_into_snapshot, workflow_connection_metadata},
 };
@@ -104,6 +107,32 @@ pub async fn start_workflow_run(
 
     let owner_id = wf.user_id;
 
+    let settings = match app_state.db.get_user_settings(owner_id).await {
+        Ok(val) => val,
+        Err(err) => {
+            eprintln!("Failed to load user settings: {:?}", err);
+            return JsonResponse::server_error("Failed to start run").into_response();
+        }
+    };
+
+    if let Some(workspace_id) = wf.workspace_id {
+        if let Err(err) = enforce_runaway_protection(&app_state, workspace_id, &settings).await {
+            match err {
+                RunawayProtectionError::RunawayProtectionTriggered { .. } => {
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        Json(json!({ "error": RUNAWAY_PROTECTION_ERROR })),
+                    )
+                        .into_response();
+                }
+                RunawayProtectionError::Database(db_err) => {
+                    eprintln!("Failed to enforce runaway protection: {:?}", db_err);
+                    return JsonResponse::server_error("Failed to start run").into_response();
+                }
+            }
+        }
+    }
+
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     let plan_tier = if let Some(workspace_id) = wf.workspace_id {
         match app_state.consume_workspace_run_quota(workspace_id).await {
@@ -200,14 +229,6 @@ pub async fn start_workflow_run(
     }
 
     // ---- SECRET HYDRATION FIX ----
-
-    let settings = match app_state.db.get_user_settings(owner_id).await {
-        Ok(val) => val,
-        Err(err) => {
-            eprintln!("Failed to load user settings: {:?}", err);
-            return JsonResponse::server_error("Failed to load secrets").into_response();
-        }
-    };
 
     let (secret_store, _) = match decrypt_secret_store(
         &app_state,
@@ -586,6 +607,32 @@ pub async fn rerun_workflow_run(
     let connection_metadata = workflow_connection_metadata::collect(&snapshot);
     workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
 
+    if let Some(workspace_id) = workflow.workspace_id {
+        let settings = match app_state.db.get_user_settings(workflow.user_id).await {
+            Ok(val) => val,
+            Err(err) => {
+                eprintln!("Failed to load user settings: {:?}", err);
+                return JsonResponse::server_error("Failed to rerun").into_response();
+            }
+        };
+
+        if let Err(err) = enforce_runaway_protection(&app_state, workspace_id, &settings).await {
+            match err {
+                RunawayProtectionError::RunawayProtectionTriggered { .. } => {
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        Json(json!({ "error": RUNAWAY_PROTECTION_ERROR })),
+                    )
+                        .into_response();
+                }
+                RunawayProtectionError::Database(db_err) => {
+                    eprintln!("Failed to enforce runaway protection: {:?}", db_err);
+                    return JsonResponse::server_error("Failed to rerun").into_response();
+                }
+            }
+        }
+    }
+
     let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
     if let Some(workspace_id) = workflow.workspace_id {
         match app_state.consume_workspace_run_quota(workspace_id).await {
@@ -755,7 +802,10 @@ pub async fn download_run_json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, OAuthProviderConfig, OAuthSettings, StripeSettings};
+    use crate::config::{
+        Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
+        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT, RUNAWAY_LIMIT_5MIN,
+    };
     use crate::db::{
         mock_db::{MockDb, StaticWorkspaceMembershipRepository},
         mock_stripe_event_log_repository::MockStripeEventLogRepository,
@@ -817,8 +867,9 @@ mod tests {
             webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
             jwt_issuer: "test-issuer".into(),
             jwt_audience: "test-audience".into(),
-            workspace_member_limit: crate::config::DEFAULT_WORKSPACE_MEMBER_LIMIT,
-            workspace_monthly_run_limit: crate::config::DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
         })
     }
 
@@ -922,6 +973,8 @@ mod tests {
         let run = run_fixture(&workflow);
 
         let mut repo = MockWorkflowRepository::new();
+        repo.expect_count_workspace_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
         repo.expect_find_workflow_for_member()
             .returning(move |user, workflow_id| {
                 let wf = workflow_for_find.clone();
@@ -989,6 +1042,8 @@ mod tests {
         let run = run_fixture(&workflow);
 
         let mut repo = MockWorkflowRepository::new();
+        repo.expect_count_workspace_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
         repo.expect_find_workflow_for_member()
             .returning(move |user, workflow_id| {
                 let wf = workflow_for_find.clone();
@@ -1043,6 +1098,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rerun_workflow_run_blocks_when_runaway_protection_triggers() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let workflow = workflow_fixture(workspace_id, owner_id);
+        let workflow_for_find = workflow.clone();
+        let workflow_for_run = workflow.clone();
+        let base_run = run_fixture(&workflow);
+        let base_run_id = base_run.id;
+        let base_run_for_get = base_run.clone();
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_find_workflow_for_member()
+            .returning(move |user, workflow_id| {
+                let wf = workflow_for_find.clone();
+                assert_eq!(user, wf.user_id);
+                assert_eq!(workflow_id, wf.id);
+                Box::pin(async move { Ok(Some(wf)) })
+            });
+        repo.expect_get_workflow_run()
+            .returning(move |user, wf_id, run_id| {
+                let wf = workflow_for_run.clone();
+                assert_eq!(user, wf.user_id);
+                assert_eq!(wf_id, wf.id);
+                assert_eq!(run_id, base_run_id);
+                let run = base_run_for_get.clone();
+                Box::pin(async move { Ok(Some(run)) })
+            });
+        repo.expect_count_workspace_runs_since()
+            .times(1)
+            .returning(|_, _| Box::pin(async { Ok(RUNAWAY_LIMIT_5MIN + 5) }));
+        repo.expect_create_workflow_run().times(0);
+        repo.expect_record_run_event().times(0);
+
+        let workspace_repo: Arc<StaticWorkspaceMembershipRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::allowing());
+        let state = test_state(
+            Arc::new(repo),
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+        );
+
+        let response = rerun_workflow_run(
+            State(state),
+            AuthSession(claims_fixture(owner_id, "member@example.com")),
+            Path((workflow.id, base_run_id)),
+            axum::Json(RerunRequest {
+                idempotency_key: None,
+                context: None,
+                start_from_node_id: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["error"],
+            Value::String(RUNAWAY_PROTECTION_ERROR.to_string())
+        );
+        assert!(workspace_repo.last_period_starts().is_empty());
+    }
+
+    #[tokio::test]
     async fn start_workflow_run_releases_quota_when_idempotent() {
         let workspace_id = Uuid::new_v4();
         let owner_id = Uuid::new_v4();
@@ -1051,6 +1169,8 @@ mod tests {
         let run = run_fixture(&workflow);
 
         let mut repo = MockWorkflowRepository::new();
+        repo.expect_count_workspace_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
         repo.expect_find_workflow_for_member()
             .returning(move |_, _| {
                 let wf = workflow_for_find.clone();

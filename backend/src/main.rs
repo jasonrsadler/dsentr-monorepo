@@ -4,6 +4,7 @@ mod engine;
 mod models;
 mod responses;
 mod routes;
+mod runaway_protection;
 mod services;
 mod session;
 mod state;
@@ -56,7 +57,10 @@ use routes::{
         microsoft_connect_callback, microsoft_connect_start, refresh_connection,
         slack_connect_callback, slack_connect_start,
     },
-    options::secrets::{delete_secret, list_secrets, upsert_secret},
+    options::{
+        secrets::{delete_secret, list_secrets, upsert_secret},
+        user_settings::{get_user_settings, update_user_settings},
+    },
     workflows::{
         cancel_all_runs_for_workflow, cancel_workflow_run, create_workflow, delete_workflow,
         download_run_json, get_egress_allowlist, get_webhook_config, get_webhook_url, get_workflow,
@@ -565,6 +569,10 @@ async fn main() -> Result<()> {
         .route(
             "/secrets/{group}/{service}/{name}",
             put(upsert_secret).delete(delete_secret),
+        )
+        .route(
+            "/user-settings",
+            get(get_user_settings).put(update_user_settings),
         )
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());

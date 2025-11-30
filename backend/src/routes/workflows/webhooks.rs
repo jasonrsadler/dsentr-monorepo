@@ -1,7 +1,11 @@
 use super::{prelude::*, runs::redact_run};
 use crate::config::MIN_WEBHOOK_SECRET_LENGTH;
 use crate::{
-    routes::plan_limits::workspace_limit_error_response, state::WorkspaceRunQuotaTicket,
+    routes::plan_limits::workspace_limit_error_response,
+    runaway_protection::{
+        enforce_runaway_protection, RunawayProtectionError, RUNAWAY_PROTECTION_ERROR,
+    },
+    state::WorkspaceRunQuotaTicket,
     utils::plan_limits::NormalizedPlanTier,
 };
 use axum::http::HeaderMap;
@@ -230,6 +234,36 @@ pub async fn webhook_trigger(
             .await
         {
             return JsonResponse::unauthorized("Replay detected").into_response();
+        }
+    }
+
+    let settings = match app_state.db.get_user_settings(wf.user_id).await {
+        Ok(val) => val,
+        Err(err) => {
+            error!(?err, user_id = %wf.user_id, "failed to load user settings");
+            return JsonResponse::server_error("Failed to enqueue").into_response();
+        }
+    };
+
+    if let Some(workspace_id) = wf.workspace_id {
+        if let Err(err) = enforce_runaway_protection(&app_state, workspace_id, &settings).await {
+            match err {
+                RunawayProtectionError::RunawayProtectionTriggered { .. } => {
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        Json(json!({ "error": RUNAWAY_PROTECTION_ERROR })),
+                    )
+                        .into_response();
+                }
+                RunawayProtectionError::Database(db_err) => {
+                    error!(
+                        ?db_err,
+                        %workspace_id,
+                        "failed to enforce runaway protection"
+                    );
+                    return JsonResponse::server_error("Failed to enqueue").into_response();
+                }
+            }
         }
     }
 

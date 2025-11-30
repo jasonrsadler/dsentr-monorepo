@@ -4,6 +4,7 @@ pub mod engine;
 pub mod models;
 pub mod responses;
 pub mod routes;
+pub mod runaway_protection;
 pub mod services;
 pub mod session;
 pub mod state;

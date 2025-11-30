@@ -602,7 +602,6 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(0)
     }
 
-    #[allow(dead_code)]
     async fn count_workspace_runs_since(
         &self,
         _workspace_id: Uuid,

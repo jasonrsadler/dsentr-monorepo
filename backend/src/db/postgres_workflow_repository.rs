@@ -972,22 +972,21 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         Ok(count.unwrap_or(0))
     }
 
-    #[allow(dead_code)]
     async fn count_workspace_runs_since(
         &self,
         workspace_id: Uuid,
         since: OffsetDateTime,
     ) -> Result<i64, sqlx::Error> {
-        let count = sqlx::query_scalar(
+        let count = sqlx::query_scalar!(
             r#"
             SELECT COUNT(*)::bigint
             FROM workflow_runs
             WHERE workspace_id = $1 AND created_at >= $2
             "#,
+            workspace_id,
+            since
         )
-        .bind(workspace_id)
-        .bind(since)
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
         Ok(count.unwrap_or(0))
     }

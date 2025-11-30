@@ -820,7 +820,7 @@ mod tests {
     use super::*;
     use crate::config::{
         Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
-        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT, RUNAWAY_LIMIT_5MIN,
     };
     use crate::db::mock_db::{MockDb, NoopWorkspaceRepository};
     use crate::db::mock_stripe_event_log_repository::MockStripeEventLogRepository;
@@ -828,6 +828,7 @@ mod tests {
     use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
     use crate::models::workflow_run::WorkflowRun;
     use crate::models::workflow_run_event::WorkflowRunEvent;
+    use crate::runaway_protection::{enforce_runaway_protection, RunawayProtectionError};
     use crate::services::oauth::account_service::OAuthAccountService;
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
@@ -883,6 +884,7 @@ mod tests {
             jwt_audience: "test-audience".into(),
             workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
             workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
         });
 
         let workflow_repo: Arc<dyn WorkflowRepository> = Arc::new(repo);
@@ -1236,5 +1238,65 @@ mod tests {
         execute_run(state, run)
             .await
             .expect("executor should gracefully handle missing connection FK");
+    }
+
+    #[tokio::test]
+    async fn runaway_protection_allows_runs_under_limit() {
+        let workspace_id = Uuid::new_v4();
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_count_workspace_runs_since()
+            .times(1)
+            .returning(|_, _| Box::pin(async { Ok(1) }));
+
+        let state = build_state(repo);
+        let settings = serde_json::json!({});
+
+        enforce_runaway_protection(&state, workspace_id, &settings)
+            .await
+            .expect("runs under the limit should pass");
+    }
+
+    #[tokio::test]
+    async fn runaway_protection_skips_when_disabled_for_workspace() {
+        let workspace_id = Uuid::new_v4();
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_count_workspace_runs_since().times(0);
+
+        let state = build_state(repo);
+        let settings = serde_json::json!({
+            "workflows": {
+                "runaway_protection_enabled": {
+                    workspace_id.to_string(): false
+                }
+            }
+        });
+
+        enforce_runaway_protection(&state, workspace_id, &settings)
+            .await
+            .expect("disabled protection should skip checks");
+    }
+
+    #[tokio::test]
+    async fn runaway_protection_blocks_when_over_limit() {
+        let workspace_id = Uuid::new_v4();
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_count_workspace_runs_since()
+            .times(1)
+            .returning(|_, _| Box::pin(async { Ok(RUNAWAY_LIMIT_5MIN + 10) }));
+
+        let state = build_state(repo);
+        let settings = serde_json::json!({});
+
+        let err = enforce_runaway_protection(&state, workspace_id, &settings)
+            .await
+            .expect_err("over the limit should trigger protection");
+
+        match err {
+            RunawayProtectionError::RunawayProtectionTriggered { count, limit } => {
+                assert!(count > limit);
+                assert_eq!(limit, RUNAWAY_LIMIT_5MIN);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 }

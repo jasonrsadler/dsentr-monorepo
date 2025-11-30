@@ -115,6 +115,10 @@ function buildWorkspaceQuery(workspaceId?: string | null) {
   return workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''
 }
 
+function parseRunawayProtectionSetting(raw: unknown): boolean {
+  return typeof raw === 'boolean' ? raw : true
+}
+
 export async function fetchSecrets(
   workspaceId?: string | null
 ): Promise<SecretStore> {
@@ -199,4 +203,66 @@ export async function fetchWorkspaceSecretOwnership(
   }
 
   return data.ownership ?? {}
+}
+
+export async function fetchRunawayProtectionSetting(
+  workspaceId?: string | null
+): Promise<boolean> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/options/user-settings${buildWorkspaceQuery(workspaceId)}`,
+    {
+      credentials: 'include'
+    }
+  )
+
+  const data = (await res
+    .json()
+    .catch(() => ({ success: false, message: 'Invalid response' }))) as {
+    success?: boolean
+    message?: string
+    settings?: { workflows?: { runaway_protection_enabled?: boolean } }
+  }
+
+  if (!res.ok || data.success === false) {
+    throw new Error(data.message || 'Failed to load settings')
+  }
+
+  return parseRunawayProtectionSetting(
+    data.settings?.workflows?.runaway_protection_enabled
+  )
+}
+
+export async function updateRunawayProtectionSetting(
+  workspaceId: string,
+  enabled: boolean
+): Promise<boolean> {
+  const csrfToken = await getCsrfToken()
+  const res = await fetch(`${API_BASE_URL}/api/options/user-settings`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-csrf-token': csrfToken
+    },
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      runaway_protection_enabled: enabled
+    })
+  })
+
+  const data = (await res
+    .json()
+    .catch(() => ({ success: false, message: 'Invalid response' }))) as {
+    success?: boolean
+    message?: string
+    settings?: { workflows?: { runaway_protection_enabled?: boolean } }
+  }
+
+  if (!res.ok || data.success === false) {
+    throw new Error(data.message || 'Failed to update settings')
+  }
+
+  return parseRunawayProtectionSetting(
+    data.settings?.workflows?.runaway_protection_enabled
+  )
 }

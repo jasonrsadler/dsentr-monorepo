@@ -8,7 +8,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::config::{
     Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
-    DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+    DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT, RUNAWAY_LIMIT_5MIN,
 };
 use crate::db::{
     mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
@@ -95,6 +95,7 @@ fn stub_config() -> Arc<Config> {
         jwt_audience: "test-audience".into(),
         workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
         workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+        runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
     })
 }
 
