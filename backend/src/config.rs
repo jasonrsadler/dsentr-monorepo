@@ -72,7 +72,13 @@ impl Config {
             .unwrap_or(false);
 
         if !dotenv_disabled {
-            dotenv::dotenv().ok();
+            // If DSENTR_ENV is set, load .env.<env>, else fallback to .env
+            if let Ok(env_name) = std::env::var("DSENTR_ENV") {
+                let filename = format!(".env.{}", env_name);
+                dotenvy::from_filename(&filename).ok();
+            } else {
+                dotenvy::dotenv().ok();
+            }
         }
 
         fn require_env(name: &'static str) -> Result<String, ConfigError> {
@@ -80,6 +86,7 @@ impl Config {
         }
 
         let database_url = require_env("DATABASE_URL")?;
+        println!("DB URL = {}", database_url);
         let frontend_origin = require_env("FRONTEND_ORIGIN")?;
 
         let google = OAuthProviderConfig {

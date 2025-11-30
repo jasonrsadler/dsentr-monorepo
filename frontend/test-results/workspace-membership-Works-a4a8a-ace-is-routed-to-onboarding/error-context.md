@@ -1,0 +1,94 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DSentr
+        - img [ref=e9]
+      - generic [ref=e19]:
+        - navigation [ref=e20]:
+          - link "Home" [ref=e21] [cursor=pointer]:
+            - /url: /
+          - link "About" [ref=e22] [cursor=pointer]:
+            - /url: /about
+          - link "How it works" [ref=e23] [cursor=pointer]:
+            - /url: /how-it-works
+          - link "Documentation" [ref=e24] [cursor=pointer]:
+            - /url: https://docs.dsentr.com
+        - link "Log in" [ref=e25] [cursor=pointer]:
+          - /url: /login
+          - button "Log in" [ref=e26]
+        - link "Sign Up" [ref=e27] [cursor=pointer]:
+          - /url: /signup
+          - button "Sign Up" [ref=e28]
+        - button [ref=e29]:
+          - img [ref=e30]
+    - main [ref=e32]:
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e38]:
+            - img [ref=e42]
+            - generic [ref=e52]: Sign in
+            - heading "Welcome back" [level=1] [ref=e53]
+            - paragraph [ref=e54]: Sign in to continue orchestrating your workflows, monitoring run history, and collaborating with your team.
+          - generic [ref=e55]:
+            - paragraph [ref=e56]: "Inside DSentr you can:"
+            - list [ref=e57]:
+              - listitem [ref=e58]:
+                - generic [ref=e59]: "1"
+                - text: Design visual workflows with modular nodes and live previews.
+              - listitem [ref=e60]:
+                - generic [ref=e61]: "2"
+                - text: Manage workspace roles, credentials, and audit trails in one place.
+              - listitem [ref=e62]:
+                - generic [ref=e63]: "3"
+                - text: Monitor execution with real-time logs and alerting.
+        - generic [ref=e64]:
+          - generic [ref=e65]:
+            - img [ref=e67]
+            - heading "Log in to DSentr" [level=1] [ref=e70]
+          - generic [ref=e71]:
+            - generic [ref=e72]:
+              - generic [ref=e73]: Email
+              - textbox "Email" [ref=e74]: test@example.com
+            - generic [ref=e75]:
+              - generic [ref=e76]: Password
+              - textbox "Password" [ref=e77]: Passw0rd
+            - generic [ref=e78]:
+              - generic [ref=e79]:
+                - checkbox "Remember me" [ref=e80]
+                - text: Remember me
+              - link "Forgot password?" [ref=e81] [cursor=pointer]:
+                - /url: /forgot-password
+            - generic [ref=e82]: Too many requests. Please wait a moment and try again.
+            - button "Log in" [active] [ref=e83]
+          - generic [ref=e84]:
+            - paragraph [ref=e85]: Or continue with
+            - generic [ref=e86]:
+              - button [ref=e87]:
+                - img [ref=e89]:
+                  - generic [ref=e98]: Sign in with Google
+              - button [ref=e100]:
+                - img [ref=e102]:
+                  - generic [ref=e104]:
+                    - img [ref=e105]
+                    - generic [ref=e107]: Sign in with GitHub
+    - contentinfo [ref=e108]:
+      - generic [ref=e109]:
+        - generic [ref=e110]: © 2025 DSentr. All rights reserved.
+        - text: •
+        - link "Terms of Service" [ref=e111] [cursor=pointer]:
+          - /url: /terms-of-service
+        - text: •
+        - link "Privacy Policy" [ref=e112] [cursor=pointer]:
+          - /url: /privacy-policy
+  - generic [ref=e113]:
+    - paragraph [ref=e114]:
+      - text: DSentr uses cookies for essential site functionality and analytics. By using this site, you agree to our
+      - link "Privacy Policy" [ref=e115] [cursor=pointer]:
+        - /url: /privacy-policy
+      - text: .
+    - button "Accept" [ref=e117]
+```
