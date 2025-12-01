@@ -29,3 +29,4 @@ nder loops—tread carefully and double-check state update patterns.
 ## Change Reasons
 - Added repository-wide secret handling policy and contributor documentation links so all teams follow consistent vault-based credential management.
 - Approved Google Fonts CDN usage, expanded CSP allow lists to enumerate the domains explicitly, and added operations documentation so external dependencies stay compliant with ASVS 14.1.2 and STIG 5.10.
+- Added a root README that introduces DSentr and documents local build and development workflows for the API and both React applications.
