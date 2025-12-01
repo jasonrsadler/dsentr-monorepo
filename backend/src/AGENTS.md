@@ -40,3 +40,4 @@
 - Runaway workflow protection is configurable via `RUNAWAY_LIMIT_5MIN` and a per-workspace user setting so routes/workers can block runaway run creation with a dedicated error code.
 - Workflow routing now includes workspace workflow SSE and optimistic concurrency handling so stale saves return 409 and live edits stream to collaborators.
 - Introduced the admin router plumbing (AppState wiring stays shared) with an IP-allowlist stub and issue thread replies persisted for support conversations.
+- CORS now honors `ADMIN_ORIGIN` so the admin portal can run on a separate host alongside the main frontend.

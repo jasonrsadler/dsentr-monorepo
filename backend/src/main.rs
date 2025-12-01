@@ -78,7 +78,10 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    trace::TraceLayer,
+};
 use tracing::info;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -344,8 +347,23 @@ async fn main() -> Result<()> {
         })
         .context("invalid FRONTEND_ORIGIN value")?;
 
+    let admin_origin = config
+        .admin_origin
+        .parse::<HeaderValue>()
+        .map_err(|error| {
+            tracing::error!(
+                error = %error,
+                origin = %config.admin_origin,
+                "Invalid ADMIN_ORIGIN provided"
+            );
+            error
+        })
+        .context("invalid ADMIN_ORIGIN value")?;
+
+    let allow_origin = AllowOrigin::list(vec![frontend_origin.clone(), admin_origin.clone()]);
+
     let cors = CorsLayer::new()
-        .allow_origin(frontend_origin.clone())
+        .allow_origin(allow_origin)
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([
             AUTHORIZATION,

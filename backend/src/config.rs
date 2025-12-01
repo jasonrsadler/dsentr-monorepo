@@ -50,6 +50,7 @@ pub struct OAuthSettings {
 pub struct Config {
     pub database_url: String,
     pub frontend_origin: String,
+    pub admin_origin: String,
     pub oauth: OAuthSettings,
     pub api_secrets_encryption_key: Vec<u8>,
     #[allow(dead_code)]
@@ -83,6 +84,7 @@ impl Config {
 
         let database_url = require_env("DATABASE_URL")?;
         let frontend_origin = require_env("FRONTEND_ORIGIN")?;
+        let admin_origin = env::var("ADMIN_ORIGIN").unwrap_or_else(|_| frontend_origin.clone());
 
         let google = OAuthProviderConfig {
             client_id: require_env("GOOGLE_INTEGRATIONS_CLIENT_ID")?,
@@ -147,6 +149,7 @@ impl Config {
         Ok(Config {
             database_url,
             frontend_origin,
+            admin_origin,
             oauth: OAuthSettings {
                 google,
                 microsoft,
@@ -253,11 +256,12 @@ mod tests {
         "JWT_AUDIENCE",
     ];
 
-    const OPTIONAL_VARS: [&str; 4] = [
+    const OPTIONAL_VARS: [&str; 5] = [
         "AUTH_COOKIE_SECURE",
         "WORKSPACE_MEMBER_LIMIT",
         "WORKSPACE_MONTHLY_RUN_LIMIT",
         "RUNAWAY_LIMIT_5MIN",
+        "ADMIN_ORIGIN",
     ]; // allow tests to run without ambient overrides
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
@@ -317,6 +321,7 @@ mod tests {
     fn populate_defaults() {
         env::set_var("DATABASE_URL", "postgres://localhost/db");
         env::set_var("FRONTEND_ORIGIN", "http://localhost:3000");
+        env::remove_var("ADMIN_ORIGIN");
         env::set_var("GOOGLE_INTEGRATIONS_CLIENT_ID", "google-client-id");
         env::set_var("GOOGLE_INTEGRATIONS_CLIENT_SECRET", "google-client-secret");
         env::set_var(
@@ -376,6 +381,7 @@ mod tests {
             let config = Config::from_env().expect("config should load");
             assert_eq!(config.database_url, "postgres://localhost/db");
             assert_eq!(config.frontend_origin, "http://localhost:3000");
+            assert_eq!(config.admin_origin, "http://localhost:3000");
             assert_eq!(config.oauth.google.client_id, "google-client-id");
             assert_eq!(config.oauth.token_encryption_key.len(), 32);
             assert!(config.auth_cookie_secure);
@@ -390,6 +396,16 @@ mod tests {
                 DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT
             );
             assert_eq!(config.runaway_limit_5min, RUNAWAY_LIMIT_5MIN);
+        });
+    }
+
+    #[test]
+    fn admin_origin_respects_override() {
+        with_env(|| {
+            populate_defaults();
+            env::set_var("ADMIN_ORIGIN", "https://admin.example.com");
+            let config = Config::from_env().expect("config should load");
+            assert_eq!(config.admin_origin, "https://admin.example.com");
         });
     }
 
