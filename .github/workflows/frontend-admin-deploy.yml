@@ -1,4 +1,4 @@
-﻿name: Frontend Build Check
+﻿name: Admin Frontend Build Check
 
 on:
   push:
