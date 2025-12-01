@@ -4,12 +4,12 @@ on:
   push:
     branches: [master]
     paths:
-      - "frontend/**"
+      - "frontend-admin/**"
       - ".github/workflows/frontend-admin-deploy.yml"
   pull_request:
     branches: [master]
     paths:
-      - "frontend/**"
+      - "frontend-admin/**"
       - ".github/workflows/frontend-admin-deploy.yml"
 
 jobs:
