@@ -695,6 +695,8 @@ mod tests {
         Arc::new(Config {
             database_url: "postgres://localhost".into(),
             frontend_origin: "http://localhost:5173".into(),
+            admin_origin: "http://localhost:5173".into(),
+            admin_origin: "http://localhost:5173".into(),
             oauth: OAuthSettings {
                 google: OAuthProviderConfig {
                     client_id: "client".into(),
