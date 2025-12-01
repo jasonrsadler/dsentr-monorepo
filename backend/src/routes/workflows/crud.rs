@@ -6,6 +6,7 @@ use super::{
     },
     prelude::*,
 };
+use crate::utils::change_history::log_workspace_history_event;
 
 #[derive(Default, Deserialize)]
 pub struct WorkflowContextQuery {
@@ -485,7 +486,7 @@ pub async fn update_workflow(
             let diffs = diff_user_nodes_only(&before.data, &workflow.data);
             if let Err(e) = app_state
                 .workflow_repo
-                .insert_workflow_log(owner_id, workflow.id, diffs)
+                .insert_workflow_log(user_id, workflow.id, diffs)
                 .await
             {
                 eprintln!("Failed to insert workflow log: {:?}", e);
@@ -740,7 +741,17 @@ pub async fn delete_workflow(
         .delete_workflow(user_id, workflow_id)
         .await
     {
-        Ok(true) => Json(json!({ "success": true })).into_response(),
+        Ok(true) => {
+            if let Some(workspace_id) = workflow.workspace_id {
+                let event = vec![json!({
+                    "path": "workflow.deleted",
+                    "from": workflow.name,
+                    "to": workflow.id,
+                })];
+                log_workspace_history_event(&app_state, workspace_id, user_id, event).await;
+            }
+            Json(json!({ "success": true })).into_response()
+        }
         Ok(false) => JsonResponse::not_found("Workflow not found").into_response(),
         Err(e) => {
             eprintln!("DB error deleting workflow: {:?}", e);

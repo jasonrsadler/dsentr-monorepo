@@ -45,3 +45,4 @@
 - User repository adds an issue-report insert helper (with Postgres + mock implementations) so support submissions capture user/workspace metadata in the database.
 - Added a Stripe event log repository (Postgres + mock) to persist processed webhook event ids for webhook idempotency.
 - Workflow repositories expose `count_workspace_runs_since` (Postgres + mocks/Noop) so runaway workflow protection can rate-limit run creation per workspace window.
+- Workflow log listing now returns all entries for a workflow (rather than filtering by actor) to support shared change-history views while preserving per-entry actor ids.

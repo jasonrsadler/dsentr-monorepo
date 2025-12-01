@@ -53,6 +53,7 @@
 - Route mocks now implement the expanded workspace repository surface (member counts, run quotas, billing cycles) and default missing plans to Workspace so invite/signup paths hit plan-limit guards without panicking in tests.
 - Workspace member caps reserve seats for pending invitations and read limits from `WORKSPACE_MEMBER_LIMIT`/`WORKSPACE_MONTHLY_RUN_LIMIT` so deployments can tune quotas without code changes.
 - Microsoft Teams channel member lookup now allows workspace-plan members/owners to use personal OAuth connections while still enforcing workspace access.
+- Stripe checkout completion now records workspace name changes into workflow change history so Settings �+' Logs can show who renamed the workspace.
 
 ## New (Stripe billing plan lifecycle)
 - Workspace subscribers now see renewal/reversion dates surfaced in the Plans tab. `GET /api/workspaces/onboarding` attaches `billing.subscription` with:

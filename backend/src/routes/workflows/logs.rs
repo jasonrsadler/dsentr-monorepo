@@ -10,10 +10,18 @@ pub async fn list_workflow_logs(
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
-    let wf_meta = app_state
+    let workflow = match app_state
         .workflow_repo
         .find_workflow_for_member(user_id, workflow_id)
-        .await;
+        .await
+    {
+        Ok(Some(workflow)) => workflow,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(err) => {
+            eprintln!("Failed to load workflow for logs: {:?}", err);
+            return JsonResponse::server_error("Failed to fetch logs").into_response();
+        }
+    };
 
     let plan_tier = app_state
         .resolve_plan_tier(user_id, claims.plan.as_deref())
@@ -35,9 +43,7 @@ pub async fn list_workflow_logs(
                 entries
             };
             let mut payload = json!({"success": true, "logs": filtered});
-            if let Ok(Some(wf)) = wf_meta {
-                payload["workflow"] = json!({ "id": wf.id, "name": wf.name });
-            }
+            payload["workflow"] = json!({ "id": workflow.id, "name": workflow.name });
             (StatusCode::OK, Json(payload)).into_response()
         }
         Err(e) => {

@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
@@ -13,6 +13,7 @@ use crate::{
     responses::JsonResponse,
     routes::auth::session::AuthSession,
     state::AppState,
+    utils::change_history::log_workspace_history_event,
     utils::secrets::{
         collect_workflow_secrets, ensure_secret_exists, extend_response_store, read_secret_store,
         remove_named_secret, to_response_store, upsert_named_secret, write_secret_store,
@@ -356,6 +357,15 @@ pub async fn upsert_secret(
     }
 
     if let Some((workspace_id, _role)) = workspace_context {
+        if matches!(outcome, SecretUpsertOutcome::Created) {
+            let event = vec![json!({
+                "path": "workspace.secret.added",
+                "from": Value::Null,
+                "to": format!("{group_key}/{service_key}/{name}"),
+            })];
+            log_workspace_history_event(&app_state, workspace_id, user_id, event).await;
+        }
+
         let secrets = match collect_workspace_secrets(&app_state, workspace_id).await {
             Ok(store) => serde_json::to_value(store).unwrap_or_else(|_| json!({})),
             Err(resp) => return resp,

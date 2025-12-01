@@ -15,3 +15,4 @@
 - Enforced workspace-scoped secret aggregation so membership checks and creator/admin deletion rules are handled on the server.
 - Secrets endpoints now encrypt persisted API keys with `API_SECRETS_ENCRYPTION_KEY`, re-encrypt legacy plaintext settings on read/write, and align with the rotation helper so sensitive values never sit in cleartext.
 - Added user-settings endpoints to read/update per-workspace `workflows.runaway_protection_enabled`, enabling the Settings UI toggle for runaway workflow protection.
+- Workspace secret creation now emits change-history entries (without values) so logs can show who added shared secrets.

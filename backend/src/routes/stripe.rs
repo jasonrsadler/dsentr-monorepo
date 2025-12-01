@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::models::workspace::{Workspace, WorkspaceRole, WORKSPACE_PLAN_SOLO};
 use crate::responses::JsonResponse;
 use crate::state::AppState;
+use crate::utils::change_history::log_workspace_history_event;
 
 // Small helper: nested json lookup
 fn jget<'a>(val: &'a serde_json::Value, path: &[&str]) -> Option<&'a serde_json::Value> {
@@ -272,12 +273,26 @@ async fn handle_stripe_event(
                     }
 
                     if reuse_candidate && current.name != workspace_name {
+                        let previous_name = current.name.clone();
                         match app_state
                             .workspace_repo
                             .update_workspace_name(workspace_id, &workspace_name)
                             .await
                         {
-                            Ok(updated) => current = updated,
+                            Ok(updated) => {
+                                log_workspace_history_event(
+                                    app_state,
+                                    workspace_id,
+                                    user_id,
+                                    vec![serde_json::json!({
+                                        "path": "workspace.name",
+                                        "from": previous_name,
+                                        "to": updated.name.clone(),
+                                    })],
+                                )
+                                .await;
+                                current = updated;
+                            }
                             Err(err) => warn!(
                                 ?err,
                                 %user_id,

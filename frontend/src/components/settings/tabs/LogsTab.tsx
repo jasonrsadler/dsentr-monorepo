@@ -3,6 +3,10 @@ import JsonDialog from '@/components/ui/dialog/JsonDialog'
 import { useSecrets } from '@/contexts/SecretsContext'
 import { errorMessage } from '@/lib/errorMessage'
 import {
+  listWorkspaceMembers,
+  type WorkspaceMember
+} from '@/lib/orgWorkspaceApi'
+import {
   getWorkflowLogs,
   listWorkflows,
   clearWorkflowLogs,
@@ -432,6 +436,7 @@ export default function LogsTab() {
   const [logs, setLogs] = useState<WorkflowLogEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [workflowName, setWorkflowName] = useState<string>('')
+  const [membersById, setMembersById] = useState<Record<string, string>>({})
 
   const SUCCESSFUL_RUNS_PER_PAGE = 20
   const [successfulRuns, setSuccessfulRuns] = useState<WorkflowRunRecord[]>([])
@@ -490,6 +495,14 @@ export default function LogsTab() {
   )
   const displayWorkflowName = workflowName || selectedWorkflow?.name || ''
 
+  const describeActor = useCallback(
+    (userId?: string | null) => {
+      if (!userId) return 'Unknown user'
+      return membersById[userId] ?? userId
+    },
+    [membersById]
+  )
+
   useEffect(() => {
     listWorkflows(activeWorkspaceId)
       .then((ws) => {
@@ -503,6 +516,32 @@ export default function LogsTab() {
       })
       .catch(() => {})
   }, [activeWorkspaceId])
+
+  useEffect(() => {
+    if (activeTab !== 'history') return
+    const workspaceId = currentWorkspace?.workspace.id
+    if (!workspaceId) {
+      setMembersById({})
+      return
+    }
+    listWorkspaceMembers(workspaceId)
+      .then((members) => {
+        const index: Record<string, string> = {}
+        members.forEach((member: WorkspaceMember) => {
+          const first = (member.first_name ?? '').trim()
+          const last = (member.last_name ?? '').trim()
+          const email = (member.email ?? '').trim()
+          const name = [first, last].filter(Boolean).join(' ').trim()
+          const label =
+            name && email
+              ? `${name} <${email}>`
+              : name || email || member.user_id
+          index[member.user_id] = label
+        })
+        setMembersById(index)
+      })
+      .catch(() => setMembersById({}))
+  }, [activeTab, currentWorkspace?.workspace.id])
 
   const sanitizeDeadLetters = useCallback(
     (items: DeadLetter[]) =>
@@ -1006,14 +1045,19 @@ export default function LogsTab() {
                   className="border border-zinc-200 dark:border-zinc-700 rounded p-3"
                 >
                   <div className="flex items-center justify-between text-sm mb-2">
-                    <span>
-                      {(() => {
-                        const d = new Date(e.created_at as any)
-                        return isNaN(d.getTime())
-                          ? String(e.created_at)
-                          : d.toLocaleString()
-                      })()}
-                    </span>
+                    <div className="flex flex-col">
+                      <span>
+                        {(() => {
+                          const d = new Date(e.created_at as any)
+                          return isNaN(d.getTime())
+                            ? String(e.created_at)
+                            : d.toLocaleString()
+                        })()}
+                      </span>
+                      <span className="text-xs text-zinc-500">
+                        {describeActor(e.user_id)}
+                      </span>
+                    </div>
                     <button
                       className="text-xs underline"
                       onClick={async () => {

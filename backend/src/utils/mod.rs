@@ -1,3 +1,4 @@
+pub mod change_history;
 pub mod csrf;
 pub mod encryption;
 pub mod jwt;

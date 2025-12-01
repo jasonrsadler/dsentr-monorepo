@@ -341,7 +341,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
 
     async fn list_workflow_logs(
         &self,
-        user_id: Uuid,
+        _user_id: Uuid,
         workflow_id: Uuid,
         limit: i64,
         offset: i64,
@@ -351,11 +351,10 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             r#"
             SELECT id, user_id, workflow_id, created_at, diffs
             FROM workflow_logs
-            WHERE user_id = $1 AND workflow_id = $2
+            WHERE workflow_id = $1
             ORDER BY created_at DESC
-            LIMIT $3 OFFSET $4
+            LIMIT $2 OFFSET $3
             "#,
-            user_id,
             workflow_id,
             limit,
             offset
