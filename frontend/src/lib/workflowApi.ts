@@ -156,9 +156,14 @@ export async function createWorkflow(
 export async function updateWorkflow(
   id: string,
   payload: WorkflowPayload,
-  workspaceId?: string | null
+  workspaceId?: string | null,
+  expectedUpdatedAt?: string | null
 ): Promise<WorkflowRecord> {
   const csrfToken = await getCsrfToken()
+  const requestBody =
+    expectedUpdatedAt != null
+      ? { ...payload, updated_at: expectedUpdatedAt }
+      : payload
 
   const res = await fetch(
     `${API_BASE_URL}/api/workflows/${id}${buildWorkspaceQuery(workspaceId)}`,
@@ -169,7 +174,7 @@ export async function updateWorkflow(
         'x-csrf-token': csrfToken
       },
       credentials: 'include',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(requestBody)
     }
   )
   let body: any = null
@@ -180,6 +185,10 @@ export async function updateWorkflow(
   }
   if (!res.ok || (body && body.success === false)) {
     const error = new Error(body?.message || res.statusText || 'Request failed')
+    if (res.status === 409) {
+      ;(error as any).code = 'conflict'
+      ;(error as any).workflow = body?.workflow
+    }
     if (body?.violations) {
       ;(error as any).violations = body.violations
     }

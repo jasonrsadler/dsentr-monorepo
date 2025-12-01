@@ -55,6 +55,8 @@
 - Microsoft Teams channel member lookup now allows workspace-plan members/owners to use personal OAuth connections while still enforcing workspace access.
 - Stripe checkout completion now records workspace name changes into workflow change history so Settings �+' Logs can show who renamed the workspace.
 
+- Workflow routes now enforce optimistic concurrency on workspace saves and provide `/api/workflows/{id}/events` SSE so collaborators receive live workflow updates without refreshing.
+
 ## New (Stripe billing plan lifecycle)
 - Workspace subscribers now see renewal/reversion dates surfaced in the Plans tab. `GET /api/workspaces/onboarding` attaches `billing.subscription` with:
   - `renews_at` (RFC3339), `cancel_at` (RFC3339|null), and `cancel_at_period_end`.

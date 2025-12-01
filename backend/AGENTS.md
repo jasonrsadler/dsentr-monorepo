@@ -48,3 +48,4 @@ itly coordinated.
 - Workspace overage billing now persists Stripe subscription item ids, attaches the metered price during workspace upgrades, and reports over-limit usage to Stripe while leaving solo plans unchanged.
 - Billing overage reporting now uses Stripe billing meter events instead of legacy usage records; set `STRIPE_WORKSPACE_METER_EVENT_NAME` to the configured meter event name so over-limit runs emit meter events with the workspace owner's Stripe customer id.
 - Added an authenticated issue-reporting endpoint and persistence so user-submitted problem reports arrive with account/workspace context for troubleshooting.
+- Workspace workflow saves now use optimistic concurrency and stream updates to collaborators to avoid overwriting changes between workspace members.

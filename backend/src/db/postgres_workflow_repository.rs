@@ -151,25 +151,48 @@ impl WorkflowRepository for PostgresWorkflowRepository {
         name: &str,
         description: Option<&str>,
         data: Value,
+        expected_updated_at: Option<OffsetDateTime>,
     ) -> Result<Option<Workflow>, sqlx::Error> {
-        let result = sqlx::query_as::<_, Workflow>(
-            r#"
-            UPDATE workflows
-            SET name = $3,
-                description = $4,
-                data = $5,
-                updated_at = now()
-            WHERE user_id = $1 AND id = $2
-            RETURNING id, user_id, workspace_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, locked_by, locked_at, created_at, updated_at
-            "#
-        )
-        .bind(user_id)
-        .bind(workflow_id)
-        .bind(name)
-        .bind(description)
-        .bind(data)
-        .fetch_optional(&self.pool)
-        .await?;
+        let result = if let Some(expected) = expected_updated_at {
+            sqlx::query_as::<_, Workflow>(
+                r#"
+                UPDATE workflows
+                SET name = $3,
+                    description = $4,
+                    data = $5,
+                    updated_at = now()
+                WHERE user_id = $1 AND id = $2 AND updated_at = $6
+                RETURNING id, user_id, workspace_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, locked_by, locked_at, created_at, updated_at
+                "#
+            )
+            .bind(user_id)
+            .bind(workflow_id)
+            .bind(name)
+            .bind(description)
+            .bind(data)
+            .bind(expected)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, Workflow>(
+                r#"
+                UPDATE workflows
+                SET name = $3,
+                    description = $4,
+                    data = $5,
+                    updated_at = now()
+                WHERE user_id = $1 AND id = $2
+                RETURNING id, user_id, workspace_id, name, description, data, concurrency_limit, egress_allowlist, require_hmac, hmac_replay_window_sec, webhook_salt, locked_by, locked_at, created_at, updated_at
+                "#
+            )
+            .bind(user_id)
+            .bind(workflow_id)
+            .bind(name)
+            .bind(description)
+            .bind(data)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(result)
     }

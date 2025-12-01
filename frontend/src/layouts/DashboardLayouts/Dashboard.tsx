@@ -177,6 +177,11 @@ export default function Dashboard() {
   const [cancelBusy, setCancelBusy] = useState(false)
   const [runToast, setRunToast] = useState<string | null>(null)
   const [lockBusy, setLockBusy] = useState(false)
+  const [remoteUpdate, setRemoteUpdate] = useState<{
+    workflow: WorkflowRecord
+    reason: 'sse' | 'conflict'
+  } | null>(null)
+  const latestWorkflowVersionRef = useRef<string | null>(null)
   const userId = useAuth((state) => state.user?.id ?? null)
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const activeWorkspaceId = currentWorkspace?.workspace.id ?? null
@@ -187,6 +192,7 @@ export default function Dashboard() {
     | 'viewer'
   const userPlan = useAuth((state) => state.user?.plan ?? null)
   const workflowSaving = useWorkflowStore(selectIsSaving)
+  const isDirty = useWorkflowStore((state) => state.isDirty)
   const planTier = useMemo<PlanTier>(
     () =>
       normalizePlanTier(
@@ -436,6 +442,13 @@ export default function Dashboard() {
   }, [canEditCurrentWorkflow])
   useEffect(() => {
     setLockBusy(false)
+  }, [currentWorkflow?.id])
+  useEffect(() => {
+    latestWorkflowVersionRef.current = currentWorkflow?.updated_at ?? null
+  }, [currentWorkflow?.id, currentWorkflow?.updated_at])
+
+  useEffect(() => {
+    setRemoteUpdate(null)
   }, [currentWorkflow?.id])
 
   const _currentMeta = useMemo(
@@ -1076,6 +1089,89 @@ export default function Dashboard() {
     }
   }, [runOverlayOpen, currentWorkflowIdValue, activeRunId, stopPolling])
 
+  useEffect(() => {
+    if (!currentWorkflowIdValue) return
+    const base = (API_BASE_URL || '').replace(/\/$/, '')
+    const workspaceQuery = activeWorkspaceId
+      ? `?workspace=${encodeURIComponent(activeWorkspaceId)}`
+      : ''
+    const url = `${base}/api/workflows/${currentWorkflowIdValue}/events${workspaceQuery}`
+    let es: EventSource | null = null
+    try {
+      es = new EventSource(url, { withCredentials: true } as EventSourceInit)
+    } catch {
+      es = null
+    }
+    if (!es) return
+
+    const onWorkflow = (e: MessageEvent) => {
+      try {
+        const incoming: WorkflowRecord = JSON.parse(e.data)
+        const incomingVersion = incoming.updated_at ?? null
+        const currentVersion = latestWorkflowVersionRef.current
+        const incomingTs = incomingVersion ? Date.parse(incomingVersion) : NaN
+        const currentTs = currentVersion ? Date.parse(currentVersion) : NaN
+        if (
+          !Number.isNaN(incomingTs) &&
+          !Number.isNaN(currentTs) &&
+          incomingTs <= currentTs
+        ) {
+          return
+        }
+        if (useWorkflowStore.getState().isDirty) {
+          latestWorkflowVersionRef.current =
+            incomingVersion ?? latestWorkflowVersionRef.current
+          setRemoteUpdate({ workflow: incoming, reason: 'sse' })
+          return
+        }
+        latestWorkflowVersionRef.current =
+          incomingVersion ?? latestWorkflowVersionRef.current
+        setWorkflows((prev) =>
+          prev.some((workflow) => workflow.id === incoming.id)
+            ? prev.map((workflow) =>
+                workflow.id === incoming.id
+                  ? { ...workflow, ...incoming }
+                  : workflow
+              )
+            : [incoming, ...prev]
+        )
+        if (!useWorkflowStore.getState().isDirty) {
+          const normalized = normalizeWorkflowData(incoming.data)
+          pushGraphToStore(normalized, false)
+          setError(null)
+          setRemoteUpdate(null)
+        } else {
+          setRemoteUpdate({ workflow: incoming, reason: 'sse' })
+        }
+      } catch (err) {
+        console.error(errorMessage(err))
+      }
+    }
+
+    es.addEventListener('workflow', onWorkflow as any)
+    es.onerror = () => {
+      try {
+        es?.close()
+      } catch (err) {
+        console.error(errorMessage(err))
+      }
+    }
+
+    return () => {
+      try {
+        es?.close()
+      } catch (err) {
+        console.error(errorMessage(err))
+      }
+    }
+  }, [
+    activeWorkspaceId,
+    currentWorkflowIdValue,
+    normalizeWorkflowData,
+    pushGraphToStore,
+    setError
+  ])
+
   const applyGraphToCanvas = useCallback(
     (graph: { nodes: any[]; edges: any[] }) => {
       setError(null)
@@ -1083,6 +1179,29 @@ export default function Dashboard() {
       pushGraphToStore(normalized, true)
     },
     [normalizeWorkflowData, setError, pushGraphToStore]
+  )
+
+  const applyRemoteWorkflow = useCallback(
+    (nextWorkflow: WorkflowRecord) => {
+      latestWorkflowVersionRef.current =
+        nextWorkflow.updated_at ?? latestWorkflowVersionRef.current
+      setRemoteUpdate(null)
+      setWorkflows((prev) =>
+        prev.some((workflow) => workflow.id === nextWorkflow.id)
+          ? prev.map((workflow) =>
+              workflow.id === nextWorkflow.id
+                ? { ...workflow, ...nextWorkflow }
+                : workflow
+            )
+          : [nextWorkflow, ...prev]
+      )
+      if (currentWorkflowIdValue === nextWorkflow.id) {
+        const normalized = normalizeWorkflowData(nextWorkflow.data)
+        pushGraphToStore(normalized, false)
+      }
+      setError(null)
+    },
+    [currentWorkflowIdValue, normalizeWorkflowData, pushGraphToStore, setError]
   )
 
   const handleSave = useCallback(async () => {
@@ -1117,7 +1236,8 @@ export default function Dashboard() {
           description: currentWorkflow.description ?? null,
           data: payloadGraph
         },
-        activeWorkspaceId
+        activeWorkspaceId,
+        currentWorkflow.updated_at ?? null
       )
 
       setWorkflows((prev) =>
@@ -1125,12 +1245,27 @@ export default function Dashboard() {
           workflow.id === updated.id ? { ...workflow, ...updated } : workflow
         )
       )
+      latestWorkflowVersionRef.current =
+        updated.updated_at ?? latestWorkflowVersionRef.current
+      setRemoteUpdate(null)
 
       const normalized = normalizeWorkflowData(updated.data ?? payloadGraph)
       // After a successful save, reflect the server graph and mark clean
       pushGraphToStore(normalized, false)
     } catch (err) {
       console.error('Failed to save workflow', err)
+      if ((err as any)?.code === 'conflict') {
+        const incoming = (err as any)?.workflow as WorkflowRecord | undefined
+        if (incoming) {
+          latestWorkflowVersionRef.current =
+            incoming.updated_at ?? latestWorkflowVersionRef.current
+          setRemoteUpdate({ workflow: incoming, reason: 'conflict' })
+          setError(
+            'Save was blocked because someone else saved a newer version. Reload the latest changes to continue.'
+          )
+          return
+        }
+      }
       if (
         Array.isArray((err as any)?.violations) &&
         (err as any).violations.length > 0
@@ -2027,6 +2162,35 @@ export default function Dashboard() {
               )}
             </div>
           </div>
+
+          {remoteUpdate && (
+            <div className="px-4 py-2 text-sm bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-100 flex flex-wrap items-center gap-2">
+              <span className="font-semibold">
+                {remoteUpdate.reason === 'conflict'
+                  ? 'Save blocked by a newer version.'
+                  : 'Latest changes are available.'}
+              </span>
+              <span className="text-amber-800 dark:text-amber-200">
+                {isDirty
+                  ? 'Reloading will replace your unsaved edits.'
+                  : 'Reload to stay in sync.'}
+              </span>
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  className="px-3 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700"
+                  onClick={() => applyRemoteWorkflow(remoteUpdate.workflow)}
+                >
+                  Reload latest
+                </button>
+                <button
+                  className="px-3 py-1 text-xs rounded border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100"
+                  onClick={() => setRemoteUpdate(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="px-4 py-2 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900">

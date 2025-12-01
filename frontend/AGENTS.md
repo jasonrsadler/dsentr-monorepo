@@ -31,6 +31,7 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Leaving a workspace is initiated from the Members settings tab. The "Leave workspace" button must be disabled for owners, call the `leaveWorkspace` API when allowed, refresh cached memberships, and send users back to their Solo workspace (or next available one) when the server responds with `403`.
 
 ## Change Reasons
+- Dashboard now consumes workflow SSE updates and shows conflict banners so workspace collaborators stay synced and avoid overwriting each other's saves.
 SheetsAction credential fallback guard:
 - Prevent Sheets action nodes from silently auto-selecting the personal Google credential after a shared workspace credential disappears. Track when we clear a workspace selection and suppress the automatic fallback so users must explicitly pick another connection, keeping React Flow updates bounded.
 

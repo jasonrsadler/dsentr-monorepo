@@ -1,4 +1,8 @@
-use super::prelude::*;
+use super::{
+    crud::WorkflowContextQuery,
+    helpers::{can_access_workflow_in_context, membership_roles_map, plan_context_for_user},
+    prelude::*,
+};
 
 pub async fn sse_run_events(
     State(app_state): State<AppState>,
@@ -151,6 +155,115 @@ pub async fn sse_global_runs(
             .interval(Duration::from_secs(10))
             .text("keepalive"),
     )
+}
+
+pub async fn sse_workflow_updates(
+    State(app_state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workflow_id): Path<Uuid>,
+    Query(params): Query<WorkflowContextQuery>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
+    };
+
+    let workflow = match app_state
+        .workflow_repo
+        .find_workflow_for_member(user_id, workflow_id)
+        .await
+    {
+        Ok(Some(workflow)) => workflow,
+        Ok(None) => return JsonResponse::not_found("Workflow not found").into_response(),
+        Err(err) => {
+            eprintln!("Failed to load workflow for SSE: {:?}", err);
+            return JsonResponse::server_error("Failed to stream workflow").into_response();
+        }
+    };
+
+    let memberships = match app_state
+        .workspace_repo
+        .list_memberships_for_user(user_id)
+        .await
+    {
+        Ok(memberships) => memberships,
+        Err(err) => {
+            eprintln!("Failed to load memberships for workflow SSE: {:?}", err);
+            return JsonResponse::server_error("Failed to stream workflow").into_response();
+        }
+    };
+    let roles_map = membership_roles_map(&memberships);
+    let context = plan_context_for_user(claims.plan.as_deref(), &memberships, params.workspace);
+
+    if params.workspace.is_some()
+        && !matches!(
+            context,
+            crate::routes::workflows::helpers::PlanContext::WorkspaceOwned { .. }
+                | crate::routes::workflows::helpers::PlanContext::WorkspaceMember { .. }
+        )
+    {
+        return JsonResponse::forbidden("You do not have access to this workspace.")
+            .into_response();
+    }
+
+    if !can_access_workflow_in_context(&workflow, context, &roles_map) {
+        return JsonResponse::forbidden(
+            "This workflow is not available in the current plan context.",
+        )
+        .into_response();
+    }
+
+    let mut last_seen = workflow.updated_at;
+    let state = app_state.clone();
+
+    let stream_user_id = user_id;
+    let s = stream! {
+        let mut initial_sent = false;
+        let mut intv = tokio::time::interval(Duration::from_millis(1200));
+        loop {
+            if initial_sent {
+                intv.tick().await;
+            }
+            match state
+                .workflow_repo
+                .find_workflow_for_member(stream_user_id, workflow_id)
+                .await
+            {
+                Ok(Some(current)) => {
+                    let should_emit = !initial_sent || current.updated_at > last_seen;
+                    if should_emit {
+                        last_seen = current.updated_at;
+                        let ev = Event::default().event("workflow").json_data(&current).unwrap();
+                        yield Ok::<Event, Infallible>(ev);
+                    } else {
+                        yield Ok::<Event, Infallible>(Event::default().event("tick").data("{}"));
+                    }
+                }
+                Ok(None) => {
+                    let ev = Event::default()
+                        .event("error")
+                        .json_data(json!({"error": "workflow_not_found"}))
+                        .unwrap();
+                    yield Ok::<Event, Infallible>(ev);
+                    break;
+                }
+                Err(err) => {
+                    eprintln!("Failed to poll workflow updates: {:?}", err);
+                }
+            }
+            if !initial_sent {
+                initial_sent = true;
+            }
+        }
+    };
+
+    Sse::new(s)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(10))
+                .text("keepalive"),
+        )
+        .into_response()
 }
 
 // Protected endpoint to fetch a webhook URL for a workflow (for display in UI)

@@ -44,3 +44,4 @@ Operational notes:
 - Workflow helper tests populate `stripe_overage_item_id` on workspace fixtures so billing overage schema updates compile across plan usage helpers.
 - Run creation endpoints (manual, rerun, webhook) enforce runaway workflow protection per workspace and return `429` with `{"error":"runaway_protection_triggered"}` when the recent-run limit is exceeded.
 - Workflow log listing now validates workspace membership and includes entries from all actors; deletions emit workspace-scoped history records so change logs capture who removed workflows.
+- Added optimistic concurrency and workflow SSE streaming so workspace users get the latest graph automatically and stale saves return 409 with the authoritative payload.

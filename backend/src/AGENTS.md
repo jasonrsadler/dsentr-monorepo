@@ -38,3 +38,4 @@
 - Main bootstrap now mounts the authenticated issue-report submission route so support tickets are captured alongside existing API groups.
 - AppState wires a Stripe event log repository so webhook handlers can record processed event ids for idempotent billing flows.
 - Runaway workflow protection is configurable via `RUNAWAY_LIMIT_5MIN` and a per-workspace user setting so routes/workers can block runaway run creation with a dedicated error code.
+- Workflow routing now includes workspace workflow SSE and optimistic concurrency handling so stale saves return 409 and live edits stream to collaborators.

@@ -11,7 +11,19 @@ use crate::utils::change_history::log_workspace_history_event;
 #[derive(Default, Deserialize)]
 pub struct WorkflowContextQuery {
     #[serde(default)]
-    workspace: Option<Uuid>,
+    pub workspace: Option<Uuid>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateWorkflowPayload {
+    pub name: String,
+    pub description: Option<String>,
+    pub data: serde_json::Value,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub workspace_id: Option<Uuid>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub updated_at: Option<OffsetDateTime>,
 }
 
 pub async fn create_workflow(
@@ -352,18 +364,19 @@ pub async fn update_workflow(
     AuthSession(claims): AuthSession,
     Path(workflow_id): Path<Uuid>,
     Query(params): Query<WorkflowContextQuery>,
-    Json(payload): Json<CreateWorkflow>,
+    Json(payload): Json<UpdateWorkflowPayload>,
 ) -> Response {
     let user_id = match Uuid::parse_str(&claims.id) {
         Ok(id) => id,
         Err(_) => return JsonResponse::unauthorized("Invalid user ID").into_response(),
     };
 
-    let CreateWorkflow {
+    let UpdateWorkflowPayload {
         name,
         description,
         data,
         workspace_id: _,
+        updated_at: client_updated_at,
     } = payload;
     let plan_tier = app_state
         .resolve_plan_tier(user_id, claims.plan.as_deref())
@@ -381,6 +394,16 @@ pub async fn update_workflow(
             return JsonResponse::server_error("Failed to update workflow").into_response();
         }
     };
+
+    if let Some(version) = client_updated_at {
+        if version != existing.updated_at {
+            return workflow_conflict_response(existing);
+        }
+    }
+
+    if existing.workspace_id.is_some() && client_updated_at.is_none() {
+        return workflow_conflict_response(existing);
+    }
 
     let memberships = match app_state
         .workspace_repo
@@ -468,7 +491,14 @@ pub async fn update_workflow(
 
     match app_state
         .workflow_repo
-        .update_workflow(owner_id, workflow_id, &name, description.as_deref(), data)
+        .update_workflow(
+            owner_id,
+            workflow_id,
+            &name,
+            description.as_deref(),
+            data,
+            client_updated_at,
+        )
         .await
     {
         Ok(Some(workflow)) => {
@@ -501,7 +531,20 @@ pub async fn update_workflow(
             )
                 .into_response()
         }
-        Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
+        Ok(None) => {
+            if client_updated_at.is_some() {
+                let latest = app_state
+                    .workflow_repo
+                    .find_workflow_for_member(user_id, workflow_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or(before);
+                workflow_conflict_response(latest)
+            } else {
+                JsonResponse::not_found("Workflow not found").into_response()
+            }
+        }
         Err(e) => {
             eprintln!("DB error updating workflow: {:?}", e);
             if is_unique_violation(&e) {
@@ -511,6 +554,18 @@ pub async fn update_workflow(
             }
         }
     }
+}
+
+fn workflow_conflict_response(workflow: Workflow) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "success": false,
+            "message": "This workflow was updated by someone else. Reload to continue editing.",
+            "workflow": workflow
+        })),
+    )
+        .into_response()
 }
 
 pub async fn lock_workflow(

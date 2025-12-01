@@ -454,6 +454,10 @@ async fn main() -> Result<()> {
             "/{workflow_id}/runs/{run_id}/download",
             get(download_run_json),
         )
+        .route(
+            "/{workflow_id}/events",
+            get(routes::workflows::sse_workflow_updates),
+        )
         .route("/{workflow_id}/runs/{run_id}/events", get(sse_run_events))
         .route(
             "/{workflow_id}/runs/events-stream",

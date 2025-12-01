@@ -369,6 +369,7 @@ impl WorkflowRepository for NoopWorkflowRepository {
         _name: &str,
         _description: Option<&str>,
         _data: Value,
+        _expected_updated_at: Option<OffsetDateTime>,
     ) -> Result<Option<Workflow>, sqlx::Error> {
         Ok(None)
     }

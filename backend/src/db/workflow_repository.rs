@@ -72,6 +72,7 @@ pub trait WorkflowRepository: Send + Sync {
         name: &str,
         description: Option<&str>,
         data: Value,
+        expected_updated_at: Option<OffsetDateTime>,
     ) -> Result<Option<Workflow>, sqlx::Error>;
 
     async fn delete_workflow(&self, user_id: Uuid, workflow_id: Uuid) -> Result<bool, sqlx::Error>;
