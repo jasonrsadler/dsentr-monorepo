@@ -1369,7 +1369,6 @@ mod tests {
             database_url: String::new(),
             frontend_origin: "https://app.example.com".into(),
             admin_origin: "https://app.example.com".into(),
-            admin_origin: "https://app.example.com".into(),
             oauth: OAuthSettings {
                 google: OAuthProviderConfig {
                     client_id: "client".into(),

@@ -855,7 +855,6 @@ mod tests {
             database_url: String::new(),
             frontend_origin: "http://localhost".into(),
             admin_origin: "http://localhost".into(),
-            admin_origin: "http://localhost".into(),
             oauth: OAuthSettings {
                 google: OAuthProviderConfig {
                     client_id: "stub".into(),
