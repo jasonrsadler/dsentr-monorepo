@@ -1,5 +1,5 @@
-import { ReactNode } from 'react';
-import { useAuthStore } from '../../stores/authStore';
+import { ReactNode } from "react";
+import { useAuthStore } from "../../stores/authStore";
 
 interface HeaderProps {
   title?: string;
@@ -12,8 +12,12 @@ export default function Header({ title, actions }: HeaderProps) {
   return (
     <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900/60 px-6 py-4">
       <div>
-        <div className="text-xs uppercase tracking-wide text-accent">Admin Portal</div>
-        <h1 className="text-xl font-bold text-slate-100">{title ?? 'Control room'}</h1>
+        <div className="text-xs uppercase tracking-wide text-accent">
+          Admin Portal
+        </div>
+        <h1 className="text-xl font-bold text-slate-100">
+          {title ?? "Control room"}
+        </h1>
       </div>
       <div className="flex items-center gap-3">
         {actions}
@@ -22,7 +26,8 @@ export default function Header({ title, actions }: HeaderProps) {
             <div className="text-right">
               <div className="font-semibold text-slate-100">{user.email}</div>
               <div className="text-xs text-slate-500">
-                {user.role === 'admin' ? 'Admin' : 'User'} | {user.plan ?? 'solo'}
+                {user.role === "admin" ? "Admin" : "User"} |{" "}
+                {user.plan ?? "solo"}
               </div>
             </div>
             <button className="btn-ghost text-xs" onClick={logout}>

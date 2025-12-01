@@ -1,6 +1,11 @@
-import { create } from 'zustand';
-import { ApiError, fetchSession, login as loginApi, logout as logoutApi } from '../api/client';
-import { SessionUser } from '../api/types';
+import { create } from "zustand";
+import {
+  ApiError,
+  fetchSession,
+  login as loginApi,
+  logout as logoutApi,
+} from "../api/client";
+import { SessionUser } from "../api/types";
 
 interface AuthState {
   user: SessionUser | null;
@@ -19,10 +24,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: undefined });
     try {
       const session = await fetchSession();
-      if (session.role !== 'admin') {
+      if (session.role !== "admin") {
         set({
           user: null,
-          error: 'Access denied. Admins only.',
+          error: "Access denied. Admins only.",
           loading: false,
         });
         await logoutApi().catch(() => {});
@@ -40,15 +45,16 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await loginApi(email, password);
       const session = await fetchSession();
-      if (session.role !== 'admin') {
-        const err = new ApiError('Not an admin', 403);
+      if (session.role !== "admin") {
+        const err = new ApiError("Not an admin", 403);
         set({ user: null, loading: false, error: err.message });
         await logoutApi().catch(() => {});
         throw err;
       }
       set({ user: session, loading: false, error: undefined });
     } catch (error) {
-      const message = error instanceof ApiError ? error.message : 'Login failed';
+      const message =
+        error instanceof ApiError ? error.message : "Login failed";
       set({ loading: false, error: message });
       throw error;
     }

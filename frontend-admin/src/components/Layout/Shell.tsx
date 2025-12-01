@@ -1,19 +1,19 @@
-import { Outlet, useLocation } from 'react-router-dom';
-import Header from './Header';
-import Sidebar from './Sidebar';
+import { Outlet, useLocation } from "react-router-dom";
+import Header from "./Header";
+import Sidebar from "./Sidebar";
 
 const titleMap: Record<string, string> = {
-  '/': 'Dashboard',
-  '/users': 'Users',
-  '/workspaces': 'Workspaces',
-  '/workflows': 'Workflows',
-  '/issues': 'Issues',
+  "/": "Dashboard",
+  "/users": "Users",
+  "/workspaces": "Workspaces",
+  "/workflows": "Workflows",
+  "/issues": "Issues",
 };
 
 export default function Shell() {
   const location = useLocation();
-  const basePath = '/' + location.pathname.split('/')[1];
-  const title = titleMap[basePath] ?? 'Admin';
+  const basePath = "/" + location.pathname.split("/")[1];
+  const title = titleMap[basePath] ?? "Admin";
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100">

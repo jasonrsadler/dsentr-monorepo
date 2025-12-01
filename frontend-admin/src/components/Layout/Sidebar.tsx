@@ -1,11 +1,11 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink } from "react-router-dom";
 
 const links = [
-  { to: '/', label: 'Dashboard' },
-  { to: '/users', label: 'Users' },
-  { to: '/workspaces', label: 'Workspaces' },
-  { to: '/workflows', label: 'Workflows' },
-  { to: '/issues', label: 'Issues' },
+  { to: "/", label: "Dashboard" },
+  { to: "/users", label: "Users" },
+  { to: "/workspaces", label: "Workspaces" },
+  { to: "/workflows", label: "Workflows" },
+  { to: "/issues", label: "Issues" },
 ];
 
 export default function Sidebar() {
@@ -19,17 +19,18 @@ export default function Sidebar() {
             to={link.to}
             className={({ isActive }) =>
               `rounded-lg px-3 py-2 transition hover:bg-slate-800 ${
-                isActive ? 'bg-slate-800 text-accent' : 'text-slate-200'
+                isActive ? "bg-slate-800 text-accent" : "text-slate-200"
               }`
             }
-            end={link.to === '/'}
+            end={link.to === "/"}
           >
             {link.label}
           </NavLink>
         ))}
       </nav>
       <div className="mt-6 text-xs text-slate-500">
-        Read-only admin tools. Replies to issues are the only mutable action here.
+        Read-only admin tools. Replies to issues are the only mutable action
+        here.
       </div>
     </aside>
   );

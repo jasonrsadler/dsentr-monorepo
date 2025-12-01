@@ -5,7 +5,12 @@ interface PaginationProps {
   onPageChange: (page: number) => void;
 }
 
-export default function Pagination({ page, limit, total, onPageChange }: PaginationProps) {
+export default function Pagination({
+  page,
+  limit,
+  total,
+  onPageChange,
+}: PaginationProps) {
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const safePage = Math.min(page, totalPages);
 

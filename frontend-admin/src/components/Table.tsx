@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 export interface Column<T> {
   key: string;
@@ -14,7 +14,12 @@ interface TableProps<T> {
   rowKey?: (row: T, index: number) => string;
 }
 
-export function Table<T>({ data, columns, empty = 'No results', rowKey }: TableProps<T>) {
+export function Table<T>({
+  data,
+  columns,
+  empty = "No results",
+  rowKey,
+}: TableProps<T>) {
   if (!data.length) {
     return <div className="card text-sm text-slate-400">{empty}</div>;
   }
@@ -25,7 +30,10 @@ export function Table<T>({ data, columns, empty = 'No results', rowKey }: TableP
         <thead className="bg-slate-900/60 text-left text-xs uppercase tracking-wide text-slate-400">
           <tr>
             {columns.map((col) => (
-              <th key={col.key} className={`px-4 py-3 font-semibold ${col.className ?? ''}`}>
+              <th
+                key={col.key}
+                className={`px-4 py-3 font-semibold ${col.className ?? ""}`}
+              >
                 {col.header}
               </th>
             ))}
@@ -38,8 +46,13 @@ export function Table<T>({ data, columns, empty = 'No results', rowKey }: TableP
               className="hover:bg-slate-800/60 transition-colors"
             >
               {columns.map((col) => (
-                <td key={col.key} className={`px-4 py-3 align-top ${col.className ?? ''}`}>
-                  {col.render ? col.render(row) : (row as Record<string, React.ReactNode>)[col.key]}
+                <td
+                  key={col.key}
+                  className={`px-4 py-3 align-top ${col.className ?? ""}`}
+                >
+                  {col.render
+                    ? col.render(row)
+                    : (row as Record<string, React.ReactNode>)[col.key]}
                 </td>
               ))}
             </tr>

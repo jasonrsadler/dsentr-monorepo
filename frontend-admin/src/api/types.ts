@@ -1,4 +1,4 @@
-export type ConnectedOAuthProvider = 'google' | 'microsoft' | 'slack';
+export type ConnectedOAuthProvider = "google" | "microsoft" | "slack";
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -10,7 +10,7 @@ export interface PaginatedResponse<T> {
 export interface SessionUser {
   id: string;
   email: string;
-  role?: 'admin' | 'user';
+  role?: "admin" | "user";
   plan?: string | null;
   first_name?: string;
   last_name?: string;
@@ -27,7 +27,7 @@ export interface AdminUser {
 }
 
 export interface AdminUserDetail extends AdminUser {
-  role?: 'admin' | 'user';
+  role?: "admin" | "user";
   company_name?: string | null;
   settings: any;
   onboarded_at?: string | null;
@@ -39,7 +39,7 @@ export interface ConnectionSummary {
   account_email: string;
   workspace_id?: string | null;
   owner_user_id: string;
-  scope: 'personal' | 'workspace' | string;
+  scope: "personal" | "workspace" | string;
   updated_at: string;
 }
 

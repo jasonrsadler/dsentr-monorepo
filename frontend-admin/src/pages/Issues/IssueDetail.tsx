@@ -1,14 +1,14 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { getIssue, replyToIssue } from '../../api/issues';
-import { IssueDetail as IssueDetailType, IssueMessage } from '../../api/types';
-import JsonView from '../../components/JsonView';
+import { FormEvent, useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import { getIssue, replyToIssue } from "../../api/issues";
+import { IssueDetail as IssueDetailType, IssueMessage } from "../../api/types";
+import JsonView from "../../components/JsonView";
 
 export default function IssueDetail() {
   const { id } = useParams<{ id: string }>();
   const [issue, setIssue] = useState<IssueDetailType | null>(null);
   const [messages, setMessages] = useState<IssueMessage[]>([]);
-  const [reply, setReply] = useState('');
+  const [reply, setReply] = useState("");
   const [error, setError] = useState<string>();
   const [sending, setSending] = useState(false);
 
@@ -16,11 +16,11 @@ export default function IssueDetail() {
     if (!id) return;
     async function load() {
       try {
-        const res = await getIssue(id);
+        const res = await getIssue(id ?? "");
         setIssue(res);
         setMessages(res.messages);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load issue');
+        setError(err instanceof Error ? err.message : "Failed to load issue");
       }
     }
     load();
@@ -33,10 +33,10 @@ export default function IssueDetail() {
     try {
       const res = await replyToIssue(id, reply);
       setMessages(res);
-      setReply('');
+      setReply("");
       setError(undefined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send reply');
+      setError(err instanceof Error ? err.message : "Failed to send reply");
     } finally {
       setSending(false);
     }
@@ -48,13 +48,19 @@ export default function IssueDetail() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-xs uppercase tracking-wide text-slate-400">Issue</div>
-          <h2 className="text-xl font-bold text-slate-100">{issue?.issue.id ?? id}</h2>
+          <div className="text-xs uppercase tracking-wide text-slate-400">
+            Issue
+          </div>
+          <h2 className="text-xl font-bold text-slate-100">
+            {issue?.issue.id ?? id}
+          </h2>
           <div className="text-xs text-slate-500">
             User: {issue?.issue.user_email} | Status: {issue?.issue.status}
           </div>
         </div>
-        <div className="pill">Workspace {issue?.issue.workspace_id ?? 'N/A'}</div>
+        <div className="pill">
+          Workspace {issue?.issue.workspace_id ?? "N/A"}
+        </div>
       </div>
 
       {error && <div className="card text-sm text-red-200">{error}</div>}
@@ -66,13 +72,15 @@ export default function IssueDetail() {
             <div
               key={msg.id}
               className={`rounded-lg border px-3 py-2 text-sm ${
-                msg.sender_type === 'admin'
-                  ? 'border-sky-600/40 bg-sky-900/30'
-                  : 'border-slate-700 bg-slate-900/60'
+                msg.sender_type === "admin"
+                  ? "border-sky-600/40 bg-sky-900/30"
+                  : "border-slate-700 bg-slate-900/60"
               }`}
             >
               <div className="flex items-center justify-between text-xs text-slate-400">
-                <span className="uppercase tracking-wide">{msg.sender_type}</span>
+                <span className="uppercase tracking-wide">
+                  {msg.sender_type}
+                </span>
                 <span>{new Date(msg.created_at).toLocaleString()}</span>
               </div>
               <div className="text-slate-100">{msg.body}</div>
@@ -92,10 +100,15 @@ export default function IssueDetail() {
           </label>
           <div className="flex items-center justify-between">
             <div className="text-xs text-slate-500">
-              Replies are visible to the user; main app will expose a user reply form later.
+              Replies are visible to the user; main app will expose a user reply
+              form later.
             </div>
-            <button className="btn" type="submit" disabled={sending || !reply.trim()}>
-              {sending ? 'Sending...' : 'Send reply'}
+            <button
+              className="btn"
+              type="submit"
+              disabled={sending || !reply.trim()}
+            >
+              {sending ? "Sending..." : "Send reply"}
             </button>
           </div>
         </form>

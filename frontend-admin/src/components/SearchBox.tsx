@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState } from "react";
 
 interface SearchBoxProps {
   placeholder?: string;
@@ -6,7 +6,11 @@ interface SearchBoxProps {
   defaultValue?: string;
 }
 
-export default function SearchBox({ placeholder, onSearch, defaultValue = '' }: SearchBoxProps) {
+export default function SearchBox({
+  placeholder,
+  onSearch,
+  defaultValue = "",
+}: SearchBoxProps) {
   const [value, setValue] = useState(defaultValue);
 
   return (

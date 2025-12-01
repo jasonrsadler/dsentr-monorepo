@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState } from "react";
 
 interface JsonViewProps {
   value: unknown;
@@ -13,8 +13,11 @@ export default function JsonView({ value, collapsed = false }: JsonViewProps) {
     <div className="card">
       <div className="mb-2 flex items-center justify-between">
         <div className="text-sm font-semibold text-slate-200">JSON</div>
-        <button className="btn-ghost text-xs" onClick={() => setOpen((v) => !v)}>
-          {open ? 'Collapse' : 'Expand'}
+        <button
+          className="btn-ghost text-xs"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? "Collapse" : "Expand"}
         </button>
       </div>
       {open ? (
