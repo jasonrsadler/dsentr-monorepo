@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 :root {
   color: #e2e8f0;
@@ -21,7 +19,7 @@ body {
 }
 
 .btn {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-slate-900 transition hover:brightness-110;
+  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:brightness-110;
 }
 
 .btn-ghost {

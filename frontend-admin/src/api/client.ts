@@ -1,4 +1,4 @@
-import { PaginatedResponse, SessionUser } from "./types";
+import { SessionUser } from "./types";
 
 export class ApiError extends Error {
   status: number;
