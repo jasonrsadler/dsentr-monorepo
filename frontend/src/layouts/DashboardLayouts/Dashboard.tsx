@@ -170,6 +170,7 @@ export default function Dashboard() {
   const [runOverlayOpen, setRunOverlayOpen] = useState(false)
   const [activeRun, setActiveRun] = useState<WorkflowRunRecord | null>(null)
   const activeRunId = activeRun?.id ?? null
+  const [runsDrawerOpen, setRunsDrawerOpen] = useState(false)
   const [nodeRuns, setNodeRuns] = useState<WorkflowNodeRunRecord[]>([])
   const pollTimerRef = useRef<any>(null)
   const currentPollRunIdRef = useRef<string | null>(null)
@@ -228,8 +229,6 @@ export default function Dashboard() {
     'idle' | 'queued' | 'running'
   >('idle')
   const globalRunsTimerRef = useRef<any>(null)
-  // Runs tab state
-  const [activePane, setActivePane] = useState<'designer' | 'runs'>('designer')
   const [runsScope, setRunsScope] = useState<'current' | 'all'>('current')
   const [runQueue, setRunQueue] = useState<WorkflowRunRecord[]>([])
   const _runQueueTimerRef = useRef<any>(null)
@@ -779,6 +778,11 @@ export default function Dashboard() {
     }
   }, [runsScope, currentWorkflow?.id])
 
+  useEffect(() => {
+    if (!runsDrawerOpen) return
+    void fetchRunQueue()
+  }, [runsDrawerOpen, fetchRunQueue])
+
   // Ensure overlay shows only the active run for the currently selected workflow
   // Now: no REST polling here; discovery is done via SSE in the effect below.
   const ensureOverlayRunForSelected = useCallback(async () => {
@@ -950,9 +954,9 @@ export default function Dashboard() {
     return 'idle'
   }, [activeRun?.status, globalRunStatus])
 
-  // Runs tab: consume SSE of active runs for the selected workflow
+  // Runs drawer: consume SSE of active runs for the selected workflow
   useEffect(() => {
-    if (activePane !== 'runs' || !currentWorkflowIdValue) return
+    if (!runsDrawerOpen || !currentWorkflowIdValue) return
     const base = (API_BASE_URL || '').replace(/\/$/, '')
     const url = `${base}/api/workflows/${currentWorkflowIdValue}/runs/events-stream`
     let es: EventSource | null = null
@@ -984,7 +988,7 @@ export default function Dashboard() {
         console.error(errorMessage(e))
       }
     }
-  }, [activePane, currentWorkflowIdValue])
+  }, [runsDrawerOpen, currentWorkflowIdValue])
 
   const handleRunWorkflow = useCallback(async () => {
     if (!currentWorkflow) return
@@ -2130,36 +2134,26 @@ export default function Dashboard() {
             onToggleOverlay={handleToggleRunOverlay}
           />
 
-          {/* Local tabs: Designer | Runs */}
+          {/* Designer tab label with Runs drawer trigger */}
           <div className="px-3 pt-2 border-b border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 backdrop-blur">
             <div className="flex items-center gap-2">
-              <button
-                className={`px-3 py-1.5 text-sm rounded-t ${activePane === 'designer' ? 'bg-white dark:bg-zinc-900 border border-b-0 border-zinc-200 dark:border-zinc-700' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
-                onClick={() => setActivePane('designer')}
-              >
+              <div className="px-3 py-1.5 text-sm rounded-t bg-white dark:bg-zinc-900 border border-b-0 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-50">
                 Designer
-              </button>
-              <button
-                className={`px-3 py-1.5 text-sm rounded-t ${activePane === 'runs' ? 'bg-white dark:bg-zinc-900 border border-b-0 border-zinc-200 dark:border-zinc-700' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
-                onClick={() => setActivePane('runs')}
-              >
-                Runs
-              </button>
-              {activePane === 'runs' && (
-                <div className="ml-auto flex items-center gap-2 text-xs">
-                  <span className="text-zinc-500">Scope:</span>
-                  <select
-                    value={runsScope}
-                    onChange={(e) =>
-                      setRunsScope((e.target.value as any) ?? 'current')
-                    }
-                    className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
-                  >
-                    <option value="current">Current workflow</option>
-                    <option value="all">All workflows</option>
-                  </select>
-                </div>
-              )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className={`inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-t border border-b-0 border-zinc-200 dark:border-zinc-700 ${
+                    runsDrawerOpen
+                      ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50'
+                      : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                  }`}
+                  onClick={() => setRunsDrawerOpen((open) => !open)}
+                  aria-pressed={runsDrawerOpen}
+                  title="Open runs panel"
+                >
+                  Runs
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2209,10 +2203,9 @@ export default function Dashboard() {
               />
             </div>
           )}
-
-          {activePane === 'designer' ? (
-            <div className="flex-1 min-h-0 flex">
-              <ReactFlowProvider>
+          <div className="flex-1 min-h-0 flex">
+            <ReactFlowProvider>
+              <div className="flex-1 min-h-0 flex relative overflow-hidden">
                 <div className="flex-1 min-h-0 flex">
                   {currentWorkflow ? (
                     <FlowCanvas
@@ -2236,64 +2229,112 @@ export default function Dashboard() {
                     </div>
                   )}
                 </div>
-              </ReactFlowProvider>
-            </div>
-          ) : (
-            // Runs pane
-            <div className="flex-1 overflow-auto themed-scroll p-4">
-              {runQueue.length === 0 ? (
-                <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                  No queued or running jobs.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {runQueue.map((run) => {
-                    const wf = workflows.find((w) => w.id === run.workflow_id)
-                    const canCancel =
-                      run.status === 'queued' || run.status === 'running'
-                    return (
-                      <div
-                        key={run.id}
-                        className="flex items-center justify-between border rounded p-2 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="px-2 py-0.5 text-xs rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                            {run.status}
-                          </span>
-                          <div>
-                            <div className="text-sm font-medium">
-                              {wf?.name || run.workflow_id}
-                            </div>
-                            <div className="text-xs text-zinc-500">
-                              Started{' '}
-                              {new Date(run.started_at).toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {canCancel && (
-                            <button
-                              className="text-xs px-2 py-1 rounded border hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                              onClick={async () => {
-                                try {
-                                  await cancelRun(run.workflow_id, run.id)
-                                  await fetchRunQueue()
-                                } catch (e) {
-                                  console.error('Failed to cancel run', e)
-                                }
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          )}
-                        </div>
+
+                {/* Runs bottom bar */}
+                <div
+                  className={`absolute left-0 right-0 bottom-0 z-10 w-full max-w-full bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 shadow-2xl transition-transform duration-200 ease-in-out ${
+                    runsDrawerOpen
+                      ? 'translate-y-0'
+                      : 'translate-y-full pointer-events-none'
+                  }`}
+                >
+                  <div className="h-[42vh] max-h-[50vh] flex flex-col overflow-hidden">
+                    <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 px-4 py-2">
+                      <div className="flex-1">
+                        <h3 className="text-sm font-semibold">Runs</h3>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                          Live queue and status
+                        </p>
                       </div>
-                    )
-                  })}
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-zinc-500">Scope:</span>
+                        <select
+                          value={runsScope}
+                          onChange={(e) =>
+                            setRunsScope((e.target.value as any) ?? 'current')
+                          }
+                          className="px-2 py-1 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700"
+                        >
+                          <option value="current">Current workflow</option>
+                          <option value="all">All workflows</option>
+                        </select>
+                      </div>
+                      <button
+                        className="ml-2 text-xs px-2 py-1 rounded border hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        onClick={() => setRunsDrawerOpen(false)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-auto themed-scroll p-4">
+                      {runQueue.length === 0 ? (
+                        <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                          No queued or running jobs.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {runQueue.map((run) => {
+                            const wf = workflows.find(
+                              (w) => w.id === run.workflow_id
+                            )
+                            const canCancel =
+                              run.status === 'queued' ||
+                              run.status === 'running'
+                            return (
+                              <div
+                                key={run.id}
+                                className="flex items-center justify-between border rounded p-2 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <span className="px-2 py-0.5 text-xs rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                                    {run.status}
+                                  </span>
+                                  <div>
+                                    <div className="text-sm font-medium">
+                                      {wf?.name || run.workflow_id}
+                                    </div>
+                                    <div className="text-xs text-zinc-500">
+                                      Started{' '}
+                                      {new Date(
+                                        run.started_at
+                                      ).toLocaleString()}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {canCancel && (
+                                    <button
+                                      className="text-xs px-2 py-1 rounded border hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                      onClick={async () => {
+                                        try {
+                                          await cancelRun(
+                                            run.workflow_id,
+                                            run.id
+                                          )
+                                          await fetchRunQueue()
+                                        } catch (e) {
+                                          console.error(
+                                            'Failed to cancel run',
+                                            e
+                                          )
+                                        }
+                                      }}
+                                    >
+                                      Cancel
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            </ReactFlowProvider>
+          </div>
         </div>
       </div>
 
