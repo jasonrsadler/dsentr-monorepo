@@ -40,7 +40,6 @@ use routes::auth::{
 };
 use routes::{
     account::{confirm_account_deletion, get_account_deletion_summary, request_account_deletion},
-    admin::purge_runs,
     auth::{
         forgot_password::handle_forgot_password,
         github_login::{github_callback, github_login},
@@ -611,7 +610,7 @@ async fn main() -> Result<()> {
 
     // Admin routes (CSRF + rate limit). Only Admin role may call these handlers.
     let admin_routes = Router::new()
-        .route("/purge-runs", post(purge_runs))
+        .merge(routes::admin::router())
         .layer(csrf_layer.clone())
         .layer(session_guard.clone())
         .layer(GovernorLayer {

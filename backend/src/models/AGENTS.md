@@ -30,3 +30,4 @@
 - Introduced the `WorkspaceBillingCycle` struct so repositories/routes can persist subscription ids plus current period start/end timestamps for billing-aware quota calculations.
 - Workspace model now includes an optional `stripe_overage_item_id` so subscription item ids for metered overage billing can be stored and surfaced across repositories and routes.
 - Added `IssueReport`/`NewIssueReport` models to persist support submissions alongside captured user/workspace metadata.
+- Added `IssueReportMessage` plus status/updated_at fields on `IssueReport` to power admin issue threading without leaking secrets.

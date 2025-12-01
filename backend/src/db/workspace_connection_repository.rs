@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -33,7 +34,7 @@ pub struct NewWorkspaceAuditEvent {
     pub metadata: Value,
 }
 
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
 pub struct WorkspaceConnectionListing {
     pub id: Uuid,
     pub workspace_id: Uuid,

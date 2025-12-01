@@ -26,6 +26,9 @@ pub struct IssueReportPayload {
     pub workspace_id: Option<Uuid>,
 }
 
+// TODO: expose an authenticated user reply endpoint that appends to issue_report_messages
+// so threads stay synchronized with the admin portal.
+
 pub async fn submit_issue_report(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,

@@ -1,0 +1,54 @@
+﻿name: Frontend Build Check
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-admin-deploy.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-admin-deploy.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VITE_API_BASE_URL: https://api.dsentr.com
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend-admin/package-lock.json
+      
+      - name: Clean npm cache
+        run: npm cache clean --force
+
+      - name: Install deps
+        run: |
+          cd frontend-admin
+          npm ci
+          
+      - name: Lint
+        run: |
+          cd frontend-admin
+          npm run lint
+
+      - name: Build
+        run: |
+          cd frontend-admin
+          npm run build
+
+      - name: Trigger Cloudflare Admin Pages Deploy
+        if: success()  # only after build passes
+        run: |
+          curl -fsS -X POST "${{ secrets.CF_ADMIN_PAGES_DEPLOY_HOOK_URL }}"
+

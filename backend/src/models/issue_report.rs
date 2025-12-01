@@ -20,6 +20,9 @@ pub struct IssueReport {
     pub metadata: Value,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    pub status: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,4 +37,15 @@ pub struct NewIssueReport {
     pub workspace_role: Option<String>,
     pub description: String,
     pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct IssueReportMessage {
+    pub id: Uuid,
+    pub issue_id: Uuid,
+    pub sender_id: Option<Uuid>,
+    pub sender_type: String,
+    pub body: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
 }

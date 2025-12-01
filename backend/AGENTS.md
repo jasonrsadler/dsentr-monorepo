@@ -49,3 +49,4 @@ itly coordinated.
 - Billing overage reporting now uses Stripe billing meter events instead of legacy usage records; set `STRIPE_WORKSPACE_METER_EVENT_NAME` to the configured meter event name so over-limit runs emit meter events with the workspace owner's Stripe customer id.
 - Added an authenticated issue-reporting endpoint and persistence so user-submitted problem reports arrive with account/workspace context for troubleshooting.
 - Workspace workflow saves now use optimistic concurrency and stream updates to collaborators to avoid overwriting changes between workspace members.
+- Added admin-only API surface for /api/admin with issue reply threading so support staff can audit users, workspaces, workflows, and respond without exposing secrets.
