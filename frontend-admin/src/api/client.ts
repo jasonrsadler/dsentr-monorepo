@@ -14,8 +14,19 @@ export class ApiError extends Error {
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 const ADMIN_BASE_PATH = "/api/admin";
 const AUTH_BASE_PATH = "/api/auth";
+let cachedCsrf: string | null = null;
 
 type RequestOptions = RequestInit & { skipJson?: boolean; basePath?: string };
+
+async function fetchCsrfToken(): Promise<string> {
+  if (cachedCsrf) return cachedCsrf;
+  const res = await fetch(`${API_BASE}${AUTH_BASE_PATH}/csrf-token`, {
+    credentials: "include",
+  });
+  const token = await res.text();
+  cachedCsrf = token;
+  return token;
+}
 
 async function request<T>(
   path: string,
@@ -24,12 +35,21 @@ async function request<T>(
   const { skipJson, basePath, headers, ...rest } = options;
   const resolvedBase = basePath ?? ADMIN_BASE_PATH;
   const url = `${API_BASE}${resolvedBase}${path}`;
+  const method = (rest.method ?? "GET").toString().toUpperCase();
+  const needsCsrf = !["GET", "HEAD", "OPTIONS"].includes(method);
+  const mergedHeaders = new Headers(headers as HeadersInit);
+  if (!mergedHeaders.has("Content-Type")) {
+    mergedHeaders.set("Content-Type", "application/json");
+  }
+
+  if (needsCsrf && !mergedHeaders.has("x-csrf-token")) {
+    const token = await fetchCsrfToken();
+    mergedHeaders.set("x-csrf-token", token);
+  }
+
   const response = await fetch(url, {
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(headers || {}),
-    },
+    headers: mergedHeaders,
     ...rest,
   });
 
