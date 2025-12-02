@@ -127,7 +127,7 @@ export async function fetchSession(): Promise<SessionUser> {
 }
 
 export async function login(email: string, password: string): Promise<void> {
-  await authPost("/login", { email, password });
+  await authPost("/login", { email, password, remember: false });
 }
 
 export async function logout(): Promise<void> {
