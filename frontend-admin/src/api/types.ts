@@ -19,6 +19,8 @@ export interface SessionUser {
 export interface AdminUser {
   id: string;
   email: string;
+  first_name: string;
+  last_name: string;
   plan?: string | null;
   is_verified: boolean;
   is_admin: boolean;

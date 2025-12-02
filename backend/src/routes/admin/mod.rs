@@ -53,6 +53,8 @@ struct PaginatedResponse<T> {
 struct AdminUserRow {
     id: Uuid,
     email: String,
+    first_name: String,
+    last_name: String,
     plan: Option<String>,
     is_verified: bool,
     is_admin: bool,
@@ -237,14 +239,28 @@ pub async fn list_users(
     };
 
     let mut list_builder = QueryBuilder::<Postgres>::new(
-        "SELECT id, email, plan, is_verified, lower(role::text) = 'admin' as is_admin, created_at, updated_at FROM users",
+        "SELECT id, email, first_name, last_name, plan, is_verified, lower(role::text) = 'admin' as is_admin, created_at, updated_at FROM users",
     );
     let mut count_builder = QueryBuilder::<Postgres>::new("SELECT COUNT(*) as count FROM users");
 
     if let Some(search) = query.search.as_ref().filter(|s| !s.is_empty()) {
         let term = format!("%{}%", search);
-        list_builder.push(" WHERE email ILIKE ").push_bind(term.clone());
-        count_builder.push(" WHERE email ILIKE ").push_bind(term);
+        list_builder
+            .push(" WHERE (email ILIKE ")
+            .push_bind(term.clone())
+            .push(" OR first_name ILIKE ")
+            .push_bind(term.clone())
+            .push(" OR last_name ILIKE ")
+            .push_bind(term.clone())
+            .push(")");
+        count_builder
+            .push(" WHERE (email ILIKE ")
+            .push_bind(term.clone())
+            .push(" OR first_name ILIKE ")
+            .push_bind(term.clone())
+            .push(" OR last_name ILIKE ")
+            .push_bind(term)
+            .push(")");
     }
 
     list_builder

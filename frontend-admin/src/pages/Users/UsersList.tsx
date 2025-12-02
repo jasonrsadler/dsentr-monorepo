@@ -73,7 +73,7 @@ export default function UsersList() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SearchBox
-          placeholder="Search by email"
+          placeholder="Search by email or name"
           onSearch={(v) => {
             setSearch(v);
             setPage(1);
@@ -101,6 +101,8 @@ export default function UsersList() {
                 header: "ID",
                 render: (row) => (row as AdminUser).id.slice(0, 8),
               },
+              { key: "first_name", header: "First" },
+              { key: "last_name", header: "Last" },
               {
                 key: "email",
                 header: "Email",
