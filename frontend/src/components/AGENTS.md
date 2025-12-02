@@ -17,6 +17,7 @@
 - WebhooksTab: Added positive confirmation states for the Signing Key "Copy" button ("Copied!") and HMAC settings "Save" button ("Saving…" → "Saved!") to clearly indicate the action was applied.
 - WebhooksTab: Restored copy-to-clipboard controls for the HMAC language examples and added a signing key rotation button that surfaces success state, refreshes the derived webhook URL, and warns that both credentials change together.
 - IntegrationsTab: Removed redundant client-side filtering of workspace OAuth connections by `workspaceId`. Backend now enforces workspace scoping for the connections listing endpoint, so the UI consumes the `workspace` array as returned.
+- Node inline secret creation fields now disable browser/password-manager autofill (autocomplete off/new-password + lp/1p ignore) so quick-create flows don't get prefilled with unrelated credentials.
 
 ## Affected Areas
 - Settings > LogsTab: change history list

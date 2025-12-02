@@ -200,6 +200,13 @@ export default function NodeSecretDropdown({
               onChange={(e) => setNameDraft(e.target.value)}
               className="px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900"
               placeholder="e.g. Primary Token"
+              autoComplete="off"
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              inputMode="text"
+              data-lpignore="true"
+              data-1p-ignore="true"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -212,6 +219,13 @@ export default function NodeSecretDropdown({
               onChange={(e) => setValueDraft(e.target.value)}
               className="px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900"
               placeholder="Enter value"
+              autoComplete="new-password"
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              inputMode="text"
+              data-lpignore="true"
+              data-1p-ignore="true"
             />
           </div>
           {error && (
