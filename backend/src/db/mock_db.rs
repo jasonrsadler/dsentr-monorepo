@@ -43,7 +43,7 @@ pub struct MockDb {
     pub stripe_customer_id: Mutex<Option<String>>,
     pub update_user_plan_calls: Mutex<usize>,
     pub terms_acceptances: Mutex<Vec<(Uuid, String, OffsetDateTime)>>,
-    pub issue_reports: Mutex<Vec<NewIssueReport>>,
+    pub issue_reports: Mutex<Vec<(Uuid, NewIssueReport)>>,
 }
 
 impl Default for MockDb {
@@ -264,9 +264,10 @@ impl UserRepository for MockDb {
         Ok(())
     }
 
-    async fn create_issue_report(&self, report: NewIssueReport) -> Result<(), sqlx::Error> {
-        self.issue_reports.lock().unwrap().push(report);
-        Ok(())
+    async fn create_issue_report(&self, report: NewIssueReport) -> Result<Uuid, sqlx::Error> {
+        let id = Uuid::new_v4();
+        self.issue_reports.lock().unwrap().push((id, report));
+        Ok(id)
     }
 
     async fn upsert_account_deletion_token(

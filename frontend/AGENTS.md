@@ -246,3 +246,4 @@ OAuth connections grouping (Google Sheets, Microsoft Teams):
 
 - Added workspace-only run usage bar in the dashboard header and a new Settings � Usage tab to show workspace totals, member run breakdowns, and overage indicators so over-limit runs remain visible for billing.
 - Added a support entry point in the dashboard header plus an issue-report modal that submits user/workspace context to the backend for troubleshooting.
+- Added a header message badge and inbox modal so customers can read/reply to system messages and clear unread counts synced with backend read tracking.

@@ -1,22 +1,24 @@
 use std::net::SocketAddr;
 
 use axum::{
-    extract::{ConnectInfo, Json, State},
+    extract::{ConnectInfo, Json, Path, State},
     response::{IntoResponse, Response},
 };
 use axum_extra::{headers::UserAgent, typed_header::TypedHeader};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::FromRow;
+use time::OffsetDateTime;
 use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::{
     models::{
-        issue_report::NewIssueReport,
+        issue_report::{IssueReport, IssueReportMessage, NewIssueReport},
         workspace::{Workspace, WorkspaceMembershipSummary},
     },
     responses::JsonResponse,
-    routes::auth::session::AuthSession,
+    routes::auth::{claims::Claims, session::AuthSession},
     state::AppState,
 };
 
@@ -26,8 +28,45 @@ pub struct IssueReportPayload {
     pub workspace_id: Option<Uuid>,
 }
 
-// TODO: expose an authenticated user reply endpoint that appends to issue_report_messages
-// so threads stay synchronized with the admin portal.
+#[derive(Debug, Serialize, FromRow)]
+pub struct IssueThreadSummary {
+    pub id: Uuid,
+    pub status: String,
+    pub workspace_id: Option<Uuid>,
+    pub workspace_name: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+    pub unread_admin_messages: i64,
+    pub last_message_body: Option<String>,
+    pub last_message_sender: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub last_message_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IssueListResponse {
+    pub issues: Vec<IssueThreadSummary>,
+    pub unread_admin_messages: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IssueDetailWithMessages {
+    pub issue: IssueReport,
+    pub workspace_name: Option<String>,
+    pub messages: Vec<IssueReportMessage>,
+    pub unread_admin_messages: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IssueReplyPayload {
+    pub message: String,
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_user_id(claims: &Claims) -> Result<Uuid, Response> {
+    Uuid::parse_str(&claims.id)
+        .map_err(|_| JsonResponse::unauthorized("Invalid user session").into_response())
+}
 
 pub async fn submit_issue_report(
     State(state): State<AppState>,
@@ -36,9 +75,9 @@ pub async fn submit_issue_report(
     user_agent: Option<TypedHeader<UserAgent>>,
     Json(payload): Json<IssueReportPayload>,
 ) -> Response {
-    let user_id = match Uuid::parse_str(&claims.id) {
+    let user_id = match parse_user_id(&claims) {
         Ok(id) => id,
-        Err(_) => return JsonResponse::unauthorized("Invalid user session").into_response(),
+        Err(resp) => return resp,
     };
 
     let description = payload.description.trim();
@@ -160,12 +199,301 @@ pub async fn submit_issue_report(
         metadata,
     };
 
-    if let Err(err) = state.db.create_issue_report(report).await {
-        error!(?err, %user_id, "failed to persist issue report");
-        return JsonResponse::server_error("Unable to submit issue right now").into_response();
-    }
+    let issue_id = match state.db.create_issue_report(report).await {
+        Ok(id) => id,
+        Err(err) => {
+            error!(?err, %user_id, "failed to persist issue report");
+            return JsonResponse::server_error("Unable to submit issue right now").into_response();
+        }
+    };
+
+    let now = OffsetDateTime::now_utc();
+    let _ = sqlx::query(
+        r#"
+        INSERT INTO issue_report_messages (issue_id, sender_id, sender_type, body, read_by_user_at)
+        VALUES ($1, $2, 'user', $3, $4)
+        "#,
+    )
+    .bind(issue_id)
+    .bind(Some(user_id))
+    .bind(description)
+    .bind(now)
+    .execute(state.db_pool.as_ref())
+    .await;
+
+    let _ = sqlx::query("UPDATE issue_reports SET updated_at = $2 WHERE id = $1")
+        .bind(issue_id)
+        .bind(now)
+        .execute(state.db_pool.as_ref())
+        .await;
 
     JsonResponse::success("Issue report submitted").into_response()
+}
+
+pub async fn list_user_issues(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+) -> Result<impl IntoResponse, Response> {
+    let user_id = parse_user_id(&claims)?;
+
+    let issues: Vec<IssueThreadSummary> = sqlx::query_as(
+        r#"
+        SELECT i.id,
+               i.status,
+               i.workspace_id,
+               ws.name AS workspace_name,
+               i.updated_at,
+               COALESCE(unread.count, 0) AS unread_admin_messages,
+               COALESCE(last_msg.body, i.description) AS last_message_body,
+               COALESCE(last_msg.sender_type, 'user') AS last_message_sender,
+               COALESCE(last_msg.created_at, i.created_at) AS last_message_at
+        FROM issue_reports i
+        LEFT JOIN workspaces ws ON ws.id = i.workspace_id
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*)::BIGINT AS count
+            FROM issue_report_messages m
+            WHERE m.issue_id = i.id
+              AND m.sender_type = 'admin'
+              AND m.read_by_user_at IS NULL
+        ) unread ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT m.body, m.sender_type, m.created_at
+            FROM issue_report_messages m
+            WHERE m.issue_id = i.id
+            ORDER BY m.created_at DESC
+            LIMIT 1
+        ) last_msg ON TRUE
+        WHERE i.user_id = $1
+        ORDER BY i.updated_at DESC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(state.db_pool.as_ref())
+    .await
+    .map_err(|_| JsonResponse::server_error("Failed to load issues").into_response())?;
+
+    let unread_admin_messages = issues.iter().map(|issue| issue.unread_admin_messages).sum();
+
+    Ok(Json(IssueListResponse {
+        issues,
+        unread_admin_messages,
+    }))
+}
+
+pub async fn get_issue_with_messages(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(issue_id): Path<Uuid>,
+) -> Result<impl IntoResponse, Response> {
+    let user_id = parse_user_id(&claims)?;
+
+    let issue: Option<IssueReport> = sqlx::query_as(
+        r#"
+        SELECT id, user_id, workspace_id, user_email, user_name, user_plan, user_role,
+               workspace_plan, workspace_role, description, metadata, created_at, status, updated_at
+        FROM issue_reports
+        WHERE id = $1 AND user_id = $2
+        "#,
+    )
+    .bind(issue_id)
+    .bind(user_id)
+    .fetch_optional(state.db_pool.as_ref())
+    .await
+    .map_err(|_| JsonResponse::server_error("Failed to load issue").into_response())?;
+
+    let Some(issue) = issue else {
+        return Err(JsonResponse::not_found("Issue not found").into_response());
+    };
+
+    let workspace_name = if let Some(ws_id) = issue.workspace_id {
+        sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
+            .bind(ws_id)
+            .fetch_optional(state.db_pool.as_ref())
+            .await
+            .unwrap_or(None)
+    } else {
+        None
+    };
+
+    let messages = fetch_issue_messages(&state, issue_id, &issue).await?;
+    let unread_admin_messages = messages
+        .iter()
+        .filter(|message| message.sender_type == "admin" && message.read_by_user_at.is_none())
+        .count() as i64;
+
+    Ok(Json(IssueDetailWithMessages {
+        issue,
+        workspace_name,
+        messages,
+        unread_admin_messages,
+    }))
+}
+
+pub async fn reply_to_issue(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(issue_id): Path<Uuid>,
+    Json(payload): Json<IssueReplyPayload>,
+) -> Result<impl IntoResponse, Response> {
+    let user_id = parse_user_id(&claims)?;
+    let body = payload.message.trim();
+    if body.is_empty() {
+        return Err(JsonResponse::bad_request("Message is required").into_response());
+    }
+    if body.len() > 4000 {
+        return Err(JsonResponse::bad_request("Message is too long").into_response());
+    }
+
+    let issue: Option<IssueReport> = sqlx::query_as(
+        r#"
+        SELECT id, user_id, workspace_id, user_email, user_name, user_plan, user_role,
+               workspace_plan, workspace_role, description, metadata, created_at, status, updated_at
+        FROM issue_reports
+        WHERE id = $1 AND user_id = $2
+        "#,
+    )
+    .bind(issue_id)
+    .bind(user_id)
+    .fetch_optional(state.db_pool.as_ref())
+    .await
+    .map_err(|_| JsonResponse::server_error("Failed to load issue").into_response())?;
+
+    let Some(mut issue) = issue else {
+        return Err(JsonResponse::not_found("Issue not found").into_response());
+    };
+
+    let now = OffsetDateTime::now_utc();
+    let insert_query = r#"
+        INSERT INTO issue_report_messages (issue_id, sender_id, sender_type, body, read_by_user_at)
+        VALUES ($1, $2, 'user', $3, $4)
+    "#;
+
+    sqlx::query(insert_query)
+        .bind(issue_id)
+        .bind(Some(user_id))
+        .bind(body)
+        .bind(now)
+        .execute(state.db_pool.as_ref())
+        .await
+        .map_err(|_| JsonResponse::server_error("Failed to store reply").into_response())?;
+
+    issue.status = "waiting_admin".to_string();
+    issue.updated_at = now;
+    let _ = sqlx::query("UPDATE issue_reports SET status = $2, updated_at = $3 WHERE id = $1")
+        .bind(issue_id)
+        .bind(&issue.status)
+        .bind(now)
+        .execute(state.db_pool.as_ref())
+        .await;
+
+    let workspace_name = if let Some(ws_id) = issue.workspace_id {
+        sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
+            .bind(ws_id)
+            .fetch_optional(state.db_pool.as_ref())
+            .await
+            .unwrap_or(None)
+    } else {
+        None
+    };
+
+    let messages = fetch_issue_messages(&state, issue_id, &issue).await?;
+    let unread_admin_messages = messages
+        .iter()
+        .filter(|message| message.sender_type == "admin" && message.read_by_user_at.is_none())
+        .count() as i64;
+
+    Ok(Json(IssueDetailWithMessages {
+        issue,
+        workspace_name,
+        messages,
+        unread_admin_messages,
+    }))
+}
+
+pub async fn mark_issue_messages_read(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(issue_id): Path<Uuid>,
+) -> Result<impl IntoResponse, Response> {
+    let user_id = parse_user_id(&claims)?;
+
+    let exists: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM issue_reports WHERE id = $1 AND user_id = $2 LIMIT 1")
+            .bind(issue_id)
+            .bind(user_id)
+            .fetch_optional(state.db_pool.as_ref())
+            .await
+            .map_err(|_| JsonResponse::server_error("Failed to load issue").into_response())?;
+
+    if exists.is_none() {
+        return Err(JsonResponse::not_found("Issue not found").into_response());
+    }
+
+    let _ = sqlx::query(
+        r#"
+        UPDATE issue_report_messages
+        SET read_by_user_at = COALESCE(read_by_user_at, now())
+        WHERE issue_id = $1
+          AND sender_type = 'admin'
+          AND read_by_user_at IS NULL
+        "#,
+    )
+    .bind(issue_id)
+    .execute(state.db_pool.as_ref())
+    .await;
+
+    let unread_admin_messages: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM issue_report_messages
+        WHERE issue_id = $1
+          AND sender_type = 'admin'
+          AND read_by_user_at IS NULL
+        "#,
+    )
+    .bind(issue_id)
+    .fetch_one(state.db_pool.as_ref())
+    .await
+    .unwrap_or(0);
+
+    Ok(Json(json!({
+        "success": true,
+        "unread_admin_messages": unread_admin_messages
+    })))
+}
+
+pub async fn fetch_issue_messages(
+    state: &AppState,
+    issue_id: Uuid,
+    issue: &IssueReport,
+) -> Result<Vec<IssueReportMessage>, Response> {
+    let replies: Vec<IssueReportMessage> = sqlx::query_as(
+        r#"
+        SELECT id, issue_id, sender_id, sender_type, body, created_at, read_by_user_at, read_by_admin_at
+        FROM issue_report_messages
+        WHERE issue_id = $1
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(issue_id)
+    .fetch_all(state.db_pool.as_ref())
+    .await
+    .map_err(|_| JsonResponse::server_error("Failed to load messages").into_response())?;
+
+    if replies.is_empty() {
+        return Ok(vec![IssueReportMessage {
+            id: Uuid::nil(),
+            issue_id,
+            sender_id: Some(issue.user_id),
+            sender_type: "user".to_string(),
+            body: issue.description.clone(),
+            created_at: issue.created_at,
+            read_by_user_at: Some(issue.created_at),
+            read_by_admin_at: None,
+        }]);
+    }
+
+    Ok(replies)
 }
 
 #[cfg(test)]
@@ -334,7 +662,7 @@ mod tests {
 
         let reports = db.issue_reports.lock().unwrap();
         assert_eq!(reports.len(), 1);
-        let report = &reports[0];
+        let (_id, report) = &reports[0];
         assert_eq!(report.user_id, user_id);
         assert_eq!(report.workspace_id, Some(workspace_id));
         assert_eq!(report.user_email, user.email);

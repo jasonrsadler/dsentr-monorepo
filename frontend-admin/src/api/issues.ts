@@ -25,6 +25,10 @@ export function getIssue(issueId: string): Promise<IssueDetail> {
   return adminGet(`/issues/${issueId}`);
 }
 
+export function markIssueRead(issueId: string): Promise<{ success: boolean }> {
+  return adminPost(`/issues/${issueId}/read`, {});
+}
+
 export function replyToIssue(
   issueId: string,
   message: string,

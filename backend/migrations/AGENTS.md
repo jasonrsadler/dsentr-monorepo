@@ -41,3 +41,4 @@
 - Added `issue_reports` table with workspace/user metadata fields so support submissions persist to the database for follow-up.
 - Added `stripe_event_log` table to persist processed Stripe webhook ids for idempotent delivery handling.
 - Added `issue_report_messages` plus `issue_reports.status/updated_at` to support admin/user reply threads without rewriting existing submissions.
+- Added read-tracking columns and indexes for `issue_report_messages` so user/admin inboxes can badge unread replies accurately.

@@ -470,8 +470,8 @@ impl UserRepository for PostgresUserRepository {
         self.update_user_settings(user_id, settings).await
     }
 
-    async fn create_issue_report(&self, report: NewIssueReport) -> Result<(), sqlx::Error> {
-        sqlx::query!(
+    async fn create_issue_report(&self, report: NewIssueReport) -> Result<Uuid, sqlx::Error> {
+        let issue_id = sqlx::query_scalar!(
             r#"
             INSERT INTO issue_reports (
                 user_id,
@@ -486,6 +486,7 @@ impl UserRepository for PostgresUserRepository {
                 metadata
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id
             "#,
             report.user_id,
             report.workspace_id,
@@ -498,10 +499,10 @@ impl UserRepository for PostgresUserRepository {
             report.description,
             report.metadata
         )
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
 
-        Ok(())
+        Ok(issue_id)
     }
 
     async fn upsert_account_deletion_token(

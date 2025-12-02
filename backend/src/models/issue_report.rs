@@ -48,4 +48,8 @@ pub struct IssueReportMessage {
     pub body: String,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub read_by_user_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub read_by_admin_at: Option<OffsetDateTime>,
 }

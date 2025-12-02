@@ -12,6 +12,7 @@ interface TableProps<T> {
   columns: Column<T>[];
   empty?: string;
   rowKey?: (row: T, index: number) => string;
+  rowClassName?: (row: T, index: number) => string;
 }
 
 export function Table<T>({
@@ -19,6 +20,7 @@ export function Table<T>({
   columns,
   empty = "No results",
   rowKey,
+  rowClassName,
 }: TableProps<T>) {
   if (!data.length) {
     return <div className="card text-sm text-slate-400">{empty}</div>;
@@ -43,7 +45,7 @@ export function Table<T>({
           {data.map((row, idx) => (
             <tr
               key={rowKey ? rowKey(row, idx) : idx.toString()}
-              className="hover:bg-slate-800/60 transition-colors"
+              className={`hover:bg-slate-800/60 transition-colors ${rowClassName ? rowClassName(row, idx) : ""}`}
             >
               {columns.map((col) => (
                 <td

@@ -142,6 +142,8 @@ export interface IssueSummary {
   workspace_id?: string | null;
   status: string;
   user_email: string;
+  unread_user_messages: number;
+  last_message_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -153,6 +155,8 @@ export interface IssueMessage {
   sender_type: string;
   body: string;
   created_at: string;
+  read_by_user_at?: string | null;
+  read_by_admin_at?: string | null;
 }
 
 export interface IssueReport {
@@ -175,6 +179,7 @@ export interface IssueReport {
 export interface IssueDetail {
   issue: IssueReport;
   messages: IssueMessage[];
+  unread_user_messages: number;
 }
 
 export interface WorkspaceDetailResponse {

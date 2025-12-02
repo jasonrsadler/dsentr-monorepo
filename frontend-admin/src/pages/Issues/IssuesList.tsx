@@ -90,6 +90,11 @@ export default function IssuesList() {
         <>
           <Table
             data={issues}
+            rowClassName={(row: IssueSummary) =>
+              row.unread_user_messages > 0
+                ? "bg-slate-800/40 font-semibold"
+                : ""
+            }
             columns={[
               {
                 key: "id",
@@ -103,6 +108,21 @@ export default function IssuesList() {
                 render: (row) => (row as IssueSummary).workspace_id ?? "-",
               },
               { key: "status", header: "Status" },
+              {
+                key: "unread_user_messages",
+                header: "Unread",
+                render: (row) => {
+                  const unread = (row as IssueSummary).unread_user_messages;
+                  return unread > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-200">
+                      <span className="h-2 w-2 rounded-full bg-amber-300" />
+                      {unread}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-500">0</span>
+                  );
+                },
+              },
               {
                 key: "created_at",
                 header: "Created",

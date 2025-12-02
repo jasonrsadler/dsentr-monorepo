@@ -536,8 +536,8 @@ mod tests {
         async fn create_issue_report(
             &self,
             _report: crate::models::issue_report::NewIssueReport,
-        ) -> Result<(), sqlx::Error> {
-            Ok(())
+        ) -> Result<Uuid, sqlx::Error> {
+            Ok(Uuid::new_v4())
         }
 
         async fn upsert_account_deletion_token(

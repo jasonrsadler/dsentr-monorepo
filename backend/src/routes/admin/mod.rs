@@ -10,7 +10,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::{postgres::PgRow, FromRow, Postgres, QueryBuilder, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -24,7 +24,10 @@ use crate::{
         workspace::{Workspace, WorkspaceInvitation, WorkspaceMember},
     },
     responses::JsonResponse,
-    routes::auth::session::AuthSession,
+    routes::{
+        auth::session::AuthSession,
+        issues::fetch_issue_messages,
+    },
     state::AppState,
 };
 
@@ -119,6 +122,9 @@ struct IssueListRow {
     workspace_id: Option<Uuid>,
     status: String,
     user_email: String,
+    unread_user_messages: i64,
+    #[serde(with = "time::serde::rfc3339::option")]
+    last_message_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
     created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
@@ -129,6 +135,7 @@ struct IssueListRow {
 struct IssueDetailResponse {
     issue: IssueReport,
     messages: Vec<IssueReportMessage>,
+    unread_user_messages: i64,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -167,6 +174,7 @@ pub fn router() -> Router<AppState> {
         .route("/workflows/{id}/json", get(get_workflow_json))
         .route("/issues", get(list_issues))
         .route("/issues/{id}", get(get_issue))
+        .route("/issues/{id}/read", post(mark_issue_read))
         .route("/issues/{id}/reply", post(reply_to_issue))
         .route_layer(axum::middleware::from_fn(admin_gate))
         .layer(axum::middleware::from_fn(ip_allowlist_stub))
@@ -694,11 +702,37 @@ pub async fn list_issues(
 ) -> Result<impl IntoResponse, Response> {
     let (limit, offset) = pagination(&query);
     let (sort_col, sort_dir) = sort_parts(&query, &["created_at", "updated_at"], "updated_at");
+    let sort_col_alias = match sort_col.as_str() {
+        "created_at" | "updated_at" => format!("ir.{sort_col}"),
+        other => other.to_string(),
+    };
 
     let mut list_builder = QueryBuilder::<Postgres>::new(
         r#"
-        SELECT id, user_id, workspace_id, status, user_email, created_at, updated_at
-        FROM issue_reports
+        SELECT ir.id,
+               ir.user_id,
+               ir.workspace_id,
+               ir.status,
+               ir.user_email,
+               COALESCE(unread.count, 0) AS unread_user_messages,
+               COALESCE(last_msg.created_at, ir.created_at) AS last_message_at,
+               ir.created_at,
+               ir.updated_at
+        FROM issue_reports ir
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*)::BIGINT AS count
+            FROM issue_report_messages m
+            WHERE m.issue_id = ir.id
+              AND m.sender_type = 'user'
+              AND m.read_by_admin_at IS NULL
+        ) unread ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT created_at
+            FROM issue_report_messages m
+            WHERE m.issue_id = ir.id
+            ORDER BY created_at DESC
+            LIMIT 1
+        ) last_msg ON TRUE
         "#,
     );
     let mut count_builder =
@@ -707,9 +741,9 @@ pub async fn list_issues(
     if let Some(search) = query.search.as_ref().filter(|s| !s.is_empty()) {
         let term = format!("%{}%", search);
         list_builder
-            .push(" WHERE (user_email ILIKE ")
+            .push(" WHERE (ir.user_email ILIKE ")
             .push_bind(term.clone())
-            .push(" OR status ILIKE ")
+            .push(" OR ir.status ILIKE ")
             .push_bind(term.clone())
             .push(")");
         count_builder
@@ -722,7 +756,7 @@ pub async fn list_issues(
 
     list_builder
         .push(" ORDER BY ")
-        .push(sort_col.as_str())
+        .push(sort_col_alias.as_str())
         .push(" ")
         .push(sort_dir)
         .push(" LIMIT ")
@@ -772,9 +806,19 @@ pub async fn get_issue(
         return Err(JsonResponse::not_found("Issue not found").into_response());
     };
 
-    let messages = fetch_issue_messages(&state, issue_id, &issue).await?;
+    mark_issue_read_internal(&state, issue_id).await.ok();
 
-    Ok(Json(IssueDetailResponse { issue, messages }))
+    let messages = fetch_issue_messages(&state, issue_id, &issue).await?;
+    let unread_user_messages = messages
+        .iter()
+        .filter(|msg| msg.sender_type == "user" && msg.read_by_admin_at.is_none())
+        .count() as i64;
+
+    Ok(Json(IssueDetailResponse {
+        issue,
+        messages,
+        unread_user_messages,
+    }))
 }
 
 pub async fn reply_to_issue(
@@ -808,18 +852,34 @@ pub async fn reply_to_issue(
         return Err(JsonResponse::not_found("Issue not found").into_response());
     };
 
-    let insert_query = r#"
-        INSERT INTO issue_report_messages (issue_id, sender_id, sender_type, body)
-        VALUES ($1, $2, 'admin', $3)
-        RETURNING id, issue_id, sender_id, sender_type, body, created_at
-    "#;
-
     let admin_id = Uuid::parse_str(&claims.id).ok();
+    let now = OffsetDateTime::now_utc();
+
+    let _ = sqlx::query(
+        r#"
+        UPDATE issue_report_messages
+        SET read_by_admin_at = COALESCE(read_by_admin_at, $2)
+        WHERE issue_id = $1
+          AND sender_type = 'user'
+          AND read_by_admin_at IS NULL
+        "#,
+    )
+    .bind(issue_id)
+    .bind(now)
+    .execute(state.db_pool.as_ref())
+    .await;
+
+    let insert_query = r#"
+        INSERT INTO issue_report_messages (issue_id, sender_id, sender_type, body, read_by_admin_at)
+        VALUES ($1, $2, 'admin', $3, $4)
+        RETURNING id, issue_id, sender_id, sender_type, body, created_at, read_by_user_at, read_by_admin_at
+    "#;
 
     let _message_row: IssueReportMessage = sqlx::query_as(insert_query)
         .bind(issue_id)
         .bind(admin_id)
         .bind(message)
+        .bind(now)
         .fetch_one(state.db_pool.as_ref())
         .await
         .map_err(|_| JsonResponse::server_error("Failed to store reply").into_response())?;
@@ -832,8 +892,16 @@ pub async fn reply_to_issue(
     .await;
 
     let messages = fetch_issue_messages(&state, issue_id, &issue).await?;
+    let unread_user_messages = messages
+        .iter()
+        .filter(|msg| msg.sender_type == "user" && msg.read_by_admin_at.is_none())
+        .count() as i64;
 
-    Ok(Json(messages))
+    Ok(Json(IssueDetailResponse {
+        issue,
+        messages,
+        unread_user_messages,
+    }))
 }
 
 pub async fn purge_runs(
@@ -862,35 +930,64 @@ pub async fn purge_runs(
     }
 }
 
-async fn fetch_issue_messages(
+pub async fn mark_issue_read(
+    State(state): State<AppState>,
+    Path(issue_id): Path<Uuid>,
+) -> Result<impl IntoResponse, Response> {
+    let unread_user_messages = mark_issue_read_internal(&state, issue_id).await?;
+
+    Ok(Json(json!({
+        "success": true,
+        "unread_user_messages": unread_user_messages
+    })))
+}
+
+async fn mark_issue_read_internal(
     state: &AppState,
     issue_id: Uuid,
-    issue: &IssueReport,
-) -> Result<Vec<IssueReportMessage>, Response> {
-    let mut messages: Vec<IssueReportMessage> = vec![IssueReportMessage {
-        id: Uuid::nil(),
-        issue_id,
-        sender_id: Some(issue.user_id),
-        sender_type: "user".to_string(),
-        body: issue.description.clone(),
-        created_at: issue.created_at,
-    }];
+) -> Result<i64, Response> {
+    let now = OffsetDateTime::now_utc();
 
-    let replies: Vec<IssueReportMessage> = sqlx::query_as(
+    let exists: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM issue_reports WHERE id = $1 LIMIT 1")
+            .bind(issue_id)
+            .fetch_optional(state.db_pool.as_ref())
+            .await
+            .map_err(|_| JsonResponse::server_error("Failed to load issue").into_response())?;
+
+    if exists.is_none() {
+        return Err(JsonResponse::not_found("Issue not found").into_response());
+    }
+
+    let _ = sqlx::query(
         r#"
-        SELECT id, issue_id, sender_id, sender_type, body, created_at
-        FROM issue_report_messages
+        UPDATE issue_report_messages
+        SET read_by_admin_at = COALESCE(read_by_admin_at, $2)
         WHERE issue_id = $1
-        ORDER BY created_at ASC
+          AND sender_type = 'user'
+          AND read_by_admin_at IS NULL
         "#,
     )
     .bind(issue_id)
-    .fetch_all(state.db_pool.as_ref())
-    .await
-    .unwrap_or_default();
+    .bind(now)
+    .execute(state.db_pool.as_ref())
+    .await;
 
-    messages.extend(replies);
-    Ok(messages)
+    let unread_user_messages: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM issue_report_messages
+        WHERE issue_id = $1
+          AND sender_type = 'user'
+          AND read_by_admin_at IS NULL
+        "#,
+    )
+    .bind(issue_id)
+    .fetch_one(state.db_pool.as_ref())
+    .await
+    .unwrap_or(0);
+
+    Ok(unread_user_messages)
 }
 
 async fn fetch_issues_for_workspace(
@@ -899,10 +996,32 @@ async fn fetch_issues_for_workspace(
 ) -> Result<Vec<IssueListRow>, Response> {
     let rows: Vec<IssueListRow> = sqlx::query_as(
         r#"
-        SELECT id, user_id, workspace_id, status, user_email, created_at, updated_at
-        FROM issue_reports
-        WHERE workspace_id = $1
-        ORDER BY updated_at DESC
+        SELECT ir.id,
+               ir.user_id,
+               ir.workspace_id,
+               ir.status,
+               ir.user_email,
+               COALESCE(unread.count, 0) AS unread_user_messages,
+               COALESCE(last_msg.created_at, ir.created_at) AS last_message_at,
+               ir.created_at,
+               ir.updated_at
+        FROM issue_reports ir
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*)::BIGINT AS count
+            FROM issue_report_messages m
+            WHERE m.issue_id = ir.id
+              AND m.sender_type = 'user'
+              AND m.read_by_admin_at IS NULL
+        ) unread ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT created_at
+            FROM issue_report_messages m
+            WHERE m.issue_id = ir.id
+            ORDER BY created_at DESC
+            LIMIT 1
+        ) last_msg ON TRUE
+        WHERE ir.workspace_id = $1
+        ORDER BY ir.updated_at DESC
         "#,
     )
     .bind(workspace_id)

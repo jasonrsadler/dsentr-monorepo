@@ -49,7 +49,10 @@ use routes::{
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
-    issues::submit_issue_report,
+    issues::{
+        get_issue_with_messages, list_user_issues, mark_issue_messages_read, reply_to_issue,
+        submit_issue_report,
+    },
     microsoft::{list_channel_members, list_team_channels, list_teams},
     oauth::{
         disconnect_connection, google_connect_callback, google_connect_start, list_connections,
@@ -658,7 +661,10 @@ async fn main() -> Result<()> {
     let invite_routes = invite_private_routes.merge(invite_public_routes);
 
     let issue_routes = Router::new()
-        .route("/issues", post(submit_issue_report))
+        .route("/issues", post(submit_issue_report).get(list_user_issues))
+        .route("/issues/{id}", get(get_issue_with_messages))
+        .route("/issues/{id}/reply", post(reply_to_issue))
+        .route("/issues/{id}/read", post(mark_issue_messages_read))
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());
 

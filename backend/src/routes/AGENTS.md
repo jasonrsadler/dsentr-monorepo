@@ -74,3 +74,4 @@
 - Workspace membership removal/leave flows now call the workspace OAuth purge helper and have regression tests to ensure shared connections are deleted when members depart or workspaces convert to Solo.
 - Added `POST /api/issues` so authenticated users can submit issue reports that persist user/workspace context for support investigations.
 - Added an admin-only `/api/admin` router (session + role guarded with an IP allowlist stub) that surfaces read-only listings and admin issue replies without exposing OAuth secrets.
+- Added messaging inbox endpoints (user + admin) with list/detail/reply/mark-read flows and read timestamps so unread badges stay accurate across both portals.

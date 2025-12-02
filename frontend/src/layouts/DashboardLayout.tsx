@@ -31,6 +31,9 @@ import ReportIssueButton from '@/components/support/ReportIssueButton'
 import { usePlanUsageStore } from '@/stores/planUsageStore'
 import { normalizePlanTier } from '@/lib/planTiers'
 import HelpButton from '@/components/help/HelpButton'
+import MessagesButton from '@/components/support/MessagesButton'
+import MessageCenter from '@/components/support/MessageCenter'
+import { fetchIssueThreads } from '@/lib/issuesApi'
 
 export default function DashboardLayout() {
   const user = useAuth((state) => state.user)
@@ -40,6 +43,8 @@ export default function DashboardLayout() {
   const setCurrentWorkspaceId = useAuth((state) => state.setCurrentWorkspaceId)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [messageCenterOpen, setMessageCenterOpen] = useState(false)
+  const [unreadMessages, setUnreadMessages] = useState(0)
   const [issueReportOpen, setIssueReportOpen] = useState(false)
   const [initialSettingsTab, setInitialSettingsTab] = useState<
     string | undefined
@@ -179,6 +184,20 @@ export default function DashboardLayout() {
     },
     [currentWorkspaceId, setCurrentWorkspaceId]
   )
+
+  const refreshUnreadMessages = useCallback(async () => {
+    try {
+      const response = await fetchIssueThreads()
+      setUnreadMessages(response.unread_admin_messages)
+    } catch {
+      setUnreadMessages(0)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!user) return
+    void refreshUnreadMessages()
+  }, [user, refreshUnreadMessages])
 
   const planBadge = useMemo(() => {
     if (!planTier) return null
@@ -354,6 +373,10 @@ export default function DashboardLayout() {
                 </NavigateButton>
                 <ThemeToggle />
                 <ProfileButton onOpenProfile={() => setProfileOpen(true)} />
+                <MessagesButton
+                  unreadCount={unreadMessages}
+                  onOpen={() => setMessageCenterOpen(true)}
+                />
                 <SettingsButton onOpenSettings={() => setSettingsOpen(true)} />
                 <ReportIssueButton onOpen={() => setIssueReportOpen(true)} />
                 <HelpButton />
@@ -366,6 +389,11 @@ export default function DashboardLayout() {
           <Outlet />
         </main>
 
+        <MessageCenter
+          open={messageCenterOpen}
+          onClose={() => setMessageCenterOpen(false)}
+          onUnreadChange={setUnreadMessages}
+        />
         <IssueReportModal
           open={issueReportOpen}
           onClose={() => setIssueReportOpen(false)}

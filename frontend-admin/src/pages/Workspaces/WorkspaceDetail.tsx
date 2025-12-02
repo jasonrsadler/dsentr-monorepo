@@ -149,6 +149,19 @@ export default function WorkspaceDetail() {
             { key: "id", header: "ID", render: (row) => row.id.slice(0, 8) },
             { key: "status", header: "Status" },
             {
+              key: "unread_user_messages",
+              header: "Unread",
+              render: (row) =>
+                row.unread_user_messages > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-200">
+                    <span className="h-2 w-2 rounded-full bg-amber-300" />
+                    {row.unread_user_messages}
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-500">0</span>
+                ),
+            },
+            {
               key: "created_at",
               header: "Created",
               render: (row) => new Date(row.created_at).toLocaleString(),
