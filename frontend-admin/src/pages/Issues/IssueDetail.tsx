@@ -32,7 +32,14 @@ export default function IssueDetail() {
     setSending(true);
     try {
       const res = await replyToIssue(id, reply);
-      setMessages(Array.isArray(res) ? res : []);
+      const nextMessages = Array.isArray(res)
+        ? res
+        : Array.isArray((res as { messages?: IssueMessage[] }).messages)
+          ? (res as { messages: IssueMessage[] }).messages
+          : null;
+      if (nextMessages) {
+        setMessages(nextMessages);
+      }
       setReply("");
       setError(undefined);
     } catch (err) {
