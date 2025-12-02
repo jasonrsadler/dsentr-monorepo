@@ -43,7 +43,7 @@ function RequireAdmin({ children }: { children?: ReactNode }) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  if (user.role !== "admin") {
+  if (user.role?.toLowerCase() !== "admin") {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-slate-950 text-slate-100">
         <div className="card max-w-md text-center text-sm">

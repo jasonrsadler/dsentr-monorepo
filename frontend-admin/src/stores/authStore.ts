@@ -24,7 +24,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: undefined });
     try {
       const session = await fetchSession();
-      if (session.role !== "admin") {
+      const normalizedRole = session.role?.toLowerCase();
+      if (normalizedRole !== "admin") {
         set({
           user: null,
           error: "Access denied. Admins only.",
@@ -45,7 +46,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await loginApi(email, password);
       const session = await fetchSession();
-      if (session.role !== "admin") {
+      const normalizedRole = session.role?.toLowerCase();
+      if (normalizedRole !== "admin") {
         const err = new ApiError("Not an admin", 403);
         set({ user: null, loading: false, error: err.message });
         await logoutApi().catch(() => {});
