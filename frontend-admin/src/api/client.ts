@@ -123,7 +123,8 @@ export function authDelete<T>(path: string): Promise<T> {
 }
 
 export async function fetchSession(): Promise<SessionUser> {
-  return authGet<SessionUser>("/me");
+  const data = await authGet<{ user: SessionUser }>("/me");
+  return data.user;
 }
 
 export async function login(email: string, password: string): Promise<void> {
