@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgRow, FromRow, Postgres, QueryBuilder, Row};
 use time::OffsetDateTime;
+use tracing::error;
 use uuid::Uuid;
 
 use crate::{
@@ -260,14 +261,20 @@ pub async fn list_users(
         .build_query_as()
         .fetch_all(state.db_pool.as_ref())
         .await
-        .map_err(|_| JsonResponse::server_error("Failed to load users").into_response())?;
+        .map_err(|err| {
+            error!(?err, "admin list_users failed to fetch rows");
+            JsonResponse::server_error("Failed to load users").into_response()
+        })?;
 
     let total: i64 = count_builder
         .build()
         .fetch_one(state.db_pool.as_ref())
         .await
         .map(|row: PgRow| row.get::<i64, _>("count"))
-        .map_err(|_| JsonResponse::server_error("Failed to count users").into_response())?;
+        .map_err(|err| {
+            error!(?err, "admin list_users failed to count rows");
+            JsonResponse::server_error("Failed to count users").into_response()
+        })?;
 
     Ok(Json(PaginatedResponse {
         data: rows,
