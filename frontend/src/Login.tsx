@@ -342,8 +342,8 @@ export default function Login() {
           </div>
         </div>
       )}
-      <p>Getting Ready!...</p>
-      {/* {!user && (
+
+      {!user && (
         <MarketingShell compact maxWidthClassName="max-w-6xl">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start">
             <div className="hidden space-y-8 lg:block">
@@ -482,7 +482,7 @@ export default function Login() {
             </div>
           </div>
         </MarketingShell>
-      )} */}
+      )}
     </>
   )
 }

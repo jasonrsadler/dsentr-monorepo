@@ -436,20 +436,22 @@ export default function SignupPage() {
                   <button
                     type="button"
                     onClick={() => setInviteDecision('join')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${inviteDecision === 'join'
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      inviteDecision === 'join'
                         ? 'border-indigo-500 bg-indigo-500 text-white shadow'
                         : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
-                      }`}
+                    }`}
                   >
                     Join workspace
                   </button>
                   <button
                     type="button"
                     onClick={() => setInviteDecision('solo')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${inviteDecision === 'solo'
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      inviteDecision === 'solo'
                         ? 'border-indigo-500 bg-indigo-500 text-white shadow'
                         : 'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-500/40 dark:bg-transparent dark:text-indigo-100'
-                      }`}
+                    }`}
                   >
                     Create my own workspace
                   </button>
@@ -479,7 +481,7 @@ export default function SignupPage() {
                 </ul>
               </div>
             )}
-            {/* <div className="space-y-3">
+            <div className="space-y-3">
               <GoogleSignupButton onClick={() => handleOAuthSignup('google')} />
               <GithubSignupButton onClick={() => handleOAuthSignup('github')} />
               <div className="relative text-center">
@@ -488,9 +490,9 @@ export default function SignupPage() {
                 </span>
                 <div className="absolute left-0 top-1/2 h-px w-full bg-zinc-200 dark:bg-zinc-700" />
               </div>
-            </div> */}
-            <p>Getting Ready!...</p>
-            {/* <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+            </div>
+
+            <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 {[
                   { name: 'first_name', label: 'First name', required: true },
@@ -637,7 +639,7 @@ export default function SignupPage() {
               <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
                 No credit card required. Start for free, cancel anytime.
               </p>
-            </form> */}
+            </form>
           </div>
         </div>
       </MarketingShell>
