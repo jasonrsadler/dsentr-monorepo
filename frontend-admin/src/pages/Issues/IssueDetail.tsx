@@ -18,7 +18,7 @@ export default function IssueDetail() {
       try {
         const res = await getIssue(id ?? "");
         setIssue(res);
-        setMessages(res.messages);
+        setMessages(Array.isArray(res.messages) ? res.messages : []);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load issue");
       }
@@ -32,7 +32,7 @@ export default function IssueDetail() {
     setSending(true);
     try {
       const res = await replyToIssue(id, reply);
-      setMessages(res);
+      setMessages(Array.isArray(res) ? res : []);
       setReply("");
       setError(undefined);
     } catch (err) {
