@@ -228,7 +228,7 @@ pub async fn list_users(
     };
 
     let mut list_builder = QueryBuilder::<Postgres>::new(
-        "SELECT id, email, plan, is_verified, role = 'admin'::user_role as is_admin, created_at, updated_at FROM users",
+        "SELECT id, email, plan, is_verified, lower(role::text) = 'admin' as is_admin, created_at, updated_at FROM users",
     );
     let mut count_builder = QueryBuilder::<Postgres>::new("SELECT COUNT(*) as count FROM users");
 
