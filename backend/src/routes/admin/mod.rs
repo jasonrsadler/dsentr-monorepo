@@ -231,9 +231,9 @@ pub async fn list_users(
     let (limit, offset) = pagination(&query);
     let (sort_col, sort_dir) = sort_parts(&query, &["created_at", "updated_at"], "created_at");
     let order_column = if sort_col == "updated_at" {
-        "w.updated_at"
+        "updated_at"
     } else {
-        "w.created_at"
+        "created_at"
     };
 
     let mut list_builder = QueryBuilder::<Postgres>::new(
