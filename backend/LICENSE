@@ -1,0 +1,43 @@
+Business Source License 1.1
+Licensor: Jason Sadler
+Licensed Work: Dsentr Backend
+The Licensed Work consists of all source files within the `backend/` directory of this repository.
+Additional Use Grant: None.
+Change Date: 2029-01-01
+Change License: MIT License
+
+Terms
+1. License Grant
+You may copy, modify, create derivative works of, redistribute, and make non-production use of the Licensed Work.
+
+Production use requires a commercial license from the Licensor. “Production use” means any use of the Licensed Work:
+  a. to provide services to others,
+  b. to operate a hosted or self-hosted automation platform,
+  c. to run workflows or automation tasks beyond personal, noncommercial experimentation,
+  d. to deploy as part of any commercial product, SaaS platform, or business operation.
+
+2. Restrictions
+The following activities are prohibited without a commercial license:
+  a. offering the Licensed Work as a hosted service,
+  b. using the Licensed Work to run or sell an automation, integration, or workflow platform,
+  c. charging for access to or operation of any service built on the Licensed Work,
+  d. rebranding the Licensed Work for commercial deployment,
+  e. distributing the Licensed Work under a license more permissive than this one.
+
+3. Distribution Requirements
+If you distribute the Licensed Work or derivative works, you must include this license notice and identify any modifications you made.
+
+4. Change Date
+On the Change Date, the Licensed Work will be automatically released under the Change License stated above. Any modifications you have made remain under the Business Source License unless you choose otherwise for your contributions.
+
+5. Trademarks
+This license does not grant you rights to use the Licensor’s name, logos, or trademarks.
+
+6. No Warranty
+The Licensed Work is provided “as is” without warranties or conditions of any kind.
+
+7. Limitation of Liability
+The Licensor is not liable for damages of any kind related to the Licensed Work or this license.
+
+Commercial Licensing
+To obtain a commercial license for production use, please contact the Licensor.

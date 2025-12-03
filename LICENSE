@@ -1,0 +1,11 @@
+This repository contains multiple components that are licensed under different terms.
+
+The frontend applications located in the `frontend/` and `frontend-admin/` directories are licensed under the MIT License. See `frontend/LICENSE` and `frontend-admin/LICENSE`.
+
+The backend server and all backend-side code located in the `backend/` directory are licensed under the Business Source License 1.1. See `backend/LICENSE`.
+
+Documentation and non-code assets in the `docs/` directory (if present) are licensed under the MIT License unless otherwise noted.
+
+By using, copying, modifying, or distributing any component of this repository, you agree to the specific license governing that component.
+
+Nothing in this root file grants any rights beyond those described in the component licenses.
