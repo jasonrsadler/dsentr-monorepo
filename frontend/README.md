@@ -98,21 +98,21 @@ MIT
 - [x] Monorepo with frontend (Vite + React + Tailwind) and backend (Rust + Axum)
 - [x] Basic Vitest + RTL setup with coverage thresholds
 - [x] GitHub version control + initial README
-- [ ] Tailwind base styles and custom theme system
-- [ ] Workflow Builder UI (drag & drop or sequential layout)
-- [ ] Core Modules:
-  - [ ] Webhook Trigger
-  - [ ] Email Action
-- [ ] Step-by-step Execution Engine
-- [ ] JWT-based Auth (login/register)
-- [ ] Workflow persistence in PostgreSQL
-- [ ] Basic error handling and logs
-- [ ] Deployment to Render
+- [x] Tailwind base styles and custom theme system
+- [x] Workflow Builder UI (drag & drop or sequential layout)
+- [x] Core Modules:
+  - [x] Webhook Trigger
+  - [x] Email Action
+- [x] Step-by-step Execution Engine
+- ~~[x] JWT-based Auth (login/register)~~
+- [x] Session-based Auth (login, registration)
+- [x] Workflow persistence in PostgreSQL
+- [x] Basic error handling and logs
 
 ### Post-MVP
-- [ ] User dashboard with execution history
-- [ ] Scheduling + event triggers
+- [x] User dashboard with execution history
+- [x] Scheduling + event triggers
 - [ ] Plugin registry for 3rd-party modules
 - [ ] Module versioning and compatibility checks
-- [ ] Live collaboration or multi-user workflow editing
-- [ ] Billing + subscription management
+- [x] Live collaboration or multi-user workflow editing
+- [x] Billing + subscription management
