@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO workflow_runs (user_id, workflow_id, workspace_id, snapshot, status, idempotency_key, started_at, created_at, updated_at)\n            VALUES ($1, $2, $3, $4, 'queued', $5, now(), now(), now())\n            RETURNING id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                      started_at as \"started_at!\", finished_at, created_at as \"created_at!\", updated_at as \"updated_at!\"\n            ",
+  "query": "\n                    SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                           started_at as \"started_at!\", resume_at as \"resume_at!\", finished_at,\n                           created_at as \"created_at!\", updated_at as \"updated_at!\"\n                    FROM workflow_runs\n                    WHERE user_id = $1 AND workflow_id = $2\n                      AND ($3::text[] IS NULL OR status = ANY($3))\n                    ORDER BY created_at DESC\n                    LIMIT $4 OFFSET $5\n                    ",
   "describe": {
     "columns": [
       {
@@ -50,16 +50,21 @@
       },
       {
         "ordinal": 9,
-        "name": "finished_at",
+        "name": "resume_at!",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 10,
-        "name": "created_at!",
+        "name": "finished_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 11,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
@@ -68,9 +73,9 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Uuid",
-        "Jsonb",
-        "Text"
+        "TextArray",
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
@@ -83,10 +88,11 @@
       true,
       true,
       false,
+      false,
       true,
       false,
       false
     ]
   },
-  "hash": "2f7150d115bd76b14460af8f9fb0334a6177f609e91a7adcfe14fb00a079f663"
+  "hash": "fd85a0a2347124f4747f62f5b7128f580df349931744fcb253b27d4a0feac642"
 }

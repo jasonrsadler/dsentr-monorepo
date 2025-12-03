@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workflow_runs\n            SET status = 'queued',\n                snapshot = $2,\n                resume_at = $3,\n                leased_by = NULL,\n                lease_expires_at = NULL,\n                heartbeat_at = NULL,\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2403e44f01a0ca7c4baee2d3d2d21ebe7b20c7a459f9052e2643463770e603c0"
+}

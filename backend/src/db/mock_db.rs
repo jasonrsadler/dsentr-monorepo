@@ -496,6 +496,15 @@ impl WorkflowRepository for NoopWorkflowRepository {
         Ok(())
     }
 
+    async fn pause_workflow_run(
+        &self,
+        _run_id: Uuid,
+        _snapshot: Value,
+        _resume_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
     async fn insert_node_run(
         &self,
         _run_id: Uuid,

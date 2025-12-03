@@ -158,6 +158,13 @@ pub trait WorkflowRepository: Send + Sync {
         error: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
+    async fn pause_workflow_run(
+        &self,
+        run_id: Uuid,
+        snapshot: Value,
+        resume_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error>;
+
     #[allow(dead_code)]
     async fn insert_node_run(
         &self,

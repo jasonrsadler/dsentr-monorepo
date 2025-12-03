@@ -2129,6 +2129,7 @@ mod tests {
             error: None,
             idempotency_key: None,
             started_at: OffsetDateTime::now_utc(),
+            resume_at: OffsetDateTime::now_utc(),
             finished_at: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),

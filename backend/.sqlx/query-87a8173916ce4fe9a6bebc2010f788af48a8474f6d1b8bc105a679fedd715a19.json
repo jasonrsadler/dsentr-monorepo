@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                       started_at as \"started_at!\", finished_at,\n                       created_at as \"created_at!\", updated_at as \"updated_at!\"\n                FROM workflow_runs\n                WHERE user_id = $1\n                  AND status IN ('queued','running')\n                ORDER BY started_at ASC\n                ",
+  "query": "\n            WITH sel AS (\n              SELECT id\n              FROM workflow_runs\n              WHERE status = 'queued'\n                AND resume_at <= now()\n              ORDER BY created_at ASC\n              LIMIT 1\n              FOR UPDATE SKIP LOCKED\n            )\n            UPDATE workflow_runs wr\n            SET status = 'running', resume_at = now(), updated_at = now()\n            FROM sel\n            WHERE wr.id = sel.id\n            RETURNING wr.id, wr.user_id, wr.workflow_id, wr.workspace_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,\n                      wr.started_at as \"started_at!\", wr.resume_at as \"resume_at!\", wr.finished_at, wr.created_at as \"created_at!\", wr.updated_at as \"updated_at!\"\n            ",
   "describe": {
     "columns": [
       {
@@ -50,24 +50,27 @@
       },
       {
         "ordinal": 9,
-        "name": "finished_at",
+        "name": "resume_at!",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 10,
-        "name": "created_at!",
+        "name": "finished_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 11,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -79,10 +82,11 @@
       true,
       true,
       false,
+      false,
       true,
       false,
       false
     ]
   },
-  "hash": "344c28a9c82b14d2ee25dc7a0d3fb7bc0c510854fb02ab4261a6f5393487929f"
+  "hash": "87a8173916ce4fe9a6bebc2010f788af48a8474f6d1b8bc105a679fedd715a19"
 }

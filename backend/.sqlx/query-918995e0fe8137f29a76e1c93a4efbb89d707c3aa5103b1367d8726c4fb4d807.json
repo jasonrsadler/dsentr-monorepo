@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH sel AS (\n              SELECT id\n              FROM workflow_runs\n              WHERE status = 'queued'\n              ORDER BY created_at ASC\n              LIMIT 1\n              FOR UPDATE SKIP LOCKED\n            )\n            UPDATE workflow_runs wr\n            SET status = 'running', updated_at = now()\n            FROM sel\n            WHERE wr.id = sel.id\n            RETURNING wr.id, wr.user_id, wr.workflow_id, wr.workspace_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,\n                      wr.started_at, wr.finished_at, wr.created_at, wr.updated_at\n            ",
+  "query": "\n                SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                       started_at as \"started_at!\", resume_at as \"resume_at!\", finished_at,\n                       created_at as \"created_at!\", updated_at as \"updated_at!\"\n                FROM workflow_runs\n                WHERE user_id = $1\n                  AND workflow_id = $2\n                  AND status IN ('queued','running')\n                ORDER BY started_at ASC\n                ",
   "describe": {
     "columns": [
       {
@@ -45,27 +45,35 @@
       },
       {
         "ordinal": 8,
-        "name": "started_at",
+        "name": "started_at!",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 9,
-        "name": "finished_at",
+        "name": "resume_at!",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 10,
-        "name": "created_at",
+        "name": "finished_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 11,
-        "name": "updated_at",
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at!",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
@@ -77,10 +85,11 @@
       true,
       true,
       false,
+      false,
       true,
       false,
       false
     ]
   },
-  "hash": "a54f6819f5479a75ce361cb33162a889f1f70c12b5ba0e35ec4db11966eee569"
+  "hash": "918995e0fe8137f29a76e1c93a4efbb89d707c3aa5103b1367d8726c4fb4d807"
 }

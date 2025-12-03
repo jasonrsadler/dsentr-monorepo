@@ -1,17 +1,21 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::time::{sleep, timeout, Instant};
 use tracing::{debug, error, warn};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
+use super::actions::delay::{compute_delay_plan, parse_delay_config, DelayOutcome};
 use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_run_event::NewWorkflowRunEvent;
 use crate::state::AppState;
 use crate::utils::{
     secrets::{hydrate_secrets_into_snapshot, read_secret_store},
+    schedule::utc_to_offset,
     workflow_connection_metadata,
 };
 
@@ -58,7 +62,16 @@ impl ExecutorError {
     }
 }
 
-pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), ExecutorError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunCompletion {
+    Finished,
+    Paused,
+}
+
+pub async fn execute_run(
+    state: AppState,
+    mut run: WorkflowRun,
+) -> Result<RunCompletion, ExecutorError> {
     let triggered_by = format!("worker:{}", state.worker_id.as_ref());
     if let Err(err_msg) = hydrate_run_secrets(&state, &mut run).await {
         warn!(
@@ -69,7 +82,7 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
             "executor: failing run during secret hydration: {err_msg}"
         );
         complete_run_with_retry(&state, run.id, "failed", Some(&err_msg)).await?;
-        return Ok(());
+        return Ok(RunCompletion::Finished);
     }
     let metadata = workflow_connection_metadata::collect(&run.snapshot);
     let events = workflow_connection_metadata::build_run_events(&run, &triggered_by, &metadata);
@@ -85,10 +98,15 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
 
     let Some(graph) = Graph::from_snapshot(&run.snapshot) else {
         complete_run_with_retry(&state, run.id, "failed", Some("Invalid snapshot")).await?;
-        return Ok(());
+        return Ok(RunCompletion::Finished);
     };
 
-    let mut context: Map<String, Value> = Map::new();
+    let mut context: Map<String, Value> = run
+        .snapshot
+        .get("_resume_context")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
     if let Some(initial) = run.snapshot.get("_trigger_context") {
         let trigger_key = graph
             .nodes
@@ -96,7 +114,9 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
             .find(|n| n.kind == "trigger")
             .map(|n| context_keys(n).0);
         let key = trigger_key.unwrap_or_else(|| "trigger".to_string());
-        context.insert(key, initial.clone());
+        if !context.contains_key(&key) {
+            context.insert(key, initial.clone());
+        }
     }
 
     let allowlist_env = std::env::var("ALLOWED_HTTP_DOMAINS")
@@ -173,7 +193,26 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let mut stack: Vec<String> = if let Some(start_id) = start_from {
+    let resume_from_nodes = run
+        .snapshot
+        .get("_resume_from_nodes")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>()
+        });
+
+    let mut stack: Vec<String> = if let Some(nodes) = resume_from_nodes {
+        if !nodes.is_empty() {
+            nodes
+        } else if let Some(start_id) = start_from.clone() {
+            vec![start_id]
+        } else {
+            Vec::new()
+        }
+    } else if let Some(start_id) = start_from {
         vec![start_id]
     } else {
         let mut s: Vec<String> = graph
@@ -258,7 +297,7 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
                         );
                         return Err(cancel_err);
                     }
-                    return Ok(());
+                    return Ok(RunCompletion::Finished);
                 }
             }
         }
@@ -340,10 +379,51 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
             "Executing workflow node"
         );
 
-        let execution = match kind {
-            "trigger" => execute_trigger(node, &context_value).await,
-            "condition" => execute_condition(node, &context_value).await,
-            k if k == "action" || k.starts_with("action") => {
+        let execution: Result<NodeExecResult, String> = async {
+            match kind {
+                "delay" | "logicDelay" | "wait" => {
+                let config_value = node.data.get("config").cloned().unwrap_or(Value::Null);
+                let config = parse_delay_config(&config_value)
+                    .map_err(|err| format!("Invalid delay config: {err}"))?;
+                let mut rng = rand::rng();
+                let plan = compute_delay_plan(&config, Utc::now(), &mut rng)
+                    .map_err(|err| format!("Delay planning failed: {err}"))?;
+
+                let outputs = match &plan {
+                    DelayOutcome::NoWait { base_delay } => json!({
+                        "resumeAt": Value::Null,
+                        "delaySeconds": base_delay.as_secs(),
+                        "jitterAppliedSeconds": 0,
+                        "mode": "duration"
+                    }),
+                    DelayOutcome::Wait(comp) => json!({
+                        "resumeAt": comp.resume_at.to_rfc3339(),
+                        "delaySeconds": comp.total_delay.as_secs(),
+                        "baseDelaySeconds": comp.base_delay.as_secs(),
+                        "jitterAppliedSeconds": comp.jitter_applied.as_secs(),
+                        "mode": "duration_or_absolute"
+                    }),
+                };
+
+                let resolution = resolve_next_nodes(&graph, &node_id, kind, &outputs, None);
+
+                let outcome = match plan {
+                    DelayOutcome::Wait(comp) => NodeExecResult::Pause {
+                        outputs,
+                        resume_at: comp.resume_at,
+                        next_nodes: resolution.nodes,
+                    },
+                    DelayOutcome::NoWait { .. } => NodeExecResult::Normal((outputs, None)),
+                };
+                Ok(outcome)
+            }
+            "trigger" => Ok(NodeExecResult::Normal(
+                execute_trigger(node, &context_value).await?,
+            )),
+            "condition" => Ok(NodeExecResult::Normal(
+                execute_condition(node, &context_value).await?,
+            )),
+            k if k == "action" || k.starts_with("action") => Ok(NodeExecResult::Normal(
                 execute_action(
                     node,
                     &context_value,
@@ -354,13 +434,15 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
                     &state,
                     &run,
                 )
-                .await
+                .await?,
+            )),
+                _ => Ok(NodeExecResult::Normal((json!({"skipped": true}), None))),
             }
-            _ => Ok((json!({"skipped": true}), None)),
-        };
+        }
+        .await;
 
         match execution {
-            Ok((outputs, selected_next)) => {
+            Ok(NodeExecResult::Normal((outputs, selected_next))) => {
                 if let Some(nr) = running {
                     let _ = state
                         .workflow_repo
@@ -403,6 +485,75 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
                     stack.push(next);
                 }
             }
+            Ok(NodeExecResult::Pause {
+                outputs,
+                resume_at,
+                next_nodes,
+            }) => {
+                if let Some(nr) = running {
+                    let _ = state
+                        .workflow_repo
+                        .upsert_node_run(
+                            run.id,
+                            &node.id,
+                            nr.name.as_deref(),
+                            nr.node_type.as_deref(),
+                            nr.inputs.clone(),
+                            Some(outputs.clone()),
+                            "succeeded",
+                            None,
+                        )
+                        .await;
+                }
+
+                let (primary_key, alias_key) = context_keys(node);
+                context.insert(primary_key, outputs.clone());
+                if let Some(alias) = alias_key {
+                    context.insert(alias, outputs.clone());
+                }
+
+                let mut snapshot = run.snapshot.clone();
+                if let Value::Object(ref mut map) = snapshot {
+                    map.insert(
+                        "_resume_context".to_string(),
+                        Value::Object(context.clone()),
+                    );
+                    map.insert(
+                        "_resume_from_nodes".to_string(),
+                        Value::Array(
+                            next_nodes
+                                .iter()
+                                .map(|id| Value::String(id.clone()))
+                                .collect(),
+                        ),
+                    );
+                    if let Some(first) = next_nodes.first() {
+                        map.insert(
+                            "_start_from_node".to_string(),
+                            Value::String(first.clone()),
+                        );
+                    }
+                    map.insert(
+                        "_resume_at".to_string(),
+                        Value::String(resume_at.to_rfc3339()),
+                    );
+                }
+
+                let resume_at_offset = match utc_to_offset(resume_at) {
+                    Some(val) => val,
+                    None => {
+                        let msg =
+                            "Failed to convert resume_at to OffsetDateTime".to_string();
+                        let _ =
+                            insert_dead_letter_with_retry(&state, &run, &msg).await;
+                        complete_run_with_retry(&state, run.id, "failed", Some(&msg))
+                            .await?;
+                        return Ok(RunCompletion::Finished);
+                    }
+                };
+                pause_run_with_retry(&state, run.id, snapshot, resume_at_offset).await?;
+                return Ok(RunCompletion::Paused);
+            }
             Err(err_msg) => {
                 let mut next_nodes: Vec<String> = vec![];
                 if let Some(nr) = running {
@@ -434,7 +585,7 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
                         return Err(err);
                     }
                     complete_run_with_retry(&state, run.id, "failed", Some(&err_msg)).await?;
-                    return Ok(());
+                    return Ok(RunCompletion::Finished);
                 } else {
                     next_nodes.extend(
                         graph
@@ -457,7 +608,7 @@ pub async fn execute_run(state: AppState, mut run: WorkflowRun) -> Result<(), Ex
         complete_run_with_retry(&state, run.id, "succeeded", None).await?;
     }
 
-    Ok(())
+    Ok(RunCompletion::Finished)
 }
 
 fn context_keys(node: &super::graph::Node) -> (String, Option<String>) {
@@ -488,6 +639,15 @@ fn context_keys(node: &super::graph::Node) -> (String, Option<String>) {
 struct NextResolution {
     nodes: Vec<String>,
     invalid_selected: Option<String>,
+}
+
+enum NodeExecResult {
+    Normal((Value, Option<String>)),
+    Pause {
+        outputs: Value,
+        resume_at: DateTime<Utc>,
+        next_nodes: Vec<String>,
+    },
 }
 
 fn resolve_next_nodes(
@@ -773,6 +933,21 @@ async fn insert_dead_letter_with_retry(
     .await
 }
 
+async fn pause_run_with_retry(
+    state: &AppState,
+    run_id: Uuid,
+    snapshot: Value,
+    resume_at: OffsetDateTime,
+) -> Result<(), ExecutorError> {
+    let repo = state.workflow_repo.clone();
+    retry_with_backoff(run_id, "pause_workflow_run", move || {
+        let repo = repo.clone();
+        let snapshot = snapshot.clone();
+        async move { repo.pause_workflow_run(run_id, snapshot, resume_at).await }
+    })
+    .await
+}
+
 async fn renew_run_lease_with_retry(
     state: &AppState,
     run_id: Uuid,
@@ -839,7 +1014,7 @@ mod tests {
     use crate::utils::jwt::JwtKeys;
     use reqwest::Client;
     use serde_json::json;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use time::OffsetDateTime;
     use uuid::Uuid;
 
@@ -1019,6 +1194,7 @@ mod tests {
             error: None,
             idempotency_key: None,
             started_at: now,
+            resume_at: now,
             finished_at: None,
             created_at: now,
             updated_at: now,
@@ -1188,6 +1364,88 @@ mod tests {
         execute_run(state, run)
             .await
             .expect("success path should still complete");
+    }
+
+    #[tokio::test]
+    async fn delay_node_schedules_resume() {
+        let run_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+        let run = WorkflowRun {
+            id: run_id,
+            user_id: Uuid::new_v4(),
+            workflow_id: Uuid::new_v4(),
+            workspace_id: Some(Uuid::new_v4()),
+            snapshot: json!({
+                "nodes": [
+                    {"id": "delay-1", "type": "delay", "data": {"label": "Wait", "config": {"wait_for": {"minutes": 1}}}},
+                    {"id": "action-1", "type": "action", "data": {"label": "Next", "actionType": "http", "params": {"url": "", "method": "GET", "headers": [], "queryParams": [], "bodyType": "raw", "body": "", "formBody": [], "authType": "none", "authUsername": "", "authPassword": "", "authToken": ""}}}
+                ],
+                "edges": [
+                    {"id": "edge-1", "source": "delay-1", "target": "action-1", "type": "nodeEdge"}
+                ]
+            }),
+            status: "running".into(),
+            error: None,
+            idempotency_key: None,
+            started_at: now,
+            resume_at: now,
+            finished_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_record_run_event().returning(|event| {
+            Box::pin(async move {
+                Ok(crate::models::workflow_run_event::WorkflowRunEvent {
+                    id: Uuid::new_v4(),
+                    workflow_run_id: event.workflow_run_id,
+                    workflow_id: event.workflow_id,
+                    workspace_id: event.workspace_id,
+                    triggered_by: event.triggered_by,
+                    connection_type: event.connection_type,
+                    connection_id: event.connection_id,
+                    recorded_at: OffsetDateTime::now_utc(),
+                })
+            })
+        });
+        repo.expect_renew_run_lease()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+        repo.expect_get_run_status()
+            .returning(|_| Box::pin(async { Ok(None) }));
+        let pause_called = Arc::new(Mutex::new(false));
+        let pause_called_clone = pause_called.clone();
+        repo.expect_pause_workflow_run()
+            .times(1)
+            .returning(move |rid, snapshot, resume_at| {
+                let flag = pause_called_clone.clone();
+                Box::pin(async move {
+                    assert_eq!(rid, run_id);
+                    assert!(resume_at > OffsetDateTime::now_utc());
+                    let obj = snapshot
+                        .as_object()
+                        .expect("snapshot should be an object");
+                    assert!(obj.contains_key("_resume_context"));
+                    assert!(obj.contains_key("_resume_from_nodes"));
+                    *flag.lock().expect("flag lock poisoned") = true;
+                    Ok(())
+                })
+            });
+        repo.expect_upsert_node_run()
+            .times(2)
+            .returning(move |_, _, _, _, _, _, status, _| {
+                let node_run = dummy_node_run(run_id, status);
+                Box::pin(async move { Ok(node_run) })
+            });
+        repo.expect_complete_workflow_run().times(0);
+
+        let state = build_state(repo);
+
+        let result = execute_run(state, run)
+            .await
+            .expect("delay node should pause for resume");
+        assert_eq!(result, RunCompletion::Paused);
+        assert!(*pause_called.lock().expect("flag lock poisoned"));
     }
 
     #[tokio::test]

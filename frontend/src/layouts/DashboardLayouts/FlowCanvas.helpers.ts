@@ -26,7 +26,10 @@ const ACTION_NODE_TYPE_ALIASES: Record<string, string> = {
   http: 'actionHttp',
   'action.code': 'actionCode',
   actioncode: 'actionCode',
-  code: 'actionCode'
+  code: 'actionCode',
+  delay: 'delay',
+  logicdelay: 'delay',
+  wait: 'delay'
 }
 
 function normalizeNodeType(nodeType: unknown): string | undefined {

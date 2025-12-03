@@ -152,6 +152,19 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
         icon: <ActionIcon />
       }
     ]
+  },
+  {
+    heading: 'Logic / Utility',
+    tiles: [
+      {
+        id: 'logic-delay',
+        label: 'Delay',
+        description: 'Pause execution for a set time',
+        dragType: 'logic:delay',
+        gradient: 'from-sky-500 to-cyan-600',
+        icon: <ConditionIcon />
+      }
+    ]
   }
 ] as const
 

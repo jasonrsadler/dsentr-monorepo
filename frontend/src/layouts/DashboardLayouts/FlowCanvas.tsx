@@ -42,6 +42,9 @@ import CustomControls from '@/components/ui/ReactFlow/CustomControl'
 import ConditionNode, {
   type ConditionNodeData
 } from '@/components/workflow/ConditionNode'
+import DelayNode, {
+  type DelayNodeData
+} from '@/components/workflow/nodes/DelayNode'
 import { normalizePlanTier } from '@/lib/planTiers'
 import { generateUniqueLabel } from '@/lib/workflowGraph'
 import {
@@ -73,6 +76,12 @@ import NodeInputField from '@/components/ui/InputFields/NodeInputField'
 import NodeCheckBoxField from '@/components/ui/InputFields/NodeCheckboxField'
 import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
 import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
+import DelayNodeConfig from '@/components/actions/logic/DelayNode'
+import {
+  normalizeDelayConfig,
+  validateDelayConfig,
+  type DelayConfig
+} from '@/components/actions/logic/DelayNode/helpers'
 import TriggerTypeDropdown from '@/components/workflow/TriggerTypeDropdown'
 import SendGridAction from '@/components/workflow/Actions/Email/Services/SendGridAction'
 import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunAction'
@@ -102,6 +111,7 @@ export interface WorkflowEdgeData extends Record<string, unknown> {
 export type WorkflowNodeData =
   | TriggerNodeData
   | ConditionNodeData
+  | DelayNodeData
   | ActionNodeData
   | Record<string, unknown>
 
@@ -110,6 +120,12 @@ export type WorkflowEdge = Edge<WorkflowEdgeData>
 
 type TriggerNodeRendererProps = NodeProps<Node<TriggerNodeData>>
 type ConditionNodeRendererProps = NodeProps<Node<ConditionNodeData>>
+type DelayNodeRendererProps = NodeProps<Node<DelayNodeData>> & {
+  isRunning?: boolean
+  isSucceeded?: boolean
+  isFailed?: boolean
+  canEdit?: boolean
+}
 
 type ActionNodeRendererProps = NodeProps<Node<ActionNodeData>> & {
   onRun?: (id: string, params: unknown) => Promise<void>
@@ -140,7 +156,7 @@ interface DropDescriptor {
   labelBase: string
   idPrefix: string
   expanded: boolean
-  data: ActionNodeData
+  data: WorkflowNodeData
 }
 
 type ActionDropConfig = {
@@ -433,6 +449,25 @@ function normalizeDropType(rawType: string): DropDescriptor {
       idPrefix: 'condition',
       expanded: true,
       data: {} as ActionNodeData
+    }
+  }
+
+  if (category === 'logic') {
+    return {
+      nodeType: 'delay',
+      labelBase: 'Delay',
+      idPrefix: 'logic-delay',
+      expanded: true,
+      data: {
+        config: {
+          wait_for: {
+            minutes: undefined,
+            hours: undefined,
+            days: undefined
+          }
+        },
+        hasValidationErrors: true
+      } as DelayNodeData
     }
   }
 
@@ -846,6 +881,16 @@ export default function FlowCanvas({
           canEdit={canEditRef.current}
         />
       ),
+      delay: (props: DelayNodeRendererProps) => (
+        <DelayNode
+          key={`delay-${props.id}-${(props?.data as any)?.wfEpoch ?? ''}`}
+          {...props}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+          canEdit={canEditRef.current}
+        />
+      ),
       actionEmailSendgrid: (props: ActionNodeRendererProps) =>
         renderActionNode('actionEmailSendgrid', props),
       actionEmailMailgun: (props: ActionNodeRendererProps) =>
@@ -1186,6 +1231,8 @@ export default function FlowCanvas({
                     />
                   ) : flyoutNode.type === 'condition' ? (
                     <FlyoutConditionFields nodeId={flyoutNode.id} />
+                  ) : flyoutNode.type === 'delay' ? (
+                    <FlyoutDelayFields nodeId={flyoutNode.id} />
                   ) : flyoutSubtype ? (
                     <FlyoutActionFields
                       nodeId={flyoutNode.id}
@@ -2351,6 +2398,103 @@ function FlyoutConditionFields({ nodeId }: FlyoutConditionFieldsProps) {
         placeholder="Comparison value"
         value={value}
         onChange={handleValue}
+      />
+    </div>
+  )
+}
+
+function FlyoutDelayFields({ nodeId }: { nodeId: string }) {
+  const nodeData = useWorkflowStore(
+    useCallback(
+      (state) =>
+        (state.nodes.find((n) => n.id === nodeId)?.data as DelayNodeData) ?? {},
+      [nodeId]
+    )
+  )
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+  const canEdit = useWorkflowStore((state) => state.canEdit)
+
+  const normalizedConfig = useMemo(
+    () => normalizeDelayConfig(nodeData?.config as DelayConfig | undefined),
+    [nodeData?.config]
+  )
+  const hasValidationErrors = useMemo(
+    () => validateDelayConfig(normalizedConfig),
+    [normalizedConfig]
+  )
+
+  useEffect(() => {
+    if ((nodeData?.hasValidationErrors ?? false) !== hasValidationErrors) {
+      updateNodeData(nodeId, { hasValidationErrors })
+    }
+  }, [
+    hasValidationErrors,
+    nodeData?.hasValidationErrors,
+    nodeId,
+    updateNodeData
+  ])
+
+  const handleLabelChange = useCallback(
+    (v: string) => {
+      if (!canEdit) return
+      updateNodeData(nodeId, { label: v, dirty: true })
+    },
+    [canEdit, nodeId, updateNodeData]
+  )
+
+  const handleDelete = useCallback(() => {
+    if (!canEdit) return
+    const confirmed = window.confirm(
+      'Delete this node? This action cannot be undone.'
+    )
+    if (confirmed) {
+      useWorkflowStore.getState().removeNode(nodeId)
+    }
+  }, [canEdit, nodeId])
+
+  const handleConfigChange = useCallback(
+    (nextConfig: DelayConfig) => {
+      if (!canEdit) return
+      const normalizedNext = normalizeDelayConfig(nextConfig)
+      const nextHasErrors = validateDelayConfig(normalizedNext)
+      updateNodeData(nodeId, {
+        config: normalizedNext,
+        hasValidationErrors: nextHasErrors,
+        dirty: true
+      })
+    },
+    [canEdit, nodeId, updateNodeData]
+  )
+
+  const label =
+    typeof nodeData?.label === 'string' && nodeData.label.trim()
+      ? nodeData.label
+      : 'Delay'
+
+  return (
+    <div className="flex flex-col gap-3">
+      <NodeHeader
+        nodeId={nodeId}
+        label={label}
+        dirty={Boolean(nodeData?.dirty)}
+        hasValidationErrors={
+          Boolean(nodeData?.labelError) ||
+          Boolean(nodeData?.hasValidationErrors)
+        }
+        expanded
+        onLabelChange={handleLabelChange}
+        onExpanded={() => undefined}
+        onConfirmingDelete={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          handleDelete()
+        }}
+      />
+      <DelayNodeConfig
+        config={normalizedConfig}
+        onChange={handleConfigChange}
+        hasValidationErrors={hasValidationErrors}
+        canEdit={canEdit}
       />
     </div>
   )

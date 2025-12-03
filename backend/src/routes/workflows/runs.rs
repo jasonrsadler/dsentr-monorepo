@@ -933,6 +933,7 @@ mod tests {
             error: None,
             idempotency_key: None,
             started_at: now,
+            resume_at: now,
             finished_at: None,
             created_at: now,
             updated_at: now,

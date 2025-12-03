@@ -15,6 +15,8 @@ pub struct WorkflowRun {
     pub idempotency_key: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub started_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub resume_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option")]
     pub finished_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]

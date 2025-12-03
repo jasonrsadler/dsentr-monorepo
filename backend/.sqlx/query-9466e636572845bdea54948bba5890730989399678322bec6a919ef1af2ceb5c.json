@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                    SELECT id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                           started_at as \"started_at!\", finished_at,\n                           created_at as \"created_at!\", updated_at as \"updated_at!\"\n                    FROM workflow_runs\n                    WHERE user_id = $1 AND workflow_id = $2\n                      AND ($3::text[] IS NULL OR status = ANY($3))\n                    ORDER BY created_at DESC\n                    LIMIT $4 OFFSET $5\n                    ",
+  "query": "\n            INSERT INTO workflow_runs (user_id, workflow_id, workspace_id, snapshot, status, idempotency_key, started_at, resume_at, created_at, updated_at)\n            VALUES ($1, $2, $3, $4, 'queued', $5, now(), now(), now(), now())\n            RETURNING id, user_id, workflow_id, workspace_id, snapshot, status, error, idempotency_key,\n                      started_at as \"started_at!\", resume_at as \"resume_at!\", finished_at, created_at as \"created_at!\", updated_at as \"updated_at!\"\n            ",
   "describe": {
     "columns": [
       {
@@ -50,16 +50,21 @@
       },
       {
         "ordinal": 9,
-        "name": "finished_at",
+        "name": "resume_at!",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 10,
-        "name": "created_at!",
+        "name": "finished_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 11,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
@@ -68,9 +73,9 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "TextArray",
-        "Int8",
-        "Int8"
+        "Uuid",
+        "Jsonb",
+        "Text"
       ]
     },
     "nullable": [
@@ -83,10 +88,11 @@
       true,
       true,
       false,
+      false,
       true,
       false,
       false
     ]
   },
-  "hash": "66781a6651b536815f6666f614221dc623cdb557f550902688256a3bb4c68f0b"
+  "hash": "9466e636572845bdea54948bba5890730989399678322bec6a919ef1af2ceb5c"
 }

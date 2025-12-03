@@ -255,11 +255,11 @@ async fn run_with_deadline(
     }
 
     if deadline.is_zero() {
-        return (run_id, execute_run(state, run).await);
+        return (run_id, execute_run(state, run).await.map(|_| ()));
     }
 
     match timeout(deadline, execute_run(state.clone(), run)).await {
-        Ok(result) => (run_id, result),
+        Ok(result) => (run_id, result.map(|_| ())),
         Err(_) => {
             warn!(
                 %run_id,
@@ -583,6 +583,7 @@ mod tests {
             error: None,
             idempotency_key: None,
             started_at: OffsetDateTime::now_utc(),
+            resume_at: OffsetDateTime::now_utc(),
             finished_at: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
@@ -748,6 +749,7 @@ mod tests {
             error: None,
             idempotency_key: None,
             started_at: OffsetDateTime::now_utc(),
+            resume_at: OffsetDateTime::now_utc(),
             finished_at: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
@@ -955,6 +957,7 @@ mod tests {
             error: None,
             idempotency_key: None,
             started_at: OffsetDateTime::now_utc(),
+            resume_at: OffsetDateTime::now_utc(),
             finished_at: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
@@ -1175,6 +1178,7 @@ mod tests {
                         error: None,
                         idempotency_key: None,
                         started_at: OffsetDateTime::now_utc(),
+                        resume_at: OffsetDateTime::now_utc(),
                         finished_at: None,
                         created_at: OffsetDateTime::now_utc(),
                         updated_at: OffsetDateTime::now_utc(),
@@ -1474,6 +1478,7 @@ mod tests {
             error: None,
             idempotency_key: None,
             started_at: OffsetDateTime::now_utc(),
+            resume_at: OffsetDateTime::now_utc(),
             finished_at: None,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
