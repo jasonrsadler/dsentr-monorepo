@@ -40,9 +40,7 @@ export function NavLinks() {
         target="_blank"
         rel="noopener noreferrer"
         title="Documentation"
-        className={
-          `${navLinkClasses({ isActive: true })} font-semibold text-primary hover:text-primary transition-all ease-in-out duration-300`
-        }
+        className={`${navLinkClasses({ isActive: true })} font-semibold text-primary hover:text-primary transition-all ease-in-out duration-300`}
       >
         Documentation
       </a>
