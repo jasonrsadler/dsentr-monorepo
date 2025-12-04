@@ -1377,12 +1377,13 @@ mod tests {
             workspace_id: Some(Uuid::new_v4()),
             snapshot: json!({
                 "nodes": [
-                    {"id": "delay-1", "type": "delay", "data": {"label": "Wait", "config": {"wait_for": {"minutes": 1}}}},
+                    {"id": "delay-1", "type": "delay", "data": {"label": "Wait", "config": {"mode": "duration", "wait_for": {"minutes": 1}}}},
                     {"id": "action-1", "type": "action", "data": {"label": "Next", "actionType": "http", "params": {"url": "", "method": "GET", "headers": [], "queryParams": [], "bodyType": "raw", "body": "", "formBody": [], "authType": "none", "authUsername": "", "authPassword": "", "authToken": ""}}}
                 ],
                 "edges": [
                     {"id": "edge-1", "source": "delay-1", "target": "action-1", "type": "nodeEdge"}
-                ]
+                ],
+                "_start_from_node": "delay-1"
             }),
             status: "running".into(),
             error: None,
@@ -1409,6 +1410,7 @@ mod tests {
                 })
             })
         });
+        repo.expect_insert_dead_letter().times(0);
         repo.expect_renew_run_lease()
             .returning(|_, _, _| Box::pin(async { Ok(()) }));
         repo.expect_get_run_status()

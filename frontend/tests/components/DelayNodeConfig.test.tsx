@@ -36,8 +36,20 @@ describe('DelayNodeConfig', () => {
       ).not.toBeInTheDocument()
     })
 
-    fireEvent.change(screen.getByPlaceholderText('2025-12-31T23:59:00Z'), {
-      target: { value: '2026-01-01T00:00:00Z' }
+    const modeButton = screen.getByRole('button', {
+      name: /wait for duration/i
+    })
+    fireEvent.click(modeButton)
+    fireEvent.click(screen.getByText(/wait until specific datetime/i))
+
+    const dateInput = screen.getByLabelText('Date (UTC)')
+    fireEvent.change(dateInput, { target: { value: '2026-01-01' } })
+    fireEvent.change(screen.getByLabelText('Hour'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('Minute'), {
+      target: { value: '2' }
+    })
+    fireEvent.change(screen.getByLabelText('Second'), {
+      target: { value: '3' }
     })
 
     await waitFor(() => {

@@ -1131,7 +1131,7 @@ impl WorkflowRepository for PostgresWorkflowRepository {
             FROM sel
             WHERE wr.id = sel.id
             RETURNING wr.id, wr.user_id, wr.workflow_id, wr.workspace_id, wr.snapshot, wr.status, wr.error, wr.idempotency_key,
-                      wr.started_at as "started_at!", wr.resume_at as "resume_at!", wr.finished_at, wr.created_at as "created_at!", wr.updated_at as "updated_at!"
+                      wr.started_at as started_at, wr.resume_at as resume_at, wr.finished_at, wr.created_at as created_at, wr.updated_at as updated_at
             "#
         )
         .bind(worker_id)

@@ -5,6 +5,7 @@ export type DurationConfig = {
 }
 
 export type DelayConfig = {
+  mode?: 'duration' | 'datetime'
   wait_for?: DurationConfig
   wait_until?: string
   jitter_seconds?: number
@@ -24,6 +25,11 @@ const parseNumber = (value?: string | number): number | undefined => {
 }
 
 export const normalizeDelayConfig = (config?: DelayConfig): DelayConfig => {
+  const mode: DelayConfig['mode'] =
+    config?.mode === 'datetime' || config?.mode === 'duration'
+      ? config.mode
+      : 'duration'
+
   const waitFor = config?.wait_for ?? {}
   const minutes = parseNumber(waitFor.minutes)
   const hours = parseNumber(waitFor.hours)
@@ -43,6 +49,7 @@ export const normalizeDelayConfig = (config?: DelayConfig): DelayConfig => {
   const jitter = parseNumber(config?.jitter_seconds)
 
   return {
+    mode,
     wait_for: normalizedWaitFor,
     wait_until: trimmedWaitUntil || undefined,
     jitter_seconds: jitter
@@ -50,6 +57,7 @@ export const normalizeDelayConfig = (config?: DelayConfig): DelayConfig => {
 }
 
 export const validateDelayConfig = (config: DelayConfig): boolean => {
+  const mode = config.mode ?? 'duration'
   const waitFor = config.wait_for ?? {}
   const hasDuration =
     (waitFor.minutes ?? 0) > 0 ||
@@ -57,6 +65,14 @@ export const validateDelayConfig = (config: DelayConfig): boolean => {
     (waitFor.days ?? 0) > 0
   const hasAbsolute =
     typeof config.wait_until === 'string' && config.wait_until.trim().length > 0
+
+  if (mode === 'duration') {
+    return !hasDuration
+  }
+
+  if (mode === 'datetime') {
+    return !hasAbsolute
+  }
 
   return !(hasDuration || hasAbsolute)
 }

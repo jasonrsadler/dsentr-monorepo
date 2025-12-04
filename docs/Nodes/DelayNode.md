@@ -4,11 +4,15 @@ The Delay node pauses workflow execution before continuing to the next step. Use
 
 ## Configuration
 
-- `wait_for_duration` (optional): Set any combination of **days**, **hours**, and **minutes** to wait before continuing. At least one of the duration fields must be greater than zero when this mode is used.
-- `wait_until_datetime` (optional): Provide an absolute timestamp in ISO 8601 (e.g., `2026-01-01T00:00:00Z`). If this time is already in the past when the run reaches the node, the workflow continues immediately.
+- Mode: Choose **Wait for duration** or **Wait until specific datetime**.
+- `wait_for_duration` (duration mode): Set any combination of **days**, **hours**, and **minutes** to wait before continuing. At least one of the duration fields must be greater than zero when this mode is used.
+- `wait_until_datetime` (datetime mode): Select a calendar date plus hour/minute/second. The picker stores the value in UTC ISO 8601 (e.g., `2026-01-01T00:00:00Z`). If this time is already in the past when the run reaches the node, the workflow continues immediately.
 - `jitter_seconds` (optional): A non-negative integer that adds a random offset between `0` and `jitter_seconds` to the computed delay. Helpful to avoid thundering herd behavior.
 
-At least one of `wait_for_duration` or `wait_until_datetime` must be configured. Both can be set; the node waits for whichever results in the longer delay.
+Validation:
+- Duration mode requires at least one non-zero duration field.
+- Datetime mode requires a valid date/time selection.
+- The node fails fast if the chosen mode is missing required values.
 
 ## Behavior
 

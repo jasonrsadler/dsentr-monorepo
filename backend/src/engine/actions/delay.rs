@@ -15,6 +15,8 @@ pub struct DurationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub struct DelayConfig {
+    #[serde(default)]
+    pub mode: Option<String>,
     pub wait_for: Option<DurationConfig>,
     #[serde(default)]
     pub wait_until: Option<DateTime<Utc>>,
@@ -58,20 +60,38 @@ pub fn compute_delay_plan(
             if target <= now {
                 Duration::ZERO
             } else {
-                chrono::Duration::from_std(Duration::from_secs(1))
-                    .and_then(|_| (target - now).to_std())
-                    .unwrap_or(Duration::ZERO)
+                (target - now).to_std().unwrap_or(Duration::ZERO)
             }
         }
         None => Duration::ZERO,
     };
 
+    let mode = config.mode.as_deref().unwrap_or("auto");
     let has_wait = config.wait_for.is_some() || config.wait_until.is_some();
-    if !has_wait {
-        return Err("Configure either a wait duration or an absolute datetime".to_string());
-    }
 
-    let base_delay = duration_delay.max(wait_until_delay);
+    match mode {
+        "duration" => {
+            if duration_delay.is_zero() {
+                return Err("Configure a duration before continuing".to_string());
+            }
+        }
+        "datetime" => {
+            if config.wait_until.is_none() {
+                return Err("Configure a valid target datetime before continuing".to_string());
+            }
+        }
+        _ => {
+            if !has_wait {
+                return Err("Configure either a wait duration or an absolute datetime".to_string());
+            }
+        }
+    };
+
+    let base_delay = match mode {
+        "duration" => duration_delay,
+        "datetime" => wait_until_delay,
+        _ => duration_delay.max(wait_until_delay),
+    };
     let jitter_range = config.jitter_seconds.unwrap_or(0);
     let jitter_applied = if jitter_range == 0 || base_delay.is_zero() {
         Duration::ZERO
@@ -127,6 +147,7 @@ mod tests {
     #[test]
     fn duration_config_sums_components() {
         let config = DelayConfig {
+            mode: Some("duration".into()),
             wait_for: Some(DurationConfig {
                 minutes: Some(30),
                 hours: Some(2),
@@ -154,6 +175,7 @@ mod tests {
         let now = Utc::now();
         let past = now - ChronoDuration::minutes(5);
         let config = DelayConfig {
+            mode: Some("datetime".into()),
             wait_for: None,
             wait_until: Some(past),
             jitter_seconds: None,
@@ -175,6 +197,7 @@ mod tests {
     fn jitter_applies_when_delay_present() {
         let now = Utc::now();
         let config = DelayConfig {
+            mode: Some("duration".into()),
             wait_for: Some(DurationConfig {
                 minutes: Some(1),
                 hours: None,
@@ -206,6 +229,7 @@ mod tests {
         let now = Utc::now();
         let future = now + ChronoDuration::minutes(10);
         let config = DelayConfig {
+            mode: Some("datetime".into()),
             wait_for: None,
             wait_until: Some(future),
             jitter_seconds: None,
@@ -227,6 +251,7 @@ mod tests {
     #[test]
     fn zero_wait_modes_error() {
         let config = DelayConfig {
+            mode: Some("duration".into()),
             wait_for: None,
             wait_until: None,
             jitter_seconds: None,
@@ -236,7 +261,7 @@ mod tests {
         let err = compute_delay_plan(&config, Utc::now(), &mut rng)
             .expect_err("missing modes should error");
         assert!(
-            err.contains("Configure either a wait duration"),
+            err.contains("duration"),
             "Unexpected error: {err}"
         );
     }

@@ -460,11 +460,14 @@ function normalizeDropType(rawType: string): DropDescriptor {
       expanded: true,
       data: {
         config: {
+          mode: 'duration',
           wait_for: {
             minutes: undefined,
             hours: undefined,
             days: undefined
-          }
+          },
+          wait_until: undefined,
+          jitter_seconds: undefined
         },
         hasValidationErrors: true
       } as DelayNodeData
