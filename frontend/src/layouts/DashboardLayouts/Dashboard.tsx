@@ -163,6 +163,14 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
         dragType: 'logic:delay',
         gradient: 'from-sky-500 to-cyan-600',
         icon: <ConditionIcon />
+      },
+      {
+        id: 'logic-formatter',
+        label: 'Formatter',
+        description: 'Transform or reshape data',
+        dragType: 'logic:formatter',
+        gradient: 'from-teal-500 to-emerald-600',
+        icon: <ConditionIcon />
       }
     ]
   }

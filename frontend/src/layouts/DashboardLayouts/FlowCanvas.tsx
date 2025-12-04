@@ -45,6 +45,9 @@ import ConditionNode, {
 import DelayNode, {
   type DelayNodeData
 } from '@/components/workflow/nodes/DelayNode'
+import FormatterNode, {
+  type FormatterNodeData
+} from '@/components/workflow/nodes/FormatterNode'
 import { normalizePlanTier } from '@/lib/planTiers'
 import { generateUniqueLabel } from '@/lib/workflowGraph'
 import {
@@ -82,6 +85,13 @@ import {
   validateDelayConfig,
   type DelayConfig
 } from '@/components/actions/logic/DelayNode/helpers'
+import FormatterNodeConfig from '@/components/actions/logic/FormatterNode'
+import {
+  createEmptyFormatterConfig,
+  normalizeFormatterConfig,
+  validateFormatterConfig,
+  type FormatterConfig
+} from '@/components/actions/logic/FormatterNode/helpers'
 import TriggerTypeDropdown from '@/components/workflow/TriggerTypeDropdown'
 import SendGridAction from '@/components/workflow/Actions/Email/Services/SendGridAction'
 import MailGunAction from '@/components/workflow/Actions/Email/Services/MailGunAction'
@@ -112,6 +122,7 @@ export type WorkflowNodeData =
   | TriggerNodeData
   | ConditionNodeData
   | DelayNodeData
+  | FormatterNodeData
   | ActionNodeData
   | Record<string, unknown>
 
@@ -121,6 +132,12 @@ export type WorkflowEdge = Edge<WorkflowEdgeData>
 type TriggerNodeRendererProps = NodeProps<Node<TriggerNodeData>>
 type ConditionNodeRendererProps = NodeProps<Node<ConditionNodeData>>
 type DelayNodeRendererProps = NodeProps<Node<DelayNodeData>> & {
+  isRunning?: boolean
+  isSucceeded?: boolean
+  isFailed?: boolean
+  canEdit?: boolean
+}
+type FormatterNodeRendererProps = NodeProps<Node<FormatterNodeData>> & {
   isRunning?: boolean
   isSucceeded?: boolean
   isFailed?: boolean
@@ -150,6 +167,7 @@ type ActionDropSubtype =
   | 'actionSheets'
   | 'actionHttp'
   | 'actionCode'
+type LogicDropSubtype = 'delay' | 'formatter'
 
 interface DropDescriptor {
   nodeType: string
@@ -428,6 +446,24 @@ function normalizeActionDropSubtype(
   }
 }
 
+function normalizeLogicDropSubtype(
+  rawSubtype?: string | null
+): LogicDropSubtype {
+  if (!rawSubtype) return 'delay'
+  const lowered = rawSubtype.trim().toLowerCase()
+  switch (lowered) {
+    case 'formatter':
+    case 'transform':
+    case 'logicformatter':
+    case 'transformer':
+      return 'formatter'
+    case 'delay':
+    case 'wait':
+    default:
+      return 'delay'
+  }
+}
+
 function normalizeDropType(rawType: string): DropDescriptor {
   const [categoryRaw, subtypeRaw] = rawType.split(':')
   const category = categoryRaw?.trim().toLowerCase()
@@ -453,6 +489,19 @@ function normalizeDropType(rawType: string): DropDescriptor {
   }
 
   if (category === 'logic') {
+    const logicSubtype = normalizeLogicDropSubtype(subtypeRaw ?? null)
+    if (logicSubtype === 'formatter') {
+      return {
+        nodeType: 'formatter',
+        labelBase: 'Formatter',
+        idPrefix: 'logic-formatter',
+        expanded: true,
+        data: {
+          config: createEmptyFormatterConfig(),
+          hasValidationErrors: true
+        } as FormatterNodeData
+      }
+    }
     return {
       nodeType: 'delay',
       labelBase: 'Delay',
@@ -894,6 +943,16 @@ export default function FlowCanvas({
           canEdit={canEditRef.current}
         />
       ),
+      formatter: (props: FormatterNodeRendererProps) => (
+        <FormatterNode
+          key={`formatter-${props.id}-${(props?.data as any)?.wfEpoch ?? ''}`}
+          {...props}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+          canEdit={canEditRef.current}
+        />
+      ),
       actionEmailSendgrid: (props: ActionNodeRendererProps) =>
         renderActionNode('actionEmailSendgrid', props),
       actionEmailMailgun: (props: ActionNodeRendererProps) =>
@@ -1077,7 +1136,7 @@ export default function FlowCanvas({
   const flyoutSubtype = useMemo<ActionDropSubtype | null>(() => {
     if (!flyoutNode) return null
     const t = (flyoutNode.type || '').toString()
-    if (t === 'trigger' || t === 'condition') return null
+    if (t === 'trigger' || t === 'condition' || t === 'formatter') return null
     const known = new Set([
       'actionEmailSendgrid',
       'actionEmailMailgun',
@@ -1236,6 +1295,8 @@ export default function FlowCanvas({
                     <FlyoutConditionFields nodeId={flyoutNode.id} />
                   ) : flyoutNode.type === 'delay' ? (
                     <FlyoutDelayFields nodeId={flyoutNode.id} />
+                  ) : flyoutNode.type === 'formatter' ? (
+                    <FlyoutFormatterFields nodeId={flyoutNode.id} />
                   ) : flyoutSubtype ? (
                     <FlyoutActionFields
                       nodeId={flyoutNode.id}
@@ -2401,6 +2462,82 @@ function FlyoutConditionFields({ nodeId }: FlyoutConditionFieldsProps) {
         placeholder="Comparison value"
         value={value}
         onChange={handleValue}
+      />
+    </div>
+  )
+}
+
+function FlyoutFormatterFields({ nodeId }: { nodeId: string }) {
+  const nodeData = useWorkflowStore(
+    useCallback(
+      (state) =>
+        (state.nodes.find((n) => n.id === nodeId)?.data as FormatterNodeData) ??
+        {},
+      [nodeId]
+    )
+  )
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
+
+  const normalizedConfig = useMemo(
+    () =>
+      normalizeFormatterConfig(nodeData?.config as FormatterConfig | undefined),
+    [nodeData?.config]
+  )
+  const validation = useMemo(
+    () => validateFormatterConfig(normalizedConfig),
+    [normalizedConfig]
+  )
+
+  useEffect(() => {
+    if ((nodeData?.hasValidationErrors ?? false) !== validation.hasErrors) {
+      updateNodeData(nodeId, { hasValidationErrors: validation.hasErrors })
+    }
+  }, [
+    nodeData?.hasValidationErrors,
+    nodeId,
+    updateNodeData,
+    validation.hasErrors
+  ])
+
+  const handleConfigChange = useCallback(
+    (nextConfig: FormatterConfig) => {
+      const normalizedNext = normalizeFormatterConfig(nextConfig)
+      const nextValidation = validateFormatterConfig(normalizedNext)
+      const currentConfig = normalizeFormatterConfig(
+        nodeData?.config as FormatterConfig | undefined
+      )
+      const configsEqual =
+        JSON.stringify(currentConfig) === JSON.stringify(normalizedNext)
+      const validationEqual =
+        (nodeData?.hasValidationErrors ?? false) === nextValidation.hasErrors
+
+      if (configsEqual && validationEqual) {
+        return
+      }
+
+      updateNodeData(nodeId, {
+        config: normalizedNext,
+        hasValidationErrors: nextValidation.hasErrors,
+        dirty: true
+      })
+    },
+    [nodeData?.config, nodeData?.hasValidationErrors, nodeId, updateNodeData]
+  )
+
+  const title =
+    typeof nodeData?.label === 'string' && nodeData.label.trim()
+      ? nodeData.label
+      : 'Formatter'
+
+  return (
+    <div className="space-y-3">
+      <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+        {title}
+      </h4>
+      <FormatterNodeConfig
+        config={normalizedConfig}
+        onChange={handleConfigChange}
+        validation={validation}
       />
     </div>
   )

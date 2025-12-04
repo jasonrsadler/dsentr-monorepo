@@ -1,6 +1,7 @@
 mod code;
 pub(crate) mod delay;
 mod email;
+pub(crate) mod formatter;
 mod google;
 mod http;
 mod messaging;
@@ -332,7 +333,7 @@ fn resolve_operand(raw: &str, context: &Value) -> Value {
     parse_flexible_value(&templated)
 }
 
-fn lookup_path(context: &Value, path: &str) -> Option<Value> {
+pub(crate) fn lookup_path(context: &Value, path: &str) -> Option<Value> {
     let mut current = context;
     for part in path.split('.') {
         if part.is_empty() {
@@ -352,7 +353,7 @@ fn lookup_path(context: &Value, path: &str) -> Option<Value> {
     Some(current.clone())
 }
 
-fn parse_flexible_value(raw: &str) -> Value {
+pub(crate) fn parse_flexible_value(raw: &str) -> Value {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Value::Null;

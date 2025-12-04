@@ -4,9 +4,9 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
+use time::OffsetDateTime;
 use tokio::time::{sleep, timeout, Instant};
 use tracing::{debug, error, warn};
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::actions::delay::{compute_delay_plan, parse_delay_config, DelayOutcome};
@@ -14,8 +14,8 @@ use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_run_event::NewWorkflowRunEvent;
 use crate::state::AppState;
 use crate::utils::{
-    secrets::{hydrate_secrets_into_snapshot, read_secret_store},
     schedule::utc_to_offset,
+    secrets::{hydrate_secrets_into_snapshot, read_secret_store},
     workflow_connection_metadata,
 };
 
@@ -382,60 +382,63 @@ pub async fn execute_run(
         let execution: Result<NodeExecResult, String> = async {
             match kind {
                 "delay" | "logicDelay" | "wait" => {
-                let config_value = node.data.get("config").cloned().unwrap_or(Value::Null);
-                let config = parse_delay_config(&config_value)
-                    .map_err(|err| format!("Invalid delay config: {err}"))?;
-                let mut rng = rand::rng();
-                let plan = compute_delay_plan(&config, Utc::now(), &mut rng)
-                    .map_err(|err| format!("Delay planning failed: {err}"))?;
+                    let config_value = node.data.get("config").cloned().unwrap_or(Value::Null);
+                    let config = parse_delay_config(&config_value)
+                        .map_err(|err| format!("Invalid delay config: {err}"))?;
+                    let mut rng = rand::rng();
+                    let plan = compute_delay_plan(&config, Utc::now(), &mut rng)
+                        .map_err(|err| format!("Delay planning failed: {err}"))?;
 
-                let outputs = match &plan {
-                    DelayOutcome::NoWait { base_delay } => json!({
-                        "resumeAt": Value::Null,
-                        "delaySeconds": base_delay.as_secs(),
-                        "jitterAppliedSeconds": 0,
-                        "mode": "duration"
-                    }),
-                    DelayOutcome::Wait(comp) => json!({
-                        "resumeAt": comp.resume_at.to_rfc3339(),
-                        "delaySeconds": comp.total_delay.as_secs(),
-                        "baseDelaySeconds": comp.base_delay.as_secs(),
-                        "jitterAppliedSeconds": comp.jitter_applied.as_secs(),
-                        "mode": "duration_or_absolute"
-                    }),
-                };
+                    let outputs = match &plan {
+                        DelayOutcome::NoWait { base_delay } => json!({
+                            "resumeAt": Value::Null,
+                            "delaySeconds": base_delay.as_secs(),
+                            "jitterAppliedSeconds": 0,
+                            "mode": "duration"
+                        }),
+                        DelayOutcome::Wait(comp) => json!({
+                            "resumeAt": comp.resume_at.to_rfc3339(),
+                            "delaySeconds": comp.total_delay.as_secs(),
+                            "baseDelaySeconds": comp.base_delay.as_secs(),
+                            "jitterAppliedSeconds": comp.jitter_applied.as_secs(),
+                            "mode": "duration_or_absolute"
+                        }),
+                    };
 
-                let resolution = resolve_next_nodes(&graph, &node_id, kind, &outputs, None);
+                    let resolution = resolve_next_nodes(&graph, &node_id, kind, &outputs, None);
 
-                let outcome = match plan {
-                    DelayOutcome::Wait(comp) => NodeExecResult::Pause {
-                        outputs,
-                        resume_at: comp.resume_at,
-                        next_nodes: resolution.nodes,
-                    },
-                    DelayOutcome::NoWait { .. } => NodeExecResult::Normal((outputs, None)),
-                };
-                Ok(outcome)
-            }
-            "trigger" => Ok(NodeExecResult::Normal(
-                execute_trigger(node, &context_value).await?,
-            )),
-            "condition" => Ok(NodeExecResult::Normal(
-                execute_condition(node, &context_value).await?,
-            )),
-            k if k == "action" || k.starts_with("action") => Ok(NodeExecResult::Normal(
-                execute_action(
-                    node,
-                    &context_value,
-                    &allowed_hosts,
-                    &disallowed_hosts,
-                    default_deny,
-                    is_prod,
-                    &state,
-                    &run,
-                )
-                .await?,
-            )),
+                    let outcome = match plan {
+                        DelayOutcome::Wait(comp) => NodeExecResult::Pause {
+                            outputs,
+                            resume_at: comp.resume_at,
+                            next_nodes: resolution.nodes,
+                        },
+                        DelayOutcome::NoWait { .. } => NodeExecResult::Normal((outputs, None)),
+                    };
+                    Ok(outcome)
+                }
+                "formatter" | "logicformatter" | "transform" => Ok(NodeExecResult::Normal(
+                    super::actions::formatter::execute_formatter(node, &context_value)?,
+                )),
+                "trigger" => Ok(NodeExecResult::Normal(
+                    execute_trigger(node, &context_value).await?,
+                )),
+                "condition" => Ok(NodeExecResult::Normal(
+                    execute_condition(node, &context_value).await?,
+                )),
+                k if k == "action" || k.starts_with("action") => Ok(NodeExecResult::Normal(
+                    execute_action(
+                        node,
+                        &context_value,
+                        &allowed_hosts,
+                        &disallowed_hosts,
+                        default_deny,
+                        is_prod,
+                        &state,
+                        &run,
+                    )
+                    .await?,
+                )),
                 _ => Ok(NodeExecResult::Normal((json!({"skipped": true}), None))),
             }
         }
@@ -528,10 +531,7 @@ pub async fn execute_run(
                         ),
                     );
                     if let Some(first) = next_nodes.first() {
-                        map.insert(
-                            "_start_from_node".to_string(),
-                            Value::String(first.clone()),
-                        );
+                        map.insert("_start_from_node".to_string(), Value::String(first.clone()));
                     }
                     map.insert(
                         "_resume_at".to_string(),
@@ -542,12 +542,9 @@ pub async fn execute_run(
                 let resume_at_offset = match utc_to_offset(resume_at) {
                     Some(val) => val,
                     None => {
-                        let msg =
-                            "Failed to convert resume_at to OffsetDateTime".to_string();
-                        let _ =
-                            insert_dead_letter_with_retry(&state, &run, &msg).await;
-                        complete_run_with_retry(&state, run.id, "failed", Some(&msg))
-                            .await?;
+                        let msg = "Failed to convert resume_at to OffsetDateTime".to_string();
+                        let _ = insert_dead_letter_with_retry(&state, &run, &msg).await;
+                        complete_run_with_retry(&state, run.id, "failed", Some(&msg)).await?;
                         return Ok(RunCompletion::Finished);
                     }
                 };
@@ -1424,9 +1421,7 @@ mod tests {
                 Box::pin(async move {
                     assert_eq!(rid, run_id);
                     assert!(resume_at > OffsetDateTime::now_utc());
-                    let obj = snapshot
-                        .as_object()
-                        .expect("snapshot should be an object");
+                    let obj = snapshot.as_object().expect("snapshot should be an object");
                     assert!(obj.contains_key("_resume_context"));
                     assert!(obj.contains_key("_resume_from_nodes"));
                     *flag.lock().expect("flag lock poisoned") = true;

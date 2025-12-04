@@ -33,3 +33,4 @@ Styles live in `src/css/globals.css` under `.themed-scroll` and were previously 
 - Added support components (header issue button and modal) so users can submit issue reports with their account/workspace context to the backend.
 - Added a message center modal and header badge button so users can read admin replies, mark them read, and reply without leaving the dashboard.
 - Added a Delay (Wait) node configuration UI and validation so the workflow designer can pause flows without manual code.
+- Added a Formatter logic node UI with grouped dropdown selection, validation, and palette/flyout wiring so users can transform data without new components or custom styling.

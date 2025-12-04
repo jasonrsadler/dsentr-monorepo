@@ -26,3 +26,4 @@
 - Slack/Microsoft workspace actions now revalidate workspace OAuth connection IDs locally after fetching tokens they confirm the connection belongs to the run's workspace so a misconfigured workflow cannot borrow credentials from another workspace.
 - Executor hydrates run snapshots with decrypted secret stores for every run before graph execution and fails runs cleanly if secrets cannot be loaded, preventing plaintext secrets from leaking in execution responses.
 - Added runaway protection helpers that count recent workspace runs and surface a dedicated error when limits are exceeded so creation and execution paths can block runaway workflows safely.
+- Formatter node execution added with typed operations (string/number/json/date/bool), JSON path access, and snapshot-friendly outputs to reshape data synchronously between steps.

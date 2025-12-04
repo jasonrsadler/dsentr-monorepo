@@ -25,10 +25,7 @@ use crate::{
         workspace::{Workspace, WorkspaceInvitation, WorkspaceMember},
     },
     responses::JsonResponse,
-    routes::{
-        auth::session::AuthSession,
-        issues::fetch_issue_messages,
-    },
+    routes::{auth::session::AuthSession, issues::fetch_issue_messages},
     state::AppState,
 };
 
@@ -366,13 +363,17 @@ pub async fn list_user_connections(
         .bind(user_id)
         .fetch_all(state.db_pool.as_ref())
         .await
-        .map_err(|_| JsonResponse::server_error("Failed to load user connections").into_response())?;
+        .map_err(|_| {
+            JsonResponse::server_error("Failed to load user connections").into_response()
+        })?;
 
     let mut workspace_connections: Vec<ConnectionSummary> = sqlx::query_as(workspace_query)
         .bind(user_id)
         .fetch_all(state.db_pool.as_ref())
         .await
-        .map_err(|_| JsonResponse::server_error("Failed to load workspace connections").into_response())?;
+        .map_err(|_| {
+            JsonResponse::server_error("Failed to load workspace connections").into_response()
+        })?;
 
     connections.append(&mut workspace_connections);
 
@@ -561,10 +562,7 @@ pub async fn list_workspace_workflows(
     let data: Vec<Value> = workflows
         .into_iter()
         .map(|wf| {
-            let run_count = run_counts
-                .get(&wf.id)
-                .copied()
-                .unwrap_or_default();
+            let run_count = run_counts.get(&wf.id).copied().unwrap_or_default();
             serde_json::json!({
                 "id": wf.id,
                 "workspace_id": wf.workspace_id,
@@ -622,9 +620,7 @@ pub async fn list_workflows(
         list_builder
             .push(" WHERE w.name ILIKE ")
             .push_bind(term.clone());
-        count_builder
-            .push(" WHERE w.name ILIKE ")
-            .push_bind(term);
+        count_builder.push(" WHERE w.name ILIKE ").push_bind(term);
     }
 
     list_builder
@@ -672,13 +668,12 @@ pub async fn get_workflow(
         return Err(JsonResponse::not_found("Workflow not found").into_response());
     };
 
-    let run_count: i64 = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM workflow_runs WHERE workflow_id = $1",
-    )
-    .bind(workflow_id)
-    .fetch_one(state.db_pool.as_ref())
-    .await
-    .unwrap_or(0);
+    let run_count: i64 =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_runs WHERE workflow_id = $1")
+            .bind(workflow_id)
+            .fetch_one(state.db_pool.as_ref())
+            .await
+            .unwrap_or(0);
 
     let runs = fetch_recent_runs(&state, workflow_id, 25).await?;
 
@@ -965,10 +960,7 @@ pub async fn mark_issue_read(
     })))
 }
 
-async fn mark_issue_read_internal(
-    state: &AppState,
-    issue_id: Uuid,
-) -> Result<i64, Response> {
+async fn mark_issue_read_internal(state: &AppState, issue_id: Uuid) -> Result<i64, Response> {
     let now = OffsetDateTime::now_utc();
 
     let exists: Option<Uuid> =
@@ -1078,10 +1070,7 @@ async fn fetch_recent_runs(
     Ok(rows)
 }
 
-async fn fetch_run_counts(
-    state: &AppState,
-    workflow_ids: Vec<Uuid>,
-) -> HashMap<Uuid, i64> {
+async fn fetch_run_counts(state: &AppState, workflow_ids: Vec<Uuid>) -> HashMap<Uuid, i64> {
     if workflow_ids.is_empty() {
         return HashMap::new();
     }

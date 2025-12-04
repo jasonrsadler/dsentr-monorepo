@@ -33,9 +33,7 @@ pub struct DelayComputation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DelayOutcome {
-    NoWait {
-        base_delay: Duration,
-    },
+    NoWait { base_delay: Duration },
     Wait(DelayComputation),
 }
 
@@ -141,8 +139,8 @@ fn chrono_duration_from_std(duration: Duration) -> Result<ChronoDuration, String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn duration_config_sums_components() {
@@ -158,8 +156,8 @@ mod tests {
         };
 
         let mut rng = StdRng::seed_from_u64(1);
-        let result = compute_delay_plan(&config, Utc::now(), &mut rng)
-            .expect("delay plan should compute");
+        let result =
+            compute_delay_plan(&config, Utc::now(), &mut rng).expect("delay plan should compute");
         match result {
             DelayOutcome::Wait(plan) => {
                 assert_eq!(plan.base_delay.as_secs(), 86_400 + 2 * 3600 + 1800);
@@ -260,9 +258,6 @@ mod tests {
 
         let err = compute_delay_plan(&config, Utc::now(), &mut rng)
             .expect_err("missing modes should error");
-        assert!(
-            err.contains("duration"),
-            "Unexpected error: {err}"
-        );
+        assert!(err.contains("duration"), "Unexpected error: {err}");
     }
 }

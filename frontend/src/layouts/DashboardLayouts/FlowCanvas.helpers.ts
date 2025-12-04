@@ -29,7 +29,11 @@ const ACTION_NODE_TYPE_ALIASES: Record<string, string> = {
   code: 'actionCode',
   delay: 'delay',
   logicdelay: 'delay',
-  wait: 'delay'
+  wait: 'delay',
+  formatter: 'formatter',
+  logicformatter: 'formatter',
+  transform: 'formatter',
+  'logic.formatter': 'formatter'
 }
 
 function normalizeNodeType(nodeType: unknown): string | undefined {

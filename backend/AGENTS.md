@@ -53,3 +53,4 @@ itly coordinated.
 - Added admin-only API surface for /api/admin with issue reply threading so support staff can audit users, workspaces, workflows, and respond without exposing secrets.
 - CORS now accepts a dedicated `ADMIN_ORIGIN` so the admin frontend can be hosted separately from the user app.
 - Added Delay workflow node execution support with resumable run scheduling (`resume_at`) so waits persist and resume reliably.
+- Added Formatter workflow node execution with typed operations (strings, numbers, JSON, dates, booleans), path-aware JSON access, and snapshot-friendly outputs so logic nodes can reshape data safely between steps.
