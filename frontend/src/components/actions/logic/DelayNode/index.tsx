@@ -375,7 +375,8 @@ function DateTimeFields({
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: -4 }}
                 transition={{ duration: 0.15 }}
-                className="absolute z-20 mt-2 w-full"
+                className="absolute left-0 right-0 z-20 mt-2 w-full"
+                style={{ minWidth: '100%' }}
               >
                 <ScheduleCalendar
                   month={month}
