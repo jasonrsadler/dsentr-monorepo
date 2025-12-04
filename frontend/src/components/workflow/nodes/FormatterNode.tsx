@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import FormatterNodeConfig from '@/components/actions/logic/FormatterNode'
 import {
   normalizeFormatterConfig,
@@ -217,14 +217,24 @@ function FormatterNodeContent({
           <p className="text-xs text-red-500">{nodeData.labelError}</p>
         ) : null}
 
-        <div className="mt-3 space-y-3">
-          <FormatterNodeConfig
-            config={normalizedConfig}
-            onChange={handleConfigChange}
-            validation={validation}
-            canEdit={effectiveCanEdit}
-          />
-        </div>
+        <AnimatePresence>
+          {nodeData?.expanded && (
+            <motion.div
+              key="expanded-content"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
+            >
+              <FormatterNodeConfig
+                config={normalizedConfig}
+                onChange={handleConfigChange}
+                validation={validation}
+                canEdit={effectiveCanEdit}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   )

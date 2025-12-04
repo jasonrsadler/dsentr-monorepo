@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import DelayNodeConfig from '@/components/actions/logic/DelayNode'
 import {
   normalizeDelayConfig,
@@ -214,14 +214,24 @@ function DelayNodeContent({
           <p className="text-xs text-red-500">{nodeData.labelError}</p>
         ) : null}
 
-        <div className="mt-3 space-y-3">
-          <DelayNodeConfig
-            config={normalizedConfig}
-            onChange={handleConfigChange}
-            hasValidationErrors={hasValidationErrors}
-            canEdit={effectiveCanEdit}
-          />
-        </div>
+        <AnimatePresence>
+          {nodeData?.expanded && (
+            <motion.div
+              key="expanded-content"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
+            >
+              <DelayNodeConfig
+                config={normalizedConfig}
+                onChange={handleConfigChange}
+                hasValidationErrors={hasValidationErrors}
+                canEdit={effectiveCanEdit}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   )
