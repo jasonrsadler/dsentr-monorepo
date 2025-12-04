@@ -6,45 +6,88 @@ import Table from "../../components/Table";
 import { listUsers } from "../../api/users";
 import { AdminUser } from "../../api/types";
 import { Link } from "react-router-dom";
+import { fetchAllPages } from "../../api/fetchAllPages";
 
 export default function UsersList() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
-  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"table" | "chart">("table");
   const [error, setError] = useState<string>();
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       try {
-        const res = await listUsers({
-          page,
-          limit,
-          search: search.trim() || undefined,
-          sort_by: "created_at",
-        });
-        setUsers(res.data);
-        setTotal(res.total);
+        setError(undefined);
+        const allUsers = await fetchAllPages((pageNum, pageSize) =>
+          listUsers({
+            page: pageNum,
+            limit: pageSize,
+            sort_by: "created_at",
+          }),
+        );
+
+        if (!cancelled) {
+          setUsers(allUsers);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load users");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load users");
+        }
       }
     }
+
     load();
-  }, [page, limit, search]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredUsers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return users;
+    return users.filter((user) => {
+      const fullName = `${user.first_name} ${user.last_name}`.toLowerCase();
+      const plan = user.plan ?? "";
+      return (
+        user.email.toLowerCase().includes(term) ||
+        fullName.includes(term) ||
+        plan.toLowerCase().includes(term)
+      );
+    });
+  }, [search, users]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / limit));
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedUsers = useMemo(() => {
+    const start = (currentPage - 1) * limit;
+    return filteredUsers.slice(start, start + limit);
+  }, [currentPage, filteredUsers, limit]);
 
   const chartData = useMemo(() => {
-    const planCounts = users.reduce<Record<string, number>>((acc, user) => {
-      const key = user.plan ?? "unknown";
-      acc[key] = (acc[key] ?? 0) + 1;
-      return acc;
-    }, {});
+    const planCounts = paginatedUsers.reduce<Record<string, number>>(
+      (acc, user) => {
+        const key = user.plan ?? "unknown";
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      },
+      {},
+    );
     return Object.entries(planCounts).map(([label, value]) => ({
       label,
       value,
     }));
-  }, [users]);
+  }, [paginatedUsers]);
 
   return (
     <div className="space-y-4">
@@ -94,7 +137,7 @@ export default function UsersList() {
       ) : (
         <>
           <Table
-            data={users}
+            data={paginatedUsers}
             columns={[
               {
                 key: "id",
@@ -144,9 +187,9 @@ export default function UsersList() {
             empty="No users found"
           />
           <Pagination
-            page={page}
+            page={currentPage}
             limit={limit}
-            total={total}
+            total={filteredUsers.length}
             onPageChange={setPage}
           />
         </>

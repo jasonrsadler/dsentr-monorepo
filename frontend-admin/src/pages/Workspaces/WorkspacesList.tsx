@@ -6,43 +6,80 @@ import SearchBox from "../../components/SearchBox";
 import Table from "../../components/Table";
 import { listWorkspaces } from "../../api/workspaces";
 import { WorkspaceSummary } from "../../api/types";
+import { fetchAllPages } from "../../api/fetchAllPages";
 
 export default function WorkspacesList() {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
-  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"table" | "chart">("table");
   const [error, setError] = useState<string>();
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       try {
-        const res = await listWorkspaces({
-          page,
-          limit,
-          search: search.trim() || undefined,
-          sort_by: "created_at",
-        });
-        setWorkspaces(res.data);
-        setTotal(res.total);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load workspaces",
+        setError(undefined);
+        const allWorkspaces = await fetchAllPages((pageNum, pageSize) =>
+          listWorkspaces({
+            page: pageNum,
+            limit: pageSize,
+            sort_by: "created_at",
+          }),
         );
+        if (!cancelled) {
+          setWorkspaces(allWorkspaces);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Failed to load workspaces",
+          );
+        }
       }
     }
     load();
-  }, [page, limit, search]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredWorkspaces = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return workspaces;
+    return workspaces.filter((ws) => {
+      const ownerEmail = ws.owner_email ?? "";
+      return (
+        ws.name.toLowerCase().includes(term) ||
+        ownerEmail.toLowerCase().includes(term) ||
+        ws.plan.toLowerCase().includes(term) ||
+        ws.id.toLowerCase().includes(term)
+      );
+    });
+  }, [search, workspaces]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredWorkspaces.length / limit));
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedWorkspaces = useMemo(() => {
+    const start = (currentPage - 1) * limit;
+    return filteredWorkspaces.slice(start, start + limit);
+  }, [currentPage, filteredWorkspaces, limit]);
 
   const chartData = useMemo(
     () =>
-      workspaces.map((ws) => ({
+      paginatedWorkspaces.map((ws) => ({
         label: ws.name.slice(0, 8),
         value: ws.run_count,
       })),
-    [workspaces],
+    [paginatedWorkspaces],
   );
 
   return (
@@ -93,7 +130,7 @@ export default function WorkspacesList() {
       ) : (
         <>
           <Table
-            data={workspaces}
+            data={paginatedWorkspaces}
             columns={[
               {
                 key: "id",
@@ -128,9 +165,9 @@ export default function WorkspacesList() {
             empty="No workspaces found"
           />
           <Pagination
-            page={page}
+            page={currentPage}
             limit={limit}
-            total={total}
+            total={filteredWorkspaces.length}
             onPageChange={setPage}
           />
         </>

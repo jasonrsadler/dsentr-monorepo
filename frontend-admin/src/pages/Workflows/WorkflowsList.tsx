@@ -6,43 +6,82 @@ import SearchBox from "../../components/SearchBox";
 import Table from "../../components/Table";
 import { listWorkflows } from "../../api/workflows";
 import { WorkflowSummary } from "../../api/types";
+import { fetchAllPages } from "../../api/fetchAllPages";
 
 export default function WorkflowsList() {
-  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
+  const [allWorkflows, setAllWorkflows] = useState<WorkflowSummary[]>([]);
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
-  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"table" | "chart">("table");
   const [error, setError] = useState<string>();
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       try {
-        const res = await listWorkflows({
-          page,
-          limit,
-          search: search.trim() || undefined,
-          sort_by: "updated_at",
-        });
-        setWorkflows(res.data);
-        setTotal(res.total);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load workflows",
+        setError(undefined);
+        const fetchedWorkflows = await fetchAllPages((pageNum, pageSize) =>
+          listWorkflows({
+            page: pageNum,
+            limit: pageSize,
+            sort_by: "updated_at",
+          }),
         );
+
+        if (!cancelled) {
+          setAllWorkflows(fetchedWorkflows);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Failed to load workflows",
+          );
+        }
       }
     }
+
     load();
-  }, [page, limit, search]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredWorkflows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return allWorkflows;
+    return allWorkflows.filter((wf) => {
+      const workspace = wf.workspace_id ?? "";
+      return (
+        wf.name.toLowerCase().includes(term) ||
+        workspace.toLowerCase().includes(term) ||
+        wf.id.toLowerCase().includes(term)
+      );
+    });
+  }, [allWorkflows, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredWorkflows.length / limit));
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedWorkflows = useMemo(() => {
+    const start = (currentPage - 1) * limit;
+    return filteredWorkflows.slice(start, start + limit);
+  }, [currentPage, filteredWorkflows, limit]);
 
   const chartData = useMemo(
     () =>
-      workflows.map((wf) => ({
+      paginatedWorkflows.map((wf) => ({
         label: wf.name.slice(0, 8),
         value: wf.run_count,
       })),
-    [workflows],
+    [paginatedWorkflows],
   );
 
   return (
@@ -89,7 +128,7 @@ export default function WorkflowsList() {
       ) : (
         <>
           <Table
-            data={workflows}
+            data={paginatedWorkflows}
             columns={[
               {
                 key: "id",
@@ -127,9 +166,9 @@ export default function WorkflowsList() {
             empty="No workflows"
           />
           <Pagination
-            page={page}
+            page={currentPage}
             limit={limit}
-            total={total}
+            total={filteredWorkflows.length}
             onPageChange={setPage}
           />
         </>
