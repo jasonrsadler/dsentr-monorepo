@@ -61,6 +61,13 @@ export default function DashboardLayout() {
   const hasMultipleWorkspaces = memberships.length > 1
   const previousSearchRef = useRef<string | null>(null)
   const hasSyncedQueryRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const currentWorkspaceName = useMemo(() => {
     if (!currentWorkspace) return ''
@@ -186,10 +193,14 @@ export default function DashboardLayout() {
   )
 
   const refreshUnreadMessages = useCallback(async () => {
+    if (!isMountedRef.current) return
+    if (typeof window === 'undefined') return
     try {
       const response = await fetchIssueThreads()
+      if (!isMountedRef.current) return
       setUnreadMessages(response.unread_admin_messages)
     } catch {
+      if (!isMountedRef.current) return
       setUnreadMessages(0)
     }
   }, [])

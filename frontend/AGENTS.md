@@ -112,6 +112,7 @@ oUnusedLocals.
 - Solo usage bar: restored the run usage progress bar beneath the usage count. Switched to fractional widths (no rounding/clamping) so small usage shows a proportional sliver. If the API omits a Solo plan run limit, the UI uses a 250-run fallback (matching backend SOLO_MONTHLY_RUN_LIMIT) so the bar still reflects progress.
 - Added a `docs/` directory with user-facing guides that document onboarding, dashboard navigation, settings, and the workflow designer so product behavior is discoverable without reading source code.
 - Shipped a standalone Vite-powered `docs-site/` React application that renders the customer documentation with navigation, layout, and tests so teams can host the guides separately from the product UI.
+- Guarded unread message fetching in `DashboardLayout` so state updates are skipped after unmount or in non-window environments, preventing test-time window reference errors.
 
 ## Additional Changes (test fixes + tooling alignment)
 - Downgraded  to  to satisfy  peer constraints and unblock installs/tests without .

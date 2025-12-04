@@ -166,6 +166,7 @@ function FormatterNodeContent({
   return (
     <motion.div
       className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
+      key="expanded-content"
       style={{
         width: expanded ? 'auto' : 256,
         minWidth: 256,

@@ -162,6 +162,7 @@ function DelayNodeContent({
 
   return (
     <motion.div
+      key="expanded-content"
       className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       style={{
         width: expanded ? 'auto' : 256,
