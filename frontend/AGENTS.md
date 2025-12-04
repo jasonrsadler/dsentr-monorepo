@@ -32,6 +32,7 @@ seCallback`, `useMemo`) to prevent infinite renders.
 
 ## Change Reasons
 - Dashboard now consumes workflow SSE updates and shows conflict banners so workspace collaborators stay synced and avoid overwriting each other's saves.
+- Removed the "Test Action" buttons from action nodes to keep the workflow canvas focused on configuration instead of per-node manual execution.
 SheetsAction credential fallback guard:
 - Prevent Sheets action nodes from silently auto-selecting the personal Google credential after a shared workspace credential disappears. Track when we clear a workspace selection and suppress the automatic fallback so users must explicitly pick another connection, keeping React Flow updates bounded.
 

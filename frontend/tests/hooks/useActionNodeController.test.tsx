@@ -5,19 +5,9 @@ import useActionNodeController, {
   PLAN_RESTRICTION_MESSAGES,
   type ActionNodeData
 } from '@/components/workflow/nodes/useActionNodeController'
-import type { BaseActionNodeRunState } from '@/components/workflow/nodes/BaseActionNode'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
 describe('useActionNodeController', () => {
-  const createRunState = (): BaseActionNodeRunState => ({
-    canInvoke: true,
-    isInvoking: false,
-    isRunning: false,
-    isSucceeded: false,
-    isFailed: false,
-    run: vi.fn().mockResolvedValue(undefined)
-  })
-
   const resetStore = () => {
     act(() => {
       useWorkflowStore.setState((state) => ({
@@ -64,8 +54,7 @@ describe('useActionNodeController', () => {
       effectiveCanEdit: true,
       onRestrictionNotice: undefined as ((message: string) => void) | undefined,
       toggleExpanded: vi.fn(),
-      remove: vi.fn(),
-      runState: createRunState()
+      remove: vi.fn()
     }
   }
 
@@ -75,7 +64,6 @@ describe('useActionNodeController', () => {
 
   it('emits plan restriction notices for restricted sheets actions', async () => {
     const noticeSpy = vi.fn()
-    const runState = createRunState()
 
     setNodeData({
       label: 'Sheets',
@@ -88,25 +76,18 @@ describe('useActionNodeController', () => {
       useActionNodeController({
         ...buildOptions(),
         planTier: 'solo',
-        onRestrictionNotice: noticeSpy,
-        runState
+        onRestrictionNotice: noticeSpy
       })
     )
 
     expect(result.current.planRestrictionMessage).toBe(
       PLAN_RESTRICTION_MESSAGES.sheets
     )
-    expect(result.current.canRunTest).toBe(false)
+    expect(result.current.combinedHasValidationErrors).toBe(true)
 
     await waitFor(() => {
       expect(noticeSpy).toHaveBeenCalledWith(PLAN_RESTRICTION_MESSAGES.sheets)
     })
-
-    act(() => {
-      result.current.handleTestAction()
-    })
-
-    expect(runState.run).not.toHaveBeenCalled()
   })
 
   it('merges child param updates and marks the node dirty', async () => {

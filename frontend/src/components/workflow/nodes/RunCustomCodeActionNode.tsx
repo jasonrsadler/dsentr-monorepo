@@ -80,8 +80,7 @@ function RunCustomCodeActionNodeContent({
     nodeData: nodeData as ActionNodeData | null,
     effectiveCanEdit,
     toggleExpanded,
-    remove,
-    runState
+    remove
   })
 
   const ringClass = runState.isFailed
@@ -135,23 +134,6 @@ function RunCustomCodeActionNodeContent({
         {controller.labelError && (
           <p className="mt-2 text-xs text-red-500">{controller.labelError}</p>
         )}
-        <button
-          onClick={controller.handleTestAction}
-          disabled={!controller.canRunTest || controller.isTestInvoking}
-          title={
-            !controller.canRunTest && controller.runState.blockedReason
-              ? controller.runState.blockedReason
-              : undefined
-          }
-          className="mt-2 w-full py-1 text-sm rounded-md bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
-        >
-          {controller.runButtonLabel}
-        </button>
-        {!controller.canRunTest && controller.runState.blockedReason ? (
-          <p className="mt-1 text-xs text-amber-600">
-            {controller.runState.blockedReason}
-          </p>
-        ) : null}
 
         <AnimatePresence>
           {controller.expanded && (

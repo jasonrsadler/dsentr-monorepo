@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 
 import { normalizePlanTier } from '@/lib/planTiers'
 import { errorMessage } from '@/lib/errorMessage'
-import type { BaseActionNodeRunState } from './BaseActionNode'
 import { useActionMeta, useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useWorkflowFlyout } from '@/components/workflow/useWorkflowFlyout'
@@ -41,7 +40,6 @@ interface UseActionNodeControllerOptions {
   onRestrictionNotice?: (message: string) => void
   toggleExpanded: () => void
   remove: () => void
-  runState?: BaseActionNodeRunState
 }
 
 export interface ActionNodeController {
@@ -74,11 +72,6 @@ export interface ActionNodeController {
   handlePlanUpgradeClick: () => void
   markDirty: () => void
   setValidationState: (flag: boolean) => void
-  canRunTest: boolean
-  isTestInvoking: boolean
-  runButtonLabel: string
-  handleTestAction: () => void
-  runState: BaseActionNodeRunState
 }
 
 export function useActionNodeController({
@@ -88,24 +81,8 @@ export function useActionNodeController({
   effectiveCanEdit,
   onRestrictionNotice,
   toggleExpanded,
-  remove,
-  runState
+  remove
 }: UseActionNodeControllerOptions): ActionNodeController {
-  const fallbackRunState: BaseActionNodeRunState = useMemo(
-    () => ({
-      canInvoke: false,
-      isInvoking: false,
-      isRunning: false,
-      isSucceeded: false,
-      isFailed: false,
-      run: async () => {},
-      blockedReason: null
-    }),
-    []
-  )
-
-  const safeRunState = runState ?? fallbackRunState
-
   const meta = useActionMeta(id)
   const params = useActionParams<ActionNodeParams>(id, meta.actionType)
 
@@ -275,27 +252,6 @@ export function useActionNodeController({
     }
   }, [])
 
-  const canRunTest =
-    Boolean(safeRunState?.canInvoke) && !combinedHasValidationErrors
-  const isTestInvoking = Boolean(safeRunState?.isInvoking)
-  const runButtonLabel = isTestInvoking ? 'Testing...' : 'Test Action'
-
-  const sanitizedRunParams = useMemo(() => {
-    if (!params || typeof params !== 'object') return {}
-    const next: Record<string, unknown> = {}
-    Object.entries(params).forEach(([key, value]) => {
-      if (key === 'dirty') return
-      next[key] = value
-    })
-    return next
-  }, [params])
-
-  const handleTestAction = useCallback(() => {
-    if (!safeRunState.canInvoke) return
-    if (combinedHasValidationErrors) return
-    safeRunState.run(sanitizedRunParams)
-  }, [safeRunState, combinedHasValidationErrors, sanitizedRunParams])
-
   const setValidationState = useCallback(
     (flag: boolean) => {
       if (!effectiveCanEdit) return
@@ -330,12 +286,7 @@ export function useActionNodeController({
     handleStopOnErrorChange,
     handlePlanUpgradeClick,
     markDirty,
-    setValidationState,
-    canRunTest,
-    isTestInvoking,
-    runButtonLabel,
-    handleTestAction,
-    runState: safeRunState
+    setValidationState
   }
 }
 

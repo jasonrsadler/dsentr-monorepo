@@ -291,7 +291,7 @@ describe('RunCustomCodeAction', () => {
     })
   })
 
-  it('disables test actions when run availability is blocked', async () => {
+  it('omits the test action control', () => {
     seedCustomCodeNode(createBaseParams())
 
     render(
@@ -308,9 +308,11 @@ describe('RunCustomCodeAction', () => {
       </TestFlowWrapper>
     )
 
-    const button = screen.getByRole('button', { name: /Test Action/i })
-    expect(button).toBeDisabled()
-
-    expect(screen.getByText(/monthly run limit reached/i)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /Test Action/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/monthly run limit reached/i)
+    ).not.toBeInTheDocument()
   })
 })
