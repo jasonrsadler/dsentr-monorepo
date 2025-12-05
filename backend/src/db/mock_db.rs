@@ -321,6 +321,8 @@ impl UserRepository for MockDb {
             user_id: activity.user_id,
             session_id: activity.session_id,
             ip_address: activity.ip_address.to_string(),
+            ipv4_address: activity.ipv4_address.map(|ip| ip.to_string()),
+            ipv6_address: activity.ipv6_address.map(|ip| ip.to_string()),
             user_agent: activity.user_agent,
             city: activity.city,
             region: activity.region,

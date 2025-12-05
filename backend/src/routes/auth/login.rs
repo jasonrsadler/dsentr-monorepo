@@ -149,8 +149,9 @@ pub async fn handle_login(
                 });
 
             let client_ip = extract_client_ip(&request_headers, Some(client_addr));
-            if let Some(ip_addr) = client_ip {
-                let lookup = lookup_ip_metadata(app_state.http_client.as_ref(), ip_addr).await;
+            if let Some(client_ip) = client_ip {
+                let primary_ip = client_ip.primary;
+                let lookup = lookup_ip_metadata(app_state.http_client.as_ref(), primary_ip).await;
                 let (city, region, country, latitude, longitude, is_proxy, is_vpn, lookup_raw) =
                     if let Some(meta) = lookup {
                         (
@@ -170,7 +171,9 @@ pub async fn handle_login(
                 let activity = NewLoginActivity {
                     user_id: user.id,
                     session_id,
-                    ip_address: IpNetwork::from(ip_addr),
+                    ip_address: IpNetwork::from(primary_ip),
+                    ipv4_address: client_ip.ipv4.map(IpNetwork::from),
+                    ipv6_address: client_ip.ipv6.map(IpNetwork::from),
                     user_agent: user_agent.clone(),
                     city,
                     region,

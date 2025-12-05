@@ -19,6 +19,7 @@
 
 ## Change Reasons
 - Added shared IP utilities, session cleanup logging, and login activity persistence so auth flows capture IP/location metadata and retain logout timestamps for audit use across routes and admin tools.
+- Login activity now prefers IPv4 when available and also stores IPv6 separately so audits can distinguish address families.
 - AppState now wires workspace OAuth promotion repositories/services for shared connection APIs.
 - Workflow run execution now records connection metadata and emits run events from routes, workers, and the engine.
 - Config now exposes Stripe credentials so downstream services can initialize billing integrations without bespoke env parsing.

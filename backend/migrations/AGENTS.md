@@ -34,6 +34,7 @@
 
 ## Change Reasons
 - Added `user_login_activity` table to persist login IPs, geo/proxy metadata, and logout timestamps for audit visibility.
+- Added IPv4-preferred capture with separate IPv6 column in login activity to distinguish address families while keeping existing audits intact.
 - Added workspace connection and audit event migration to back shared OAuth token promotion.
 - Added owner/token metadata to `workspace_connections` plus a composite uniqueness constraint so multiple shared credentials per provider can coexist without colliding on `(workspace_id, provider)`.
 - Added `workspace_run_usage` table to track monthly per-workspace run counts with indexed period windows so plan quota enforcement can atomically increment without race conditions.

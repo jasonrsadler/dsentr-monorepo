@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO user_login_activity (\n                user_id,\n                session_id,\n                ip_address,\n                ipv4_address,\n                ipv6_address,\n                user_agent,\n                city,\n                region,\n                country,\n                latitude,\n                longitude,\n                is_proxy,\n                is_vpn,\n                lookup_raw,\n                logged_in_at\n            )\n            VALUES (\n                $1,\n                $2,\n                $3::inet,\n                $4::inet,\n                $5::inet,\n                $6,\n                $7,\n                $8,\n                $9,\n                $10,\n                $11,\n                $12,\n                $13,\n                $14,\n                $15\n            )\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Inet",
+        "Inet",
+        "Inet",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Float8",
+        "Float8",
+        "Bool",
+        "Bool",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a3ee4fa5730c66eccbc78cfdd27439383bc86563a2384fb618320b40792529e1"
+}

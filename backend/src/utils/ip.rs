@@ -7,6 +7,13 @@ use std::time::Duration;
 use tracing::warn;
 
 #[derive(Debug, Clone)]
+pub struct ClientIp {
+    pub primary: IpAddr,
+    pub ipv4: Option<IpAddr>,
+    pub ipv6: Option<IpAddr>,
+}
+
+#[derive(Debug, Clone)]
 pub struct IpLookup {
     pub city: Option<String>,
     pub region: Option<String>,
@@ -36,28 +43,63 @@ struct IpWhoisResponse {
     security: Option<IpWhoisSecurity>,
 }
 
-pub fn extract_client_ip(headers: &HeaderMap, connect_info: Option<SocketAddr>) -> Option<IpAddr> {
-    let forwarded = headers
+pub fn extract_client_ip(
+    headers: &HeaderMap,
+    connect_info: Option<SocketAddr>,
+) -> Option<ClientIp> {
+    let mut first: Option<IpAddr> = None;
+    let mut first_ipv4: Option<IpAddr> = None;
+    let mut first_ipv6: Option<IpAddr> = None;
+
+    if let Some(raw) = headers
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .and_then(|value| value.parse::<IpAddr>().ok());
-
-    if forwarded.is_some() {
-        return forwarded;
+    {
+        for part in raw.split(',').map(str::trim).filter(|v| !v.is_empty()) {
+            if let Ok(ip) = part.parse::<IpAddr>() {
+                if first.is_none() {
+                    first = Some(ip);
+                }
+                match ip {
+                    IpAddr::V4(_) if first_ipv4.is_none() => first_ipv4 = Some(ip),
+                    IpAddr::V6(_) if first_ipv6.is_none() => first_ipv6 = Some(ip),
+                    _ => {}
+                }
+            }
+        }
     }
 
-    let real_ip = headers
-        .get("x-real-ip")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<IpAddr>().ok());
-
-    if real_ip.is_some() {
-        return real_ip;
+    if first.is_none() {
+        let real_ip = headers
+            .get("x-real-ip")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<IpAddr>().ok());
+        if let Some(ip) = real_ip {
+            first = Some(ip);
+            match ip {
+                IpAddr::V4(_) => first_ipv4 = Some(ip),
+                IpAddr::V6(_) => first_ipv6 = Some(ip),
+            }
+        }
     }
 
-    connect_info.map(|addr| addr.ip())
+    if first.is_none() {
+        if let Some(addr) = connect_info {
+            let ip = addr.ip();
+            first = Some(ip);
+            match ip {
+                IpAddr::V4(_) => first_ipv4 = Some(ip),
+                IpAddr::V6(_) => first_ipv6 = Some(ip),
+            }
+        }
+    }
+
+    let primary = first_ipv4.or(first)?;
+    Some(ClientIp {
+        primary,
+        ipv4: first_ipv4,
+        ipv6: first_ipv6,
+    })
 }
 
 pub async fn lookup_ip_metadata(client: &Client, ip: IpAddr) -> Option<IpLookup> {

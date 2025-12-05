@@ -40,6 +40,8 @@ export interface UserLoginActivity {
   user_id: string;
   session_id: string;
   ip_address: string;
+  ipv4_address?: string | null;
+  ipv6_address?: string | null;
   user_agent?: string | null;
   city?: string | null;
   region?: string | null;
