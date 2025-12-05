@@ -106,7 +106,7 @@ export default function IntegrationsTab({
   >(() =>
     PROVIDERS.reduce(
       (acc, provider) => {
-        acc[provider.key] = true
+        acc[provider.key] = false
         return acc
       },
       {} as Record<OAuthProvider, boolean>
