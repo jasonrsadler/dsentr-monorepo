@@ -29,7 +29,7 @@ describe('NavLinks', () => {
 
     const aboutLink = screen.getByText('About')
     expect(aboutLink).not.toHaveClass('font-semibold')
-    expect(aboutLink).toHaveClass('text-white')
+    expect(aboutLink).toHaveClass('text-zinc-700')
   })
 
   it('applies active class to the About link when on /about route', () => {
@@ -45,7 +45,7 @@ describe('NavLinks', () => {
 
     const homeLink = screen.getByText('Home')
     expect(homeLink).not.toHaveClass('font-semibold')
-    expect(homeLink).toHaveClass('text-white')
+    expect(homeLink).toHaveClass('text-zinc-700')
   })
 
   it('applies active class to the How it works link when on /how-it-works route', () => {
@@ -61,6 +61,6 @@ describe('NavLinks', () => {
 
     const homeLink = screen.getByText('Home')
     expect(homeLink).not.toHaveClass('font-semibold')
-    expect(homeLink).toHaveClass('text-white')
+    expect(homeLink).toHaveClass('text-zinc-700')
   })
 })

@@ -26,6 +26,12 @@ export default function PublicLayout() {
               {user.first_name} {user.last_name}
             </span>
             <NavigateButton
+              to="/dashboard"
+              className="px-3 py-2 text-sm leading-none h-9"
+            >
+              Dashboard
+            </NavigateButton>
+            <NavigateButton
               to="/logout"
               className="px-3 py-2 text-sm leading-none h-9"
             >

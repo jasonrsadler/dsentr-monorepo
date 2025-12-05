@@ -6,6 +6,7 @@ import DashboardLayout from '@/layouts/DashboardLayout'
 import Home from '@/Home'
 import About from '@/About'
 import HowItWorks from '@/HowItWorks'
+import Pricing from '@/Pricing'
 import Signup from '@/Signup'
 import CheckEmail from '@/CheckEmail'
 import VerifyEmail from '@/VerifyEmail'
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
+          <Route path="/pricing" element={<Pricing />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/check-email" element={<CheckEmail />} />
           <Route path="/verify-email" element={<VerifyEmail />} />

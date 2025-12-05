@@ -106,8 +106,7 @@ export default function HowItWorks() {
 
           <div className="flex flex-col items-center gap-4 rounded-2xl border border-indigo-200/40 bg-indigo-500/5 p-8 text-center shadow-inner dark:border-indigo-400/30 dark:bg-indigo-500/10">
             <p className="max-w-2xl text-base text-zinc-700 dark:text-zinc-200">
-              Ready to orchestrate your next workflow? Join the waitlist to
-              access DSentr as soon as it opens to early teams.
+              Ready to orchestrate your next workflow?
             </p>
             <NavigateButton to="/signup" className="px-6 py-3 text-base">
               Try Now

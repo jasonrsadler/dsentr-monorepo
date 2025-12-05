@@ -1,6 +1,7 @@
 # Components Agent Notes
 
 ## Change Reasons
+- Added a Pricing link to the marketing navigation (desktop and mobile), refreshed the public nav styling, and added a signed-in Dashboard shortcut ahead of logout.
 - HTTP Request node: surface a warning when the URL targets `VITE_API_BASE_URL` so users avoid self-calling workflows that can loop indefinitely and rack up overage charges.
 - Google Sheets action: guard against automatically falling back to the personal credential after a shared workspace connection is removed by tracking when a workspace selection is cleared. This keeps users from silently swapping credentials and mirrors the React Flow safety patterns for avoiding redundant updates.
 - UI: Unified scrollbar theming across scrollable components to match the Settings modal.

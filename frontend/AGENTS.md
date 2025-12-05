@@ -31,6 +31,8 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Leaving a workspace is initiated from the Members settings tab. The "Leave workspace" button must be disabled for owners, call the `leaveWorkspace` API when allowed, refresh cached memberships, and send users back to their Solo workspace (or next available one) when the server responds with `403`.
 
 ## Change Reasons
+- Refreshed public navigation styling and added a Dashboard shortcut for authenticated users before logout.
+- Added a public Pricing page covering Solo and Workspace plans (pricing grid, callout, FAQ) and routed it via /pricing in the marketing layout.
 - Dashboard now consumes workflow SSE updates and shows conflict banners so workspace collaborators stay synced and avoid overwriting each other's saves.
 - Removed the "Test Action" buttons from action nodes to keep the workflow canvas focused on configuration instead of per-node manual execution.
 SheetsAction credential fallback guard:
