@@ -133,7 +133,25 @@ export default function UserDetail() {
           data={logins}
           rowKey={(row) => row.id}
           columns={[
-            { key: "ip_address", header: "IP address" },
+            {
+              key: "ip_address",
+              header: "IP (primary)",
+              render: (row) =>
+                row.ipv4_address ??
+                row.ip_address ??
+                row.ipv6_address ??
+                "Unknown",
+            },
+            {
+              key: "ipv4_address",
+              header: "IPv4",
+              render: (row) => row.ipv4_address ?? "—",
+            },
+            {
+              key: "ipv6_address",
+              header: "IPv6",
+              render: (row) => row.ipv6_address ?? "—",
+            },
             {
               key: "location",
               header: "Location",
