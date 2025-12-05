@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { AnimatePresence, motion } from 'framer-motion'
 import FormatterNodeConfig from '@/components/actions/logic/FormatterNode'
@@ -89,6 +89,7 @@ function FormatterNodeContent({
     isSucceeded,
     isFailed
   } = baseProps
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const normalizedConfig = useMemo(
     () =>
@@ -147,12 +148,19 @@ function FormatterNodeContent({
     ]
   )
 
-  const handleDelete = useCallback(() => {
+  const requestDelete = useCallback(() => {
     if (!effectiveCanEdit) return
-    const ok = window.confirm('Delete this node? This action cannot be undone.')
-    if (ok) {
-      remove()
-    }
+    setConfirmingDelete(true)
+  }, [effectiveCanEdit])
+
+  const cancelDelete = useCallback(() => {
+    setConfirmingDelete(false)
+  }, [])
+
+  const confirmDelete = useCallback(() => {
+    if (!effectiveCanEdit) return
+    setConfirmingDelete(false)
+    remove()
   }, [effectiveCanEdit, remove])
 
   const ringClass = isFailed
@@ -209,7 +217,7 @@ function FormatterNodeContent({
           onConfirmingDelete={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            handleDelete()
+            requestDelete()
           }}
         />
 
@@ -236,6 +244,37 @@ function FormatterNodeContent({
           )}
         </AnimatePresence>
       </div>
+      <AnimatePresence>
+        {confirmingDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl"
+          >
+            <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl shadow-md w-56">
+              <p className="text-sm mb-3">Delete this node?</p>
+              <p className="text-sm mb-3">This action can not be undone</p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={cancelDelete}
+                  className="px-2 py-1 text-xs rounded border"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  className="px-2 py-1 text-xs rounded bg-red-500 text-white"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
