@@ -33,6 +33,8 @@ seCallback`, `useMemo`) to prevent infinite renders.
 ## Change Reasons
 - Refreshed public navigation styling and added a Dashboard shortcut for authenticated users before logout.
 - Added a public Pricing page covering Solo and Workspace plans (pricing grid, callout, FAQ) and routed it via /pricing in the marketing layout.
+- Added a static sitemap at `public/sitemap.xml` that lists all public/non-auth pages plus the documentation site to improve search engine indexing coverage.
+- Normalized `src/Pricing.tsx` formatting to satisfy prettier linting during sitemap work; no behavior changes.
 - Dashboard now consumes workflow SSE updates and shows conflict banners so workspace collaborators stay synced and avoid overwriting each other's saves.
 - Removed the "Test Action" buttons from action nodes to keep the workflow canvas focused on configuration instead of per-node manual execution.
 SheetsAction credential fallback guard:

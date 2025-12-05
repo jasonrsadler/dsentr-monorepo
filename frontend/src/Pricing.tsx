@@ -42,14 +42,10 @@ const soloFeatures: PlanFeature[] = [
 const workspaceFeatures: PlanFeature[] = [
   { label: '20,000 workflow runs per month included', status: 'included' },
   {
-    label:
-      'Additional runs billed as overage ($0.003 per run over)',
+    label: 'Additional runs billed as overage ($0.003 per run over)',
     status: 'note'
   },
-  {
-    label: 'Up to 8 members',
-    status: 'included'
-  },
+  { label: 'Up to 8 members', status: 'included' },
   { label: 'Unlimited workflows', status: 'included' },
   { label: 'Access to all triggers and actions', status: 'included' },
   { label: 'OAuth workspace connections', status: 'included' },
@@ -281,10 +277,11 @@ function Accordion({ items }: { items: FaqItem[] }) {
               </span>
             </button>
             <div
-              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${isOpen
-                ? 'grid-rows-[1fr] opacity-100'
-                : 'grid-rows-[0fr] opacity-0'
-                }`}
+              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+                isOpen
+                  ? 'grid-rows-[1fr] opacity-100'
+                  : 'grid-rows-[0fr] opacity-0'
+              }`}
             >
               <div className="overflow-hidden">
                 <p className="mt-3 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
