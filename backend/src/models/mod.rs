@@ -2,6 +2,7 @@ pub mod account_deletion;
 pub mod early_access;
 pub mod egress_block_event;
 pub mod issue_report;
+pub mod login_activity;
 pub mod oauth_token;
 pub mod plan;
 pub mod signup;

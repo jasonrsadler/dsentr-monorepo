@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE user_login_activity\n                    SET logged_out_at = COALESCE(logged_out_at, now())\n                    WHERE session_id = ANY($1)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "880d1e9ec0aed3a47ac0cb88a90a2c5148acfc509472e316e4cb116574ab6733"
+}

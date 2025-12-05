@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE user_login_activity\n            SET logged_out_at = COALESCE(logged_out_at, $2)\n            WHERE session_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "05d7293b43a05d083a22e90e67c3e5b5d1aa31152bf192fecb101c2fdc00ac80"
+}

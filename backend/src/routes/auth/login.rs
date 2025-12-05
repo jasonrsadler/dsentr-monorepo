@@ -1,23 +1,33 @@
 use crate::routes::auth::claims::{Claims, TokenUse};
 use crate::{
-    models::user::OauthProvider,
+    models::{login_activity::NewLoginActivity, user::OauthProvider},
     responses::JsonResponse,
     session,
     state::AppState,
-    utils::{password::verify_password, plan_limits::NormalizedPlanTier},
+    utils::{
+        ip::{extract_client_ip, lookup_ip_metadata},
+        password::verify_password,
+        plan_limits::NormalizedPlanTier,
+    },
 };
 
 use axum::{
-    extract::{Json, State},
+    extract::{ConnectInfo, Json, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
-use axum_extra::extract::cookie::{Cookie, SameSite};
+use axum_extra::{
+    extract::cookie::{Cookie, SameSite},
+    headers::UserAgent,
+    typed_header::TypedHeader,
+};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, to_value};
+use sqlx::types::ipnetwork::IpNetwork;
+use std::net::SocketAddr;
 use time::{Duration as TimeDuration, OffsetDateTime};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::session::AuthSession;
@@ -31,6 +41,9 @@ pub struct LoginPayload {
 
 pub async fn handle_login(
     State(app_state): State<AppState>,
+    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
+    request_headers: HeaderMap,
+    maybe_agent: Option<TypedHeader<UserAgent>>,
     Json(payload): Json<LoginPayload>,
 ) -> Response {
     let user = app_state.db.find_user_by_email(&payload.email).await;
@@ -124,6 +137,59 @@ pub async fn handle_login(
                 }
             };
 
+            let user_agent = maybe_agent
+                .as_ref()
+                .map(|TypedHeader(agent)| agent.to_string())
+                .filter(|ua| !ua.is_empty())
+                .or_else(|| {
+                    request_headers
+                        .get(header::USER_AGENT)
+                        .and_then(|value| value.to_str().ok())
+                        .map(|ua| ua.to_string())
+                });
+
+            let client_ip = extract_client_ip(&request_headers, Some(client_addr));
+            if let Some(ip_addr) = client_ip {
+                let lookup = lookup_ip_metadata(app_state.http_client.as_ref(), ip_addr).await;
+                let (city, region, country, latitude, longitude, is_proxy, is_vpn, lookup_raw) =
+                    if let Some(meta) = lookup {
+                        (
+                            meta.city,
+                            meta.region,
+                            meta.country,
+                            meta.latitude,
+                            meta.longitude,
+                            meta.is_proxy,
+                            meta.is_vpn,
+                            meta.raw,
+                        )
+                    } else {
+                        (None, None, None, None, None, None, None, None)
+                    };
+
+                let activity = NewLoginActivity {
+                    user_id: user.id,
+                    session_id,
+                    ip_address: IpNetwork::from(ip_addr),
+                    user_agent: user_agent.clone(),
+                    city,
+                    region,
+                    country,
+                    latitude,
+                    longitude,
+                    is_proxy,
+                    is_vpn,
+                    lookup_raw,
+                    logged_in_at: OffsetDateTime::now_utc(),
+                };
+
+                if let Err(err) = app_state.db.record_login_activity(activity).await {
+                    warn!(?err, user_id=%user.id, "failed to record login activity");
+                }
+            } else {
+                warn!(user_id=%user.id, "could not determine client ip for login");
+            }
+
             let secure_cookie = app_state.config.auth_cookie_secure;
             let session_cookie = Cookie::build(("dsentr_session", session_id.to_string()))
                 .http_only(true)
@@ -133,8 +199,8 @@ pub async fn handle_login(
                 .max_age(TimeDuration::hours(session_ttl_hours))
                 .build();
 
-            let mut headers = HeaderMap::new();
-            headers.insert(
+            let mut response_headers = HeaderMap::new();
+            response_headers.insert(
                 header::SET_COOKIE,
                 HeaderValue::from_str(&session_cookie.to_string()).unwrap(),
             );
@@ -142,7 +208,7 @@ pub async fn handle_login(
             let memberships_json = to_value(&memberships).expect("Membership serialization failed");
             (
                 StatusCode::OK,
-                headers,
+                response_headers,
                 Json(json!({
                     "success": true,
                     "user": user_json,
@@ -296,13 +362,14 @@ mod tests {
     use argon2::{Argon2, PasswordHasher};
     use axum::{
         body::{to_bytes, Body},
-        extract::Request,
+        extract::{ConnectInfo, Request},
         http::StatusCode,
         routing::post,
         Router,
     };
     use password_hash::SaltString;
     use rand_core::OsRng;
+    use std::net::SocketAddr;
     use time::OffsetDateTime;
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -432,6 +499,14 @@ mod tests {
             .with_state(app_state)
     }
 
+    fn login_request(payload: &LoginPayload) -> Request {
+        Request::post("/login")
+            .header("Content-Type", "application/json")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 3000))))
+            .body(Body::from(serde_json::to_vec(payload).unwrap()))
+            .unwrap()
+    }
+
     // --- Tests ---
 
     #[tokio::test]
@@ -454,15 +529,7 @@ mod tests {
             remember: true,
         };
 
-        let res = app
-            .oneshot(
-                Request::post("/login")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let res = app.oneshot(login_request(&payload)).await.unwrap();
 
         assert_eq!(res.status(), StatusCode::OK);
         let cookies: Vec<String> = res
@@ -502,15 +569,7 @@ mod tests {
             remember: false,
         };
 
-        let res = app
-            .oneshot(
-                Request::post("/login")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let res = app.oneshot(login_request(&payload)).await.unwrap();
 
         let cookies: Vec<String> = res
             .headers()
@@ -543,15 +602,7 @@ mod tests {
             remember: false,
         };
 
-        let res = app
-            .oneshot(
-                Request::post("/login")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let res = app.oneshot(login_request(&payload)).await.unwrap();
 
         let cookies: Vec<String> = res
             .headers()
@@ -587,15 +638,7 @@ mod tests {
             remember: false,
         };
 
-        let res = app
-            .oneshot(
-                Request::post("/login")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let res = app.oneshot(login_request(&payload)).await.unwrap();
 
         assert_eq!(res.status(), StatusCode::OK);
         let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
@@ -623,15 +666,7 @@ mod tests {
             remember: false,
         };
 
-        let res = app
-            .oneshot(
-                Request::post("/login")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let res = app.oneshot(login_request(&payload)).await.unwrap();
 
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
@@ -653,15 +688,7 @@ mod tests {
             remember: false,
         };
 
-        let res = app
-            .oneshot(
-                Request::post("/login")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let res = app.oneshot(login_request(&payload)).await.unwrap();
 
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
@@ -687,15 +714,7 @@ mod tests {
             remember: false,
         };
 
-        let res = app
-            .oneshot(
-                Request::post("/login")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let res = app.oneshot(login_request(&payload)).await.unwrap();
 
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }

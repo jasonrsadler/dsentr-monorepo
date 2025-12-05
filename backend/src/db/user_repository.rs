@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::models::{
     account_deletion::{AccountDeletionAuditInsert, AccountDeletionContext, AccountDeletionCounts},
     issue_report::NewIssueReport,
+    login_activity::{NewLoginActivity, UserLoginActivity},
     signup::SignupPayload,
     user::{OauthProvider, PublicUser, User},
 };
@@ -136,4 +137,18 @@ pub trait UserRepository: Send + Sync {
     async fn clear_stripe_customer_id(&self, user_id: Uuid) -> Result<(), sqlx::Error>;
 
     async fn delete_verification_tokens_for_user(&self, user_id: Uuid) -> Result<(), sqlx::Error>;
+
+    async fn record_login_activity(&self, activity: NewLoginActivity) -> Result<Uuid, sqlx::Error>;
+
+    async fn mark_logout_activity(
+        &self,
+        session_id: Uuid,
+        logged_out_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn list_login_activity_for_user(
+        &self,
+        user_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<UserLoginActivity>, sqlx::Error>;
 }

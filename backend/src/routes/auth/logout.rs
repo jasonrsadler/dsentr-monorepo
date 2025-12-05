@@ -1,6 +1,6 @@
 use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use time::Duration as TimeDuration;
+use time::{Duration as TimeDuration, OffsetDateTime};
 
 use crate::{
     responses::JsonResponse, routes::auth::session::extract_session_id, session, state::AppState,
@@ -12,6 +12,13 @@ pub async fn handle_logout(
     jar: CookieJar,
 ) -> impl IntoResponse {
     if let Ok(session_id) = extract_session_id(&headers) {
+        if let Err(err) = app_state
+            .db
+            .mark_logout_activity(session_id, OffsetDateTime::now_utc())
+            .await
+        {
+            tracing::warn!(?err, %session_id, "failed to record logout activity");
+        }
         match session::delete_session(app_state.db_pool.as_ref(), session_id).await {
             Ok(true) => tracing::info!(%session_id, "session deleted during logout"),
             Ok(false) => tracing::warn!(%session_id, "session missing during logout"),

@@ -161,6 +161,7 @@ pub fn router() -> Router<AppState> {
         .route("/purge-runs", post(purge_runs))
         .route("/users", get(list_users))
         .route("/users/{id}", get(get_user))
+        .route("/users/{id}/logins", get(list_user_login_activity))
         .route("/users/{id}/workspaces", get(list_user_workspaces))
         .route("/users/{id}/connections", get(list_user_connections))
         .route("/workspaces", get(list_workspaces))
@@ -378,6 +379,24 @@ pub async fn list_user_connections(
     connections.append(&mut workspace_connections);
 
     Ok(Json(connections))
+}
+
+pub async fn list_user_login_activity(
+    State(state): State<AppState>,
+    Path(user_id): Path<Uuid>,
+    Query(query): Query<ListQuery>,
+) -> Result<impl IntoResponse, Response> {
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let events = state
+        .db
+        .list_login_activity_for_user(user_id, limit)
+        .await
+        .map_err(|err| {
+            error!(?err, %user_id, "failed to load user login activity");
+            JsonResponse::server_error("Failed to load login activity").into_response()
+        })?;
+
+    Ok(Json(events))
 }
 
 pub async fn list_workspaces(

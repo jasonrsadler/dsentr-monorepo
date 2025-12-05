@@ -3,11 +3,13 @@ import { Link, useParams } from "react-router-dom";
 import {
   getUser,
   getUserConnections,
+  getUserLogins,
   getUserWorkspaces,
 } from "../../api/users";
 import {
   AdminUserDetail,
   ConnectionSummary,
+  UserLoginActivity,
   WorkspaceMembershipSummary,
 } from "../../api/types";
 import JsonView from "../../components/JsonView";
@@ -20,20 +22,24 @@ export default function UserDetail() {
     [],
   );
   const [connections, setConnections] = useState<ConnectionSummary[]>([]);
+  const [logins, setLogins] = useState<UserLoginActivity[]>([]);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     if (!id) return;
     async function load() {
       try {
-        const [userRes, workspacesRes, connectionsRes] = await Promise.all([
-          getUser(id ?? ""),
-          getUserWorkspaces(id ?? ""),
-          getUserConnections(id ?? ""),
-        ]);
+        const [userRes, workspacesRes, connectionsRes, loginsRes] =
+          await Promise.all([
+            getUser(id ?? ""),
+            getUserWorkspaces(id ?? ""),
+            getUserConnections(id ?? ""),
+            getUserLogins(id ?? "", 100),
+          ]);
         setUser(userRes);
         setWorkspaces(workspacesRes);
         setConnections(connectionsRes);
+        setLogins(loginsRes);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load user");
       }
@@ -117,6 +123,65 @@ export default function UserDetail() {
             empty="No connections"
           />
         </div>
+      </div>
+
+      <div className="card">
+        <div className="mb-2 text-sm font-semibold text-slate-200">
+          Login activity
+        </div>
+        <Table
+          data={logins}
+          rowKey={(row) => row.id}
+          columns={[
+            { key: "ip_address", header: "IP address" },
+            {
+              key: "location",
+              header: "Location",
+              render: (row) => {
+                const location = [row.city, row.region, row.country]
+                  .filter(Boolean)
+                  .join(", ");
+                return location || "Unknown";
+              },
+            },
+            {
+              key: "proxy",
+              header: "Proxy/VPN",
+              render: (row) => {
+                const flags = [
+                  row.is_proxy ? "Proxy" : null,
+                  row.is_vpn ? "VPN" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" / ");
+                return flags || "Not detected";
+              },
+            },
+            {
+              key: "logged_in_at",
+              header: "Logged in",
+              render: (row) => new Date(row.logged_in_at).toLocaleString(),
+            },
+            {
+              key: "logged_out_at",
+              header: "Logged out",
+              render: (row) =>
+                row.logged_out_at
+                  ? new Date(row.logged_out_at).toLocaleString()
+                  : "Active/unset",
+            },
+            {
+              key: "user_agent",
+              header: "User agent",
+              render: (row) => (
+                <span className="text-xs text-slate-400">
+                  {row.user_agent ?? "Unknown"}
+                </span>
+              ),
+            },
+          ]}
+          empty="No login activity on record"
+        />
       </div>
 
       <JsonView value={user?.settings ?? {}} />

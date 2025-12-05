@@ -345,6 +345,29 @@ mod tests {
         async fn clear_stripe_customer_id(&self, _user_id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
         }
+
+        async fn record_login_activity(
+            &self,
+            _activity: crate::models::login_activity::NewLoginActivity,
+        ) -> Result<Uuid, sqlx::Error> {
+            Ok(Uuid::new_v4())
+        }
+
+        async fn mark_logout_activity(
+            &self,
+            _session_id: Uuid,
+            _logged_out_at: OffsetDateTime,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn list_login_activity_for_user(
+            &self,
+            _user_id: Uuid,
+            _limit: i64,
+        ) -> Result<Vec<crate::models::login_activity::UserLoginActivity>, sqlx::Error> {
+            Ok(vec![])
+        }
     }
 
     fn make_app(behavior: MockBehavior) -> Router {

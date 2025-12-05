@@ -21,6 +21,7 @@ itly coordinated.
 
 - Delay node execution now honors explicit mode (duration vs datetime) and fails fast when the chosen mode lacks required inputs.
 ## Change Reasons
+- Added login activity tracking (IP, user agent, geo/proxy hints) so admin tooling can audit where users sign in and when sessions end.
 - Added pluggable app email delivery with environment-controlled provider selection (`EMAIL_PROVIDER`). Supports `smtp` and `sendgrid` for signup, password reset, invites, and account notifications. This accommodates hosts that disallow outbound SMTP while preserving SMTP for environments that support it.
 - Workflow node email behavior is unchanged: nodes using SMTP still send via runtime SMTP configuration and are not affected by the app-level provider switch.
 

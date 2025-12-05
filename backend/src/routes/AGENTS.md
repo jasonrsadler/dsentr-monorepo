@@ -23,6 +23,7 @@
 - Settings secrets APIs now decrypt/encrypt user secret stores with `API_SECRETS_ENCRYPTION_KEY` and opportunistically re-encrypt legacy plaintext values so API keys are not persisted in cleartext.
 
 ## Change Reasons
+- Auth routes now record login IPs with location/proxy hints and expose an admin endpoint for per-user login activity so support can audit sign-in origins and logout times.
 - Solo plan downgrades now normalize owned workspaces back to the solo tier when processing plan changes.
 - Added promotion endpoint tests to cover workspace-level OAuth sharing and authorization checks.
 - Plan change behavior updated: selecting the Workspace plan now initiates a Stripe Checkout session and returns `{ success, checkout_url }` instead of immediately updating user/workspace plans. The handler persists the Checkout `session_id` and desired plan/workspace name in `users.settings.billing.pending_checkout` and stores a `stripe_customer_id` on the user if needed. The Solo path is unchanged and still returns the prior shape with memberships/workflows.

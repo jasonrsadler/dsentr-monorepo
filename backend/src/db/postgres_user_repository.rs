@@ -6,12 +6,14 @@ use crate::{
             AccountDeletionToken,
         },
         issue_report::NewIssueReport,
+        login_activity::{NewLoginActivity, UserLoginActivity},
         signup::SignupPayload,
         user::{OauthProvider, PublicUser, User},
     },
 };
 use async_trait::async_trait;
 use serde_json::Value;
+use sqlx::types::ipnetwork::IpNetwork;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -825,5 +827,116 @@ impl UserRepository for PostgresUserRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn record_login_activity(&self, activity: NewLoginActivity) -> Result<Uuid, sqlx::Error> {
+        let ip: IpNetwork = activity.ip_address;
+        sqlx::query_scalar!(
+            r#"
+            INSERT INTO user_login_activity (
+                user_id,
+                session_id,
+                ip_address,
+                user_agent,
+                city,
+                region,
+                country,
+                latitude,
+                longitude,
+                is_proxy,
+                is_vpn,
+                lookup_raw,
+                logged_in_at
+            )
+            VALUES (
+                $1,
+                $2,
+                $3::inet,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                $12,
+                $13
+            )
+            RETURNING id
+            "#,
+            activity.user_id,
+            activity.session_id,
+            ip,
+            activity.user_agent,
+            activity.city,
+            activity.region,
+            activity.country,
+            activity.latitude,
+            activity.longitude,
+            activity.is_proxy,
+            activity.is_vpn,
+            activity.lookup_raw,
+            activity.logged_in_at
+        )
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    async fn mark_logout_activity(
+        &self,
+        session_id: Uuid,
+        logged_out_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE user_login_activity
+            SET logged_out_at = COALESCE(logged_out_at, $2)
+            WHERE session_id = $1
+            "#,
+            session_id,
+            logged_out_at
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn list_login_activity_for_user(
+        &self,
+        user_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<UserLoginActivity>, sqlx::Error> {
+        sqlx::query_as!(
+            UserLoginActivity,
+            r#"
+            SELECT
+                id,
+                user_id,
+                session_id,
+                ip_address::text as "ip_address!",
+                user_agent,
+                city,
+                region,
+                country,
+                latitude,
+                longitude,
+                is_proxy,
+                is_vpn,
+                lookup_raw,
+                logged_in_at,
+                logged_out_at,
+                created_at
+            FROM user_login_activity
+            WHERE user_id = $1
+            ORDER BY logged_in_at DESC
+            LIMIT $2
+            "#,
+            user_id,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await
     }
 }

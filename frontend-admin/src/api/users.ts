@@ -3,6 +3,7 @@ import {
   AdminUser,
   AdminUserDetail,
   ConnectionSummary,
+  UserLoginActivity,
   WorkspaceMembershipSummary,
 } from "./types";
 
@@ -40,4 +41,13 @@ export async function getUserConnections(
   userId: string,
 ): Promise<ConnectionSummary[]> {
   return adminGet(`/users/${userId}/connections`);
+}
+
+export async function getUserLogins(
+  userId: string,
+  limit = 50,
+): Promise<UserLoginActivity[]> {
+  const params = new URLSearchParams();
+  if (limit) params.set("limit", limit.toString());
+  return adminGet(`/users/${userId}/logins`, params);
 }

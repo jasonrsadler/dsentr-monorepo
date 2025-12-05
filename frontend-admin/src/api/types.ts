@@ -35,6 +35,24 @@ export interface AdminUserDetail extends AdminUser {
   onboarded_at?: string | null;
 }
 
+export interface UserLoginActivity {
+  id: string;
+  user_id: string;
+  session_id: string;
+  ip_address: string;
+  user_agent?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  is_proxy?: boolean | null;
+  is_vpn?: boolean | null;
+  logged_in_at: string;
+  logged_out_at?: string | null;
+  created_at: string;
+}
+
 export interface ConnectionSummary {
   id: string;
   provider: ConnectedOAuthProvider;

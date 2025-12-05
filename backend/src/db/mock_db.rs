@@ -1,4 +1,5 @@
 use crate::models::issue_report::NewIssueReport;
+use crate::models::login_activity::{NewLoginActivity, UserLoginActivity};
 use crate::models::user::{OauthProvider, PublicUser, User};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -44,6 +45,7 @@ pub struct MockDb {
     pub update_user_plan_calls: Mutex<usize>,
     pub terms_acceptances: Mutex<Vec<(Uuid, String, OffsetDateTime)>>,
     pub issue_reports: Mutex<Vec<(Uuid, NewIssueReport)>>,
+    pub login_activity: Mutex<Vec<UserLoginActivity>>,
 }
 
 impl Default for MockDb {
@@ -60,6 +62,7 @@ impl Default for MockDb {
             update_user_plan_calls: Mutex::new(0),
             terms_acceptances: Mutex::new(vec![]),
             issue_reports: Mutex::new(vec![]),
+            login_activity: Mutex::new(vec![]),
         }
     }
 }
@@ -309,6 +312,63 @@ impl UserRepository for MockDb {
         let mut guard = self.stripe_customer_id.lock().unwrap();
         *guard = None;
         Ok(())
+    }
+
+    async fn record_login_activity(&self, activity: NewLoginActivity) -> Result<Uuid, sqlx::Error> {
+        let id = Uuid::new_v4();
+        let record = UserLoginActivity {
+            id,
+            user_id: activity.user_id,
+            session_id: activity.session_id,
+            ip_address: activity.ip_address.to_string(),
+            user_agent: activity.user_agent,
+            city: activity.city,
+            region: activity.region,
+            country: activity.country,
+            latitude: activity.latitude,
+            longitude: activity.longitude,
+            is_proxy: activity.is_proxy,
+            is_vpn: activity.is_vpn,
+            lookup_raw: activity.lookup_raw,
+            logged_in_at: activity.logged_in_at,
+            logged_out_at: None,
+            created_at: OffsetDateTime::now_utc(),
+        };
+        self.login_activity.lock().unwrap().push(record);
+        Ok(id)
+    }
+
+    async fn mark_logout_activity(
+        &self,
+        session_id: Uuid,
+        logged_out_at: OffsetDateTime,
+    ) -> Result<(), sqlx::Error> {
+        let mut entries = self.login_activity.lock().unwrap();
+        for entry in entries.iter_mut() {
+            if entry.session_id == session_id && entry.logged_out_at.is_none() {
+                entry.logged_out_at = Some(logged_out_at);
+            }
+        }
+        Ok(())
+    }
+
+    async fn list_login_activity_for_user(
+        &self,
+        user_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<UserLoginActivity>, sqlx::Error> {
+        let mut entries: Vec<UserLoginActivity> = self
+            .login_activity
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e.user_id == user_id)
+            .cloned()
+            .collect();
+
+        entries.sort_by(|a, b| b.logged_in_at.cmp(&a.logged_in_at));
+        entries.truncate(limit as usize);
+        Ok(entries)
     }
 }
 

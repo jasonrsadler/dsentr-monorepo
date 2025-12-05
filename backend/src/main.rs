@@ -87,6 +87,7 @@ use tower_http::{
 };
 use tracing::info;
 use tracing_subscriber::{prelude::*, EnvFilter};
+use uuid::Uuid;
 
 use utils::{
     csrf::{get_csrf_token, validate_csrf},
@@ -757,6 +758,32 @@ fn spawn_session_cleanup_task(db_pool: Arc<PgPool>) {
                     true
                 }
             });
+
+            let expired_sessions: Vec<Uuid> =
+                sqlx::query_scalar("SELECT id FROM user_sessions WHERE expires_at < now()")
+                    .fetch_all(db_pool.as_ref())
+                    .await
+                    .unwrap_or_default();
+
+            if !expired_sessions.is_empty() {
+                if let Err(error) = sqlx::query!(
+                    r#"
+                    UPDATE user_login_activity
+                    SET logged_out_at = COALESCE(logged_out_at, now())
+                    WHERE session_id = ANY($1)
+                    "#,
+                    &expired_sessions
+                )
+                .execute(db_pool.as_ref())
+                .await
+                {
+                    tracing::warn!(
+                        ?error,
+                        count = expired_sessions.len(),
+                        "failed to backfill logout timestamps for expired sessions"
+                    );
+                }
+            }
 
             match sqlx::query!("DELETE FROM user_sessions WHERE expires_at < now()")
                 .execute(db_pool.as_ref())
