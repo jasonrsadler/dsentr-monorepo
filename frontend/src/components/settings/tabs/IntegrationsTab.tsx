@@ -20,6 +20,7 @@ import {
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog'
+import GoogleIcon from '@/assets/svg-components/GoogleIcon'
 
 export type IntegrationNotice =
   | { kind: 'connected'; provider?: OAuthProvider }
@@ -40,7 +41,8 @@ interface ProviderMeta {
 const PROVIDER_ICONS: Partial<
   Record<OAuthProvider, (props: React.SVGProps<SVGSVGElement>) => JSX.Element>
 > = {
-  slack: SlackIcon
+  slack: SlackIcon,
+  google: GoogleIcon
 }
 
 const PROVIDERS: ProviderMeta[] = [
