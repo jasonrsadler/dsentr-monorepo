@@ -1,8 +1,10 @@
-name: Dependency Audit
+name: Frontend Dependency Audit
 
 on:
   push:
     branches: [master]
+    paths:
+      - "frontend/**"
   pull_request:
 
 permissions:
