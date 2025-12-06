@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { JSX, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 
+import SlackIcon from '@/assets/svg-components/SlackIcon'
 import { API_BASE_URL } from '@/lib/config'
 import { errorMessage } from '@/lib/errorMessage'
 import {
@@ -34,6 +35,12 @@ interface ProviderMeta {
   name: string
   description: string
   scopes: string
+}
+
+const PROVIDER_ICONS: Partial<
+  Record<OAuthProvider, (props: React.SVGProps<SVGSVGElement>) => JSX.Element>
+> = {
+  slack: SlackIcon
 }
 
 const PROVIDERS: ProviderMeta[] = [
@@ -566,9 +573,23 @@ export default function IntegrationsTab({
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50 text-xs font-semibold uppercase text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-500">
-                      <span aria-hidden="true">
-                        {provider.name.slice(0, 1)}
-                      </span>
+                      {(() => {
+                        const Logo = PROVIDER_ICONS[provider.key]
+                        if (Logo) {
+                          return (
+                            <Logo
+                              aria-hidden="true"
+                              className="h-7 w-7"
+                              focusable="false"
+                            />
+                          )
+                        }
+                        return (
+                          <span aria-hidden="true">
+                            {provider.name.slice(0, 1)}
+                          </span>
+                        )
+                      })()}
                     </div>
                     <span className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
                       {provider.name}

@@ -24,6 +24,7 @@
 - Settings > Integrations: added a brief expand/collapse animation on accordion content so the UI feels responsive without altering existing card details or actions.
 - Integration tab tests now expand accordion sections before interacting so assertions remain valid with the default-collapsed layout.
 - Integration tab revocation/removal tests now open accordion panels before querying actions to match the collapsed default state.
+- Settings > Integrations: mapped providers to dedicated logo components and render the Slack logo inside the 40x40 placeholder while keeping the slot reusable for future provider icons.
 
 ## Affected Areas
 - Settings > LogsTab: change history list
