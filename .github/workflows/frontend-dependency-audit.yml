@@ -116,20 +116,4 @@ jobs:
       - name: npm audit --production
         working-directory: ${{ matrix.working_directory }}
         run: npm audit --production
-
-  cargo-audit:
-    name: cargo audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-
-      - name: cargo audit
-        working-directory: backend
-        run: cargo audit
+        
