@@ -193,7 +193,7 @@ export default function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
           />
         </clipPath>
       </defs>
-      <g transform="translate(8.78 5.92) scale(0.1461)">
+      <g transform="translate(8.78 5.92) scale(0.97)">
         <g transform="matrix(0.957922,0,0,0.985255,-90.17436,-78.85577)">
           <g clip-path="url(#i)">
             <path

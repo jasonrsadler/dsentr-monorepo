@@ -3,8 +3,12 @@ name: Backend CI + Docker Deploy
 on:
   push:
     branches: [ master ]
+    paths:
+      - "backend/**"
   pull_request:
     branches: [ master ]
+    paths:
+      - "backend/**"
 
 jobs:
   backend-ci-docker-deploy:
