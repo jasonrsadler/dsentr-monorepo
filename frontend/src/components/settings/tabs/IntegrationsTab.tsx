@@ -582,193 +582,197 @@ export default function IntegrationsTab({
                   />
                 </button>
 
-                {isExpanded ? (
-                  <div className="border-t border-zinc-200 px-4 pb-4 pt-2 dark:border-zinc-800">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                          {provider.name}
-                        </h3>
-                        <p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
-                          {provider.description}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        {connected ? (
-                          <>
-                            <button
-                              onClick={() => handleRefresh(provider.key)}
-                              disabled={busy || promoting}
-                              className="rounded-md border border-zinc-300 px-3 py-1 text-sm text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            >
-                              Refresh token
-                            </button>
-                            <button
-                              onClick={() => handleDisconnect(provider.key)}
-                              disabled={busy || promoting}
-                              className="rounded-md bg-red-500 px-3 py-1 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
-                            >
-                              Disconnect
-                            </button>
-                            {canPromote && !personal?.isShared ? (
-                              <button
-                                onClick={() =>
-                                  setPromoteDialogProvider(provider.key)
-                                }
-                                disabled={promoteDisabled}
-                                className="rounded-md bg-indigo-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
-                              >
-                                Promote to Workspace
-                              </button>
-                            ) : null}
-                          </>
-                        ) : (
-                          <button
-                            aria-label={`Connect ${provider.name}`}
-                            onClick={() => handleConnect(provider.key)}
-                            disabled={isSoloPlan || isViewer}
-                            className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Connect
-                          </button>
-                        )}
-                      </div>
+                <div
+                  aria-hidden={!isExpanded}
+                  className={`overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-out ${
+                    isExpanded
+                      ? 'max-h-[2000px] border-t border-zinc-200 px-4 pb-4 pt-2 opacity-100 dark:border-zinc-800'
+                      : 'max-h-0 border-t border-transparent px-4 pb-0 pt-0 opacity-0 dark:border-transparent'
+                  } ${!isExpanded ? '-translate-y-1 pointer-events-none' : 'translate-y-0'}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                        {provider.name}
+                      </h3>
+                      <p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
+                        {provider.description}
+                      </p>
                     </div>
-
-                    <dl className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
-                      <div className="flex items-center gap-2">
-                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                          Status:
-                        </dt>
-                        <dd>
-                          {personalRequiresReconnect
-                            ? 'Reconnect required'
-                            : connected
-                              ? 'Connected'
-                              : 'Not connected'}
-                        </dd>
-                      </div>
-                      {personalRequiresReconnect ? (
-                        <p className="text-xs text-red-600 dark:text-red-400">
-                          This connection was revoked by the provider. Reconnect
-                          to restore access.
-                        </p>
-                      ) : null}
-                      {personal?.isShared ? (
-                        <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-300">
-                          <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                            Sharing:
-                          </dt>
-                          <dd>Promoted to workspace</dd>
-                        </div>
-                      ) : null}
-                      {accountEmail && (
-                        <div className="flex items-center gap-2">
-                          <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                            Account:
-                          </dt>
-                          <dd>{accountEmail}</dd>
-                        </div>
-                      )}
-                      {expiresAt && (
-                        <div className="flex items-center gap-2">
-                          <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                            Token expires:
-                          </dt>
-                          <dd>{new Date(expiresAt).toLocaleString()}</dd>
-                        </div>
-                      )}
-                      {lastRefreshedAt && (
-                        <div className="flex items-center gap-2">
-                          <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                            Last refreshed:
-                          </dt>
-                          <dd>{new Date(lastRefreshedAt).toLocaleString()}</dd>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                          Scopes:
-                        </dt>
-                        <dd className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                          {provider.scopes}
-                        </dd>
-                      </div>
-                    </dl>
-                    <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
-                      <div className="font-semibold text-zinc-700 dark:text-zinc-200">
-                        Workspace connections
-                      </div>
-                      {workspaceRequiresReconnect ? (
-                        <p className="text-xs text-red-600 dark:text-red-400">
-                          One or more shared credentials were revoked. Workspace
-                          admins must reconnect them to continue using
-                          workflows.
-                        </p>
-                      ) : null}
-                      {workspaceConnections.length === 0 ? (
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                          No workspace connections have been shared yet.
-                        </p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {workspaceConnections.map((entry) => (
-                            <li
-                              key={entry.id}
-                              className={`rounded border px-3 py-2 text-xs ${
-                                entry.requiresReconnect
-                                  ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-500/70 dark:bg-red-500/10 dark:text-red-200'
-                                  : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-                              }`}
+                    <div className="flex gap-2">
+                      {connected ? (
+                        <>
+                          <button
+                            onClick={() => handleRefresh(provider.key)}
+                            disabled={busy || promoting}
+                            className="rounded-md border border-zinc-300 px-3 py-1 text-sm text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                          >
+                            Refresh token
+                          </button>
+                          <button
+                            onClick={() => handleDisconnect(provider.key)}
+                            disabled={busy || promoting}
+                            className="rounded-md bg-red-500 px-3 py-1 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
+                          >
+                            Disconnect
+                          </button>
+                          {canPromote && !personal?.isShared ? (
+                            <button
+                              onClick={() =>
+                                setPromoteDialogProvider(provider.key)
+                              }
+                              disabled={promoteDisabled}
+                              className="rounded-md bg-indigo-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
                             >
-                              <div className="font-medium text-zinc-700 dark:text-zinc-100">
-                                {entry.workspaceName}
-                              </div>
-                              <div className="text-zinc-600 dark:text-zinc-300">
-                                {entry.accountEmail || 'Delegated account'}
-                              </div>
-                              <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                                Shared by{' '}
-                                {entry.sharedByName || 'workspace admin'}
-                                {entry.sharedByEmail
-                                  ? ` (${entry.sharedByEmail})`
-                                  : ''}
-                              </div>
-                              {entry.lastRefreshedAt ? (
-                                <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                                  Last refreshed{' '}
-                                  {new Date(
-                                    entry.lastRefreshedAt
-                                  ).toLocaleString()}
-                                </div>
-                              ) : null}
-                              {entry.requiresReconnect ? (
-                                <div className="text-[11px] font-semibold text-red-600 dark:text-red-300">
-                                  Reconnect required by the credential owner.
-                                </div>
-                              ) : null}
-                              {canPromote ? (
-                                <div className="mt-2 flex justify-end">
-                                  <button
-                                    onClick={() => setRemoveDialog(entry)}
-                                    disabled={
-                                      removeBusyId === entry.id ||
-                                      busy ||
-                                      promoting
-                                    }
-                                    className="rounded-md bg-red-500 px-2 py-1 text-xs font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
-                                  >
-                                    Remove from workspace
-                                  </button>
-                                </div>
-                              ) : null}
-                            </li>
-                          ))}
-                        </ul>
+                              Promote to Workspace
+                            </button>
+                          ) : null}
+                        </>
+                      ) : (
+                        <button
+                          aria-label={`Connect ${provider.name}`}
+                          onClick={() => handleConnect(provider.key)}
+                          disabled={isSoloPlan || isViewer}
+                          className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Connect
+                        </button>
                       )}
                     </div>
                   </div>
-                ) : null}
+
+                  <dl className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
+                    <div className="flex items-center gap-2">
+                      <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                        Status:
+                      </dt>
+                      <dd>
+                        {personalRequiresReconnect
+                          ? 'Reconnect required'
+                          : connected
+                            ? 'Connected'
+                            : 'Not connected'}
+                      </dd>
+                    </div>
+                    {personalRequiresReconnect ? (
+                      <p className="text-xs text-red-600 dark:text-red-400">
+                        This connection was revoked by the provider. Reconnect
+                        to restore access.
+                      </p>
+                    ) : null}
+                    {personal?.isShared ? (
+                      <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-300">
+                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Sharing:
+                        </dt>
+                        <dd>Promoted to workspace</dd>
+                      </div>
+                    ) : null}
+                    {accountEmail && (
+                      <div className="flex items-center gap-2">
+                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Account:
+                        </dt>
+                        <dd>{accountEmail}</dd>
+                      </div>
+                    )}
+                    {expiresAt && (
+                      <div className="flex items-center gap-2">
+                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Token expires:
+                        </dt>
+                        <dd>{new Date(expiresAt).toLocaleString()}</dd>
+                      </div>
+                    )}
+                    {lastRefreshedAt && (
+                      <div className="flex items-center gap-2">
+                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Last refreshed:
+                        </dt>
+                        <dd>{new Date(lastRefreshedAt).toLocaleString()}</dd>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                        Scopes:
+                      </dt>
+                      <dd className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                        {provider.scopes}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
+                    <div className="font-semibold text-zinc-700 dark:text-zinc-200">
+                      Workspace connections
+                    </div>
+                    {workspaceRequiresReconnect ? (
+                      <p className="text-xs text-red-600 dark:text-red-400">
+                        One or more shared credentials were revoked. Workspace
+                        admins must reconnect them to continue using workflows.
+                      </p>
+                    ) : null}
+                    {workspaceConnections.length === 0 ? (
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        No workspace connections have been shared yet.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {workspaceConnections.map((entry) => (
+                          <li
+                            key={entry.id}
+                            className={`rounded border px-3 py-2 text-xs ${
+                              entry.requiresReconnect
+                                ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-500/70 dark:bg-red-500/10 dark:text-red-200'
+                                : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                            }`}
+                          >
+                            <div className="font-medium text-zinc-700 dark:text-zinc-100">
+                              {entry.workspaceName}
+                            </div>
+                            <div className="text-zinc-600 dark:text-zinc-300">
+                              {entry.accountEmail || 'Delegated account'}
+                            </div>
+                            <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                              Shared by{' '}
+                              {entry.sharedByName || 'workspace admin'}
+                              {entry.sharedByEmail
+                                ? ` (${entry.sharedByEmail})`
+                                : ''}
+                            </div>
+                            {entry.lastRefreshedAt ? (
+                              <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                Last refreshed{' '}
+                                {new Date(
+                                  entry.lastRefreshedAt
+                                ).toLocaleString()}
+                              </div>
+                            ) : null}
+                            {entry.requiresReconnect ? (
+                              <div className="text-[11px] font-semibold text-red-600 dark:text-red-300">
+                                Reconnect required by the credential owner.
+                              </div>
+                            ) : null}
+                            {canPromote ? (
+                              <div className="mt-2 flex justify-end">
+                                <button
+                                  onClick={() => setRemoveDialog(entry)}
+                                  disabled={
+                                    removeBusyId === entry.id ||
+                                    busy ||
+                                    promoting
+                                  }
+                                  className="rounded-md bg-red-500 px-2 py-1 text-xs font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
+                                >
+                                  Remove from workspace
+                                </button>
+                              </div>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
               </section>
             )
           })}

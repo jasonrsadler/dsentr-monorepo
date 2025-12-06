@@ -56,6 +56,19 @@ useAuth.mockImplementation((selector?: any) =>
   typeof selector === 'function' ? selector(authState) : authState
 )
 
+async function expandProviderSections(
+  user: ReturnType<typeof userEvent.setup>
+) {
+  for (const name of ['Google', 'Microsoft', 'Slack']) {
+    const toggle = await screen.findByRole('button', {
+      name: new RegExp(`^${name}$`, 'i')
+    })
+    if (toggle.getAttribute('aria-expanded') === 'false') {
+      await user.click(toggle)
+    }
+  }
+}
+
 describe('IntegrationsTab', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -122,6 +135,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
@@ -192,6 +206,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
 
     const promoteButton = await screen.findByRole('button', {
@@ -253,6 +268,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
@@ -316,6 +332,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
@@ -368,6 +385,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
     const disconnectButton = await screen.findByRole('button', {
@@ -420,8 +438,10 @@ describe('IntegrationsTab', () => {
       workspace: []
     })
 
+    const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
@@ -459,6 +479,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 

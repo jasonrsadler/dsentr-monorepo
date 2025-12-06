@@ -21,6 +21,9 @@
 - Node inline secret creation fields now disable browser/password-manager autofill (autocomplete off/new-password + lp/1p ignore) so quick-create flows don't get prefilled with unrelated credentials.
 - Delay and Formatter logic nodes now use inline component delete confirmations instead of `window.confirm`, matching other workflow node modals on the canvas.
 - Settings > Integrations: converted provider cards to collapsible accordion items (default collapsed) so the collapsed view only shows the provider name/icon space while keeping expanded content identical for future provider additions.
+- Settings > Integrations: added a brief expand/collapse animation on accordion content so the UI feels responsive without altering existing card details or actions.
+- Integration tab tests now expand accordion sections before interacting so assertions remain valid with the default-collapsed layout.
+- Integration tab revocation/removal tests now open accordion panels before querying actions to match the collapsed default state.
 
 ## Affected Areas
 - Settings > LogsTab: change history list
