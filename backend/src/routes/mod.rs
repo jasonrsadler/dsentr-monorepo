@@ -5,6 +5,7 @@ pub mod billing;
 pub mod dashboard;
 pub mod early_access;
 pub mod issues;
+pub mod asana;
 pub mod microsoft;
 pub mod oauth;
 pub mod options;

@@ -76,4 +76,5 @@
 - Added `POST /api/issues` so authenticated users can submit issue reports that persist user/workspace context for support investigations.
 - Added an admin-only `/api/admin` router (session + role guarded with an IP allowlist stub) that surfaces read-only listings and admin issue replies without exposing OAuth secrets.
 - Added messaging inbox endpoints (user + admin) with list/detail/reply/mark-read flows and read timestamps so unread badges stay accurate across both portals.
+- Added Asana metadata routes (workspaces, projects, tags, teams, users, sections) behind authenticated OAuth so the frontend can populate dropdowns without exposing tokens.
 - Added Asana OAuth route support (start + callback + provider parsing) so the new Asana integration can authenticate alongside Google, Microsoft, and Slack.

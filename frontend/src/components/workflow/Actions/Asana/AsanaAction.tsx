@@ -10,6 +10,21 @@ import NodeTextAreaField from '@/components/ui/InputFields/NodeTextAreaField'
 import NodeCheckBoxField from '@/components/ui/InputFields/NodeCheckboxField'
 import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import {
+  fetchAsanaProjects,
+  fetchAsanaSections,
+  fetchAsanaTags,
+  fetchAsanaTeams,
+  fetchAsanaUsers,
+  fetchAsanaWorkspaces,
+  type AsanaConnectionOptions,
+  type AsanaProject,
+  type AsanaSection,
+  type AsanaTag,
+  type AsanaTeam,
+  type AsanaUser,
+  type AsanaWorkspace
+} from '@/lib/asanaApi'
+import {
   fetchConnections,
   getCachedConnections,
   subscribeToConnectionUpdates,
@@ -691,7 +706,7 @@ export default function AsanaAction({
           )
           setConnectionsError(null)
         })
-        .catch((err) => {
+        .catch((err: unknown) => {
           if (!active) return
           const message =
             err instanceof Error
@@ -748,6 +763,311 @@ export default function AsanaAction({
 
     return options
   }, [connectionState])
+
+  const asanaConnectionOptions = useMemo<AsanaConnectionOptions | null>(() => {
+    if (!activeConnection?.connectionId || !activeConnection.connectionScope) {
+      return null
+    }
+    return {
+      scope:
+        activeConnection.connectionScope === 'workspace'
+          ? 'workspace'
+          : 'personal',
+      connectionId: activeConnection.connectionId
+    }
+  }, [activeConnection])
+
+  const [workspaceOptions, setWorkspaceOptions] = useState<
+    NodeDropdownOption[]
+  >([])
+  const [workspaceOptionsLoading, setWorkspaceOptionsLoading] = useState(false)
+  const [workspaceOptionsError, setWorkspaceOptionsError] = useState<
+    string | null
+  >(null)
+
+  const [projectOptions, setProjectOptions] = useState<NodeDropdownOption[]>([])
+  const [projectOptionsLoading, setProjectOptionsLoading] = useState(false)
+  const [projectOptionsError, setProjectOptionsError] = useState<string | null>(
+    null
+  )
+
+  const [tagOptions, setTagOptions] = useState<NodeDropdownOption[]>([])
+  const [tagOptionsLoading, setTagOptionsLoading] = useState(false)
+  const [tagOptionsError, setTagOptionsError] = useState<string | null>(null)
+
+  const [teamOptions, setTeamOptions] = useState<NodeDropdownOption[]>([])
+  const [teamOptionsLoading, setTeamOptionsLoading] = useState(false)
+  const [teamOptionsError, setTeamOptionsError] = useState<string | null>(null)
+
+  const [userOptions, setUserOptions] = useState<NodeDropdownOption[]>([])
+  const [userOptionsLoading, setUserOptionsLoading] = useState(false)
+  const [userOptionsError, setUserOptionsError] = useState<string | null>(null)
+
+  const [sectionOptions, setSectionOptions] = useState<NodeDropdownOption[]>([])
+  const [sectionOptionsLoading, setSectionOptionsLoading] = useState(false)
+  const [sectionOptionsError, setSectionOptionsError] = useState<string | null>(
+    null
+  )
+
+  const hasConnection = Boolean(asanaConnectionOptions)
+
+  const handleWorkspaceSelect = useCallback(
+    (workspaceGid: string) => {
+      applyAsanaPatch({
+        workspaceGid,
+        projectGid: '',
+        sectionGid: '',
+        tagGid: '',
+        teamGid: '',
+        userGid: ''
+      })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleProjectSelect = useCallback(
+    (projectGid: string) => {
+      applyAsanaPatch({
+        projectGid,
+        sectionGid: ''
+      })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleTagSelect = useCallback(
+    (tagGid: string) => {
+      applyAsanaPatch({ tagGid })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleTeamSelect = useCallback(
+    (teamGid: string) => {
+      applyAsanaPatch({
+        teamGid,
+        userGid: ''
+      })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleUserSelect = useCallback(
+    (userGid: string) => {
+      applyAsanaPatch({ userGid })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleSectionSelect = useCallback(
+    (sectionGid: string) => {
+      applyAsanaPatch({ sectionGid })
+    },
+    [applyAsanaPatch]
+  )
+
+  useEffect(() => {
+    setWorkspaceOptions([])
+    setWorkspaceOptionsError(null)
+    if (!asanaConnectionOptions) {
+      setWorkspaceOptionsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setWorkspaceOptionsLoading(true)
+    fetchAsanaWorkspaces(asanaConnectionOptions)
+      .then((workspaces: AsanaWorkspace[]) => {
+        if (cancelled) return
+        const options = workspaces.map((workspace) => ({
+          value: workspace.gid,
+          label: workspace.name || workspace.gid
+        }))
+        setWorkspaceOptions(options)
+        setWorkspaceOptionsError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setWorkspaceOptionsError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load Asana workspaces for this connection'
+        )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setWorkspaceOptionsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [asanaConnectionOptions])
+
+  useEffect(() => {
+    setProjectOptions([])
+    setTagOptions([])
+    setTeamOptions([])
+    setUserOptions([])
+    setSectionOptions([])
+    setProjectOptionsError(null)
+    setTagOptionsError(null)
+    setTeamOptionsError(null)
+    setUserOptionsError(null)
+
+    const workspaceGid = asanaParams.workspaceGid?.trim()
+    if (!workspaceGid || !asanaConnectionOptions) {
+      setProjectOptionsLoading(false)
+      setTagOptionsLoading(false)
+      setTeamOptionsLoading(false)
+      setUserOptionsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setProjectOptionsLoading(true)
+    setTagOptionsLoading(true)
+    setTeamOptionsLoading(true)
+    setUserOptionsLoading(true)
+
+    Promise.allSettled([
+      fetchAsanaProjects(workspaceGid, asanaConnectionOptions),
+      fetchAsanaTags(workspaceGid, asanaConnectionOptions),
+      fetchAsanaTeams(workspaceGid, asanaConnectionOptions),
+      fetchAsanaUsers(
+        workspaceGid,
+        asanaConnectionOptions,
+        asanaParams.teamGid?.trim() || undefined
+      )
+    ]).then((results) => {
+      if (cancelled) return
+
+      const [projects, tags, teams, users] = results
+
+      if (projects.status === 'fulfilled') {
+        setProjectOptions(
+          projects.value.map((project: AsanaProject) => ({
+            value: project.gid,
+            label: project.name || project.gid
+          }))
+        )
+        setProjectOptionsError(null)
+      } else {
+        setProjectOptionsError(
+          projects.reason instanceof Error
+            ? projects.reason.message
+            : 'Failed to load Asana projects'
+        )
+      }
+
+      if (tags.status === 'fulfilled') {
+        setTagOptions(
+          tags.value.map((tag: AsanaTag) => ({
+            value: tag.gid,
+            label: tag.name || tag.gid
+          }))
+        )
+        setTagOptionsError(null)
+      } else {
+        setTagOptionsError(
+          tags.reason instanceof Error
+            ? tags.reason.message
+            : 'Failed to load Asana tags'
+        )
+      }
+
+      if (teams.status === 'fulfilled') {
+        setTeamOptions(
+          teams.value.map((team: AsanaTeam) => ({
+            value: team.gid,
+            label: team.name || team.gid
+          }))
+        )
+        setTeamOptionsError(null)
+      } else {
+        setTeamOptionsError(
+          teams.reason instanceof Error
+            ? teams.reason.message
+            : 'Failed to load Asana teams'
+        )
+      }
+
+      if (users.status === 'fulfilled') {
+        setUserOptions(
+          users.value.map((user: AsanaUser) => ({
+            value: user.gid,
+            label: user.email
+              ? `${user.name || user.gid} (${user.email})`
+              : user.name || user.gid
+          }))
+        )
+        setUserOptionsError(null)
+      } else {
+        setUserOptionsError(
+          users.reason instanceof Error
+            ? users.reason.message
+            : 'Failed to load Asana users'
+        )
+      }
+
+      setProjectOptionsLoading(false)
+      setTagOptionsLoading(false)
+      setTeamOptionsLoading(false)
+      setUserOptionsLoading(false)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    asanaConnectionOptions,
+    asanaParams.workspaceGid,
+    asanaParams.teamGid,
+    asanaParams.connectionId,
+    asanaParams.connectionScope
+  ])
+
+  useEffect(() => {
+    setSectionOptions([])
+    setSectionOptionsError(null)
+    const projectGid = asanaParams.projectGid?.trim()
+    if (!projectGid || !asanaConnectionOptions) {
+      setSectionOptionsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setSectionOptionsLoading(true)
+    fetchAsanaSections(projectGid, asanaConnectionOptions)
+      .then((sections: AsanaSection[]) => {
+        if (cancelled) return
+        setSectionOptions(
+          sections.map((section) => ({
+            value: section.gid,
+            label: section.name || section.gid
+          }))
+        )
+        setSectionOptionsError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setSectionOptionsError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load Asana sections for this project'
+        )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSectionOptionsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [asanaConnectionOptions, asanaParams.projectGid])
 
   const selectedConnectionValue = useMemo(() => {
     if (!activeConnection?.connectionId || !activeConnection.connectionScope)
@@ -815,6 +1135,259 @@ export default function AsanaAction({
     const value = (asanaParams as Record<string, unknown>)[field]
     const error = validation.errors[field]
     const labelText = `${meta.label}${isRequired ? ' *' : ''}`
+
+    if (field === 'workspaceGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={workspaceOptions}
+            value={currentValue}
+            onChange={handleWorkspaceSelect}
+            placeholder={
+              !hasConnection
+                ? 'Connect Asana to load workspaces'
+                : workspaceOptionsLoading
+                  ? 'Loading workspaces...'
+                  : 'Select workspace'
+            }
+            disabled={
+              !effectiveCanEdit || !hasConnection || workspaceOptionsLoading
+            }
+            loading={workspaceOptionsLoading}
+            emptyMessage={
+              workspaceOptionsError ||
+              'No Asana workspaces available for this connection'
+            }
+          />
+          <NodeInputField
+            placeholder="Or enter workspace GID"
+            value={currentValue}
+            onChange={(val) =>
+              applyAsanaPatch({
+                workspaceGid: val
+              })
+            }
+          />
+          {workspaceOptionsError && (
+            <p className="text-xs text-red-500">{workspaceOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'projectGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={projectOptions}
+            value={currentValue}
+            onChange={handleProjectSelect}
+            placeholder={
+              !hasConnection
+                ? 'Select an Asana connection first'
+                : asanaParams.workspaceGid
+                  ? projectOptionsLoading
+                    ? 'Loading projects...'
+                    : 'Select project'
+                  : 'Select a workspace first'
+            }
+            disabled={
+              !effectiveCanEdit || !hasConnection || projectOptionsLoading
+            }
+            loading={projectOptionsLoading}
+            emptyMessage={projectOptionsError || 'No projects available'}
+          />
+          <NodeInputField
+            placeholder="Or enter project GID"
+            value={currentValue}
+            onChange={(val) =>
+              applyAsanaPatch({
+                projectGid: val
+              })
+            }
+          />
+          {projectOptionsError && (
+            <p className="text-xs text-red-500">{projectOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'sectionGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={sectionOptions}
+            value={currentValue}
+            onChange={handleSectionSelect}
+            placeholder={
+              !hasConnection
+                ? 'Select an Asana connection first'
+                : asanaParams.projectGid
+                  ? sectionOptionsLoading
+                    ? 'Loading sections...'
+                    : 'Select section'
+                  : 'Select a project first'
+            }
+            disabled={
+              !effectiveCanEdit || !hasConnection || sectionOptionsLoading
+            }
+            loading={sectionOptionsLoading}
+            emptyMessage={sectionOptionsError || 'No sections available'}
+          />
+          <NodeInputField
+            placeholder="Or enter section GID"
+            value={currentValue}
+            onChange={(val) =>
+              applyAsanaPatch({
+                sectionGid: val
+              })
+            }
+          />
+          {sectionOptionsError && (
+            <p className="text-xs text-red-500">{sectionOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'tagGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={tagOptions}
+            value={currentValue}
+            onChange={handleTagSelect}
+            placeholder={
+              !hasConnection
+                ? 'Select an Asana connection first'
+                : asanaParams.workspaceGid
+                  ? tagOptionsLoading
+                    ? 'Loading tags...'
+                    : 'Select tag'
+                  : 'Select a workspace first'
+            }
+            disabled={!effectiveCanEdit || !hasConnection || tagOptionsLoading}
+            loading={tagOptionsLoading}
+            emptyMessage={tagOptionsError || 'No tags available'}
+          />
+          <NodeInputField
+            placeholder="Or enter tag GID"
+            value={currentValue}
+            onChange={(val) =>
+              applyAsanaPatch({
+                tagGid: val
+              })
+            }
+          />
+          {tagOptionsError && (
+            <p className="text-xs text-red-500">{tagOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'teamGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={teamOptions}
+            value={currentValue}
+            onChange={handleTeamSelect}
+            placeholder={
+              !hasConnection
+                ? 'Select an Asana connection first'
+                : asanaParams.workspaceGid
+                  ? teamOptionsLoading
+                    ? 'Loading teams...'
+                    : 'Select team (optional)'
+                  : 'Select a workspace first'
+            }
+            disabled={!effectiveCanEdit || !hasConnection || teamOptionsLoading}
+            loading={teamOptionsLoading}
+            emptyMessage={teamOptionsError || 'No teams available'}
+          />
+          <NodeInputField
+            placeholder="Or enter team GID"
+            value={currentValue}
+            onChange={(val) =>
+              applyAsanaPatch({
+                teamGid: val
+              })
+            }
+          />
+          {teamOptionsError && (
+            <p className="text-xs text-red-500">{teamOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'userGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={userOptions}
+            value={currentValue}
+            onChange={handleUserSelect}
+            placeholder={
+              !hasConnection
+                ? 'Select an Asana connection first'
+                : asanaParams.workspaceGid
+                  ? userOptionsLoading
+                    ? 'Loading users...'
+                    : 'Select user'
+                  : 'Select a workspace first'
+            }
+            disabled={!effectiveCanEdit || !hasConnection || userOptionsLoading}
+            loading={userOptionsLoading}
+            emptyMessage={userOptionsError || 'No users available'}
+          />
+          <NodeInputField
+            placeholder="Or enter user GID"
+            value={currentValue}
+            onChange={(val) =>
+              applyAsanaPatch({
+                userGid: val
+              })
+            }
+          />
+          {userOptionsError && (
+            <p className="text-xs text-red-500">{userOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
 
     if (field === 'completed' || field === 'archived') {
       return (

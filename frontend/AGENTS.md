@@ -84,6 +84,7 @@ oUnusedLocals.
 - Shared credential removal flows now warn about potential workflow failures and ensure personal disconnects also revoke shared workspace connections.
 - Integrations tab now surfaces an Asana card with OAuth connect/disconnect support using the new backend provider and displays both personal and workspace connections.
 - Added an Asana action node (palette + flyout) with connection selector, plan restriction messaging, and operations for managing Asana projects, tasks, subtasks, comments, tags, and users.
+- Asana node now fetches workspaces/projects/sections/tags/teams/users from the selected connection and renders dropdowns alongside manual GID inputs so users don’t have to look up IDs.
 - Action nodes now deep-compare local state before notifying the canvas so update notifications don't trigger infinite React Flow rerender loops.
 - Action node prop-to-state sync skips redundant param updates to prevent React Flow dirty-check loops when toggling node UI.
 - Condition nodes now deep-compare update payloads before notifying the canvas so toggling other nodes or edges doesn't trigger infinite workflow rerenders.
