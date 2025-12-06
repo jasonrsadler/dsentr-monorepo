@@ -890,6 +890,34 @@ export default function AsanaAction({
 
   const hasConnection = Boolean(asanaConnectionOptions)
 
+  const [debouncedWorkspaceGid, setDebouncedWorkspaceGid] = useState(
+    asanaParams.workspaceGid?.trim() ?? ''
+  )
+  const [debouncedProjectGid, setDebouncedProjectGid] = useState(
+    asanaParams.projectGid?.trim() ?? ''
+  )
+  const [debouncedTeamGid, setDebouncedTeamGid] = useState(
+    asanaParams.teamGid?.trim() ?? ''
+  )
+
+  useEffect(() => {
+    const next = asanaParams.workspaceGid?.trim() ?? ''
+    const id = window.setTimeout(() => setDebouncedWorkspaceGid(next), 300)
+    return () => window.clearTimeout(id)
+  }, [asanaParams.workspaceGid])
+
+  useEffect(() => {
+    const next = asanaParams.projectGid?.trim() ?? ''
+    const id = window.setTimeout(() => setDebouncedProjectGid(next), 300)
+    return () => window.clearTimeout(id)
+  }, [asanaParams.projectGid])
+
+  useEffect(() => {
+    const next = asanaParams.teamGid?.trim() ?? ''
+    const id = window.setTimeout(() => setDebouncedTeamGid(next), 300)
+    return () => window.clearTimeout(id)
+  }, [asanaParams.teamGid])
+
   const todayIso = useMemo(() => {
     const now = new Date()
     return toISODateString(now.getFullYear(), now.getMonth(), now.getDate())
@@ -1102,7 +1130,7 @@ export default function AsanaAction({
     setTeamOptionsError(null)
     setUserOptionsError(null)
 
-    const workspaceGid = asanaParams.workspaceGid?.trim()
+    const workspaceGid = debouncedWorkspaceGid
     if (!workspaceGid || !asanaConnectionOptions) {
       setProjectOptionsLoading(false)
       setTagOptionsLoading(false)
@@ -1124,7 +1152,7 @@ export default function AsanaAction({
       fetchAsanaUsers(
         workspaceGid,
         asanaConnectionOptions,
-        asanaParams.teamGid?.trim() || undefined
+        debouncedTeamGid || undefined
       )
     ]).then((results) => {
       if (cancelled) return
@@ -1208,8 +1236,8 @@ export default function AsanaAction({
     }
   }, [
     asanaConnectionOptions,
-    asanaParams.workspaceGid,
-    asanaParams.teamGid,
+    debouncedWorkspaceGid,
+    debouncedTeamGid,
     asanaParams.connectionId,
     asanaParams.connectionScope
   ])
@@ -1217,7 +1245,7 @@ export default function AsanaAction({
   useEffect(() => {
     setSectionOptions([])
     setSectionOptionsError(null)
-    const projectGid = asanaParams.projectGid?.trim()
+    const projectGid = debouncedProjectGid
     if (!projectGid || !asanaConnectionOptions) {
       setSectionOptionsLoading(false)
       return
@@ -1253,7 +1281,7 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [asanaConnectionOptions, asanaParams.projectGid])
+  }, [asanaConnectionOptions, debouncedProjectGid])
 
   const selectedConnectionValue = useMemo(() => {
     if (!activeConnection?.connectionId || !activeConnection.connectionScope)
