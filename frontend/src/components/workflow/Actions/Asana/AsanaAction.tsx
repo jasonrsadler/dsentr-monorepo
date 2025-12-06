@@ -352,11 +352,11 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   createProject: {
     label: 'Projects - Create project',
     required: ['workspaceGid', 'name'],
-    optional: ['notes', 'teamGid', 'archived', 'additionalFields']
+    optional: ['notes', 'teamGid', 'additionalFields']
   },
   deleteProject: {
     label: 'Projects - Delete project',
-    required: ['projectGid']
+    required: ['workspaceGid', 'projectGid']
   },
   getProject: {
     label: 'Projects - Get project',
@@ -369,8 +369,8 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   updateProject: {
     label: 'Projects - Update project',
-    required: ['projectGid'],
-    optional: ['name', 'notes', 'archived', 'additionalFields']
+    required: ['workspaceGid', 'projectGid'],
+    optional: ['name', 'notes', 'additionalFields']
   },
   createSubtask: {
     label: 'Subtasks - Create subtask',
@@ -387,9 +387,9 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
     required: ['workspaceGid', 'name'],
     optional: [
       'projectGid',
-      'assignee',
       'dueOn',
       'dueAt',
+      'assignee',
       'notes',
       'additionalFields'
     ]
@@ -456,7 +456,7 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   getUser: {
     label: 'Users - Get user',
-    required: ['userGid']
+    required: ['workspaceGid', 'userGid']
   },
   listUsers: {
     label: 'Users - List users',
@@ -1101,16 +1101,17 @@ export default function AsanaAction({
           fieldVisibility.name = true
           fieldVisibility.notes = true
           fieldVisibility.teamGid = true
-          fieldVisibility.archived = true
           fieldVisibility.additionalFields = true
         }
         break
       case 'updateProject':
-        fieldVisibility.projectGid = true
-        if (hasProjectSelected) {
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.name = true
           fieldVisibility.notes = true
-          fieldVisibility.archived = true
           fieldVisibility.additionalFields = true
         }
         break
@@ -1150,7 +1151,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasTaskSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.name = true
           fieldVisibility.notes = true
           fieldVisibility.assignee = true
@@ -1197,7 +1198,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasTaskSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.sectionGid = true
         }
         break
@@ -1206,7 +1207,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.parentTaskGid = true
         }
-        if (hasParentTaskSelected) {
+        if (hasWorkspaceSelected && hasParentTaskSelected) {
           fieldVisibility.name = true
           fieldVisibility.assignee = true
           fieldVisibility.notes = true
@@ -1220,7 +1221,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.parentTaskGid = true
         }
-        if (hasParentTaskSelected) {
+        if (hasWorkspaceSelected && hasParentTaskSelected) {
           fieldVisibility.limit = true
         }
         break
@@ -1229,7 +1230,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasTaskSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.notes = true
         }
         break
@@ -1238,7 +1239,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasTaskSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.storyGid = true
         }
         break
@@ -1247,10 +1248,10 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasTaskSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.projectGid = true
         }
-        if (hasProjectSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected && hasProjectSelected) {
           fieldVisibility.sectionGid = true
         }
         break
@@ -1259,7 +1260,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasTaskSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.projectGid = true
         }
         break
@@ -1268,7 +1269,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasTaskSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.tagGid = true
         }
         break
@@ -1277,7 +1278,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasTaskSelected) {
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.tagGid = true
         }
         break
@@ -1466,105 +1467,177 @@ export default function AsanaAction({
 
   useEffect(() => {
     setProjectOptions([])
-    setTagOptions([])
-    setTeamOptions([])
-    setUserOptions([])
-    setSectionOptions([])
     setProjectOptionsError(null)
-    setTagOptionsError(null)
-    setTeamOptionsError(null)
-    setUserOptionsError(null)
-
+    setProjectOptionsLoading(false)
     const workspaceGid = debouncedWorkspaceGid
-    const shouldFetch =
-      visibility.projectGid ||
-      visibility.tagGid ||
-      visibility.teamGid ||
-      visibility.assignee
     if (
-      !shouldFetch ||
+      !visibility.projectGid ||
       !workspaceGid ||
       !asanaConnectionOptions ||
       isSoloPlan
     ) {
-      setProjectOptionsLoading(false)
-      setTagOptionsLoading(false)
-      setTeamOptionsLoading(false)
-      setUserOptionsLoading(false)
       return
     }
 
     let cancelled = false
     setProjectOptionsLoading(true)
-    setTagOptionsLoading(true)
-    setTeamOptionsLoading(true)
-    setUserOptionsLoading(true)
-
-    Promise.allSettled([
-      fetchAsanaProjects(workspaceGid, asanaConnectionOptions),
-      fetchAsanaTags(workspaceGid, asanaConnectionOptions),
-      fetchAsanaTeams(workspaceGid, asanaConnectionOptions),
-      fetchAsanaUsers(
-        workspaceGid,
-        asanaConnectionOptions,
-        debouncedTeamGid || undefined
-      )
-    ]).then((results) => {
-      if (cancelled) return
-
-      const [projects, tags, teams, users] = results
-
-      if (projects.status === 'fulfilled') {
+    fetchAsanaProjects(workspaceGid, asanaConnectionOptions)
+      .then((projects: AsanaProject[]) => {
+        if (cancelled) return
         setProjectOptions(
-          projects.value.map((project: AsanaProject) => ({
+          projects.map((project) => ({
             value: project.gid,
             label: project.name || project.gid
           }))
         )
         setProjectOptionsError(null)
-      } else {
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
         setProjectOptionsError(
-          projects.reason instanceof Error
-            ? projects.reason.message
-            : 'Failed to load Asana projects'
+          err instanceof Error ? err.message : 'Failed to load Asana projects'
         )
-      }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setProjectOptionsLoading(false)
+        }
+      })
 
-      if (tags.status === 'fulfilled') {
+    return () => {
+      cancelled = true
+    }
+  }, [
+    asanaConnectionOptions,
+    debouncedWorkspaceGid,
+    isSoloPlan,
+    visibility.projectGid
+  ])
+
+  useEffect(() => {
+    setTagOptions([])
+    setTagOptionsError(null)
+    setTagOptionsLoading(false)
+    const workspaceGid = debouncedWorkspaceGid
+    if (
+      !visibility.tagGid ||
+      !workspaceGid ||
+      !asanaConnectionOptions ||
+      isSoloPlan
+    ) {
+      return
+    }
+
+    let cancelled = false
+    setTagOptionsLoading(true)
+    fetchAsanaTags(workspaceGid, asanaConnectionOptions)
+      .then((tags: AsanaTag[]) => {
+        if (cancelled) return
         setTagOptions(
-          tags.value.map((tag: AsanaTag) => ({
+          tags.map((tag) => ({
             value: tag.gid,
             label: tag.name || tag.gid
           }))
         )
         setTagOptionsError(null)
-      } else {
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
         setTagOptionsError(
-          tags.reason instanceof Error
-            ? tags.reason.message
-            : 'Failed to load Asana tags'
+          err instanceof Error ? err.message : 'Failed to load Asana tags'
         )
-      }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTagOptionsLoading(false)
+        }
+      })
 
-      if (teams.status === 'fulfilled') {
+    return () => {
+      cancelled = true
+    }
+  }, [
+    asanaConnectionOptions,
+    debouncedWorkspaceGid,
+    isSoloPlan,
+    visibility.tagGid
+  ])
+
+  useEffect(() => {
+    setTeamOptions([])
+    setTeamOptionsError(null)
+    setTeamOptionsLoading(false)
+    const workspaceGid = debouncedWorkspaceGid
+    if (
+      !visibility.teamGid ||
+      !workspaceGid ||
+      !asanaConnectionOptions ||
+      isSoloPlan
+    ) {
+      return
+    }
+
+    let cancelled = false
+    setTeamOptionsLoading(true)
+    fetchAsanaTeams(workspaceGid, asanaConnectionOptions)
+      .then((teams: AsanaTeam[]) => {
+        if (cancelled) return
         setTeamOptions(
-          teams.value.map((team: AsanaTeam) => ({
+          teams.map((team) => ({
             value: team.gid,
             label: team.name || team.gid
           }))
         )
         setTeamOptionsError(null)
-      } else {
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
         setTeamOptionsError(
-          teams.reason instanceof Error
-            ? teams.reason.message
-            : 'Failed to load Asana teams'
+          err instanceof Error ? err.message : 'Failed to load Asana teams'
         )
-      }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTeamOptionsLoading(false)
+        }
+      })
 
-      if (users.status === 'fulfilled') {
+    return () => {
+      cancelled = true
+    }
+  }, [
+    asanaConnectionOptions,
+    debouncedWorkspaceGid,
+    isSoloPlan,
+    visibility.teamGid
+  ])
+
+  useEffect(() => {
+    setUserOptions([])
+    setUserOptionsError(null)
+    setUserOptionsLoading(false)
+    const workspaceGid = debouncedWorkspaceGid
+    const shouldFetchUsers = visibility.assignee || visibility.userGid
+    if (
+      !shouldFetchUsers ||
+      !workspaceGid ||
+      !asanaConnectionOptions ||
+      isSoloPlan
+    ) {
+      return
+    }
+
+    let cancelled = false
+    setUserOptionsLoading(true)
+    fetchAsanaUsers(
+      workspaceGid,
+      asanaConnectionOptions,
+      debouncedTeamGid || undefined
+    )
+      .then((users: AsanaUser[]) => {
+        if (cancelled) return
         setUserOptions(
-          users.value.map((user: AsanaUser) => ({
+          users.map((user) => ({
             value: user.gid,
             label: user.email
               ? `${user.name || user.gid} (${user.email})`
@@ -1572,19 +1645,18 @@ export default function AsanaAction({
           }))
         )
         setUserOptionsError(null)
-      } else {
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
         setUserOptionsError(
-          users.reason instanceof Error
-            ? users.reason.message
-            : 'Failed to load Asana users'
+          err instanceof Error ? err.message : 'Failed to load Asana users'
         )
-      }
-
-      setProjectOptionsLoading(false)
-      setTagOptionsLoading(false)
-      setTeamOptionsLoading(false)
-      setUserOptionsLoading(false)
-    })
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setUserOptionsLoading(false)
+        }
+      })
 
     return () => {
       cancelled = true
@@ -1593,13 +1665,9 @@ export default function AsanaAction({
     asanaConnectionOptions,
     debouncedWorkspaceGid,
     debouncedTeamGid,
-    asanaParams.connectionId,
-    asanaParams.connectionScope,
     isSoloPlan,
     visibility.assignee,
-    visibility.projectGid,
-    visibility.tagGid,
-    visibility.teamGid
+    visibility.userGid
   ])
 
   useEffect(() => {
