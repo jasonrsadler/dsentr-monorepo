@@ -290,7 +290,7 @@ const FIELD_META: Record<FieldKey, FieldMeta> = {
     placeholder: 'ISO8601 timestamp (UTC)'
   },
   assignee: {
-    label: 'Assignee GID',
+    label: 'Assignee',
     placeholder: 'User to assign'
   },
   query: {
@@ -1061,6 +1061,271 @@ export default function AsanaAction({
     }
   }, [asanaParams.dueAt, asanaParams.dueOn])
 
+  const hasWorkspaceSelected = Boolean(asanaParams.workspaceGid?.trim())
+  const hasProjectSelected = Boolean(asanaParams.projectGid?.trim())
+  const hasTaskSelected = Boolean(asanaParams.taskGid?.trim())
+  const hasParentTaskSelected = Boolean(asanaParams.parentTaskGid?.trim())
+
+  const visibility = useMemo(() => {
+    const op = asanaParams.operation
+    const fieldVisibility: Record<FieldKey, boolean> = {
+      workspaceGid: false,
+      projectGid: false,
+      taskGid: false,
+      parentTaskGid: false,
+      sectionGid: false,
+      tagGid: false,
+      userGid: false,
+      storyGid: false,
+      teamGid: false,
+      name: false,
+      notes: false,
+      dueOn: false,
+      dueAt: false,
+      assignee: false,
+      query: false,
+      completed: false,
+      archived: false,
+      limit: false,
+      additionalFields: false
+    }
+
+    const enableWorkspace = () => {
+      fieldVisibility.workspaceGid = true
+    }
+
+    switch (op) {
+      case 'createProject':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.name = true
+          fieldVisibility.notes = true
+          fieldVisibility.teamGid = true
+          fieldVisibility.archived = true
+          fieldVisibility.additionalFields = true
+        }
+        break
+      case 'updateProject':
+        fieldVisibility.projectGid = true
+        if (hasProjectSelected) {
+          fieldVisibility.name = true
+          fieldVisibility.notes = true
+          fieldVisibility.archived = true
+          fieldVisibility.additionalFields = true
+        }
+        break
+      case 'getProject':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
+        break
+      case 'listProjects':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.teamGid = true
+          fieldVisibility.limit = true
+        }
+        break
+      case 'deleteProject':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
+        break
+      case 'createTask':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.name = true
+          fieldVisibility.projectGid = true
+          fieldVisibility.assignee = true
+          fieldVisibility.notes = true
+          fieldVisibility.dueOn = dueMode === 'dueOn'
+          fieldVisibility.dueAt = dueMode === 'dueAt'
+          fieldVisibility.additionalFields = true
+        }
+        break
+      case 'updateTask':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        if (hasTaskSelected) {
+          fieldVisibility.name = true
+          fieldVisibility.notes = true
+          fieldVisibility.assignee = true
+          fieldVisibility.completed = true
+          fieldVisibility.dueOn = dueMode === 'dueOn'
+          fieldVisibility.dueAt = dueMode === 'dueAt'
+          fieldVisibility.additionalFields = true
+        }
+        break
+      case 'getTask':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        break
+      case 'listTasks':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+          fieldVisibility.tagGid = true
+          fieldVisibility.assignee = true
+          fieldVisibility.limit = true
+        }
+        break
+      case 'deleteTask':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        break
+      case 'searchTasks':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.query = true
+          fieldVisibility.projectGid = true
+          fieldVisibility.tagGid = true
+          fieldVisibility.assignee = true
+          fieldVisibility.completed = true
+          fieldVisibility.limit = true
+        }
+        break
+      case 'moveTask':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        if (hasTaskSelected) {
+          fieldVisibility.sectionGid = true
+        }
+        break
+      case 'createSubtask':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.parentTaskGid = true
+        }
+        if (hasParentTaskSelected) {
+          fieldVisibility.name = true
+          fieldVisibility.assignee = true
+          fieldVisibility.notes = true
+          fieldVisibility.dueOn = dueMode === 'dueOn'
+          fieldVisibility.dueAt = dueMode === 'dueAt'
+          fieldVisibility.additionalFields = true
+        }
+        break
+      case 'listSubtasks':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.parentTaskGid = true
+        }
+        if (hasParentTaskSelected) {
+          fieldVisibility.limit = true
+        }
+        break
+      case 'addComment':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        if (hasTaskSelected) {
+          fieldVisibility.notes = true
+        }
+        break
+      case 'removeComment':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        if (hasTaskSelected) {
+          fieldVisibility.storyGid = true
+        }
+        break
+      case 'addTaskProject':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        if (hasTaskSelected) {
+          fieldVisibility.projectGid = true
+        }
+        if (hasProjectSelected) {
+          fieldVisibility.sectionGid = true
+        }
+        break
+      case 'removeTaskProject':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        if (hasTaskSelected) {
+          fieldVisibility.projectGid = true
+        }
+        break
+      case 'addTaskTag':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        if (hasTaskSelected) {
+          fieldVisibility.tagGid = true
+        }
+        break
+      case 'removeTaskTag':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.taskGid = true
+        }
+        if (hasTaskSelected) {
+          fieldVisibility.tagGid = true
+        }
+        break
+      case 'getUser':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.userGid = true
+        }
+        break
+      case 'listUsers':
+        enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.teamGid = true
+          fieldVisibility.limit = true
+        }
+        break
+      default:
+        break
+    }
+
+    return fieldVisibility
+  }, [
+    asanaParams.operation,
+    hasProjectSelected,
+    hasParentTaskSelected,
+    hasTaskSelected,
+    hasWorkspaceSelected,
+    dueMode
+  ])
+
+  const showDueModeSelector = useMemo(() => {
+    switch (asanaParams.operation) {
+      case 'createTask':
+        return hasWorkspaceSelected
+      case 'updateTask':
+        return hasTaskSelected
+      case 'createSubtask':
+        return hasParentTaskSelected
+      default:
+        return false
+    }
+  }, [
+    asanaParams.operation,
+    hasParentTaskSelected,
+    hasTaskSelected,
+    hasWorkspaceSelected
+  ])
+
   const handleDueModeChange = useCallback(
     (mode: 'dueOn' | 'dueAt') => {
       setDueMode(mode)
@@ -1155,10 +1420,15 @@ export default function AsanaAction({
     [applyAsanaPatch]
   )
 
+  const shouldFetchWorkspaces = useMemo(
+    () => hasConnection && !isSoloPlan && visibility.workspaceGid,
+    [hasConnection, isSoloPlan, visibility.workspaceGid]
+  )
+
   useEffect(() => {
     setWorkspaceOptions([])
     setWorkspaceOptionsError(null)
-    if (!asanaConnectionOptions || isSoloPlan) {
+    if (!asanaConnectionOptions || !shouldFetchWorkspaces) {
       setWorkspaceOptionsLoading(false)
       return
     }
@@ -1192,7 +1462,7 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [asanaConnectionOptions, isSoloPlan])
+  }, [asanaConnectionOptions, shouldFetchWorkspaces])
 
   useEffect(() => {
     setProjectOptions([])
@@ -1206,7 +1476,17 @@ export default function AsanaAction({
     setUserOptionsError(null)
 
     const workspaceGid = debouncedWorkspaceGid
-    if (!workspaceGid || !asanaConnectionOptions || isSoloPlan) {
+    const shouldFetch =
+      visibility.projectGid ||
+      visibility.tagGid ||
+      visibility.teamGid ||
+      visibility.assignee
+    if (
+      !shouldFetch ||
+      !workspaceGid ||
+      !asanaConnectionOptions ||
+      isSoloPlan
+    ) {
       setProjectOptionsLoading(false)
       setTagOptionsLoading(false)
       setTeamOptionsLoading(false)
@@ -1315,14 +1595,23 @@ export default function AsanaAction({
     debouncedTeamGid,
     asanaParams.connectionId,
     asanaParams.connectionScope,
-    isSoloPlan
+    isSoloPlan,
+    visibility.assignee,
+    visibility.projectGid,
+    visibility.tagGid,
+    visibility.teamGid
   ])
 
   useEffect(() => {
     setSectionOptions([])
     setSectionOptionsError(null)
     const projectGid = debouncedProjectGid
-    if (!projectGid || !asanaConnectionOptions || isSoloPlan) {
+    if (
+      !visibility.sectionGid ||
+      !projectGid ||
+      !asanaConnectionOptions ||
+      isSoloPlan
+    ) {
       setSectionOptionsLoading(false)
       return
     }
@@ -1357,13 +1646,25 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [asanaConnectionOptions, debouncedProjectGid, isSoloPlan])
+  }, [
+    asanaConnectionOptions,
+    debouncedProjectGid,
+    isSoloPlan,
+    visibility.sectionGid
+  ])
 
   useEffect(() => {
     setTaskOptions([])
     setTaskOptionsError(null)
     const workspaceGid = debouncedWorkspaceGid
-    if (!workspaceGid || !asanaConnectionOptions || isSoloPlan) {
+    const shouldFetchTasks =
+      visibility.taskGid || visibility.parentTaskGid || visibility.storyGid
+    if (
+      !shouldFetchTasks ||
+      !workspaceGid ||
+      !asanaConnectionOptions ||
+      isSoloPlan
+    ) {
       setTaskOptionsLoading(false)
       return
     }
@@ -1406,14 +1707,22 @@ export default function AsanaAction({
     asanaConnectionOptions,
     debouncedWorkspaceGid,
     debouncedProjectGid,
-    isSoloPlan
+    isSoloPlan,
+    visibility.parentTaskGid,
+    visibility.storyGid,
+    visibility.taskGid
   ])
 
   useEffect(() => {
     setCommentOptions([])
     setCommentOptionsError(null)
     const taskGid = (asanaParams.taskGid ?? '').trim()
-    if (!taskGid || !asanaConnectionOptions || isSoloPlan) {
+    if (
+      !visibility.storyGid ||
+      !taskGid ||
+      !asanaConnectionOptions ||
+      isSoloPlan
+    ) {
       setCommentOptionsLoading(false)
       return
     }
@@ -1448,7 +1757,12 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [asanaConnectionOptions, asanaParams.taskGid, isSoloPlan])
+  }, [
+    asanaConnectionOptions,
+    asanaParams.taskGid,
+    isSoloPlan,
+    visibility.storyGid
+  ])
 
   const selectedConnectionValue = useMemo(() => {
     if (!activeConnection?.connectionId || !activeConnection.connectionScope)
@@ -1506,10 +1820,10 @@ export default function AsanaAction({
   const visibleFields = useMemo(() => {
     const config = OPERATION_FIELDS[asanaParams.operation]
     return {
-      required: config.required,
-      optional: config.optional ?? []
+      required: (config.required || []).filter((field) => visibility[field]),
+      optional: (config.optional ?? []).filter((field) => visibility[field])
     }
-  }, [asanaParams.operation])
+  }, [asanaParams.operation, visibility])
 
   const renderField = (field: FieldKey, _isRequired: boolean) => {
     const meta = FIELD_META[field]
@@ -1521,6 +1835,10 @@ export default function AsanaAction({
       return null
     }
     if (field === 'dueAt' && supportsDueMode && dueMode !== 'dueAt') {
+      return null
+    }
+
+    if (!visibility[field]) {
       return null
     }
 
@@ -2133,65 +2451,73 @@ export default function AsanaAction({
         )}
       </div>
 
-      <div className="space-y-1">
-        <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-          Operation
-        </p>
-        <NodeDropdownField
-          options={OPERATION_OPTIONS.map<NodeDropdownOption>((option) => ({
-            label: option.label,
-            value: option.value
-          }))}
-          value={asanaParams.operation}
-          onChange={(val) =>
-            applyAsanaPatch({ operation: val as AsanaOperation })
-          }
-          disabled={!effectiveCanEdit}
-        />
-      </div>
+      {hasConnection && (
+        <>
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+              Operation
+            </p>
+            <NodeDropdownField
+              options={OPERATION_OPTIONS.map<NodeDropdownOption>((option) => ({
+                label: option.label,
+                value: option.value
+              }))}
+              value={asanaParams.operation}
+              onChange={(val) =>
+                applyAsanaPatch({ operation: val as AsanaOperation })
+              }
+              disabled={!effectiveCanEdit}
+            />
+          </div>
 
-      {supportsDueMode && (
-        <div className="space-y-1">
-          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-            Due field
-          </p>
-          <NodeDropdownField
-            options={[
-              { label: 'Due on (date)', value: 'dueOn' },
-              { label: 'Due at (datetime)', value: 'dueAt' }
-            ]}
-            value={dueMode}
-            onChange={(val) =>
-              handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
-            }
-            disabled={!effectiveCanEdit}
-          />
-        </div>
+          {supportsDueMode && showDueModeSelector && (
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                Due field
+              </p>
+              <NodeDropdownField
+                options={[
+                  { label: 'Due on (date)', value: 'dueOn' },
+                  { label: 'Due at (datetime)', value: 'dueAt' }
+                ]}
+                value={dueMode}
+                onChange={(val) =>
+                  handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
+                }
+                disabled={!effectiveCanEdit}
+              />
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {visibleFields.required.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Required fields
+                </p>
+                <div className="space-y-2">
+                  {visibleFields.required.map((field) =>
+                    renderField(field, true)
+                  )}
+                </div>
+              </div>
+            )}
+
+            {visibleFields.optional.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Optional fields
+                </p>
+                <div className="space-y-2">
+                  {visibleFields.optional.map((field) =>
+                    renderField(field, false)
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
       )}
-
-      <div className="space-y-3">
-        {visibleFields.required.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Required fields
-            </p>
-            <div className="space-y-2">
-              {visibleFields.required.map((field) => renderField(field, true))}
-            </div>
-          </div>
-        )}
-
-        {visibleFields.optional.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Optional fields
-            </p>
-            <div className="space-y-2">
-              {visibleFields.optional.map((field) => renderField(field, false))}
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   )
 }
