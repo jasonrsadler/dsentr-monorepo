@@ -9,6 +9,7 @@ pub enum ConnectedOAuthProvider {
     Google,
     Microsoft,
     Slack,
+    Asana,
 }
 
 #[allow(dead_code)]

@@ -4,6 +4,7 @@ import { ChevronDown } from 'lucide-react'
 import SlackIcon from '@/assets/svg-components/third-party/SlackIcon'
 import { API_BASE_URL } from '@/lib/config'
 import { errorMessage } from '@/lib/errorMessage'
+import AsanaIcon from '@/assets/svg-components/third-party/AsanaIcon'
 import {
   OAuthProvider,
   ProviderConnectionSet,
@@ -44,7 +45,8 @@ const PROVIDER_ICONS: Partial<
 > = {
   slack: SlackIcon,
   google: GoogleIcon,
-  microsoft: MicrosoftIcon
+  microsoft: MicrosoftIcon,
+  asana: AsanaIcon
 }
 
 const PROVIDERS: ProviderMeta[] = [
@@ -68,6 +70,13 @@ const PROVIDERS: ProviderMeta[] = [
     description:
       'Connect your Slack workspace to post messages, manage channels, and automate collaboration from DSentr workflows.',
     scopes: 'chat:write channels:read users:read'
+  },
+  {
+    key: 'asana',
+    name: 'Asana',
+    description:
+      'Connect Asana to create and update projects, tasks, and comments directly from your workflows.',
+    scopes: 'default email'
   }
 ]
 

@@ -12,7 +12,9 @@ export const PLAN_RESTRICTION_MESSAGES = {
   slack:
     'Slack messaging is available on workspace plans and above. Switch this action to Google Chat or upgrade in Settings → Plan.',
   teams:
-    'Microsoft Teams messaging is available on workspace plans and above. Switch this action to Google Chat or upgrade in Settings → Plan.'
+    'Microsoft Teams messaging is available on workspace plans and above. Switch this action to Google Chat or upgrade in Settings → Plan.',
+  asana:
+    'Asana actions are available on workspace plans and above. Upgrade in Settings → Plan to run this step.'
 } as const
 
 export type ActionNodeParams = Record<string, unknown>
@@ -118,6 +120,9 @@ export function useActionNodeController({
     if (!isSoloPlan) return null
     if (actionType === 'sheets') {
       return PLAN_RESTRICTION_MESSAGES.sheets
+    }
+    if (actionType === 'asana') {
+      return PLAN_RESTRICTION_MESSAGES.asana
     }
     return null
   }, [isSoloPlan, actionType])

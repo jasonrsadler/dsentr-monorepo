@@ -35,7 +35,8 @@ import {
   GoogleChatActionNode,
   GoogleSheetsActionNode,
   HttpRequestActionNode,
-  RunCustomCodeActionNode
+  RunCustomCodeActionNode,
+  AsanaActionNode
 } from '@/components/workflow/nodes'
 import NodeEdge from '@/components/workflow/NodeEdge'
 import CustomControls from '@/components/ui/ReactFlow/CustomControl'
@@ -167,6 +168,7 @@ type ActionDropSubtype =
   | 'actionSheets'
   | 'actionHttp'
   | 'actionCode'
+  | 'actionAsana'
 type LogicDropSubtype = 'delay' | 'formatter'
 
 interface DropDescriptor {
@@ -378,6 +380,26 @@ const ACTION_NODE_DROP_CONFIG: Record<ActionDropSubtype, ActionDropConfig> = {
       stopOnError: true
     })
   },
+  actionAsana: {
+    nodeType: 'actionAsana',
+    labelBase: 'Asana',
+    idPrefix: 'action-asana',
+    expanded: true,
+    createData: () => ({
+      actionType: 'asana',
+      params: {
+        operation: 'createTask',
+        connectionScope: '',
+        connectionId: '',
+        workspaceGid: '',
+        name: '',
+        additionalFields: []
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
   actionCode: {
     nodeType: 'actionCode',
     labelBase: 'Code step',
@@ -427,6 +449,9 @@ function normalizeActionDropSubtype(
     case 'googlechat':
     case 'google chat':
       return 'actionGoogleChat'
+    case 'actionasana':
+    case 'asana':
+      return 'actionAsana'
     case 'actionsheets':
     case 'sheets':
     case 'create google sheet row':
@@ -763,6 +788,8 @@ export default function FlowCanvas({
           return 'actionTeams'
         case 'googlechat':
           return 'actionGoogleChat'
+        case 'asana':
+          return 'actionAsana'
         case 'sheets':
           return 'actionSheets'
         case 'http':
@@ -883,6 +910,16 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
+      actionAsana: (props: ActionNodeRendererProps) => (
+        <AsanaActionNode
+          key={`action-asana-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...createSharedRunProps()}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
       actionCode: (props: ActionNodeRendererProps) => (
         <RunCustomCodeActionNode
           key={`action-code-${props.id}-${props?.data?.wfEpoch ?? ''}`}
@@ -973,6 +1010,8 @@ export default function FlowCanvas({
         renderActionNode('actionSheets', props),
       actionHttp: (props: ActionNodeRendererProps) =>
         renderActionNode('actionHttp', props),
+      actionAsana: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionAsana', props),
       actionCode: (props: ActionNodeRendererProps) =>
         renderActionNode('actionCode', props),
       action: (props: ActionNodeRendererProps) => {

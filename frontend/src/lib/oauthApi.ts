@@ -2,7 +2,7 @@ import { API_BASE_URL } from './config'
 import { getCsrfToken } from './csrfCache'
 import { useAuth } from '@/stores/auth'
 
-export type OAuthProvider = 'google' | 'microsoft' | 'slack'
+export type OAuthProvider = 'google' | 'microsoft' | 'slack' | 'asana'
 
 export type ConnectionScope = 'personal' | 'workspace'
 
@@ -49,7 +49,7 @@ export interface GroupedConnectionsSnapshot {
   workspace: WorkspaceConnectionInfo[]
 }
 
-const PROVIDER_KEYS: OAuthProvider[] = ['google', 'microsoft', 'slack']
+const PROVIDER_KEYS: OAuthProvider[] = ['google', 'microsoft', 'slack', 'asana']
 
 const resolveApiBaseUrl = (): string => {
   const rawBase =

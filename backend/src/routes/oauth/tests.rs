@@ -82,6 +82,11 @@ fn stub_config() -> Arc<Config> {
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost/slack".into(),
             },
+            asana: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/asana".into(),
+            },
             token_encryption_key: vec![0u8; 32],
         },
         api_secrets_encryption_key: vec![1u8; 32],
@@ -1536,6 +1541,7 @@ fn parse_provider_handles_known_values() {
         Some(ConnectedOAuthProvider::Microsoft)
     );
     assert_eq!(parse_provider("slack"), Some(ConnectedOAuthProvider::Slack));
+    assert_eq!(parse_provider("asana"), Some(ConnectedOAuthProvider::Asana));
     assert_eq!(parse_provider("unknown"), None);
 }
 

@@ -82,6 +82,8 @@ oUnusedLocals.
 - Workflow nodes clear shared workspace credential selections when the shared connection is removed so users must choose an available credential explicitly.
 - OAuth connection selectors update in real time when workspace credentials are promoted or removed, so open workflows reflect changes without refreshing.
 - Shared credential removal flows now warn about potential workflow failures and ensure personal disconnects also revoke shared workspace connections.
+- Integrations tab now surfaces an Asana card with OAuth connect/disconnect support using the new backend provider and displays both personal and workspace connections.
+- Added an Asana action node (palette + flyout) with connection selector, plan restriction messaging, and operations for managing Asana projects, tasks, subtasks, comments, tags, and users.
 - Action nodes now deep-compare local state before notifying the canvas so update notifications don't trigger infinite React Flow rerender loops.
 - Action node prop-to-state sync skips redundant param updates to prevent React Flow dirty-check loops when toggling node UI.
 - Condition nodes now deep-compare update payloads before notifying the canvas so toggling other nodes or edges doesn't trigger infinite workflow rerenders.

@@ -27,3 +27,4 @@
 - OAuth integrations listing now blocks Solo-plan workspaces and returns a `workspace_plan_required` error so Settings integrations stay premium-only even when a user belongs to other Workspace plans.
 - OAuth route test repositories now implement pending-invite counting to satisfy workspace seat checks that treat invitations as reserved seats.
 - OAuth route test repositories stub `stripe_overage_item_id` accessors so the expanded workspace repository trait for metered billing compiles in the OAuth harness.
+- Added Asana provider parsing, state-cookie wiring, and start/callback handlers so users can connect Asana accounts through the OAuth flow alongside Google, Microsoft, and Slack.

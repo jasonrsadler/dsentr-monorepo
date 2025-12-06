@@ -461,6 +461,7 @@ impl WorkspaceOAuthService {
             ConnectedOAuthProvider::Google => 0,
             ConnectedOAuthProvider::Microsoft => 1,
             ConnectedOAuthProvider::Slack => 2,
+            ConnectedOAuthProvider::Asana => 3,
         }
     }
 

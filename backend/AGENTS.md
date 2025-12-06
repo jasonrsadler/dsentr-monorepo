@@ -20,6 +20,7 @@ itly coordinated.
 - Updated `.env.template` placeholders to reference SECURITY.md and vault-managed secrets, reducing the risk of reusing committed credentials.
 
 - Delay node execution now honors explicit mode (duration vs datetime) and fails fast when the chosen mode lacks required inputs.
+ - Added Asana OAuth configuration so the backend can provision client credentials and callbacks for the new Asana integration path.
 ## Change Reasons
 - Added login activity tracking (IP, user agent, geo/proxy hints) so admin tooling can audit where users sign in and when sessions end.
 - Added pluggable app email delivery with environment-controlled provider selection (`EMAIL_PROVIDER`). Supports `smtp` and `sendgrid` for signup, password reset, invites, and account notifications. This accommodates hosts that disallow outbound SMTP while preserving SMTP for environments that support it.

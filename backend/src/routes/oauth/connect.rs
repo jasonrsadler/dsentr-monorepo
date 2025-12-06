@@ -2,7 +2,8 @@ use super::{
     helpers::{
         build_state_cookie, handle_callback, redirect_with_error, CallbackQuery, GOOGLE_AUTH_URL,
         GOOGLE_STATE_COOKIE, MICROSOFT_AUTH_URL, MICROSOFT_STATE_COOKIE,
-        OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_AUTH_URL, SLACK_STATE_COOKIE,
+        OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_AUTH_URL, SLACK_STATE_COOKIE, ASANA_AUTH_URL,
+        ASANA_STATE_COOKIE,
     },
     prelude::*,
 };
@@ -279,6 +280,70 @@ pub async fn slack_connect_callback(
         query,
         ConnectedOAuthProvider::Slack,
         SLACK_STATE_COOKIE,
+    )
+    .await
+}
+
+pub async fn asana_connect_start(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Query(params): Query<ConnectQuery>,
+    jar: CookieJar,
+) -> Response {
+    match Uuid::parse_str(&claims.id) {
+        Ok(user_id) => {
+            if let Err(response) = ensure_oauth_permissions(
+                &state,
+                user_id,
+                claims.plan.as_deref(),
+                params.workspace,
+                ConnectedOAuthProvider::Asana,
+            )
+            .await
+            {
+                return response;
+            }
+        }
+        Err(_) => {
+            let plan_tier = NormalizedPlanTier::from_option(claims.plan.as_deref());
+            if plan_tier.is_solo() {
+                return redirect_with_error(
+                    &state.config,
+                    ConnectedOAuthProvider::Asana,
+                    OAUTH_PLAN_RESTRICTION_MESSAGE,
+                );
+            }
+        }
+    }
+
+    let state_token = generate_csrf_token();
+    let cookie = build_state_cookie(ASANA_STATE_COOKIE, &state_token);
+    let jar = jar.add(cookie);
+
+    let mut url = Url::parse(ASANA_AUTH_URL).expect("valid asana auth url");
+    url.query_pairs_mut()
+        .append_pair("client_id", &state.config.oauth.asana.client_id)
+        .append_pair("redirect_uri", &state.config.oauth.asana.redirect_uri)
+        .append_pair("response_type", "code")
+        .append_pair("scope", state.oauth_accounts.asana_scopes())
+        .append_pair("state", &state_token);
+
+    (jar, Redirect::to(url.as_str())).into_response()
+}
+
+pub async fn asana_connect_callback(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    jar: CookieJar,
+    Query(query): Query<CallbackQuery>,
+) -> Response {
+    handle_callback(
+        state,
+        claims,
+        jar,
+        query,
+        ConnectedOAuthProvider::Asana,
+        ASANA_STATE_COOKIE,
     )
     .await
 }

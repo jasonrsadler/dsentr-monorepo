@@ -43,6 +43,7 @@ pub struct OAuthSettings {
     pub google: OAuthProviderConfig,
     pub microsoft: OAuthProviderConfig,
     pub slack: OAuthProviderConfig,
+    pub asana: OAuthProviderConfig,
     pub token_encryption_key: Vec<u8>,
 }
 
@@ -104,6 +105,12 @@ impl Config {
             redirect_uri: require_env("SLACK_INTEGRATIONS_REDIRECT_URI")?,
         };
 
+        let asana = OAuthProviderConfig {
+            client_id: require_env("ASANA_INTEGRATIONS_CLIENT_ID")?,
+            client_secret: require_env("ASANA_INTEGRATIONS_CLIENT_SECRET")?,
+            redirect_uri: require_env("ASANA_INTEGRATIONS_REDIRECT_URI")?,
+        };
+
         let encryption_key_b64 = require_env("OAUTH_TOKEN_ENCRYPTION_KEY")?;
         let token_encryption_key =
             decode_key(&encryption_key_b64).map_err(|source| ConfigError::SecretDecode {
@@ -154,6 +161,7 @@ impl Config {
                 google,
                 microsoft,
                 slack,
+                asana,
                 token_encryption_key,
             },
             api_secrets_encryption_key,
@@ -340,6 +348,9 @@ mod tests {
         env::set_var("SLACK_INTEGRATIONS_CLIENT_ID", "slack-client-id");
         env::set_var("SLACK_INTEGRATIONS_CLIENT_SECRET", "slack-client-secret");
         env::set_var("SLACK_INTEGRATIONS_REDIRECT_URI", "http://localhost/slack");
+        env::set_var("ASANA_INTEGRATIONS_CLIENT_ID", "asana-client-id");
+        env::set_var("ASANA_INTEGRATIONS_CLIENT_SECRET", "asana-client-secret");
+        env::set_var("ASANA_INTEGRATIONS_REDIRECT_URI", "http://localhost/asana");
         let key = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
         env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", key);
         env::set_var(

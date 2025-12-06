@@ -23,3 +23,4 @@
 - Workspace OAuth handling now keeps per-connection records keyed by connection ID: promotions always insert new rows without pruning other members, removal/unshare only clears personal tokens when no other workspace connections exist for that provider, and token retrieval helpers consume explicit connection IDs so callers can manage multiple shared integrations safely.
 - WorkspaceOAuthService test doubles now stub the new workspace quota/billing methods and membership defaults so the expanded repository trait compiles cleanly across routes, services, and mocks.
 - Workspace OAuth service tests implement the new overage subscription item accessors on workspace repositories so billing schema changes compile without affecting OAuth behavior.
+ - Added Asana OAuth provider configuration and token handling so Asana connections can be exchanged, refreshed, revoked, and promoted like other providers.

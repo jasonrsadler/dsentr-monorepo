@@ -1385,6 +1385,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "https://app.example.com/oauth/slack".into(),
                 },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/asana".into(),
+                },
                 token_encryption_key: vec![0; 32],
             },
             api_secrets_encryption_key: vec![1; 32],

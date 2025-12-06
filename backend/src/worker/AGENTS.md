@@ -22,3 +22,4 @@
 - Updated slow-run worker test harness to fully own mocked node run fields and reuse shared completion trackers without moving them, fixing compile-time lifetime and move errors.
 - Scheduled run quota checks now tolerate solo-plan workspaces by skipping workspace-only limits instead of logging plan-required warnings.
 - Runaway workflow protection blocks runs in the worker before execution, records a `runaway_protection_triggered` event, fails the run without retries, and skips workspace quota/overage increments when the limit is exceeded.
+- Worker/AppState test scaffolding now seeds the Asana OAuth provider config so executor paths compile with the expanded provider set.

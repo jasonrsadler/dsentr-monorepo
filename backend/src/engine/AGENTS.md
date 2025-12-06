@@ -27,3 +27,4 @@
 - Executor hydrates run snapshots with decrypted secret stores for every run before graph execution and fails runs cleanly if secrets cannot be loaded, preventing plaintext secrets from leaking in execution responses.
 - Added runaway protection helpers that count recent workspace runs and surface a dedicated error when limits are exceeded so creation and execution paths can block runaway workflows safely.
 - Formatter node execution added with typed operations (string/number/json/date/bool), JSON path access, and snapshot-friendly outputs to reshape data synchronously between steps.
+- Action router now registers the Asana executor (`actionType: "asana"`) so workflow runs can call Asana project/task APIs using personal or workspace OAuth connections while respecting plan membership.

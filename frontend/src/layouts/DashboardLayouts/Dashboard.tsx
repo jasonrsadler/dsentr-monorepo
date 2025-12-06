@@ -115,6 +115,19 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
     ]
   },
   {
+    heading: 'Project Management',
+    tiles: [
+      {
+        id: 'action-asana',
+        label: 'Asana',
+        description: 'Create and update Asana projects and tasks',
+        dragType: 'action:actionAsana',
+        gradient: 'from-orange-500 to-rose-500',
+        icon: <ActionIcon />
+      }
+    ]
+  },
+  {
     heading: 'Google Sheets',
     tiles: [
       {

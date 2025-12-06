@@ -5,6 +5,7 @@ pub(crate) mod formatter;
 mod google;
 mod http;
 mod messaging;
+mod asana;
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -80,7 +81,7 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
                     connection_id: parsed_id,
                 }));
             }
-            "user" => {
+            "user" | "personal" => {
                 return Ok(NodeConnectionUsage::User(UserConnectionUsage {
                     connection_id,
                     account_email: account_email(),
@@ -466,6 +467,7 @@ pub(crate) async fn execute_action(
         }
         "sheets" => google::execute_sheets(node, context, state, run).await,
         "code" => code::execute_code(node, context).await,
+        "asana" => asana::execute_asana(node, context, state, run).await,
         _ => Ok((
             json!({"skipped": true, "reason": "unsupported actionType"}),
             None,
@@ -512,6 +514,27 @@ mod tests {
             NodeConnectionUsage::User(info) => {
                 assert_eq!(info.connection_id.as_deref(), Some("microsoft-personal"));
                 assert_eq!(info.account_email.as_deref(), Some("alice@example.com"));
+            }
+            other => panic!("expected personal usage, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolve_connection_usage_supports_personal_scope_on_connection_object() {
+        let params = json!({
+            "connection": {
+                "connectionScope": "personal",
+                "connectionId": "asana-connection",
+                "accountEmail": "jane@example.com"
+            }
+        });
+
+        let usage = resolve_connection_usage(&params).expect("personal scope should parse");
+
+        match usage {
+            NodeConnectionUsage::User(info) => {
+                assert_eq!(info.connection_id.as_deref(), Some("asana-connection"));
+                assert_eq!(info.account_email.as_deref(), Some("jane@example.com"));
             }
             other => panic!("expected personal usage, got {:?}", other),
         }

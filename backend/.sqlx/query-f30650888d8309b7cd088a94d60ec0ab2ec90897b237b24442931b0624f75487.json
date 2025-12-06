@@ -19,7 +19,8 @@
               "Enum": [
                 "google",
                 "microsoft",
-                "slack"
+                "slack",
+                "asana"
               ]
             }
           }

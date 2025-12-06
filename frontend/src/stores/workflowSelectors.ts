@@ -218,6 +218,8 @@ export function normalizeActionType(value: unknown): string {
       return 'http'
     case 'run custom code':
       return 'code'
+    case 'asana':
+      return 'asana'
     case 'messaging.slack':
     case 'action.messaging.slack':
     case 'slack message':

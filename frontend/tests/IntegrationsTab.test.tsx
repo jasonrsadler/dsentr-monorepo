@@ -59,7 +59,7 @@ useAuth.mockImplementation((selector?: any) =>
 async function expandProviderSections(
   user: ReturnType<typeof userEvent.setup>
 ) {
-  for (const name of ['Google', 'Microsoft', 'Slack']) {
+  for (const name of ['Google', 'Microsoft', 'Slack', 'Asana']) {
     const toggle = await screen.findByRole('button', {
       name: new RegExp(`^${name}$`, 'i')
     })
@@ -415,7 +415,7 @@ describe('IntegrationsTab', () => {
 
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: /Connect/i })).toHaveLength(
-        3
+        4
       )
     })
   })

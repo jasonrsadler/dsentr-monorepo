@@ -25,6 +25,9 @@ const MICROSOFT_REVOCATION_URL: &str =
 const SLACK_TOKEN_URL: &str = "https://slack.com/api/oauth.v2.access";
 const SLACK_USER_INFO_URL: &str = "https://slack.com/api/users.info";
 const SLACK_REVOCATION_URL: &str = "https://slack.com/api/auth.revoke";
+const ASANA_TOKEN_URL: &str = "https://app.asana.com/-/oauth_token";
+const ASANA_USERINFO_URL: &str = "https://app.asana.com/api/1.0/users/me";
+const ASANA_REVOCATION_URL: &str = "https://app.asana.com/-/oauth_revoke";
 
 #[derive(Debug, Clone)]
 pub struct StoredOAuthToken {
@@ -75,6 +78,7 @@ pub struct OAuthAccountService {
     google: OAuthProviderConfig,
     microsoft: OAuthProviderConfig,
     slack: OAuthProviderConfig,
+    asana: OAuthProviderConfig,
     #[cfg(test)]
     refresh_override: Option<Arc<RefreshOverride>>,
     #[cfg(test)]
@@ -99,6 +103,7 @@ impl OAuthAccountService {
             google: settings.google.clone(),
             microsoft: settings.microsoft.clone(),
             slack: settings.slack.clone(),
+            asana: settings.asana.clone(),
             #[cfg(test)]
             refresh_override: None,
             #[cfg(test)]
@@ -200,6 +205,12 @@ impl OAuthAccountService {
 
     pub fn slack_scopes(&self) -> &'static str {
         "chat:write,channels:read,groups:read,users:read,users:read.email"
+    }
+
+    pub fn asana_scopes(&self) -> &'static str {
+        // `default` grants standard Asana app permissions; `email` ensures the user profile
+        // includes an email address for auditing and display in the UI.
+        "default email"
     }
 
     pub async fn save_authorization(
@@ -413,6 +424,7 @@ impl OAuthAccountService {
             ConnectedOAuthProvider::Google => self.exchange_google_code(code).await,
             ConnectedOAuthProvider::Microsoft => self.exchange_microsoft_code(code).await,
             ConnectedOAuthProvider::Slack => self.exchange_slack_code(code).await,
+            ConnectedOAuthProvider::Asana => self.exchange_asana_code(code).await,
         }
     }
 
@@ -641,6 +653,75 @@ impl OAuthAccountService {
         })
     }
 
+    async fn exchange_asana_code(
+        &self,
+        code: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+            #[serde(default)]
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+        }
+
+        #[derive(Deserialize)]
+        struct AsanaUser {
+            email: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct UserInfoResponse {
+            data: Option<AsanaUser>,
+        }
+
+        let response: TokenResponse = self
+            .client
+            .post(ASANA_TOKEN_URL)
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("client_id", self.asana.client_id.as_str()),
+                ("client_secret", self.asana.client_secret.as_str()),
+                ("redirect_uri", self.asana.redirect_uri.as_str()),
+                ("code", code),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let refresh_token = response
+            .refresh_token
+            .ok_or(OAuthAccountError::MissingRefreshToken)?;
+        let expires_in = response.expires_in.ok_or_else(|| {
+            OAuthAccountError::InvalidResponse("Asana response missing expires_in".into())
+        })?;
+        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
+
+        let user_info: UserInfoResponse = self
+            .client
+            .get(ASANA_USERINFO_URL)
+            .bearer_auth(&response.access_token)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let account_email = user_info
+            .data
+            .and_then(|data| data.email)
+            .ok_or_else(|| OAuthAccountError::InvalidResponse("Missing account email".into()))?;
+
+        Ok(AuthorizationTokens {
+            access_token: response.access_token,
+            refresh_token,
+            expires_at,
+            account_email,
+        })
+    }
+
     pub async fn refresh_access_token(
         &self,
         provider: ConnectedOAuthProvider,
@@ -654,6 +735,7 @@ impl OAuthAccountService {
             ConnectedOAuthProvider::Google => self.refresh_google_token(refresh_token).await,
             ConnectedOAuthProvider::Microsoft => self.refresh_microsoft_token(refresh_token).await,
             ConnectedOAuthProvider::Slack => self.refresh_slack_token(refresh_token).await,
+            ConnectedOAuthProvider::Asana => self.refresh_asana_token(refresh_token).await,
         }
     }
 
@@ -873,6 +955,67 @@ impl OAuthAccountService {
         })
     }
 
+    async fn refresh_asana_token(
+        &self,
+        refresh_token: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+            #[serde(default)]
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+        }
+
+        let response = self
+            .client
+            .post(ASANA_TOKEN_URL)
+            .form(&[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+                ("client_id", self.asana.client_id.as_str()),
+                ("client_secret", self.asana.client_secret.as_str()),
+            ])
+            .send()
+            .await?;
+
+        if let Err(err) = response.error_for_status_ref() {
+            let body = response.text().await.unwrap_or_else(|_| String::new());
+            if is_revocation_signal(err.status(), &body) {
+                warn!(
+                    provider = "asana",
+                    status = ?err.status(),
+                    body = %body,
+                    "asana oauth refresh token revoked"
+                );
+                return Err(OAuthAccountError::TokenRevoked {
+                    provider: ConnectedOAuthProvider::Asana,
+                });
+            }
+            return Err(OAuthAccountError::Http(err));
+        }
+
+        let body: TokenResponse = response
+            .json()
+            .await
+            .map_err(|err| OAuthAccountError::InvalidResponse(err.to_string()))?;
+
+        let expires_in = body.expires_in.ok_or_else(|| {
+            OAuthAccountError::InvalidResponse("Asana refresh missing expires_in".into())
+        })?;
+        let expires_at = OffsetDateTime::now_utc() + Duration::seconds(expires_in);
+        let new_refresh = body
+            .refresh_token
+            .unwrap_or_else(|| refresh_token.to_string());
+
+        Ok(AuthorizationTokens {
+            access_token: body.access_token,
+            refresh_token: new_refresh,
+            expires_at,
+            account_email: String::new(),
+        })
+    }
+
     async fn revoke_existing_credentials(
         &self,
         provider: ConnectedOAuthProvider,
@@ -995,6 +1138,27 @@ impl OAuthAccountService {
                     Err(OAuthAccountError::InvalidResponse(format!(
                         "Failed to revoke token: {}",
                         status
+                    )))
+                }
+            }
+            ConnectedOAuthProvider::Asana => {
+                let response = self
+                    .client
+                    .post(ASANA_REVOCATION_URL)
+                    .form(&[
+                        ("token", token),
+                        ("client_id", self.asana.client_id.as_str()),
+                        ("client_secret", self.asana.client_secret.as_str()),
+                    ])
+                    .send()
+                    .await?;
+
+                if response.status().is_success() {
+                    Ok(())
+                } else {
+                    Err(OAuthAccountError::InvalidResponse(format!(
+                        "Failed to revoke token: {}",
+                        response.status()
                     )))
                 }
             }
@@ -1254,6 +1418,11 @@ impl OAuthAccountService {
                 redirect_uri: "http://localhost".into(),
             },
             slack: OAuthProviderConfig {
+                client_id: "stub".into(),
+                client_secret: "stub".into(),
+                redirect_uri: "http://localhost".into(),
+            },
+            asana: OAuthProviderConfig {
                 client_id: "stub".into(),
                 client_secret: "stub".into(),
                 redirect_uri: "http://localhost".into(),
@@ -1563,6 +1732,11 @@ mod tests {
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost".into(),
             },
+            asana: OAuthProviderConfig {
+                client_id: "id".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost".into(),
+            },
             token_encryption_key: vec![0u8; 32],
         };
         let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
@@ -1578,6 +1752,7 @@ mod tests {
             service.slack_scopes(),
             "chat:write,channels:read,groups:read,users:read,users:read.email"
         );
+        assert_eq!(service.asana_scopes(), "default email");
     }
 
     #[tokio::test]
@@ -1622,6 +1797,11 @@ mod tests {
                 client_id: "client".into(),
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost/slack".into(),
+            },
+            asana: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/asana".into(),
             },
             token_encryption_key: vec![0u8; 32],
         };
@@ -1687,6 +1867,11 @@ mod tests {
                 client_id: "client".into(),
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost/slack".into(),
+            },
+            asana: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/asana".into(),
             },
             token_encryption_key: vec![0u8; 32],
         };
@@ -2095,6 +2280,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/slack".into(),
                 },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -2183,6 +2373,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/slack".into(),
                 },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -2267,6 +2462,11 @@ mod tests {
                     client_id: "client".into(),
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/slack".into(),
+                },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
                 },
                 token_encryption_key: (*key).clone(),
             },

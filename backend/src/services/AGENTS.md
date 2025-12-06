@@ -24,3 +24,4 @@
 - Tests: added unit tests for the Stripe service validating request construction (via the mock capturing last requests) and error mapping (invalid webhook signature, invalid customer id parsing) without hitting the network.
 - Workspace OAuth service adds connection purge helpers plus dedicated mocks/tests so member removals can revoke shared tokens and audit deletions consistently.
 - Workspace OAuth workflows now persist `owner_user_id`/`user_oauth_token_id` on shared connections and ensure permission checks, mocks, and decrypt helpers respect the new ownership contract.
+ - Added Asana provider support to the OAuth service so Asana tokens refresh, revoke, and promote alongside existing Google/Microsoft/Slack credentials.

@@ -55,9 +55,9 @@ use routes::{
     },
     microsoft::{list_channel_members, list_team_channels, list_teams},
     oauth::{
-        disconnect_connection, google_connect_callback, google_connect_start, list_connections,
-        microsoft_connect_callback, microsoft_connect_start, refresh_connection,
-        slack_connect_callback, slack_connect_start,
+        asana_connect_callback, asana_connect_start, disconnect_connection, google_connect_callback,
+        google_connect_start, list_connections, microsoft_connect_callback,
+        microsoft_connect_start, refresh_connection, slack_connect_callback, slack_connect_start,
     },
     options::{
         secrets::{delete_secret, list_secrets, upsert_secret},
@@ -609,6 +609,8 @@ async fn main() -> Result<()> {
         .route("/microsoft/callback", get(microsoft_connect_callback))
         .route("/slack/start", get(slack_connect_start))
         .route("/slack/callback", get(slack_connect_callback))
+        .route("/asana/start", get(asana_connect_start))
+        .route("/asana/callback", get(asana_connect_callback))
         .layer(session_guard.clone());
 
     let oauth_private_routes = Router::new()
