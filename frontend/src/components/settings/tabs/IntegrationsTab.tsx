@@ -1,7 +1,7 @@
 import { JSX, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 
-import SlackIcon from '@/assets/svg-components/SlackIcon'
+import SlackIcon from '@/assets/svg-components/third-party/SlackIcon'
 import { API_BASE_URL } from '@/lib/config'
 import { errorMessage } from '@/lib/errorMessage'
 import {
@@ -20,7 +20,8 @@ import {
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog'
-import GoogleIcon from '@/assets/svg-components/GoogleIcon'
+import GoogleIcon from '@/assets/svg-components/third-party/GoogleIcon'
+import MicrosoftIcon from '@/assets/svg-components/third-party/MicrosoftIcon'
 
 export type IntegrationNotice =
   | { kind: 'connected'; provider?: OAuthProvider }
@@ -42,7 +43,8 @@ const PROVIDER_ICONS: Partial<
   Record<OAuthProvider, (props: React.SVGProps<SVGSVGElement>) => JSX.Element>
 > = {
   slack: SlackIcon,
-  google: GoogleIcon
+  google: GoogleIcon,
+  microsoft: MicrosoftIcon
 }
 
 const PROVIDERS: ProviderMeta[] = [
