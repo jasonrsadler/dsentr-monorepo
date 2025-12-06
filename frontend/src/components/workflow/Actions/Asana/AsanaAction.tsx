@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CalendarDays, Clock, Globe2 } from 'lucide-react'
 import deepEqual from 'fast-deep-equal'
 
 import NodeDropdownField, {
@@ -34,6 +35,18 @@ import {
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { ScheduleCalendar } from '@/components/ui/schedule/ScheduleCalendar'
+import { ScheduleTimePicker } from '@/components/ui/schedule/ScheduleTimePicker'
+import { ScheduleTimezonePicker } from '@/components/ui/schedule/ScheduleTimezonePicker'
+import {
+  formatDisplayDate,
+  formatDisplayTime,
+  getInitialMonth,
+  parseTime,
+  toISODateString,
+  toTimeString,
+  type CalendarMonth
+} from '@/components/ui/schedule/utils'
 
 type AsanaConnectionScope = 'personal' | 'workspace'
 
@@ -121,6 +134,72 @@ const DEFAULT_PARAMS: AsanaActionParams = {
   limit: '',
   additionalFields: [],
   hasValidationErrors: false
+}
+
+type DateTimeParts = {
+  date: string
+  hour: number
+  minute: number
+  second: number
+  valid: boolean
+}
+
+const parseIsoDateTime = (value?: string | null): DateTimeParts => {
+  if (!value) {
+    return { date: '', hour: 0, minute: 0, second: 0, valid: false }
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return { date: '', hour: 0, minute: 0, second: 0, valid: false }
+  }
+  return {
+    date: parsed.toISOString().slice(0, 10),
+    hour: parsed.getUTCHours(),
+    minute: parsed.getUTCMinutes(),
+    second: parsed.getUTCSeconds(),
+    valid: true
+  }
+}
+
+const buildIsoDateTime = (
+  dateStr: string,
+  hour: number,
+  minute: number,
+  second: number,
+  timezone?: string
+) => {
+  if (!dateStr) return undefined
+  const [yearStr, monthStr, dayStr] = dateStr.split('-')
+  const year = Number(yearStr)
+  const month = Number(monthStr)
+  const day = Number(dayStr)
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
+    return undefined
+  }
+  const baseUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+  if (Number.isNaN(baseUtc.getTime())) {
+    return undefined
+  }
+  if (!timezone || timezone === 'UTC') {
+    return baseUtc.toISOString()
+  }
+  try {
+    const zoned = new Date(
+      baseUtc.toLocaleString('en-US', { timeZone: timezone })
+    )
+    const diff = baseUtc.getTime() - zoned.getTime()
+    const adjusted = new Date(baseUtc.getTime() - diff)
+    if (Number.isNaN(adjusted.getTime())) {
+      return baseUtc.toISOString()
+    }
+    return adjusted.toISOString()
+  } catch {
+    return baseUtc.toISOString()
+  }
 }
 
 type FieldKey =
@@ -811,6 +890,113 @@ export default function AsanaAction({
 
   const hasConnection = Boolean(asanaConnectionOptions)
 
+  const todayIso = useMemo(() => {
+    const now = new Date()
+    return toISODateString(now.getFullYear(), now.getMonth(), now.getDate())
+  }, [])
+
+  const [dueOnPickerOpen, setDueOnPickerOpen] = useState(false)
+  const [dueOnMonth, setDueOnMonth] = useState<CalendarMonth>(() =>
+    getInitialMonth(asanaParams.dueOn)
+  )
+  useEffect(() => {
+    setDueOnMonth(getInitialMonth(asanaParams.dueOn))
+  }, [asanaParams.dueOn])
+
+  const defaultTimezone = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    } catch {
+      return 'UTC'
+    }
+  }, [])
+  const [dueAtTimezone, setDueAtTimezone] = useState(defaultTimezone)
+  const [dueAtCalendarOpen, setDueAtCalendarOpen] = useState(false)
+  const [dueAtTimeOpen, setDueAtTimeOpen] = useState(false)
+  const [dueAtTimezoneOpen, setDueAtTimezoneOpen] = useState(false)
+  const [dueAtTimezoneSearch, setDueAtTimezoneSearch] = useState('')
+  const dueAtParts = useMemo(
+    () => parseIsoDateTime(asanaParams.dueAt),
+    [asanaParams.dueAt]
+  )
+  const [dueAtMonth, setDueAtMonth] = useState<CalendarMonth>(() =>
+    getInitialMonth(dueAtParts.date)
+  )
+  useEffect(() => {
+    setDueAtMonth(getInitialMonth(dueAtParts.date))
+  }, [dueAtParts.date])
+
+  const dueAtTimeString = useMemo(
+    () =>
+      dueAtParts.valid ? toTimeString(dueAtParts.hour, dueAtParts.minute) : '',
+    [dueAtParts.hour, dueAtParts.minute, dueAtParts.valid]
+  )
+  const dueAtTimeParts = useMemo(
+    () => parseTime(dueAtTimeString),
+    [dueAtTimeString]
+  )
+  const timezoneOptions = useMemo(() => {
+    const options: string[] = []
+    try {
+      const maybeSupported = (Intl as any).supportedValuesOf
+      if (typeof maybeSupported === 'function') {
+        const supported = maybeSupported('timeZone')
+        if (Array.isArray(supported)) {
+          options.push(...supported)
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    options.push(dueAtTimezone, 'UTC')
+    return Array.from(new Set(options))
+  }, [dueAtTimezone])
+  const filteredTimezones = useMemo(() => {
+    const needle = dueAtTimezoneSearch.trim().toLowerCase()
+    if (!needle) return timezoneOptions
+    return timezoneOptions.filter((tz) => tz.toLowerCase().includes(needle))
+  }, [dueAtTimezoneSearch, timezoneOptions])
+  const updateDueAt = useCallback(
+    (
+      dateStr: string,
+      hour: number,
+      minute: number,
+      second?: number,
+      tz?: string
+    ) => {
+      const iso = buildIsoDateTime(
+        dateStr,
+        hour,
+        minute,
+        second ?? 0,
+        tz || dueAtTimezone
+      )
+      applyAsanaPatch({ dueAt: iso ?? '' })
+    },
+    [applyAsanaPatch, dueAtTimezone]
+  )
+  const handleDueAtTimezoneSelect = useCallback(
+    (tz: string) => {
+      setDueAtTimezone(tz)
+      if (dueAtParts.date) {
+        updateDueAt(
+          dueAtParts.date,
+          dueAtParts.hour,
+          dueAtParts.minute,
+          dueAtParts.second,
+          tz
+        )
+      }
+    },
+    [
+      dueAtParts.date,
+      dueAtParts.hour,
+      dueAtParts.minute,
+      dueAtParts.second,
+      updateDueAt
+    ]
+  )
+
   const handleWorkspaceSelect = useCallback(
     (workspaceGid: string) => {
       applyAsanaPatch({
@@ -1163,15 +1349,6 @@ export default function AsanaAction({
               'No Asana workspaces available for this connection'
             }
           />
-          <NodeInputField
-            placeholder="Or enter workspace GID"
-            value={currentValue}
-            onChange={(val) =>
-              applyAsanaPatch({
-                workspaceGid: val
-              })
-            }
-          />
           {workspaceOptionsError && (
             <p className="text-xs text-red-500">{workspaceOptionsError}</p>
           )}
@@ -1205,15 +1382,6 @@ export default function AsanaAction({
             }
             loading={projectOptionsLoading}
             emptyMessage={projectOptionsError || 'No projects available'}
-          />
-          <NodeInputField
-            placeholder="Or enter project GID"
-            value={currentValue}
-            onChange={(val) =>
-              applyAsanaPatch({
-                projectGid: val
-              })
-            }
           />
           {projectOptionsError && (
             <p className="text-xs text-red-500">{projectOptionsError}</p>
@@ -1249,15 +1417,6 @@ export default function AsanaAction({
             loading={sectionOptionsLoading}
             emptyMessage={sectionOptionsError || 'No sections available'}
           />
-          <NodeInputField
-            placeholder="Or enter section GID"
-            value={currentValue}
-            onChange={(val) =>
-              applyAsanaPatch({
-                sectionGid: val
-              })
-            }
-          />
           {sectionOptionsError && (
             <p className="text-xs text-red-500">{sectionOptionsError}</p>
           )}
@@ -1289,15 +1448,6 @@ export default function AsanaAction({
             disabled={!effectiveCanEdit || !hasConnection || tagOptionsLoading}
             loading={tagOptionsLoading}
             emptyMessage={tagOptionsError || 'No tags available'}
-          />
-          <NodeInputField
-            placeholder="Or enter tag GID"
-            value={currentValue}
-            onChange={(val) =>
-              applyAsanaPatch({
-                tagGid: val
-              })
-            }
           />
           {tagOptionsError && (
             <p className="text-xs text-red-500">{tagOptionsError}</p>
@@ -1331,17 +1481,40 @@ export default function AsanaAction({
             loading={teamOptionsLoading}
             emptyMessage={teamOptionsError || 'No teams available'}
           />
-          <NodeInputField
-            placeholder="Or enter team GID"
-            value={currentValue}
-            onChange={(val) =>
-              applyAsanaPatch({
-                teamGid: val
-              })
-            }
-          />
           {teamOptionsError && (
             <p className="text-xs text-red-500">{teamOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'assignee') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={userOptions}
+            value={currentValue}
+            onChange={(gid) => applyAsanaPatch({ assignee: gid })}
+            placeholder={
+              !hasConnection
+                ? 'Select an Asana connection first'
+                : asanaParams.workspaceGid
+                  ? userOptionsLoading
+                    ? 'Loading users...'
+                    : 'Select assignee'
+                  : 'Select a workspace first'
+            }
+            disabled={!effectiveCanEdit || !hasConnection || userOptionsLoading}
+            loading={userOptionsLoading}
+            emptyMessage={userOptionsError || 'No users available'}
+          />
+          {userOptionsError && (
+            <p className="text-xs text-red-500">{userOptionsError}</p>
           )}
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
@@ -1372,18 +1545,186 @@ export default function AsanaAction({
             loading={userOptionsLoading}
             emptyMessage={userOptionsError || 'No users available'}
           />
-          <NodeInputField
-            placeholder="Or enter user GID"
-            value={currentValue}
-            onChange={(val) =>
-              applyAsanaPatch({
-                userGid: val
-              })
-            }
-          />
           {userOptionsError && (
             <p className="text-xs text-red-500">{userOptionsError}</p>
           )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'dueOn') {
+      const dateValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <div className="relative">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+              onClick={() => setDueOnPickerOpen((open) => !open)}
+              disabled={!effectiveCanEdit}
+            >
+              <span className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
+                {dateValue ? formatDisplayDate(dateValue) : 'Select date'}
+              </span>
+            </button>
+            {dueOnPickerOpen ? (
+              <div className="absolute z-30 mt-2">
+                <ScheduleCalendar
+                  month={dueOnMonth}
+                  selectedDate={dateValue}
+                  todayISO={todayIso}
+                  onMonthChange={(month) => setDueOnMonth(month)}
+                  onSelectDate={(isoDate) => {
+                    setDueOnPickerOpen(false)
+                    setDueOnMonth(getInitialMonth(isoDate))
+                    applyAsanaPatch({ dueOn: isoDate })
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+          <NodeInputField
+            placeholder="Or enter date (YYYY-MM-DD)"
+            value={dateValue}
+            onChange={(val) => applyAsanaPatch({ dueOn: val })}
+          />
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'dueAt') {
+      return (
+        <div key={field} className="space-y-2">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="relative">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                onClick={() => {
+                  setDueAtCalendarOpen((open) => !open)
+                  setDueAtTimeOpen(false)
+                  setDueAtTimezoneOpen(false)
+                }}
+                disabled={!effectiveCanEdit}
+              >
+                <span className="flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
+                  {dueAtParts.valid
+                    ? formatDisplayDate(dueAtParts.date)
+                    : 'Select date'}
+                </span>
+              </button>
+              {dueAtCalendarOpen ? (
+                <div className="absolute z-30 mt-2">
+                  <ScheduleCalendar
+                    month={dueAtMonth}
+                    selectedDate={dueAtParts.date}
+                    todayISO={todayIso}
+                    onMonthChange={(month) => setDueAtMonth(month)}
+                    onSelectDate={(isoDate) => {
+                      setDueAtCalendarOpen(false)
+                      setDueAtMonth(getInitialMonth(isoDate))
+                      updateDueAt(
+                        isoDate,
+                        dueAtParts.hour,
+                        dueAtParts.minute,
+                        dueAtParts.second
+                      )
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                onClick={() => {
+                  setDueAtTimeOpen((open) => !open)
+                  setDueAtCalendarOpen(false)
+                  setDueAtTimezoneOpen(false)
+                }}
+                disabled={!effectiveCanEdit}
+              >
+                <span className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
+                  {dueAtParts.valid
+                    ? formatDisplayTime(dueAtTimeString)
+                    : 'Select time'}
+                </span>
+              </button>
+              {dueAtTimeOpen ? (
+                <div className="absolute z-30 mt-2">
+                  <ScheduleTimePicker
+                    selectedTime={dueAtTimeParts}
+                    onSelect={(time) => {
+                      const parsed = parseTime(time)
+                      const nextHour = parsed?.hours ?? 0
+                      const nextMinute = parsed?.minutes ?? 0
+                      setDueAtTimeOpen(false)
+                      updateDueAt(
+                        dueAtParts.date,
+                        nextHour,
+                        nextMinute,
+                        dueAtParts.second
+                      )
+                    }}
+                    onClose={() => setDueAtTimeOpen(false)}
+                  />
+                </div>
+              ) : null}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                onClick={() => {
+                  setDueAtTimezoneOpen((open) => !open)
+                  setDueAtCalendarOpen(false)
+                  setDueAtTimeOpen(false)
+                }}
+                disabled={!effectiveCanEdit}
+              >
+                <span className="flex items-center gap-2">
+                  <Globe2 className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
+                  {dueAtTimezone || 'Select timezone'}
+                </span>
+              </button>
+              {dueAtTimezoneOpen ? (
+                <div className="absolute z-30 mt-2">
+                  <ScheduleTimezonePicker
+                    options={filteredTimezones}
+                    selectedTimezone={dueAtTimezone}
+                    search={dueAtTimezoneSearch}
+                    onSearchChange={(value) => setDueAtTimezoneSearch(value)}
+                    onSelect={(tz) => {
+                      setDueAtTimezoneOpen(false)
+                      setDueAtTimezoneSearch('')
+                      handleDueAtTimezoneSelect(tz)
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <NodeInputField
+            placeholder="Or enter ISO datetime"
+            value={typeof value === 'string' ? value : ''}
+            onChange={(val) => applyAsanaPatch({ dueAt: val })}
+          />
+          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            Date/time is captured in UTC and saved as ISO 8601. Timezone
+            selection converts to UTC.
+          </p>
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
       )
