@@ -37,6 +37,14 @@ pub struct UsersQuery {
     connection_id: Option<Uuid>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TasksQuery {
+    #[serde(rename = "project_gid")]
+    project_gid: Option<String>,
+    scope: Option<String>,
+    connection_id: Option<Uuid>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspacePayload {
@@ -82,6 +90,20 @@ struct UserPayload {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskPayload {
+    gid: String,
+    name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoryPayload {
+    gid: String,
+    text: String,
+}
+
+#[derive(Serialize)]
 struct WorkspacesResponse {
     success: bool,
     workspaces: Vec<WorkspacePayload>,
@@ -115,6 +137,18 @@ struct TeamsResponse {
 struct UsersResponse {
     success: bool,
     users: Vec<UserPayload>,
+}
+
+#[derive(Serialize)]
+struct TasksResponse {
+    success: bool,
+    tasks: Vec<TaskPayload>,
+}
+
+#[derive(Serialize)]
+struct StoriesResponse {
+    success: bool,
+    stories: Vec<StoryPayload>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,6 +191,19 @@ struct UserRecord {
     gid: String,
     name: Option<String>,
     email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskRecord {
+    gid: String,
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoryRecord {
+    gid: String,
+    text: Option<String>,
+    resource_subtype: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -350,6 +397,74 @@ pub async fn list_users(
         Ok(users) => Json(UsersResponse {
             success: true,
             users,
+        })
+        .into_response(),
+        Err(resp) => resp,
+    }
+}
+
+pub async fn list_tasks(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(workspace_gid): Path<String>,
+    Query(query): Query<TasksQuery>,
+) -> Response {
+    let user_id = match parse_user_id(&claims) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    if let Err(resp) = ensure_workspace_plan_membership(&state, user_id).await {
+        return resp;
+    }
+
+    let connection_query = ConnectionQuery {
+        scope: query.scope.clone(),
+        connection_id: query.connection_id,
+    };
+
+    let (access_token, _) = match ensure_asana_token(&state, user_id, &connection_query).await {
+        Ok(token) => token,
+        Err(resp) => return resp,
+    };
+
+    match fetch_tasks(
+        &state,
+        &access_token,
+        workspace_gid.trim(),
+        query.project_gid.as_deref(),
+    )
+    .await
+    {
+        Ok(tasks) => Json(TasksResponse { success: true, tasks }).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+pub async fn list_task_stories(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(task_gid): Path<String>,
+    Query(query): Query<ConnectionQuery>,
+) -> Response {
+    let user_id = match parse_user_id(&claims) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    if let Err(resp) = ensure_workspace_plan_membership(&state, user_id).await {
+        return resp;
+    }
+
+    let (access_token, _) = match ensure_asana_token(&state, user_id, &query).await {
+        Ok(token) => token,
+        Err(resp) => return resp,
+    };
+
+    match fetch_task_stories(&state, &access_token, task_gid.trim()).await {
+        Ok(stories) => Json(StoriesResponse {
+            success: true,
+            stories,
         })
         .into_response(),
         Err(resp) => resp,
@@ -651,6 +766,81 @@ async fn fetch_users(
         .collect())
 }
 
+async fn fetch_tasks(
+    state: &AppState,
+    access_token: &str,
+    workspace_gid: &str,
+    project_gid: Option<&str>,
+) -> Result<Vec<TaskPayload>, Response> {
+    if workspace_gid.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut url = format!("{ASANA_BASE_URL}/workspaces/{workspace_gid}/tasks/search?limit=50&opt_fields=name");
+    if let Some(project) = project_gid {
+        if !project.trim().is_empty() {
+            url.push_str(&format!(
+                "&project={}",
+                urlencoding::encode(project.trim())
+            ));
+        }
+    }
+
+    let records: ListResponse<TaskRecord> = get_json(state, access_token, &url).await?;
+
+    Ok(records
+        .data
+        .into_iter()
+        .filter(|record| !record.gid.trim().is_empty())
+        .map(|record| TaskPayload {
+            gid: record.gid.trim().to_string(),
+            name: record
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Task")
+                .to_string(),
+        })
+        .collect())
+}
+
+async fn fetch_task_stories(
+    state: &AppState,
+    access_token: &str,
+    task_gid: &str,
+) -> Result<Vec<StoryPayload>, Response> {
+    if task_gid.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let url = format!("{ASANA_BASE_URL}/tasks/{task_gid}/stories?opt_fields=text,resource_subtype");
+    let records: ListResponse<StoryRecord> = get_json(state, access_token, &url).await?;
+
+    Ok(records
+        .data
+        .into_iter()
+        .filter(|record| {
+            !record.gid.trim().is_empty()
+                && record
+                    .resource_subtype
+                    .as_deref()
+                    .map(str::trim)
+                    .map(|s| s.eq_ignore_ascii_case("comment"))
+                    .unwrap_or(false)
+        })
+        .map(|record| StoryPayload {
+            gid: record.gid.trim().to_string(),
+            text: record
+                .text
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Comment")
+                .to_string(),
+        })
+        .collect())
+}
 async fn get_json<T: for<'de> Deserialize<'de>>(
     state: &AppState,
     access_token: &str,

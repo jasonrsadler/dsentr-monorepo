@@ -78,3 +78,4 @@
 - Added messaging inbox endpoints (user + admin) with list/detail/reply/mark-read flows and read timestamps so unread badges stay accurate across both portals.
 - Added Asana metadata routes (workspaces, projects, tags, teams, users, sections) behind authenticated OAuth so the frontend can populate dropdowns without exposing tokens.
 - Added Asana OAuth route support (start + callback + provider parsing) so the new Asana integration can authenticate alongside Google, Microsoft, and Slack.
+- Added Asana task and comment metadata endpoints (workspace-plan only) to back new dropdowns while keeping Solo users blocked server-side.

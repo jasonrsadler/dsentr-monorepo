@@ -13,14 +13,18 @@ import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import {
   fetchAsanaProjects,
   fetchAsanaSections,
+  fetchAsanaStories,
   fetchAsanaTags,
+  fetchAsanaTasks,
   fetchAsanaTeams,
   fetchAsanaUsers,
   fetchAsanaWorkspaces,
   type AsanaConnectionOptions,
   type AsanaProject,
   type AsanaSection,
+  type AsanaStory,
   type AsanaTag,
+  type AsanaTask,
   type AsanaTeam,
   type AsanaUser,
   type AsanaWorkspace
@@ -32,6 +36,7 @@ import {
   type GroupedConnectionsSnapshot,
   type ProviderConnectionSet
 } from '@/lib/oauthApi'
+import { normalizePlanTier } from '@/lib/planTiers'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
@@ -232,39 +237,39 @@ interface FieldMeta {
 
 const FIELD_META: Record<FieldKey, FieldMeta> = {
   workspaceGid: {
-    label: 'Workspace GID',
-    placeholder: 'e.g., 12025512345'
+    label: 'Workspace',
+    placeholder: 'Select workspace'
   },
   projectGid: {
-    label: 'Project GID',
-    placeholder: 'Project identifier'
+    label: 'Project',
+    placeholder: 'Project'
   },
   taskGid: {
-    label: 'Task GID',
-    placeholder: 'Task identifier'
+    label: 'Task',
+    placeholder: 'Task'
   },
   parentTaskGid: {
-    label: 'Parent Task GID',
+    label: 'Parent Task',
     placeholder: 'Parent task to attach a subtask'
   },
   sectionGid: {
-    label: 'Section GID',
+    label: 'Section',
     placeholder: 'Target section/column'
   },
   tagGid: {
-    label: 'Tag GID',
-    placeholder: 'Tag identifier'
+    label: 'Tag',
+    placeholder: 'Tag'
   },
   userGid: {
-    label: 'User GID',
-    placeholder: 'User identifier'
+    label: 'User',
+    placeholder: 'User'
   },
   storyGid: {
-    label: 'Comment/Story GID',
-    placeholder: 'Comment identifier'
+    label: 'Comment',
+    placeholder: 'Comment'
   },
   teamGid: {
-    label: 'Team GID',
+    label: 'Team',
     placeholder: 'Optional team filter'
   },
   name: {
@@ -355,7 +360,7 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   getProject: {
     label: 'Projects - Get project',
-    required: ['projectGid']
+    required: ['workspaceGid', 'projectGid']
   },
   listProjects: {
     label: 'Projects - List projects',
@@ -369,12 +374,12 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   createSubtask: {
     label: 'Subtasks - Create subtask',
-    required: ['parentTaskGid', 'name'],
+    required: ['workspaceGid', 'parentTaskGid', 'name'],
     optional: ['assignee', 'dueOn', 'dueAt', 'notes', 'additionalFields']
   },
   listSubtasks: {
     label: 'Subtasks - List subtasks',
-    required: ['parentTaskGid'],
+    required: ['workspaceGid', 'parentTaskGid'],
     optional: ['limit']
   },
   createTask: {
@@ -391,11 +396,11 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   deleteTask: {
     label: 'Tasks - Delete task',
-    required: ['taskGid']
+    required: ['workspaceGid', 'taskGid']
   },
   getTask: {
     label: 'Tasks - Get task',
-    required: ['taskGid']
+    required: ['workspaceGid', 'taskGid']
   },
   listTasks: {
     label: 'Tasks - List tasks',
@@ -404,7 +409,7 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   moveTask: {
     label: 'Tasks - Move task to section',
-    required: ['taskGid', 'sectionGid']
+    required: ['workspaceGid', 'taskGid', 'sectionGid']
   },
   searchTasks: {
     label: 'Tasks - Search tasks',
@@ -413,7 +418,7 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   updateTask: {
     label: 'Tasks - Update task',
-    required: ['taskGid'],
+    required: ['workspaceGid', 'taskGid'],
     optional: [
       'name',
       'notes',
@@ -426,28 +431,28 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   addComment: {
     label: 'Comments - Add comment to task',
-    required: ['taskGid', 'notes']
+    required: ['workspaceGid', 'taskGid', 'notes']
   },
   removeComment: {
     label: 'Comments - Remove comment',
-    required: ['storyGid']
+    required: ['workspaceGid', 'taskGid', 'storyGid']
   },
   addTaskProject: {
     label: 'Projects - Add task to project',
-    required: ['taskGid', 'projectGid'],
+    required: ['workspaceGid', 'taskGid', 'projectGid'],
     optional: ['sectionGid']
   },
   removeTaskProject: {
     label: 'Projects - Remove task from project',
-    required: ['taskGid', 'projectGid']
+    required: ['workspaceGid', 'taskGid', 'projectGid']
   },
   addTaskTag: {
     label: 'Tags - Add task tag',
-    required: ['taskGid', 'tagGid']
+    required: ['workspaceGid', 'taskGid', 'tagGid']
   },
   removeTaskTag: {
     label: 'Tags - Remove task tag',
-    required: ['taskGid', 'tagGid']
+    required: ['workspaceGid', 'taskGid', 'tagGid']
   },
   getUser: {
     label: 'Users - Get user',
@@ -711,6 +716,8 @@ export default function AsanaAction({
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
+  const isSoloPlan =
+    normalizePlanTier(currentWorkspace?.workspace.plan) === 'solo'
 
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null): ProviderConnectionSet => {
@@ -888,6 +895,16 @@ export default function AsanaAction({
     null
   )
 
+  const [taskOptions, setTaskOptions] = useState<NodeDropdownOption[]>([])
+  const [taskOptionsLoading, setTaskOptionsLoading] = useState(false)
+  const [taskOptionsError, setTaskOptionsError] = useState<string | null>(null)
+
+  const [commentOptions, setCommentOptions] = useState<NodeDropdownOption[]>([])
+  const [commentOptionsLoading, setCommentOptionsLoading] = useState(false)
+  const [commentOptionsError, setCommentOptionsError] = useState<string | null>(
+    null
+  )
+
   const hasConnection = Boolean(asanaConnectionOptions)
 
   const [debouncedWorkspaceGid, setDebouncedWorkspaceGid] = useState(
@@ -1025,6 +1042,37 @@ export default function AsanaAction({
     ]
   )
 
+  const supportsDueMode =
+    asanaParams.operation === 'createTask' ||
+    asanaParams.operation === 'updateTask' ||
+    asanaParams.operation === 'createSubtask'
+
+  const [dueMode, setDueMode] = useState<'dueOn' | 'dueAt'>(
+    asanaParams.dueAt?.trim() ? 'dueAt' : 'dueOn'
+  )
+
+  useEffect(() => {
+    if (asanaParams.dueAt?.trim()) {
+      setDueMode('dueAt')
+    } else if (asanaParams.dueOn?.trim()) {
+      setDueMode('dueOn')
+    } else {
+      setDueMode('dueOn')
+    }
+  }, [asanaParams.dueAt, asanaParams.dueOn])
+
+  const handleDueModeChange = useCallback(
+    (mode: 'dueOn' | 'dueAt') => {
+      setDueMode(mode)
+      if (mode === 'dueOn') {
+        applyAsanaPatch({ dueAt: '' })
+      } else {
+        applyAsanaPatch({ dueOn: '' })
+      }
+    },
+    [applyAsanaPatch]
+  )
+
   const handleWorkspaceSelect = useCallback(
     (workspaceGid: string) => {
       applyAsanaPatch({
@@ -1033,7 +1081,10 @@ export default function AsanaAction({
         sectionGid: '',
         tagGid: '',
         teamGid: '',
-        userGid: ''
+        userGid: '',
+        taskGid: '',
+        parentTaskGid: '',
+        storyGid: ''
       })
     },
     [applyAsanaPatch]
@@ -1043,7 +1094,10 @@ export default function AsanaAction({
     (projectGid: string) => {
       applyAsanaPatch({
         projectGid,
-        sectionGid: ''
+        sectionGid: '',
+        taskGid: '',
+        parentTaskGid: '',
+        storyGid: ''
       })
     },
     [applyAsanaPatch]
@@ -1080,10 +1134,31 @@ export default function AsanaAction({
     [applyAsanaPatch]
   )
 
+  const handleTaskSelect = useCallback(
+    (taskGid: string) => {
+      applyAsanaPatch({ taskGid, storyGid: '' })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleParentTaskSelect = useCallback(
+    (parentTaskGid: string) => {
+      applyAsanaPatch({ parentTaskGid })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleStorySelect = useCallback(
+    (storyGid: string) => {
+      applyAsanaPatch({ storyGid })
+    },
+    [applyAsanaPatch]
+  )
+
   useEffect(() => {
     setWorkspaceOptions([])
     setWorkspaceOptionsError(null)
-    if (!asanaConnectionOptions) {
+    if (!asanaConnectionOptions || isSoloPlan) {
       setWorkspaceOptionsLoading(false)
       return
     }
@@ -1117,7 +1192,7 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [asanaConnectionOptions])
+  }, [asanaConnectionOptions, isSoloPlan])
 
   useEffect(() => {
     setProjectOptions([])
@@ -1131,7 +1206,7 @@ export default function AsanaAction({
     setUserOptionsError(null)
 
     const workspaceGid = debouncedWorkspaceGid
-    if (!workspaceGid || !asanaConnectionOptions) {
+    if (!workspaceGid || !asanaConnectionOptions || isSoloPlan) {
       setProjectOptionsLoading(false)
       setTagOptionsLoading(false)
       setTeamOptionsLoading(false)
@@ -1239,14 +1314,15 @@ export default function AsanaAction({
     debouncedWorkspaceGid,
     debouncedTeamGid,
     asanaParams.connectionId,
-    asanaParams.connectionScope
+    asanaParams.connectionScope,
+    isSoloPlan
   ])
 
   useEffect(() => {
     setSectionOptions([])
     setSectionOptionsError(null)
     const projectGid = debouncedProjectGid
-    if (!projectGid || !asanaConnectionOptions) {
+    if (!projectGid || !asanaConnectionOptions || isSoloPlan) {
       setSectionOptionsLoading(false)
       return
     }
@@ -1281,7 +1357,98 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [asanaConnectionOptions, debouncedProjectGid])
+  }, [asanaConnectionOptions, debouncedProjectGid, isSoloPlan])
+
+  useEffect(() => {
+    setTaskOptions([])
+    setTaskOptionsError(null)
+    const workspaceGid = debouncedWorkspaceGid
+    if (!workspaceGid || !asanaConnectionOptions || isSoloPlan) {
+      setTaskOptionsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setTaskOptionsLoading(true)
+    fetchAsanaTasks(
+      workspaceGid,
+      asanaConnectionOptions,
+      debouncedProjectGid || undefined
+    )
+      .then((tasks: AsanaTask[]) => {
+        if (cancelled) return
+        setTaskOptions(
+          tasks.map((task) => ({
+            value: task.gid,
+            label: task.name || task.gid
+          }))
+        )
+        setTaskOptionsError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setTaskOptionsError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load Asana tasks for this workspace'
+        )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTaskOptionsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    asanaConnectionOptions,
+    debouncedWorkspaceGid,
+    debouncedProjectGid,
+    isSoloPlan
+  ])
+
+  useEffect(() => {
+    setCommentOptions([])
+    setCommentOptionsError(null)
+    const taskGid = (asanaParams.taskGid ?? '').trim()
+    if (!taskGid || !asanaConnectionOptions || isSoloPlan) {
+      setCommentOptionsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setCommentOptionsLoading(true)
+    fetchAsanaStories(taskGid, asanaConnectionOptions)
+      .then((stories: AsanaStory[]) => {
+        if (cancelled) return
+        setCommentOptions(
+          stories.map((story) => ({
+            value: story.gid,
+            label: story.text || story.gid
+          }))
+        )
+        setCommentOptionsError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setCommentOptionsError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load Asana comments for this task'
+        )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCommentOptionsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [asanaConnectionOptions, asanaParams.taskGid, isSoloPlan])
 
   const selectedConnectionValue = useMemo(() => {
     if (!activeConnection?.connectionId || !activeConnection.connectionScope)
@@ -1344,11 +1511,18 @@ export default function AsanaAction({
     }
   }, [asanaParams.operation])
 
-  const renderField = (field: FieldKey, isRequired: boolean) => {
+  const renderField = (field: FieldKey, _isRequired: boolean) => {
     const meta = FIELD_META[field]
     const value = (asanaParams as Record<string, unknown>)[field]
     const error = validation.errors[field]
-    const labelText = `${meta.label}${isRequired ? ' *' : ''}`
+    const labelText = meta.label
+
+    if (field === 'dueOn' && supportsDueMode && dueMode !== 'dueOn') {
+      return null
+    }
+    if (field === 'dueAt' && supportsDueMode && dueMode !== 'dueAt') {
+      return null
+    }
 
     if (field === 'workspaceGid') {
       const currentValue = typeof value === 'string' ? value : ''
@@ -1453,6 +1627,43 @@ export default function AsanaAction({
       )
     }
 
+    if (field === 'taskGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={taskOptions}
+            value={currentValue}
+            onChange={handleTaskSelect}
+            placeholder={
+              !hasConnection
+                ? 'Select an Asana connection first'
+                : debouncedWorkspaceGid
+                  ? taskOptionsLoading
+                    ? 'Loading tasks...'
+                    : 'Select task'
+                  : 'Select a workspace first'
+            }
+            disabled={
+              !effectiveCanEdit ||
+              !hasConnection ||
+              taskOptionsLoading ||
+              !debouncedWorkspaceGid
+            }
+            loading={taskOptionsLoading}
+            emptyMessage={taskOptionsError || 'No tasks available'}
+          />
+          {taskOptionsError && (
+            <p className="text-xs text-red-500">{taskOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
     if (field === 'tagGid') {
       const currentValue = typeof value === 'string' ? value : ''
       return (
@@ -1549,6 +1760,43 @@ export default function AsanaAction({
       )
     }
 
+    if (field === 'parentTaskGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={taskOptions}
+            value={currentValue}
+            onChange={handleParentTaskSelect}
+            placeholder={
+              !hasConnection
+                ? 'Select an Asana connection first'
+                : debouncedWorkspaceGid
+                  ? taskOptionsLoading
+                    ? 'Loading tasks...'
+                    : 'Select parent task'
+                  : 'Select a workspace first'
+            }
+            disabled={
+              !effectiveCanEdit ||
+              !hasConnection ||
+              taskOptionsLoading ||
+              !debouncedWorkspaceGid
+            }
+            loading={taskOptionsLoading}
+            emptyMessage={taskOptionsError || 'No tasks available'}
+          />
+          {taskOptionsError && (
+            <p className="text-xs text-red-500">{taskOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
     if (field === 'userGid') {
       const currentValue = typeof value === 'string' ? value : ''
       return (
@@ -1575,6 +1823,41 @@ export default function AsanaAction({
           />
           {userOptionsError && (
             <p className="text-xs text-red-500">{userOptionsError}</p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )
+    }
+
+    if (field === 'storyGid') {
+      const currentValue = typeof value === 'string' ? value : ''
+      return (
+        <div key={field} className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            {labelText}
+          </p>
+          <NodeDropdownField
+            options={commentOptions}
+            value={currentValue}
+            onChange={handleStorySelect}
+            placeholder={
+              !asanaParams.taskGid
+                ? 'Select a task first'
+                : commentOptionsLoading
+                  ? 'Loading comments...'
+                  : 'Select comment'
+            }
+            disabled={
+              !effectiveCanEdit ||
+              commentOptionsLoading ||
+              !asanaParams.taskGid ||
+              !hasConnection
+            }
+            loading={commentOptionsLoading}
+            emptyMessage={commentOptionsError || 'No comments available'}
+          />
+          {commentOptionsError && (
+            <p className="text-xs text-red-500">{commentOptionsError}</p>
           )}
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
@@ -1616,11 +1899,6 @@ export default function AsanaAction({
               </div>
             ) : null}
           </div>
-          <NodeInputField
-            placeholder="Or enter date (YYYY-MM-DD)"
-            value={dateValue}
-            onChange={(val) => applyAsanaPatch({ dueOn: val })}
-          />
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
       )
@@ -1632,46 +1910,46 @@ export default function AsanaAction({
           <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
             {labelText}
           </p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <div className="relative">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                onClick={() => {
-                  setDueAtCalendarOpen((open) => !open)
-                  setDueAtTimeOpen(false)
-                  setDueAtTimezoneOpen(false)
-                }}
-                disabled={!effectiveCanEdit}
-              >
-                <span className="flex items-center gap-2">
-                  <CalendarDays className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
-                  {dueAtParts.valid
-                    ? formatDisplayDate(dueAtParts.date)
-                    : 'Select date'}
-                </span>
-              </button>
-              {dueAtCalendarOpen ? (
-                <div className="absolute z-30 mt-2">
-                  <ScheduleCalendar
-                    month={dueAtMonth}
-                    selectedDate={dueAtParts.date}
-                    todayISO={todayIso}
-                    onMonthChange={(month) => setDueAtMonth(month)}
-                    onSelectDate={(isoDate) => {
-                      setDueAtCalendarOpen(false)
-                      setDueAtMonth(getInitialMonth(isoDate))
-                      updateDueAt(
-                        isoDate,
-                        dueAtParts.hour,
-                        dueAtParts.minute,
-                        dueAtParts.second
-                      )
-                    }}
-                  />
-                </div>
-              ) : null}
-            </div>
+          <div className="relative">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+              onClick={() => {
+                setDueAtCalendarOpen((open) => !open)
+                setDueAtTimeOpen(false)
+                setDueAtTimezoneOpen(false)
+              }}
+              disabled={!effectiveCanEdit}
+            >
+              <span className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
+                {dueAtParts.valid
+                  ? formatDisplayDate(dueAtParts.date)
+                  : 'Select date'}
+              </span>
+            </button>
+            {dueAtCalendarOpen ? (
+              <div className="absolute z-30 mt-2">
+                <ScheduleCalendar
+                  month={dueAtMonth}
+                  selectedDate={dueAtParts.date}
+                  todayISO={todayIso}
+                  onMonthChange={(month) => setDueAtMonth(month)}
+                  onSelectDate={(isoDate) => {
+                    setDueAtCalendarOpen(false)
+                    setDueAtMonth(getInitialMonth(isoDate))
+                    updateDueAt(
+                      isoDate,
+                      dueAtParts.hour,
+                      dueAtParts.minute,
+                      dueAtParts.second
+                    )
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="relative">
               <button
                 type="button"
@@ -1744,15 +2022,6 @@ export default function AsanaAction({
               ) : null}
             </div>
           </div>
-          <NodeInputField
-            placeholder="Or enter ISO datetime"
-            value={typeof value === 'string' ? value : ''}
-            onChange={(val) => applyAsanaPatch({ dueAt: val })}
-          />
-          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-            Date/time is captured in UTC and saved as ISO 8601. Timezone
-            selection converts to UTC.
-          </p>
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
       )
@@ -1827,6 +2096,15 @@ export default function AsanaAction({
     )
   }
 
+  if (isSoloPlan) {
+    return (
+      <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-100">
+        Asana actions are available on the Workspace plan. Upgrade to connect
+        and run Asana nodes.
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
       <div className="space-y-1">
@@ -1871,6 +2149,25 @@ export default function AsanaAction({
           disabled={!effectiveCanEdit}
         />
       </div>
+
+      {supportsDueMode && (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            Due field
+          </p>
+          <NodeDropdownField
+            options={[
+              { label: 'Due on (date)', value: 'dueOn' },
+              { label: 'Due at (datetime)', value: 'dueAt' }
+            ]}
+            value={dueMode}
+            onChange={(val) =>
+              handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
+            }
+            disabled={!effectiveCanEdit}
+          />
+        </div>
+      )}
 
       <div className="space-y-3">
         {visibleFields.required.length > 0 && (

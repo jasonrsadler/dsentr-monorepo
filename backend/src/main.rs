@@ -47,7 +47,12 @@ use routes::{
         handle_logout, handle_me, resend_verification_email,
         reset_password::{handle_reset_password, handle_verify_token},
     },
-    asana::{list_projects as list_asana_projects, list_sections as list_asana_sections, list_tags as list_asana_tags, list_teams as list_asana_teams, list_users as list_asana_users, list_workspaces as list_asana_workspaces},
+    asana::{
+        list_projects as list_asana_projects, list_sections as list_asana_sections,
+        list_tags as list_asana_tags, list_task_stories as list_asana_task_stories,
+        list_tasks as list_asana_tasks, list_teams as list_asana_teams,
+        list_users as list_asana_users, list_workspaces as list_asana_workspaces,
+    },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
     issues::{
@@ -642,7 +647,9 @@ async fn main() -> Result<()> {
         .route("/workspaces/{workspace_gid}/tags", get(list_asana_tags))
         .route("/workspaces/{workspace_gid}/users", get(list_asana_users))
         .route("/workspaces/{workspace_gid}/teams", get(list_asana_teams))
+        .route("/workspaces/{workspace_gid}/tasks", get(list_asana_tasks))
         .route("/projects/{project_gid}/sections", get(list_asana_sections))
+        .route("/tasks/{task_gid}/stories", get(list_asana_task_stories))
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());
 

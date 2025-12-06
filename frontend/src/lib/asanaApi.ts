@@ -31,6 +31,14 @@ interface UsersApiResponse extends AsanaApiResponse {
   users?: { gid?: string; name?: string | null; email?: string | null }[]
 }
 
+interface TasksApiResponse extends AsanaApiResponse {
+  tasks?: { gid?: string; name?: string | null }[]
+}
+
+interface StoriesApiResponse extends AsanaApiResponse {
+  stories?: { gid?: string; text?: string | null }[]
+}
+
 export interface AsanaWorkspace {
   gid: string
   name: string
@@ -60,6 +68,16 @@ export interface AsanaUser {
   gid: string
   name: string
   email?: string
+}
+
+export interface AsanaTask {
+  gid: string
+  name: string
+}
+
+export interface AsanaStory {
+  gid: string
+  text: string
 }
 
 export interface AsanaConnectionOptions {
@@ -281,4 +299,58 @@ export async function fetchAsanaUsers(
       return { gid, name, email: email || undefined }
     })
     .filter((user) => user.gid.length > 0)
+}
+
+export async function fetchAsanaTasks(
+  workspaceGid: string,
+  options?: AsanaConnectionOptions,
+  projectGid?: string
+): Promise<AsanaTask[]> {
+  if (!workspaceGid.trim()) return []
+
+  const encodedWorkspace = encodeURIComponent(workspaceGid.trim())
+  const data = await requestJson<TasksApiResponse>(
+    appendConnectionQuery(
+      `/api/asana/workspaces/${encodedWorkspace}/tasks`,
+      options,
+      { project_gid: projectGid }
+    ),
+    'Asana tasks'
+  )
+
+  const tasks = Array.isArray(data.tasks) ? data.tasks : []
+  return tasks
+    .filter((task) => typeof task?.gid === 'string' && task.gid)
+    .map((task) => {
+      const gid = task!.gid!.trim()
+      const name =
+        (task!.name && task!.name!.trim()) || (gid.length > 0 ? gid : 'Task')
+      return { gid, name }
+    })
+    .filter((task) => task.gid.length > 0)
+}
+
+export async function fetchAsanaStories(
+  taskGid: string,
+  options?: AsanaConnectionOptions
+): Promise<AsanaStory[]> {
+  if (!taskGid.trim()) return []
+
+  const encodedTask = encodeURIComponent(taskGid.trim())
+  const data = await requestJson<StoriesApiResponse>(
+    appendConnectionQuery(`/api/asana/tasks/${encodedTask}/stories`, options),
+    'Asana comments'
+  )
+
+  const stories = Array.isArray(data.stories) ? data.stories : []
+  return stories
+    .filter((story) => typeof story?.gid === 'string' && story.gid)
+    .map((story) => {
+      const gid = story!.gid!.trim()
+      const text =
+        (story!.text && story!.text!.trim()) ||
+        (gid.length > 0 ? gid : 'Comment')
+      return { gid, text }
+    })
+    .filter((story) => story.gid.length > 0)
 }
