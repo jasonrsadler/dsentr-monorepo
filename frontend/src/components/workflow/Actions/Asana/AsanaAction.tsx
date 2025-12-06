@@ -716,8 +716,9 @@ export default function AsanaAction({
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
-  const isSoloPlan =
-    normalizePlanTier(currentWorkspace?.workspace.plan) === 'solo'
+  const isSoloPlan = currentWorkspace?.workspace.plan
+    ? normalizePlanTier(currentWorkspace.workspace.plan) === 'solo'
+    : false
 
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null): ProviderConnectionSet => {
