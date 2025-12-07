@@ -862,7 +862,7 @@ export default function AsanaAction({
           : 'personal',
       connectionId: activeConnection.connectionId
     }
-  }, [activeConnection])
+  }, [activeConnection?.connectionScope, activeConnection?.connectionId])
 
   const [workspaceOptions, setWorkspaceOptions] = useState<
     NodeDropdownOption[]
@@ -919,22 +919,25 @@ export default function AsanaAction({
   )
 
   useEffect(() => {
-    const next = asanaParams.workspaceGid?.trim() ?? ''
+    const next = (asanaParams.workspaceGid ?? '').trim()
+    if (next === debouncedWorkspaceGid) return
     const id = window.setTimeout(() => setDebouncedWorkspaceGid(next), 300)
     return () => window.clearTimeout(id)
-  }, [asanaParams.workspaceGid])
+  }, [asanaParams.workspaceGid, debouncedWorkspaceGid])
 
   useEffect(() => {
-    const next = asanaParams.projectGid?.trim() ?? ''
+    const next = (asanaParams.projectGid ?? '').trim()
+    if (next === debouncedProjectGid) return
     const id = window.setTimeout(() => setDebouncedProjectGid(next), 300)
     return () => window.clearTimeout(id)
-  }, [asanaParams.projectGid])
+  }, [asanaParams.projectGid, debouncedProjectGid])
 
   useEffect(() => {
-    const next = asanaParams.teamGid?.trim() ?? ''
+    const next = (asanaParams.teamGid ?? '').trim()
+    if (next === debouncedTeamGid) return
     const id = window.setTimeout(() => setDebouncedTeamGid(next), 300)
     return () => window.clearTimeout(id)
-  }, [asanaParams.teamGid])
+  }, [asanaParams.teamGid, debouncedTeamGid])
 
   const todayIso = useMemo(() => {
     const now = new Date()
@@ -1840,7 +1843,7 @@ export default function AsanaAction({
       activeConnection.connectionScope as AsanaConnectionScope,
       activeConnection.connectionId
     )
-  }, [activeConnection])
+  }, [activeConnection?.connectionScope, activeConnection?.connectionId])
 
   const hasOAuthConnections =
     Boolean(
