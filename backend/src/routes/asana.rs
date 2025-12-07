@@ -436,7 +436,11 @@ pub async fn list_tasks(
     )
     .await
     {
-        Ok(tasks) => Json(TasksResponse { success: true, tasks }).into_response(),
+        Ok(tasks) => Json(TasksResponse {
+            success: true,
+            tasks,
+        })
+        .into_response(),
         Err(resp) => resp,
     }
 }
@@ -776,13 +780,15 @@ async fn fetch_tasks(
         return Ok(Vec::new());
     }
 
-    let mut url = format!("{ASANA_BASE_URL}/workspaces/{workspace_gid}/tasks/search?limit=50&opt_fields=name");
+    // Base endpoint for non-premium listing
+    let mut url = format!(
+        "{ASANA_BASE_URL}/tasks?workspace={}&assignee=any&opt_fields=name",
+        urlencoding::encode(workspace_gid.trim())
+    );
+
     if let Some(project) = project_gid {
         if !project.trim().is_empty() {
-            url.push_str(&format!(
-                "&project={}",
-                urlencoding::encode(project.trim())
-            ));
+            url.push_str(&format!("&project={}", urlencoding::encode(project.trim())));
         }
     }
 
@@ -791,10 +797,10 @@ async fn fetch_tasks(
     Ok(records
         .data
         .into_iter()
-        .filter(|record| !record.gid.trim().is_empty())
-        .map(|record| TaskPayload {
-            gid: record.gid.trim().to_string(),
-            name: record
+        .filter(|r| !r.gid.trim().is_empty())
+        .map(|r| TaskPayload {
+            gid: r.gid.trim().to_string(),
+            name: r
                 .name
                 .as_deref()
                 .map(str::trim)
