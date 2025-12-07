@@ -406,7 +406,6 @@ pub async fn list_users(
 pub async fn list_tasks(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
-    Path(workspace_gid): Path<String>,
     Query(query): Query<TasksQuery>,
 ) -> Response {
     let user_id = match parse_user_id(&claims) {
@@ -428,14 +427,17 @@ pub async fn list_tasks(
         Err(resp) => return resp,
     };
 
-    match fetch_tasks(
-        &state,
-        &access_token,
-        workspace_gid.trim(),
-        query.project_gid.as_deref(),
-    )
-    .await
-    {
+    let project_gid = match query.project_gid.as_deref() {
+        Some(v) if !v.trim().is_empty() => v,
+        _ => {
+            return JsonResponse::bad_request(
+                "Project is required to list tasks for Asana on this plan",
+            )
+            .into_response();
+        }
+    };
+
+    match fetch_tasks(&state, &access_token, project_gid).await {
         Ok(tasks) => Json(TasksResponse {
             success: true,
             tasks,
@@ -773,24 +775,17 @@ async fn fetch_users(
 async fn fetch_tasks(
     state: &AppState,
     access_token: &str,
-    workspace_gid: &str,
-    project_gid: Option<&str>,
+    project_gid: &str,
 ) -> Result<Vec<TaskPayload>, Response> {
-    if workspace_gid.is_empty() {
+    let trimmed = project_gid.trim();
+    if trimmed.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Base endpoint for non-premium listing
-    let mut url = format!(
-        "{ASANA_BASE_URL}/tasks?project={project_gid}&opt_fields=name&limit=50",
-        urlencoding::encode(project_gid.trim())
+    let url = format!(
+        "{ASANA_BASE_URL}/tasks?opt_fields=name&limit=50&project={}",
+        urlencoding::encode(trimmed)
     );
-
-    if let Some(project) = project_gid {
-        if !project.trim().is_empty() {
-            url.push_str(&format!("&project={}", urlencoding::encode(project.trim())));
-        }
-    }
 
     let records: ListResponse<TaskRecord> = get_json(state, access_token, &url).await?;
 
