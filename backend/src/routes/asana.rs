@@ -782,8 +782,8 @@ async fn fetch_tasks(
 
     // Base endpoint for non-premium listing
     let mut url = format!(
-        "{ASANA_BASE_URL}/tasks?workspace={}&assignee.any=null&opt_fields=name",
-        urlencoding::encode(workspace_gid.trim())
+        "{ASANA_BASE_URL}/tasks?project={project_gid}&opt_fields=name&limit=50",
+        urlencoding::encode(project_gid.trim())
     );
 
     if let Some(project) = project_gid {

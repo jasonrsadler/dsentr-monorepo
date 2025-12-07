@@ -1152,7 +1152,7 @@ export default function AsanaAction({
         break
       case 'updateTask':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
         if (hasWorkspaceSelected && hasTaskSelected) {
@@ -1167,14 +1167,14 @@ export default function AsanaAction({
         break
       case 'getTask':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
         break
       case 'listTasks':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
-          fieldVisibility.projectGid = true
+        fieldVisibility.projectGid = true
+        if (hasProjectSelected) {
           fieldVisibility.tagGid = true
           fieldVisibility.assignee = true
           fieldVisibility.limit = true
@@ -1182,7 +1182,7 @@ export default function AsanaAction({
         break
       case 'deleteTask':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
         break
@@ -1199,7 +1199,7 @@ export default function AsanaAction({
         break
       case 'moveTask':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
         if (hasWorkspaceSelected && hasTaskSelected) {
@@ -1208,10 +1208,14 @@ export default function AsanaAction({
         break
       case 'createSubtask':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
-          fieldVisibility.parentTaskGid = true
+        if (hasWorkspaceSelected && hasProjectSelected) {
+          fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasParentTaskSelected) {
+        if (
+          hasWorkspaceSelected &&
+          hasProjectSelected &&
+          hasParentTaskSelected
+        ) {
           fieldVisibility.name = true
           fieldVisibility.assignee = true
           fieldVisibility.notes = true
@@ -1222,34 +1226,38 @@ export default function AsanaAction({
         break
       case 'listSubtasks':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
-          fieldVisibility.parentTaskGid = true
+        if (hasWorkspaceSelected && hasProjectSelected) {
+          fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasParentTaskSelected) {
+        if (
+          hasWorkspaceSelected &&
+          hasProjectSelected &&
+          hasParentTaskSelected
+        ) {
           fieldVisibility.limit = true
         }
         break
       case 'addComment':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasTaskSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected && hasTaskSelected) {
           fieldVisibility.notes = true
         }
         break
       case 'removeComment':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasTaskSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected && hasTaskSelected) {
           fieldVisibility.storyGid = true
         }
         break
       case 'addTaskProject':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
         if (hasWorkspaceSelected && hasTaskSelected) {
@@ -1261,7 +1269,7 @@ export default function AsanaAction({
         break
       case 'removeTaskProject':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
         if (hasWorkspaceSelected && hasTaskSelected) {
@@ -1270,19 +1278,19 @@ export default function AsanaAction({
         break
       case 'addTaskTag':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasTaskSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected && hasTaskSelected) {
           fieldVisibility.tagGid = true
         }
         break
       case 'removeTaskTag':
         enableWorkspace()
-        if (hasWorkspaceSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasTaskSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected && hasTaskSelected) {
           fieldVisibility.tagGid = true
         }
         break
@@ -1730,13 +1738,10 @@ export default function AsanaAction({
     setTaskOptionsError(null)
     const workspaceGid = debouncedWorkspaceGid
     const shouldFetchTasks =
-      visibility.taskGid || visibility.parentTaskGid || visibility.storyGid
-    if (
-      !shouldFetchTasks ||
-      !workspaceGid ||
-      !asanaConnectionOptions ||
-      isSoloPlan
-    ) {
+      (visibility.taskGid || visibility.parentTaskGid || visibility.storyGid) &&
+      debouncedWorkspaceGid &&
+      debouncedProjectGid
+    if (!shouldFetchTasks || !asanaConnectionOptions || isSoloPlan) {
       setTaskOptionsLoading(false)
       return
     }
@@ -2032,9 +2037,11 @@ export default function AsanaAction({
               !hasConnection
                 ? 'Select an Asana connection first'
                 : debouncedWorkspaceGid
-                  ? taskOptionsLoading
-                    ? 'Loading tasks...'
-                    : 'Select task'
+                  ? debouncedProjectGid
+                    ? taskOptionsLoading
+                      ? 'Loading tasks...'
+                      : 'Select task'
+                    : 'Select a project first'
                   : 'Select a workspace first'
             }
             disabled={
@@ -2165,9 +2172,11 @@ export default function AsanaAction({
               !hasConnection
                 ? 'Select an Asana connection first'
                 : debouncedWorkspaceGid
-                  ? taskOptionsLoading
-                    ? 'Loading tasks...'
-                    : 'Select parent task'
+                  ? debouncedProjectGid
+                    ? taskOptionsLoading
+                      ? 'Loading tasks...'
+                      : 'Select task'
+                    : 'Select a project first'
                   : 'Select a workspace first'
             }
             disabled={
