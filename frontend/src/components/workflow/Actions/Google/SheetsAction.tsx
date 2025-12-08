@@ -3,11 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import NodeDropdownField, {
   type NodeDropdownOptionGroup
 } from '@/components/ui/InputFields/NodeDropdownField'
-import NodeInputField from '@/components/ui/InputFields/NodeInputField'
-import {
-  fetchSpreadsheetSheets,
-  fetchSpreadsheetFiles
-} from '@/lib/googleSheetsApi'
+import { fetchSpreadsheetSheets } from '@/lib/googleSheetsApi'
 import { fetchGoogleAccessToken } from '@/lib/googleSheetsApi'
 import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import {
@@ -25,6 +21,11 @@ import {
   useSheetsActionParams
 } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import {
+  DrivePicker,
+  DrivePickerDocsView
+} from '@googleworkspace/drive-picker-react'
+import { Plus } from 'lucide-react'
 
 interface SheetsActionProps {
   nodeId: string
@@ -580,13 +581,6 @@ export default function SheetsAction({
     [applySheetsParamsPatch, findConnectionById]
   )
 
-  const handleSpreadsheetChange = useCallback(
-    (value: string) => {
-      applySheetsParamsPatch({ spreadsheetId: value })
-    },
-    [applySheetsParamsPatch]
-  )
-
   const handleColumnsChange = useCallback(
     (updatedVars: { key: string; value: string }[]) => {
       applySheetsParamsPatch({ columns: updatedVars })
@@ -610,48 +604,37 @@ export default function SheetsAction({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerLoading, setPickerLoading] = useState(false)
   const [pickerError, setPickerError] = useState<string | null>(null)
-  const [pickerFiles, setPickerFiles] = useState<
-    { id: string; title: string }[]
-  >([])
 
   // Simple in-component cache to avoid refetching during the same session
   const sheetsCacheRef = useRef<Record<string, NodeDropdownOptionGroup[]>>({})
-
-  // Picker loader state
-  const pickerLoadedRef = useRef(false)
-
-  const ensurePickerLoaded = useCallback((): Promise<void> => {
-    if (pickerLoadedRef.current) return Promise.resolve()
-    return new Promise((resolve, reject) => {
-      const loadScript = (src: string) => {
-        return new Promise<void>((resolveScript, rejectScript) => {
-          const existing = document.querySelector(`script[src="${src}"]`)
-          if (existing) return resolveScript()
-          const s = document.createElement('script')
-          s.src = src
-          s.async = true
-          s.onload = () => resolveScript()
-          s.onerror = () => rejectScript(new Error(`Failed to load ${src}`))
-          document.head.appendChild(s)
-        })
-      }
-
-      // Load the base gapi library and the picker lib
-      loadScript('https://apis.google.com/js/api.js')
-        .then(() => loadScript('https://www.gstatic.com/picker/1/picker.js'))
-        .then(() => {
-          pickerLoadedRef.current = true
-          resolve()
-        })
-        .catch(reject)
-    })
-  }, [])
 
   useEffect(() => {
     const id = spreadsheetId?.trim() || ''
     const handle = setTimeout(() => setDebouncedSpreadsheetId(id), 300)
     return () => clearTimeout(handle)
   }, [spreadsheetId])
+
+  const openPicker = useCallback(() => {
+    setPickerOpen(true)
+    setPickerError(null)
+    setPickerLoading(true)
+
+    const parsed = parseConnectionValue(selectedConnectionValue)
+    const scope = parsed?.scope
+    const connId = parsed?.id
+
+    fetchGoogleAccessToken({
+      scope: scope === 'personal' || scope === 'workspace' ? scope : undefined,
+      connectionId: connId
+    })
+      .then((token) => {
+        ;(window as any).__dsentrPickerToken = token
+      })
+      .catch((err) => {
+        setPickerError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => setPickerLoading(false))
+  }, [selectedConnectionValue])
 
   useEffect(() => {
     let active = true
@@ -705,91 +688,6 @@ export default function SheetsAction({
     }
   }, [spreadsheetId, selectedConnectionValue, debouncedSpreadsheetId])
 
-  const openPicker = useCallback(() => {
-    setPickerOpen(true)
-    setPickerError(null)
-    setPickerFiles([])
-    const parsedConn = parseConnectionValue(selectedConnectionValue)
-    const scope = parsedConn?.scope
-    const connId = parsedConn?.id
-    const GOOGLE_API_KEY = (import.meta as any).env?.VITE_GOOGLE_API_KEY
-    const GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID
-
-    // If the client API key and client id are available, prefer the official Picker
-    if (GOOGLE_API_KEY && GOOGLE_CLIENT_ID) {
-      setPickerLoading(true)
-      fetchGoogleAccessToken({
-        scope:
-          scope === 'personal' || scope === 'workspace' ? scope : undefined,
-        connectionId: connId && scope === 'workspace' ? connId : undefined
-      })
-        .then((token: string) =>
-          ensurePickerLoaded()
-            .then(() => {
-              const google = (window as any).google
-              if (!google || !google.picker) {
-                throw new Error('Google Picker failed to load')
-              }
-
-              const docsView = new google.picker.DocsView(
-                google.picker.ViewId.DOCS
-              )
-                .setMimeTypes('application/vnd.google-apps.spreadsheet')
-                .setMode(google.picker.DocsViewMode.LIST)
-
-              const picker = new google.picker.PickerBuilder()
-                .addView(docsView)
-                .setDeveloperKey(GOOGLE_API_KEY)
-                .setOAuthToken(token)
-                .setClientId(GOOGLE_CLIENT_ID)
-                .setCallback((data: any) => {
-                  if (data?.action === google.picker.Action.PICKED) {
-                    const doc = data.docs && data.docs[0]
-                    if (doc && doc.id) {
-                      applySheetsParamsPatch({ spreadsheetId: doc.id })
-                    }
-                  }
-                })
-                .build()
-
-              picker.setVisible(true)
-            })
-            .catch((err: unknown) => {
-              setPickerError(err instanceof Error ? err.message : String(err))
-            })
-        )
-        .catch((err: unknown) => {
-          setPickerError(err instanceof Error ? err.message : String(err))
-        })
-        .finally(() => setPickerLoading(false))
-      return
-    }
-
-    // Fallback: server-side Drive listing (existing behavior)
-    setPickerLoading(true)
-    fetchSpreadsheetFiles({
-      scope: scope === 'personal' || scope === 'workspace' ? scope : undefined,
-      connectionId: connId && scope === 'workspace' ? connId : undefined
-    })
-      .then((items) => {
-        setPickerFiles(items)
-      })
-      .catch((err) => {
-        setPickerError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => setPickerLoading(false))
-  }, [selectedConnectionValue, ensurePickerLoaded, applySheetsParamsPatch])
-
-  const handlePickerSelect = useCallback(
-    (id?: string) => {
-      setPickerOpen(false)
-      if (id) {
-        applySheetsParamsPatch({ spreadsheetId: id })
-      }
-    },
-    [applySheetsParamsPatch]
-  )
-
   return (
     <div className="flex flex-col gap-2">
       <NodeDropdownField
@@ -828,21 +726,17 @@ export default function SheetsAction({
           </p>
         )}
 
-      <NodeInputField
-        placeholder="Spreadsheet ID"
-        value={spreadsheetId || ''}
-        onChange={handleSpreadsheetChange}
-      />
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className="text-sm text-blue-600 hover:underline"
+          className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
           onClick={() => {
             if (!effectiveCanEdit) return
             openPicker()
           }}
           disabled={!effectiveCanEdit || connectionsLoading}
         >
+          <Plus size={14} />
           Choose from Google Drive
         </button>
         {pickerLoading && <span className="text-xs">Loading…</span>}
@@ -850,33 +744,32 @@ export default function SheetsAction({
       {pickerOpen && (
         <div className="mt-2 rounded border bg-white p-2 shadow-sm">
           {pickerError && <p className="text-xs text-red-500">{pickerError}</p>}
-          {pickerLoading && <p className="text-xs">Loading files…</p>}
-          {!pickerLoading && pickerFiles.length === 0 && (
-            <p className="text-xs">No spreadsheets found</p>
-          )}
-          {!pickerLoading && pickerFiles.length > 0 && (
-            <div className="flex flex-col gap-1">
-              {pickerFiles.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  className="text-left text-sm hover:bg-gray-50 p-1 rounded"
-                  onClick={() => handlePickerSelect(f.id)}
-                >
-                  {f.title}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="text-sm text-gray-600 hover:underline mt-1"
-                onClick={() => setPickerOpen(false)}
-              >
-                Cancel
-              </button>
-            </div>
+          {pickerLoading && <p className="text-xs">Loading picker…</p>}
+
+          {!pickerLoading && (
+            <DrivePicker
+              client-id={import.meta.env.VITE_GOOGLE_CLIENT_ID}
+              app-id={import.meta.env.VITE_GOOGLE_APP_ID}
+              title="Select a Google Sheet"
+              onPicked={(e) => {
+                const picked = e.detail?.docs?.[0]
+                if (picked?.id) {
+                  applySheetsParamsPatch({ spreadsheetId: picked.id })
+                }
+                setPickerOpen(false)
+              }}
+              onCanceled={() => setPickerOpen(false)}
+              onOauthError={(e) => {
+                setPickerError('Google OAuth error')
+                console.error(e)
+              }}
+            >
+              <DrivePickerDocsView mime-types="application/vnd.google-apps.spreadsheet" />
+            </DrivePicker>
           )}
         </div>
       )}
+
       {validationErrors.spreadsheetId && (
         <p className={errorClass}>{validationErrors.spreadsheetId}</p>
       )}

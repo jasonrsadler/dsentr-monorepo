@@ -139,7 +139,7 @@ describe('SheetsAction', () => {
   it('merges sheet param updates with the existing payload', async () => {
     render(<SheetsAction nodeId={nodeId} />)
 
-    await screen.findByPlaceholderText('Spreadsheet ID')
+    await screen.findByText('Choose from Google Drive')
     updateNodeData.mockClear()
 
     // The worksheet field is now a dropdown. Select the first option.

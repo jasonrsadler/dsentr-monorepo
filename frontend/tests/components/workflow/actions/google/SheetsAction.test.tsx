@@ -351,33 +351,6 @@ describe('SheetsAction', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('dispatches spreadsheet updates through focused patches', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue(
-      createJsonResponse({ success: true, personal: [], workspace: [] })
-    )
-
-    try {
-      render(<SheetsAction nodeId={nodeId} />)
-
-      updateNodeData.mockClear()
-
-      const input = screen.getByPlaceholderText('Spreadsheet ID')
-      fireEvent.change(input, { target: { value: 'new-sheet-id' } })
-
-      await act(async () => {})
-
-      expect(updateNodeData).toHaveBeenCalledWith(
-        nodeId,
-        expect.objectContaining({
-          params: expect.objectContaining({ spreadsheetId: 'new-sheet-id' }),
-          dirty: true
-        })
-      )
-    } finally {
-      /* no-op */
-    }
-  })
-
   it('sends column mapping updates with focused patches', async () => {
     vi.spyOn(global, 'fetch').mockResolvedValue(
       createJsonResponse({ success: true, personal: [], workspace: [] })

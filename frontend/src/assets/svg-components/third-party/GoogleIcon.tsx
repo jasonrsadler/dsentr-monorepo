@@ -11,74 +11,74 @@ export default function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
     >
       <defs>
         <linearGradient id="a">
-          <stop offset="0" stop-color="#0fbc5c" />
-          <stop offset="1" stop-color="#0cba65" />
+          <stop offset="0" stopColor="#0fbc5c" />
+          <stop offset="1" stopColor="#0cba65" />
         </linearGradient>
         <linearGradient id="g">
-          <stop offset=".2312727" stop-color="#0fbc5f" />
-          <stop offset=".3115468" stop-color="#0fbc5f" />
-          <stop offset=".3660131" stop-color="#0fbc5e" />
-          <stop offset=".4575163" stop-color="#0fbc5d" />
-          <stop offset=".540305" stop-color="#12bc58" />
-          <stop offset=".6993464" stop-color="#28bf3c" />
-          <stop offset=".7712418" stop-color="#38c02b" />
-          <stop offset=".8605665" stop-color="#52c218" />
-          <stop offset=".9150327" stop-color="#67c30f" />
-          <stop offset="1" stop-color="#86c504" />
+          <stop offset=".2312727" stopColor="#0fbc5f" />
+          <stop offset=".3115468" stopColor="#0fbc5f" />
+          <stop offset=".3660131" stopColor="#0fbc5e" />
+          <stop offset=".4575163" stopColor="#0fbc5d" />
+          <stop offset=".540305" stopColor="#12bc58" />
+          <stop offset=".6993464" stopColor="#28bf3c" />
+          <stop offset=".7712418" stopColor="#38c02b" />
+          <stop offset=".8605665" stopColor="#52c218" />
+          <stop offset=".9150327" stopColor="#67c30f" />
+          <stop offset="1" stopColor="#86c504" />
         </linearGradient>
         <linearGradient id="h">
-          <stop offset=".1416122" stop-color="#1abd4d" />
-          <stop offset=".2475151" stop-color="#6ec30d" />
-          <stop offset=".3115468" stop-color="#8ac502" />
-          <stop offset=".3660131" stop-color="#a2c600" />
-          <stop offset=".4456735" stop-color="#c8c903" />
-          <stop offset=".540305" stop-color="#ebcb03" />
-          <stop offset=".6156363" stop-color="#f7cd07" />
-          <stop offset=".6993454" stop-color="#fdcd04" />
-          <stop offset=".7712418" stop-color="#fdce05" />
-          <stop offset=".8605661" stop-color="#ffce0a" />
+          <stop offset=".1416122" stopColor="#1abd4d" />
+          <stop offset=".2475151" stopColor="#6ec30d" />
+          <stop offset=".3115468" stopColor="#8ac502" />
+          <stop offset=".3660131" stopColor="#a2c600" />
+          <stop offset=".4456735" stopColor="#c8c903" />
+          <stop offset=".540305" stopColor="#ebcb03" />
+          <stop offset=".6156363" stopColor="#f7cd07" />
+          <stop offset=".6993454" stopColor="#fdcd04" />
+          <stop offset=".7712418" stopColor="#fdce05" />
+          <stop offset=".8605661" stopColor="#ffce0a" />
         </linearGradient>
         <linearGradient id="f">
-          <stop offset=".3159041" stop-color="#ff4c3c" />
-          <stop offset=".6038179" stop-color="#ff692c" />
-          <stop offset=".7268366" stop-color="#ff7825" />
-          <stop offset=".884534" stop-color="#ff8d1b" />
-          <stop offset="1" stop-color="#ff9f13" />
+          <stop offset=".3159041" stopColor="#ff4c3c" />
+          <stop offset=".6038179" stopColor="#ff692c" />
+          <stop offset=".7268366" stopColor="#ff7825" />
+          <stop offset=".884534" stopColor="#ff8d1b" />
+          <stop offset="1" stopColor="#ff9f13" />
         </linearGradient>
         <linearGradient id="b">
-          <stop offset=".2312727" stop-color="#ff4541" />
-          <stop offset=".3115468" stop-color="#ff4540" />
-          <stop offset=".4575163" stop-color="#ff4640" />
-          <stop offset=".540305" stop-color="#ff473f" />
-          <stop offset=".6993464" stop-color="#ff5138" />
-          <stop offset=".7712418" stop-color="#ff5b33" />
-          <stop offset=".8605665" stop-color="#ff6c29" />
-          <stop offset="1" stop-color="#ff8c18" />
+          <stop offset=".2312727" stopColor="#ff4541" />
+          <stop offset=".3115468" stopColor="#ff4540" />
+          <stop offset=".4575163" stopColor="#ff4640" />
+          <stop offset=".540305" stopColor="#ff473f" />
+          <stop offset=".6993464" stopColor="#ff5138" />
+          <stop offset=".7712418" stopColor="#ff5b33" />
+          <stop offset=".8605665" stopColor="#ff6c29" />
+          <stop offset="1" stopColor="#ff8c18" />
         </linearGradient>
         <linearGradient id="d">
-          <stop offset=".4084578" stop-color="#fb4e5a" />
-          <stop offset="1" stop-color="#ff4540" />
+          <stop offset=".4084578" stopColor="#fb4e5a" />
+          <stop offset="1" stopColor="#ff4540" />
         </linearGradient>
         <linearGradient id="c">
-          <stop offset=".1315461" stop-color="#0cba65" />
-          <stop offset=".2097843" stop-color="#0bb86d" />
-          <stop offset=".2972969" stop-color="#09b479" />
-          <stop offset=".3962575" stop-color="#08ad93" />
-          <stop offset=".4771242" stop-color="#0aa6a9" />
-          <stop offset=".5684245" stop-color="#0d9cc6" />
-          <stop offset=".667385" stop-color="#1893dd" />
-          <stop offset=".7687273" stop-color="#258bf1" />
-          <stop offset=".8585063" stop-color="#3086ff" />
+          <stop offset=".1315461" stopColor="#0cba65" />
+          <stop offset=".2097843" stopColor="#0bb86d" />
+          <stop offset=".2972969" stopColor="#09b479" />
+          <stop offset=".3962575" stopColor="#08ad93" />
+          <stop offset=".4771242" stopColor="#0aa6a9" />
+          <stop offset=".5684245" stopColor="#0d9cc6" />
+          <stop offset=".667385" stopColor="#1893dd" />
+          <stop offset=".7687273" stopColor="#258bf1" />
+          <stop offset=".8585063" stopColor="#3086ff" />
         </linearGradient>
         <linearGradient id="e">
-          <stop offset=".3660131" stop-color="#ff4e3a" />
-          <stop offset=".4575163" stop-color="#ff8a1b" />
-          <stop offset=".540305" stop-color="#ffa312" />
-          <stop offset=".6156363" stop-color="#ffb60c" />
-          <stop offset=".7712418" stop-color="#ffcd0a" />
-          <stop offset=".8605665" stop-color="#fecf0a" />
-          <stop offset=".9150327" stop-color="#fecf08" />
-          <stop offset="1" stop-color="#fdcd01" />
+          <stop offset=".3660131" stopColor="#ff4e3a" />
+          <stop offset=".4575163" stopColor="#ff8a1b" />
+          <stop offset=".540305" stopColor="#ffa312" />
+          <stop offset=".6156363" stopColor="#ffb60c" />
+          <stop offset=".7712418" stopColor="#ffcd0a" />
+          <stop offset=".8605665" stopColor="#fecf0a" />
+          <stop offset=".9150327" stopColor="#fecf08" />
+          <stop offset="1" stopColor="#fdcd01" />
         </linearGradient>
         <linearGradient
           xlinkHref="#a"
