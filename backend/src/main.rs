@@ -685,13 +685,16 @@ async fn main() -> Result<()> {
     let invite_routes = invite_private_routes.merge(invite_public_routes);
 
     // Google provider routes
-    use routes::google::list_spreadsheet_sheets;
+    use routes::google::{list_spreadsheet_sheets, list_spreadsheets_files};
+    use routes::google::get_google_access_token;
 
     let google_routes = Router::new()
         .route(
             "/spreadsheets/{spreadsheet_id}/sheets",
             get(list_spreadsheet_sheets),
         )
+        .route("/spreadsheets/files", get(list_spreadsheets_files))
+        .route("/token", get(get_google_access_token))
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());
 

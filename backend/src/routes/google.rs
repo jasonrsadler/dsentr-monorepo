@@ -184,6 +184,113 @@ pub async fn list_spreadsheet_sheets(
     .into_response()
 }
 
+pub async fn list_spreadsheets_files(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Query(query): Query<ConnectionQuery>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user identifier").into_response(),
+    };
+
+    let token = match determine_scope_and_token(&state, user_id, &query).await {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+
+    // Drive API: list spreadsheets the user has access to
+    let q = "mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false";
+    let url = format!(
+        "https://www.googleapis.com/drive/v3/files?fields=files(id,name)&orderBy=name&q={}&pageSize=200",
+        urlencoding::encode(q)
+    );
+
+    let res = match state
+        .http_client
+        .get(&url)
+        .bearer_auth(&token.access_token)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(err) => {
+            error!(%err, "failed to call google drive api");
+            return JsonResponse::server_error("Failed to call Google Drive API").into_response();
+        }
+    };
+
+    let status = res.status();
+    let body_text = match res.text().await {
+        Ok(t) => t,
+        Err(err) => {
+            error!(%err, "failed to read google drive response");
+            return JsonResponse::server_error("Failed to read Google Drive response").into_response();
+        }
+    };
+
+    if !status.is_success() {
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return JsonResponse::unauthorized(
+                "Google returned an authentication error. Reconnect the integration.",
+            )
+            .into_response();
+        }
+        return JsonResponse::server_error(&format!(
+            "Google Drive API error (status {}): {}",
+            status.as_u16(), body_text
+        ))
+        .into_response();
+    }
+
+    #[derive(serde::Deserialize)]
+    struct DriveFilesList {
+        files: Option<Vec<DriveFileEntry>>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct DriveFileEntry {
+        id: Option<String>,
+        name: Option<String>,
+    }
+
+    let parsed: DriveFilesList = match serde_json::from_str(&body_text) {
+        Ok(p) => p,
+        Err(err) => {
+            error!(%err, body = %body_text, "invalid json from google drive");
+            return JsonResponse::server_error("Invalid response from Google Drive API").into_response();
+        }
+    };
+
+    let mut out: Vec<SheetPayload> = Vec::new();
+    if let Some(files) = parsed.files {
+        for f in files.into_iter() {
+            if let Some(id) = f.id {
+                let title = f.name.unwrap_or_else(|| id.clone());
+                out.push(SheetPayload { id, title });
+            }
+        }
+    }
+
+    Json(serde_json::json!({ "success": true, "files": out })).into_response()
+}
+
+pub async fn get_google_access_token(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Query(query): Query<ConnectionQuery>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::unauthorized("Invalid user identifier").into_response(),
+    };
+
+    match determine_scope_and_token(&state, user_id, &query).await {
+        Ok(tok) => Json(serde_json::json!({ "success": true, "access_token": tok.access_token })).into_response(),
+        Err(resp) => resp,
+    }
+}
+
 // tests are moved to the end of the file to satisfy clippy's
 // `items_after_test_module` lint (test modules should be last)
 
