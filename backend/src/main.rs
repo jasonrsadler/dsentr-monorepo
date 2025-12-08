@@ -684,6 +684,17 @@ async fn main() -> Result<()> {
 
     let invite_routes = invite_private_routes.merge(invite_public_routes);
 
+    // Google provider routes
+    use routes::google::list_spreadsheet_sheets;
+
+    let google_routes = Router::new()
+        .route(
+            "/spreadsheets/:spreadsheet_id/sheets",
+            get(list_spreadsheet_sheets),
+        )
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
+
     let issue_routes = Router::new()
         .route("/issues", post(submit_issue_report).get(list_user_issues))
         .route("/issues/{id}", get(get_issue_with_messages))
@@ -721,6 +732,7 @@ async fn main() -> Result<()> {
         .merge(Router::new().nest("/api", invite_routes))
         .merge(Router::new().nest("/api", issue_routes))
         .nest("/api/oauth", oauth_routes)
+        .nest("/api/google", google_routes)
         .nest("/api/microsoft", microsoft_routes)
         .nest("/api/asana", asana_routes)
         .nest("/api/options", options_routes)

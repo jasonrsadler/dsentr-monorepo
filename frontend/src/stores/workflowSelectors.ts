@@ -60,6 +60,7 @@ export interface RunCustomCodeActionParams extends Record<string, unknown> {
 export interface SheetsActionParams extends Record<string, unknown> {
   spreadsheetId: string
   worksheet: string
+  worksheetId?: string
   columns: KeyValuePair[]
   accountEmail: string
   oauthConnectionScope: 'personal' | 'workspace' | ''

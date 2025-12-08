@@ -84,6 +84,47 @@ vi.mock('@/lib/oauthApi', () => ({
     subscribeToConnectionUpdates(...args)
 }))
 
+// Mock the sheet listing API
+const mockSheets = [
+  { id: 'sheet-1', title: 'Sheet A' },
+  { id: 'sheet-2', title: 'Sheet B' }
+]
+vi.mock('@/lib/googleSheetsApi', () => ({
+  fetchSpreadsheetSheets: vi.fn(() => Promise.resolve(mockSheets))
+}))
+
+vi.mock('@/components/ui/InputFields/NodeDropdownField', () => ({
+  __esModule: true,
+  default: ({ value, onChange, options, placeholder }: any) => {
+    const flatOptions = (options as any[]).flatMap((entry) => {
+      if (entry && typeof entry === 'object' && 'options' in entry) {
+        return (entry.options as any[]) ?? []
+      }
+      return [entry]
+    })
+
+    return (
+      <select
+        aria-label={placeholder ?? 'dropdown'}
+        value={value ?? ''}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {flatOptions.map((option) => {
+          const normalized =
+            typeof option === 'string'
+              ? { label: option, value: option }
+              : option
+          return (
+            <option key={normalized.value} value={normalized.value}>
+              {normalized.label}
+            </option>
+          )
+        })}
+      </select>
+    )
+  }
+}))
+
 describe('SheetsAction', () => {
   const nodeId = 'sheets-node'
 
@@ -101,8 +142,9 @@ describe('SheetsAction', () => {
     await screen.findByPlaceholderText('Spreadsheet ID')
     updateNodeData.mockClear()
 
-    const worksheetInput = await screen.findByPlaceholderText('Worksheet Name')
-    fireEvent.change(worksheetInput, { target: { value: 'Data Sheet' } })
+    // The worksheet field is now a dropdown. Select the first option.
+    const worksheetSelect = await screen.findByLabelText('Select worksheet')
+    fireEvent.change(worksheetSelect, { target: { value: 'sheet-1' } })
 
     await waitFor(() => {
       const patchCall = updateNodeData.mock.calls.find(
@@ -112,7 +154,8 @@ describe('SheetsAction', () => {
       expect(patchCall?.[1]).toEqual({
         params: {
           spreadsheetId: 'sheet-123',
-          worksheet: 'Data Sheet',
+          worksheet: 'Sheet A',
+          worksheetId: 'sheet-1',
           columns: [{ key: 'A', value: 'name' }],
           accountEmail: 'user@example.com',
           oauthConnectionScope: 'personal',

@@ -4,6 +4,7 @@ import NodeDropdownField, {
   type NodeDropdownOptionGroup
 } from '@/components/ui/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/ui/InputFields/NodeInputField'
+import { fetchSpreadsheetSheets } from '@/lib/googleSheetsApi'
 import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import {
   fetchConnections,
@@ -128,6 +129,7 @@ export default function SheetsAction({
   const {
     spreadsheetId,
     worksheet,
+    worksheetId,
     columns = [],
     accountEmail,
     oauthConnectionScope,
@@ -581,13 +583,6 @@ export default function SheetsAction({
     [applySheetsParamsPatch]
   )
 
-  const handleWorksheetChange = useCallback(
-    (value: string) => {
-      applySheetsParamsPatch({ worksheet: value })
-    },
-    [applySheetsParamsPatch]
-  )
-
   const handleColumnsChange = useCallback(
     (updatedVars: { key: string; value: string }[]) => {
       applySheetsParamsPatch({ columns: updatedVars })
@@ -597,6 +592,76 @@ export default function SheetsAction({
 
   const usingWorkspaceCredential = selectedConnection?.scope === 'workspace'
   const errorClass = 'text-xs text-red-500'
+
+  const [sheetsLoading, setSheetsLoading] = useState(false)
+  const [sheetsOptions, setSheetsOptions] = useState<NodeDropdownOptionGroup[]>(
+    []
+  )
+  const [sheetsError, setSheetsError] = useState<string | null>(null)
+  const [debouncedSpreadsheetId, setDebouncedSpreadsheetId] = useState(
+    spreadsheetId?.trim() || ''
+  )
+
+  // Simple in-component cache to avoid refetching during the same session
+  const sheetsCacheRef = useRef<Record<string, NodeDropdownOptionGroup[]>>({})
+
+  useEffect(() => {
+    const id = spreadsheetId?.trim() || ''
+    const handle = setTimeout(() => setDebouncedSpreadsheetId(id), 300)
+    return () => clearTimeout(handle)
+  }, [spreadsheetId])
+
+  useEffect(() => {
+    let active = true
+    setSheetsError(null)
+    setSheetsOptions([])
+
+    const id = debouncedSpreadsheetId?.trim()
+    if (!id) return
+
+    // Check frontend cache first
+    const cached = sheetsCacheRef.current[id]
+    if (cached) {
+      setSheetsOptions(cached)
+      setSheetsLoading(false)
+      setSheetsError(null)
+      return
+    }
+
+    const parsedConn = parseConnectionValue(selectedConnectionValue)
+    const scope = parsedConn?.scope
+    const connId = parsedConn?.id
+
+    setSheetsLoading(true)
+    fetchSpreadsheetSheets(id, {
+      scope: scope === 'personal' || scope === 'workspace' ? scope : undefined,
+      connectionId: connId && scope === 'workspace' ? connId : undefined
+    })
+      .then((items) => {
+        if (!active) return
+        const options = items.map((s) => ({ value: s.id, label: s.title }))
+        setSheetsOptions(
+          options.length > 0 ? [{ label: 'Worksheets', options }] : []
+        )
+        // cache the normalized options
+        sheetsCacheRef.current[id] =
+          options.length > 0 ? [{ label: 'Worksheets', options }] : []
+        setSheetsError(null)
+      })
+      .catch((err) => {
+        if (!active) return
+        setSheetsError(err instanceof Error ? err.message : String(err))
+        setSheetsOptions([])
+      })
+      .finally(() => {
+        if (!active) return
+        setSheetsLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [spreadsheetId, selectedConnectionValue, debouncedSpreadsheetId])
 
   return (
     <div className="flex flex-col gap-2">
@@ -645,10 +710,46 @@ export default function SheetsAction({
         <p className={errorClass}>{validationErrors.spreadsheetId}</p>
       )}
 
-      <NodeInputField
-        placeholder="Worksheet Name"
-        value={worksheet || ''}
-        onChange={handleWorksheetChange}
+      <NodeDropdownField
+        options={sheetsOptions}
+        value={(() => {
+          if (typeof worksheetId === 'string' && worksheetId) return worksheetId
+          if (typeof worksheet === 'string' && worksheet) {
+            for (const g of sheetsOptions) {
+              const found = g.options.find(
+                (o) => typeof o !== 'string' && o.label === worksheet
+              )
+              if (found && typeof found !== 'string') return found.value
+            }
+          }
+          return ''
+        })()}
+        onChange={(val) => {
+          const flat = sheetsOptions
+            .flatMap((g) => g.options)
+            .map((o) => (typeof o === 'string' ? { value: o, label: o } : o))
+          const selected = flat.find((o) => o.value === val)
+          if (selected) {
+            applySheetsParamsPatch({
+              worksheet: selected.label,
+              worksheetId: selected.value
+            })
+          } else {
+            applySheetsParamsPatch({ worksheet: val, worksheetId: '' })
+          }
+        }}
+        placeholder={
+          sheetsLoading
+            ? 'Loading worksheets…'
+            : sheetsOptions.length > 0
+              ? 'Select worksheet'
+              : 'No worksheets available'
+        }
+        disabled={
+          !effectiveCanEdit || sheetsLoading || sheetsOptions.length === 0
+        }
+        loading={sheetsLoading}
+        emptyMessage={sheetsError || 'No worksheets available'}
       />
       {validationErrors.worksheet && (
         <p className={errorClass}>{validationErrors.worksheet}</p>

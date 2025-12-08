@@ -5,6 +5,11 @@ import SheetsAction from '@/components/workflow/Actions/Google/SheetsAction'
 import { updateCachedConnections } from '@/lib/oauthApi'
 import { useAuth } from '@/stores/auth'
 
+// Prevent the component from making sheet-listing network requests during these tests
+vi.mock('@/lib/googleSheetsApi', () => ({
+  fetchSpreadsheetSheets: vi.fn(() => Promise.resolve([]))
+}))
+
 const createJsonResponse = (body: unknown) =>
   new Response(JSON.stringify(body), {
     status: 200,
