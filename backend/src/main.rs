@@ -689,7 +689,7 @@ async fn main() -> Result<()> {
 
     let google_routes = Router::new()
         .route(
-            "/spreadsheets/:spreadsheet_id/sheets",
+            "/spreadsheets/{spreadsheet_id}/sheets",
             get(list_spreadsheet_sheets),
         )
         .layer(csrf_layer.clone())
