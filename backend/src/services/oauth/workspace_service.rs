@@ -528,6 +528,31 @@ impl WorkspaceOAuthService {
         Ok(record)
     }
 
+    pub async fn list_workspace_worksheets(
+        &self,
+        connection_id: Uuid,
+        spreadsheet_id: &str,
+    ) -> Result<Vec<String>, WorkspaceOAuthError> {
+        let decrypted = self.ensure_valid_workspace_token(connection_id).await?;
+
+        if decrypted.provider != ConnectedOAuthProvider::Google {
+            return Err(WorkspaceOAuthError::Forbidden);
+        }
+
+        // You already have access token. Forward to google client.
+        let worksheets = self
+            .google_client
+            .list_worksheets(&decrypted.access_token, spreadsheet_id)
+            .await
+            .map_err(|_| {
+                WorkspaceOAuthError::OAuth(OAuthAccountError::InvalidResponse(
+                    "Google Sheets API error".into(),
+                ))
+            })?;
+
+        Ok(worksheets)
+    }
+
     #[cfg(test)]
     pub fn test_stub() -> Arc<Self> {
         use async_trait::async_trait;

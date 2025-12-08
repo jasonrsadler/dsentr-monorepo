@@ -13,6 +13,7 @@ use crate::db::workspace_connection_repository::WorkspaceConnectionRepository;
 use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
 #[cfg(test)]
 use crate::models::oauth_token::{WorkspaceAuditEvent, WorkspaceConnection};
+use crate::services::oauth::google::client::GoogleOAuthClient;
 use crate::utils::encryption::{decrypt_secret, encrypt_secret, EncryptionError};
 
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -67,6 +68,8 @@ pub enum OAuthAccountError {
     EmailNotVerified { provider: ConnectedOAuthProvider },
     #[error("oauth token revoked for {provider:?}")]
     TokenRevoked { provider: ConnectedOAuthProvider },
+    #[error("oauth token expired for {provider:?}")]
+    TokenExpired { provider: ConnectedOAuthProvider },
 }
 
 #[derive(Clone)]
@@ -75,10 +78,14 @@ pub struct OAuthAccountService {
     workspace_connections: Arc<dyn WorkspaceConnectionRepository>,
     encryption_key: Arc<Vec<u8>>,
     client: Arc<Client>,
+
+    google_client: Arc<GoogleOAuthClient>,
+
     google: OAuthProviderConfig,
     microsoft: OAuthProviderConfig,
     slack: OAuthProviderConfig,
     asana: OAuthProviderConfig,
+
     #[cfg(test)]
     refresh_override: Option<Arc<RefreshOverride>>,
     #[cfg(test)]
@@ -94,16 +101,20 @@ impl OAuthAccountService {
         encryption_key: Arc<Vec<u8>>,
         client: Arc<Client>,
         settings: &OAuthSettings,
+        google_client: Arc<GoogleOAuthClient>,
     ) -> Self {
         Self {
             repo,
             workspace_connections,
             encryption_key,
             client,
+            google_client,
+
             google: settings.google.clone(),
             microsoft: settings.microsoft.clone(),
             slack: settings.slack.clone(),
             asana: settings.asana.clone(),
+
             #[cfg(test)]
             refresh_override: None,
             #[cfg(test)]
@@ -1233,6 +1244,26 @@ impl OAuthAccountService {
         })
     }
 
+    pub async fn list_personal_worksheets(
+        &self,
+        user_id: Uuid,
+        connection_id: Uuid,
+        spreadsheet_id: &str,
+    ) -> Result<Vec<String>, OAuthAccountError> {
+        let token = self
+            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Google)
+            .await?;
+
+        if token.id != connection_id {
+            return Err(OAuthAccountError::NotFound);
+        }
+
+        self.google_client
+            .list_worksheets(&token.access_token, spreadsheet_id)
+            .await
+            .map_err(|_| OAuthAccountError::InvalidResponse("Google Sheets API error".into()))
+    }
+
     #[cfg(test)]
     pub fn test_stub() -> Arc<Self> {
         use async_trait::async_trait;
@@ -1435,6 +1466,7 @@ impl OAuthAccountService {
             key,
             client,
             &settings,
+            google_client: Arc<GoogleOAuthClient>,
         ))
     }
 }
@@ -1498,6 +1530,7 @@ mod tests {
     use crate::db::workspace_connection_repository::{
         StaleWorkspaceConnection, WorkspaceConnectionRepository,
     };
+    use crate::services::oauth::google::mock::MockGoogleOAuthClient;
     use async_trait::async_trait;
     use sqlx::Error;
     use std::io::Write;
@@ -1716,6 +1749,9 @@ mod tests {
         let repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(InMemoryRepo);
         let workspace_repo: Arc<dyn WorkspaceConnectionRepository> = Arc::new(NoopWorkspaceRepo);
         let key = Arc::new(vec![0u8; 32]);
+        let google_client = Arc::new(GoogleOAuthClient {
+            client: Client::new(),
+        });
         let settings = OAuthSettings {
             google: OAuthProviderConfig {
                 client_id: "id".into(),
@@ -1739,7 +1775,7 @@ mod tests {
             },
             token_encryption_key: vec![0u8; 32],
         };
-        let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
+        let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings, Arc::new(MockGoogleOAuthClient::default()),);
         assert_eq!(
             service.google_scopes(),
             "openid email https://www.googleapis.com/auth/spreadsheets"
@@ -1806,7 +1842,8 @@ mod tests {
             token_encryption_key: vec![0u8; 32],
         };
 
-        let mut service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
+        let mut service =
+            OAuthAccountService::new(repo, workspace_repo, key, client, &settings, google);
         service.set_google_endpoint_overrides(
             token_server.url("/token"),
             userinfo_server.url("/v1/userinfo"),
@@ -1876,7 +1913,8 @@ mod tests {
             token_encryption_key: vec![0u8; 32],
         };
 
-        let mut service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
+        let mut service =
+            OAuthAccountService::new(repo, workspace_repo, key, client, &settings, google);
         service.set_google_endpoint_overrides(
             token_server.url("/token"),
             userinfo_server.url("/v1/userinfo"),

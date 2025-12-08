@@ -117,10 +117,6 @@ mod tests {
     use uuid::Uuid;
 
     use super::{extract_session_id, require_session, AuthSession, SessionIdError};
-    use crate::config::{
-        Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
-        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT, RUNAWAY_LIMIT_5MIN,
-    };
     use crate::db::{
         mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository},
         mock_stripe_event_log_repository::MockStripeEventLogRepository,
@@ -138,6 +134,14 @@ mod tests {
     };
     use crate::session::{self, SessionData};
     use crate::state::{test_pg_pool, AppState};
+    use crate::{
+        config::{
+            Config, OAuthProviderConfig, OAuthSettings, StripeSettings,
+            DEFAULT_WORKSPACE_MEMBER_LIMIT, DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            RUNAWAY_LIMIT_5MIN,
+        },
+        services::oauth::google::client::GoogleOAuthClient,
+    };
     use chrono::{Duration, Utc};
     use reqwest::Client;
     use serde_json::json;
@@ -206,6 +210,9 @@ mod tests {
                 crate::utils::jwt::JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
                     .expect("test key"),
             ),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         }
     }
 

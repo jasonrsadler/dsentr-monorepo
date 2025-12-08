@@ -281,6 +281,9 @@ pub fn map_oauth_error(err: OAuthAccountError) -> Response {
         OAuthAccountError::MissingRefreshToken => {
             JsonResponse::server_error("Provider did not return a refresh token").into_response()
         }
+        OAuthAccountError::TokenExpired { .. } => {
+            JsonResponse::server_error("The OAuth connection's token was expired").into_response()
+        }
     }
 }
 
@@ -303,6 +306,9 @@ pub(crate) fn error_message_for_redirect(err: &OAuthAccountError) -> String {
         }
         OAuthAccountError::MissingRefreshToken => {
             "The OAuth provider did not return a refresh token.".to_string()
+        }
+        OAuthAccountError::TokenExpired { .. } => {
+            "The OAuth connection's token was expired".to_string()
         }
     }
 }

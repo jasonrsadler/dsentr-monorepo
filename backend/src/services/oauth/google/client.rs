@@ -69,6 +69,38 @@ impl GoogleOAuthService for GoogleOAuthClient {
     }
 }
 
+impl GoogleOAuthClient {
+    pub async fn list_worksheets(
+        &self,
+        access_token: &str,
+        spreadsheet_id: &str,
+    ) -> Result<Vec<String>, anyhow::Error> {
+        let url = format!(
+            "https://sheets.googleapis.com/v4/spreadsheets/{}?fields=sheets.properties.title",
+            spreadsheet_id
+        );
+
+        let resp = self
+            .client
+            .get(&url)
+            .bearer_auth(access_token)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<serde_json::Value>()
+            .await?;
+
+        let titles = resp["sheets"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|sheet| sheet["properties"]["title"].as_str().map(|s| s.to_string()))
+            .collect();
+
+        Ok(titles)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

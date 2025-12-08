@@ -40,18 +40,18 @@ use routes::auth::{
 };
 use routes::{
     account::{confirm_account_deletion, get_account_deletion_summary, request_account_deletion},
+    asana::{
+        list_projects as list_asana_projects, list_sections as list_asana_sections,
+        list_tags as list_asana_tags, list_task_stories as list_asana_task_stories,
+        list_tasks as list_asana_tasks, list_teams as list_asana_teams,
+        list_users as list_asana_users, list_workspaces as list_asana_workspaces,
+    },
     auth::{
         forgot_password::handle_forgot_password,
         github_login::{github_callback, github_login},
         google_login::{google_callback, google_login},
         handle_logout, handle_me, resend_verification_email,
         reset_password::{handle_reset_password, handle_verify_token},
-    },
-    asana::{
-        list_projects as list_asana_projects, list_sections as list_asana_sections,
-        list_tags as list_asana_tags, list_task_stories as list_asana_task_stories,
-        list_tasks as list_asana_tasks, list_teams as list_asana_teams,
-        list_users as list_asana_users, list_workspaces as list_asana_workspaces,
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
@@ -61,9 +61,10 @@ use routes::{
     },
     microsoft::{list_channel_members, list_team_channels, list_teams},
     oauth::{
-        asana_connect_callback, asana_connect_start, disconnect_connection, google_connect_callback,
-        google_connect_start, list_connections, microsoft_connect_callback,
-        microsoft_connect_start, refresh_connection, slack_connect_callback, slack_connect_start,
+        asana_connect_callback, asana_connect_start, disconnect_connection,
+        google_connect_callback, google_connect_start, list_connections,
+        microsoft_connect_callback, microsoft_connect_start, refresh_connection,
+        slack_connect_callback, slack_connect_start,
     },
     options::{
         secrets::{delete_secret, list_secrets, upsert_secret},
@@ -339,6 +340,9 @@ async fn main() -> Result<()> {
             .and_then(|v| v.parse::<i32>().ok())
             .unwrap_or(15),
         jwt_keys: jwt_keys.clone(),
+        google_client: Arc::new(GoogleOAuthClient {
+            client: http_client.clone(),
+        }),
     };
     let state_for_worker = state.clone();
     spawn_session_cleanup_task(shared_pg_pool.clone());
@@ -638,6 +642,13 @@ async fn main() -> Result<()> {
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());
 
+    let google_sheets_routes = Router::new()
+        .route(
+            "/sheets/:spreadsheet_id/worksheets",
+            get(routes::third_party::google::sheets::list_worksheets),
+        )
+        .layer(session_guard.clone());
+
     let asana_routes = Router::new()
         .route("/workspaces", get(list_asana_workspaces))
         .route(
@@ -722,6 +733,7 @@ async fn main() -> Result<()> {
         .merge(Router::new().nest("/api", issue_routes))
         .nest("/api/oauth", oauth_routes)
         .nest("/api/microsoft", microsoft_routes)
+        .nest("/api/google", google_sheets_routes)
         .nest("/api/asana", asana_routes)
         .nest("/api/options", options_routes)
         .nest("/api/admin", admin_routes)

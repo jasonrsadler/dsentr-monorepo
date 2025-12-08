@@ -61,6 +61,7 @@ mod tests {
     use tower::util::ServiceExt;
     use uuid::Uuid;
 
+    use crate::services::oauth::google::client::GoogleOAuthClient;
     use crate::{
         config::{
             Config, OAuthProviderConfig, OAuthSettings, StripeSettings,
@@ -88,6 +89,7 @@ mod tests {
         state::{test_pg_pool, AppState},
         utils::jwt::JwtKeys,
     };
+
     use reqwest::Client;
 
     fn test_config() -> Arc<Config> {
@@ -398,6 +400,9 @@ mod tests {
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         };
 
         Router::new()
@@ -525,6 +530,9 @@ mod tests {
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         };
 
         let app = Router::new()

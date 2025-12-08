@@ -321,7 +321,7 @@ mod tests {
                     models::{GitHubCallback, GitHubToken},
                     service::{GitHubOAuthService, GitHubUserInfo},
                 },
-                google::mock_google_oauth::MockGoogleOAuth,
+                google::{client::GoogleOAuthClient, mock_google_oauth::MockGoogleOAuth},
                 workspace_service::WorkspaceOAuthService,
             },
             smtp_mailer::MockMailer,
@@ -401,6 +401,9 @@ mod tests {
             worker_id: Arc::new("test-worker".into()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         }
     }
 
@@ -455,6 +458,9 @@ mod tests {
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         };
 
         let params = GitHubCallback {
@@ -536,6 +542,9 @@ mod tests {
             worker_id: Arc::new("test-worker".to_string()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         };
 
         let params = GitHubCallback {

@@ -523,6 +523,7 @@ mod tests {
         workspace_repository::WorkspaceRepository,
     };
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
+    use crate::services::oauth::google::client::GoogleOAuthClient;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
     use crate::services::oauth::workspace_service::{
         WorkspaceOAuthService, WorkspaceTokenRefresher,
@@ -897,6 +898,9 @@ mod tests {
             worker_id: Arc::new("worker".to_string()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         }
     }
 

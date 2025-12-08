@@ -820,6 +820,7 @@ mod tests {
     };
     use crate::routes::auth::claims::{Claims, TokenUse};
     use crate::routes::auth::session::AuthSession;
+    use crate::services::oauth::google::client::GoogleOAuthClient;
     use crate::services::{
         oauth::{
             github::mock_github_oauth::MockGitHubOAuth, google::mock_google_oauth::MockGoogleOAuth,
@@ -968,6 +969,7 @@ mod tests {
             worker_id: Arc::new("worker-1".into()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient::new()),
         }
     }
 

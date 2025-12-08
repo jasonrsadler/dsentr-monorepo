@@ -1003,6 +1003,7 @@ mod tests {
     use crate::runaway_protection::{enforce_runaway_protection, RunawayProtectionError};
     use crate::services::oauth::account_service::OAuthAccountService;
     use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
+    use crate::services::oauth::google::client::GoogleOAuthClient;
     use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
     use crate::services::oauth::workspace_service::WorkspaceOAuthService;
     use crate::services::smtp_mailer::MockMailer;
@@ -1085,6 +1086,9 @@ mod tests {
             worker_id: Arc::new("worker-test".into()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         }
     }
 

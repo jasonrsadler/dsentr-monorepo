@@ -260,8 +260,9 @@ mod tests {
         },
         services::{
             oauth::{
-                account_service::OAuthAccountService, github::mock_github_oauth::MockGitHubOAuth,
-                google::mock_google_oauth::MockGoogleOAuth,
+                account_service::OAuthAccountService,
+                github::mock_github_oauth::MockGitHubOAuth,
+                google::{client::GoogleOAuthClient, mock_google_oauth::MockGoogleOAuth},
                 workspace_service::WorkspaceOAuthService,
             },
             smtp_mailer::{Mailer, MockMailer},
@@ -1075,6 +1076,9 @@ mod tests {
                 worker_id: Arc::new("test-worker".to_string()),
                 worker_lease_seconds: 30,
                 jwt_keys: test_jwt_keys(),
+                google_client: Arc::new(GoogleOAuthClient {
+                    client: Client::new(),
+                }),
             });
 
         let request = Request::builder()

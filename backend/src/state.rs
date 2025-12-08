@@ -6,6 +6,7 @@ use crate::db::{
     workspace_repository::WorkspaceRepository,
 };
 use crate::models::{plan::PlanTier, workspace::WorkspaceBillingCycle};
+use crate::services::oauth::google::client::GoogleOAuthClient;
 use crate::services::oauth::{
     account_service::OAuthAccountService, github::service::GitHubOAuthService,
     google::service::GoogleOAuthService, workspace_service::WorkspaceOAuthService,
@@ -43,6 +44,7 @@ pub struct AppState {
     pub worker_id: Arc<String>,
     pub worker_lease_seconds: i32,
     pub jwt_keys: Arc<JwtKeys>,
+    pub google_client: Arc<GoogleOAuthClient>,
 }
 
 #[derive(Clone, Copy, Debug)]

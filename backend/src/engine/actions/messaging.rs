@@ -1665,7 +1665,6 @@ mod tests {
         task::JoinHandle,
     };
 
-    use crate::engine::graph::Node;
     use crate::{
         config::{
             Config, OAuthProviderConfig, OAuthSettings, StripeSettings,
@@ -1698,6 +1697,7 @@ mod tests {
         state::{test_pg_pool, AppState},
         utils::{encryption::encrypt_secret, jwt::JwtKeys},
     };
+    use crate::{engine::graph::Node, services::oauth::google::client::GoogleOAuthClient};
     use sqlx::Error as SqlxError;
     use uuid::Uuid;
 
@@ -2110,6 +2110,9 @@ mod tests {
             worker_id: Arc::new("worker".to_string()),
             worker_lease_seconds: 30,
             jwt_keys: test_jwt_keys(),
+            google_client: Arc::new(GoogleOAuthClient {
+                client: Client::new(),
+            }),
         }
     }
 
