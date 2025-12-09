@@ -415,6 +415,7 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
     label: 'Tasks - Update task',
     required: ['workspaceGid', 'taskGid', 'name'],
     optional: [
+      'projectGid',
       'notes',
       'assignee',
       'dueOn',
@@ -695,6 +696,36 @@ export default function AsanaAction({
       nodeId,
       updateNodeData
     ]
+  )
+
+  const handleOperationChange = useCallback(
+    (op: string) => {
+      if (!effectiveCanEdit) return
+      const operation = (op as AsanaOperation) || DEFAULT_PARAMS.operation
+      if (operation === 'updateTask') {
+        // Reset fields so only workspace picker is available
+        const reset: Partial<AsanaActionParams> = {
+          operation,
+          // clear workspace so user re-selects it (shows only workspace picker)
+          workspaceGid: '',
+          projectGid: '',
+          taskGid: '',
+          name: '',
+          assignee: '',
+          notes: '',
+          dueOn: '',
+          dueAt: '',
+          additionalFields: [],
+          completed: false,
+          archived: false,
+          limit: ''
+        }
+        applyAsanaPatch(reset)
+        return
+      }
+      applyAsanaPatch({ operation })
+    },
+    [applyAsanaPatch, effectiveCanEdit]
   )
 
   useEffect(() => {
@@ -1337,6 +1368,24 @@ export default function AsanaAction({
         break
     }
 
+    // Ensure project selector is shown under a selected workspace whenever the
+    // operation declares `projectGid` as either required or optional. This
+    // centralizes the "project appears after workspace" rule instead of
+    // relying on each case to set it.
+    try {
+      const cfg = OPERATION_FIELDS[op]
+      if (hasWorkspaceSelected && cfg) {
+        const wantsProject =
+          (cfg.required || []).includes('projectGid') ||
+          (cfg.optional || []).includes('projectGid')
+        if (wantsProject) {
+          fieldVisibility.projectGid = true
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     return fieldVisibility
   }, [
     asanaParams.operation,
@@ -1374,7 +1423,7 @@ export default function AsanaAction({
         applyAsanaPatch({ dueOn: '' })
       }
     },
-    [applyAsanaPatch]
+    [applyAsanaPatch, asanaParams.operation, taskOptions]
   )
 
   const handleWorkspaceSelect = useCallback(
@@ -1440,7 +1489,15 @@ export default function AsanaAction({
 
   const handleTaskSelect = useCallback(
     (taskGid: string) => {
-      applyAsanaPatch({ taskGid, storyGid: '' })
+      // Prefill name when updating a task using the selected task's label
+      const next: Partial<AsanaActionParams> = { taskGid, storyGid: '' }
+      if (asanaParams.operation === 'updateTask') {
+        const found = taskOptions.find((o) => o.value === taskGid)
+        if (found) {
+          next.name = typeof found.label === 'string' ? found.label : ''
+        }
+      }
+      applyAsanaPatch(next)
     },
     [applyAsanaPatch]
   )
@@ -1932,10 +1989,43 @@ export default function AsanaAction({
 
   const visibleFields = useMemo(() => {
     const config = OPERATION_FIELDS[asanaParams.operation]
-    return {
-      required: (config.required || []).filter((field) => visibility[field]),
-      optional: (config.optional ?? []).filter((field) => visibility[field])
+    const req = (config.required || []).filter((field) => visibility[field])
+    const opt = (config.optional ?? []).filter((field) => visibility[field])
+
+    // Ensure projectGid (when visible) is positioned immediately after
+    // workspaceGid in the rendered required fields. We will build the
+    // required list placing workspace then project (if present), then the
+    // remaining required fields. The optional list will exclude project if
+    // it was promoted into the required ordering so it isn't rendered twice.
+    const requiredOrdered: FieldKey[] = []
+    const optionalFiltered: FieldKey[] = [...opt]
+
+    if (visibility['workspaceGid']) {
+      // include workspace if present in either required or optional
+      if (req.includes('workspaceGid') || opt.includes('workspaceGid')) {
+        requiredOrdered.push('workspaceGid')
+      }
+
+      // include project immediately after workspace if visible
+      if (
+        visibility['projectGid'] &&
+        (req.includes('projectGid') || opt.includes('projectGid'))
+      ) {
+        requiredOrdered.push('projectGid')
+        // remove project from optionalFiltered if present
+        const idx = optionalFiltered.indexOf('projectGid')
+        if (idx !== -1) optionalFiltered.splice(idx, 1)
+      }
     }
+
+    // add remaining required fields (excluding workspace/project duplicates)
+    req.forEach((f) => {
+      if (f === 'workspaceGid' || f === 'projectGid') return
+      requiredOrdered.push(f)
+    })
+
+    // optionalFiltered already has project removed if promoted; keep order
+    return { required: requiredOrdered, optional: optionalFiltered }
   }, [asanaParams.operation, visibility])
 
   const renderField = (field: FieldKey, _isRequired: boolean) => {
@@ -2593,9 +2683,7 @@ export default function AsanaAction({
                 value: option.value
               }))}
               value={asanaParams.operation}
-              onChange={(val) =>
-                applyAsanaPatch({ operation: val as AsanaOperation })
-              }
+              onChange={(val) => handleOperationChange(val as string)}
               disabled={!effectiveCanEdit}
             />
           </div>
@@ -2628,7 +2716,10 @@ export default function AsanaAction({
                       'additionalFields'
                     ]
 
-                    if (asanaParams.operation === 'createTask') {
+                    if (
+                      asanaParams.operation === 'createTask' ||
+                      asanaParams.operation === 'updateTask'
+                    ) {
                       // 1) Assignee first
                       specialBefore.forEach((optField) => {
                         if (visibility[optField]) {
@@ -2684,7 +2775,10 @@ export default function AsanaAction({
                     }
 
                     const rest = visibleFields.optional.filter((f) => {
-                      if (asanaParams.operation === 'createTask') {
+                      if (
+                        asanaParams.operation === 'createTask' ||
+                        asanaParams.operation === 'updateTask'
+                      ) {
                         return ![
                           ...specialBefore,
                           ...specialAfter,
