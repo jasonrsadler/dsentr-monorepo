@@ -413,9 +413,8 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   updateTask: {
     label: 'Tasks - Update task',
-    required: ['workspaceGid', 'taskGid'],
+    required: ['workspaceGid', 'taskGid', 'name'],
     optional: [
-      'name',
       'notes',
       'assignee',
       'dueOn',
@@ -2608,37 +2607,9 @@ export default function AsanaAction({
                   Required fields
                 </p>
                 <div className="space-y-2">
-                  {visibleFields.required.flatMap((field) => {
-                    const elems: any[] = [renderField(field, true)]
-                    // Insert the due-mode selector immediately after the Project selector
-                    if (
-                      field === 'projectGid' &&
-                      supportsDueMode &&
-                      showDueModeSelector
-                    ) {
-                      elems.push(
-                        <div className="space-y-1" key="due-mode">
-                          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                            Due field
-                          </p>
-                          <NodeDropdownField
-                            options={[
-                              { label: 'Due on (date)', value: 'dueOn' },
-                              { label: 'Due at (datetime)', value: 'dueAt' }
-                            ]}
-                            value={dueMode}
-                            onChange={(val) =>
-                              handleDueModeChange(
-                                val === 'dueAt' ? 'dueAt' : 'dueOn'
-                              )
-                            }
-                            disabled={!effectiveCanEdit}
-                          />
-                        </div>
-                      )
-                    }
-                    return elems
-                  })}
+                  {visibleFields.required.map((field) =>
+                    renderField(field, true)
+                  )}
                 </div>
               </div>
             )}
@@ -2649,9 +2620,88 @@ export default function AsanaAction({
                   Optional fields
                 </p>
                 <div className="space-y-2">
-                  {visibleFields.optional.map((field) =>
-                    renderField(field, false)
-                  )}
+                  {(() => {
+                    const nodes: React.ReactNode[] = []
+                    const specialBefore: FieldKey[] = ['assignee']
+                    const specialAfter: FieldKey[] = [
+                      'notes',
+                      'additionalFields'
+                    ]
+
+                    if (asanaParams.operation === 'createTask') {
+                      // 1) Assignee first
+                      specialBefore.forEach((optField) => {
+                        if (visibility[optField]) {
+                          const node = renderField(optField, false)
+                          if (node)
+                            nodes.push(
+                              <div key={`opt-${optField}`}>{node}</div>
+                            )
+                        }
+                      })
+
+                      // 2) Due mode selector
+                      if (supportsDueMode && showDueModeSelector) {
+                        nodes.push(
+                          <div className="space-y-1" key="due-mode-opt">
+                            <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                              Due field
+                            </p>
+                            <NodeDropdownField
+                              options={[
+                                { label: 'Due on (date)', value: 'dueOn' },
+                                { label: 'Due at (datetime)', value: 'dueAt' }
+                              ]}
+                              value={dueMode}
+                              onChange={(val) =>
+                                handleDueModeChange(
+                                  val === 'dueAt' ? 'dueAt' : 'dueOn'
+                                )
+                              }
+                              disabled={!effectiveCanEdit}
+                            />
+                          </div>
+                        )
+                      }
+
+                      // 3) DueOn / DueAt fields (only one will render depending on dueMode)
+                      ;['dueOn', 'dueAt'].forEach((df) => {
+                        const node = renderField(df as FieldKey, false)
+                        if (node)
+                          nodes.push(<div key={`opt-${df}`}>{node}</div>)
+                      })
+
+                      // 4) Notes and Additional fields
+                      specialAfter.forEach((optField) => {
+                        if (visibility[optField]) {
+                          const node = renderField(optField, false)
+                          if (node)
+                            nodes.push(
+                              <div key={`opt-${optField}`}>{node}</div>
+                            )
+                        }
+                      })
+                    }
+
+                    const rest = visibleFields.optional.filter((f) => {
+                      if (asanaParams.operation === 'createTask') {
+                        return ![
+                          ...specialBefore,
+                          ...specialAfter,
+                          'dueOn',
+                          'dueAt'
+                        ].includes(f as FieldKey)
+                      }
+                      return true
+                    })
+                    rest.forEach((field) => {
+                      const node = renderField(field, false)
+                      if (node)
+                        nodes.push(<div key={`opt-rest-${field}`}>{node}</div>)
+                    })
+
+                    return nodes
+                  })()}
                 </div>
               </div>
             )}
