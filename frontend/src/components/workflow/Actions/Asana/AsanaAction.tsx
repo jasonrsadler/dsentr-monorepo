@@ -385,15 +385,9 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   createTask: {
     label: 'Tasks - Create task',
-    required: ['workspaceGid', 'name'],
-    optional: [
-      'projectGid',
-      'dueOn',
-      'dueAt',
-      'assignee',
-      'notes',
-      'additionalFields'
-    ]
+    // Project is shown before name in the UI flow (workspace -> project -> name)
+    required: ['workspaceGid', 'projectGid', 'name'],
+    optional: ['dueOn', 'dueAt', 'assignee', 'notes', 'additionalFields']
   },
   deleteTask: {
     label: 'Tasks - Delete task',
@@ -2605,24 +2599,6 @@ export default function AsanaAction({
               }
               disabled={!effectiveCanEdit}
             />
-            {supportsDueMode && showDueModeSelector && (
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                  Due field
-                </p>
-                <NodeDropdownField
-                  options={[
-                    { label: 'Due on (date)', value: 'dueOn' },
-                    { label: 'Due at (datetime)', value: 'dueAt' }
-                  ]}
-                  value={dueMode}
-                  onChange={(val) =>
-                    handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
-                  }
-                  disabled={!effectiveCanEdit}
-                />
-              </div>
-            )}
           </div>
 
           <div className="space-y-3">
@@ -2632,9 +2608,37 @@ export default function AsanaAction({
                   Required fields
                 </p>
                 <div className="space-y-2">
-                  {visibleFields.required.map((field) =>
-                    renderField(field, true)
-                  )}
+                  {visibleFields.required.flatMap((field) => {
+                    const elems: any[] = [renderField(field, true)]
+                    // Insert the due-mode selector immediately after the Project selector
+                    if (
+                      field === 'projectGid' &&
+                      supportsDueMode &&
+                      showDueModeSelector
+                    ) {
+                      elems.push(
+                        <div className="space-y-1" key="due-mode">
+                          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                            Due field
+                          </p>
+                          <NodeDropdownField
+                            options={[
+                              { label: 'Due on (date)', value: 'dueOn' },
+                              { label: 'Due at (datetime)', value: 'dueAt' }
+                            ]}
+                            value={dueMode}
+                            onChange={(val) =>
+                              handleDueModeChange(
+                                val === 'dueAt' ? 'dueAt' : 'dueOn'
+                              )
+                            }
+                            disabled={!effectiveCanEdit}
+                          />
+                        </div>
+                      )
+                    }
+                    return elems
+                  })}
                 </div>
               </div>
             )}
