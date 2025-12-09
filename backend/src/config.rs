@@ -67,16 +67,44 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
-        let dotenv_disabled = env::var("DOTENV_DISABLE")
+        // Allow an explicit backend-only override so frontend tooling that disables
+        // dotenv globally doesn't prevent the backend from loading `backend/.env`.
+        let dotenv_disabled_backend = env::var("DOTENV_DISABLE_BACKEND")
             .ok()
-            .map(|value| {
-                let normalized = value.to_ascii_lowercase();
-                matches!(normalized.as_str(), "1" | "true")
-            })
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true"))
             .unwrap_or(false);
 
-        if !dotenv_disabled {
-            dotenv::dotenv().ok();
+        let dotenv_disabled = if dotenv_disabled_backend {
+            true
+        } else {
+            env::var("DOTENV_DISABLE")
+                .ok()
+                .map(|value| {
+                    let normalized = value.to_ascii_lowercase();
+                    matches!(normalized.as_str(), "1" | "true")
+                })
+                .unwrap_or(false)
+        };
+
+        // Prefer loading `backend/.env` from the crate manifest directory when present.
+        // This ensures local backend development loads its `.env` even if a global
+        // process-level `DOTENV_DISABLE` is set by other tooling (e.g., frontend).
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let env_path = std::path::Path::new(manifest_dir).join(".env");
+        if env_path.exists() {
+            match dotenvy::from_path(&env_path) {
+                Ok(_) => {
+                    eprintln!("Loaded backend .env from {}", env_path.display());
+                }
+                Err(err) => {
+                    eprintln!("Failed to load backend .env from {}: {err}", env_path.display());
+                }
+            }
+        } else if !dotenv_disabled {
+            match dotenvy::dotenv() {
+                Ok(_) => eprintln!("Loaded .env via dotenvy::dotenv()"),
+                Err(err) => eprintln!("dotenvy::dotenv() failed: {err}"),
+            }
         }
 
         fn require_env(name: &'static str) -> Result<String, ConfigError> {

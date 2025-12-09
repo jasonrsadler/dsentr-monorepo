@@ -9,7 +9,7 @@ use dsentr_backend::utils::secrets::{read_secret_store, write_secret_store};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
 
     let database_url =
         env::var("DATABASE_URL").context("DATABASE_URL is required to rotate API secrets")?;
