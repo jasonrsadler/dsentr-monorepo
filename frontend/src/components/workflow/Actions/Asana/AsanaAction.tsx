@@ -550,7 +550,7 @@ const sanitizeAsanaParams = (
   base.userGid = cleanString(params.userGid).trim()
   base.storyGid = cleanString(params.storyGid).trim()
   base.teamGid = cleanString(params.teamGid).trim()
-  base.name = cleanString(params.name).trim()
+  base.name = cleanString(params.name)
   base.notes = cleanString(params.notes)
   base.dueOn = cleanString(params.dueOn).trim()
   base.dueAt = cleanString(params.dueAt).trim()
@@ -1142,13 +1142,17 @@ export default function AsanaAction({
       case 'createTask':
         enableWorkspace()
         if (hasWorkspaceSelected) {
-          fieldVisibility.name = true
           fieldVisibility.projectGid = true
-          fieldVisibility.assignee = true
-          fieldVisibility.notes = true
-          fieldVisibility.dueOn = dueMode === 'dueOn'
-          fieldVisibility.dueAt = dueMode === 'dueAt'
-          fieldVisibility.additionalFields = true
+          if (hasProjectSelected) {
+            fieldVisibility.name = true
+            fieldVisibility.assignee = true
+            fieldVisibility.notes = true
+            if (dueMode != null) {
+              fieldVisibility.dueOn = dueMode === 'dueOn'
+              fieldVisibility.dueAt = dueMode === 'dueAt'
+            }
+            fieldVisibility.additionalFields = true
+          }
         }
         break
       case 'updateTask':
@@ -1156,7 +1160,7 @@ export default function AsanaAction({
         if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasTaskSelected) {
+        if (hasWorkspaceSelected && hasProjectSelected &&hasTaskSelected) {
           fieldVisibility.name = true
           fieldVisibility.notes = true
           fieldVisibility.assignee = true
@@ -1183,7 +1187,10 @@ export default function AsanaAction({
         break
       case 'deleteTask':
         enableWorkspace()
-        if (hasWorkspaceSelected && hasProjectSelected) {
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
+        if (hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
         break
@@ -1325,7 +1332,7 @@ export default function AsanaAction({
   const showDueModeSelector = useMemo(() => {
     switch (asanaParams.operation) {
       case 'createTask':
-        return hasWorkspaceSelected
+        return hasProjectSelected
       case 'updateTask':
         return hasTaskSelected
       case 'createSubtask':
@@ -1337,7 +1344,7 @@ export default function AsanaAction({
     asanaParams.operation,
     hasParentTaskSelected,
     hasTaskSelected,
-    hasWorkspaceSelected
+    hasProjectSelected
   ])
 
   const handleDueModeChange = useCallback(
