@@ -1157,10 +1157,18 @@ export default function AsanaAction({
         break
       case 'updateTask':
         enableWorkspace()
+        // Show project selector once a workspace is chosen
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
+
+        // Show task selector only after a project is chosen
         if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasProjectSelected &&hasTaskSelected) {
+
+        // Show editable task fields only after a task is selected
+        if (hasWorkspaceSelected && hasProjectSelected && hasTaskSelected) {
           fieldVisibility.name = true
           fieldVisibility.notes = true
           fieldVisibility.assignee = true
@@ -1172,6 +1180,12 @@ export default function AsanaAction({
         break
       case 'getTask':
         enableWorkspace()
+        // Show project selector when workspace is selected
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
+
+        // Show task selector when project is selected
         if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
@@ -1187,10 +1201,13 @@ export default function AsanaAction({
         break
       case 'deleteTask':
         enableWorkspace()
+        // Show project selector when workspace is selected
         if (hasWorkspaceSelected) {
           fieldVisibility.projectGid = true
         }
-        if (hasProjectSelected) {
+
+        // Show task selector only after a project is selected
+        if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
         break
@@ -1207,10 +1224,18 @@ export default function AsanaAction({
         break
       case 'moveTask':
         enableWorkspace()
+        // Show project selector when workspace is selected
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
+
+        // Show task selector only after a project is selected
         if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
-        if (hasWorkspaceSelected && hasTaskSelected) {
+
+        // Show section selector only after a task is selected
+        if (hasWorkspaceSelected && hasProjectSelected && hasTaskSelected) {
           fieldVisibility.sectionGid = true
         }
         break
@@ -2281,26 +2306,7 @@ export default function AsanaAction({
       )
     }
 
-    if (supportsDueMode && showDueModeSelector) {
-      return (
-        <div className="space-y-1">
-          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-            Due field
-          </p>
-          <NodeDropdownField
-            options={[
-              { label: 'Due on (date)', value: 'dueOn' },
-              { label: 'Due at (datetime)', value: 'dueAt' }
-            ]}
-            value={dueMode}
-            onChange={(val) =>
-              handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
-            }
-            disabled={!effectiveCanEdit}
-          />
-        </div>
-      )
-    }
+    // Due-mode selector is rendered once in the main form (not per-field)
 
     if (field === 'dueOn') {
       const dateValue = typeof value === 'string' ? value : ''
@@ -2599,6 +2605,24 @@ export default function AsanaAction({
               }
               disabled={!effectiveCanEdit}
             />
+            {supportsDueMode && showDueModeSelector && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                  Due field
+                </p>
+                <NodeDropdownField
+                  options={[
+                    { label: 'Due on (date)', value: 'dueOn' },
+                    { label: 'Due at (datetime)', value: 'dueAt' }
+                  ]}
+                  value={dueMode}
+                  onChange={(val) =>
+                    handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
+                  }
+                  disabled={!effectiveCanEdit}
+                />
+              </div>
+            )}
           </div>
 
           <div className="space-y-3">
