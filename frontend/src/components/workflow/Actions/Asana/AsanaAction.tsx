@@ -2274,6 +2274,27 @@ export default function AsanaAction({
       )
     }
 
+    if (supportsDueMode && showDueModeSelector) {
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            Due field
+          </p>
+          <NodeDropdownField
+            options={[
+              { label: 'Due on (date)', value: 'dueOn' },
+              { label: 'Due at (datetime)', value: 'dueAt' }
+            ]}
+            value={dueMode}
+            onChange={(val) =>
+              handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
+            }
+            disabled={!effectiveCanEdit}
+          />
+        </div>
+      )
+    }
+
     if (field === 'dueOn') {
       const dateValue = typeof value === 'string' ? value : ''
       return (
