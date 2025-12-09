@@ -52,6 +52,7 @@ import {
   toTimeString,
   type CalendarMonth
 } from '@/components/ui/schedule/utils'
+import { errorMessage } from '@/lib/errorMessage'
 
 type AsanaConnectionScope = 'personal' | 'workspace'
 
@@ -1682,6 +1683,16 @@ export default function AsanaAction({
     visibility.userGid
   ])
 
+  const handlePlanUpgradeClick = useCallback(() => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
+      )
+    } catch (err) {
+      console.error(errorMessage(err))
+    }
+  }, [])
+
   useEffect(() => {
     setSectionOptions([])
     setSectionOptionsError(null)
@@ -2263,6 +2274,27 @@ export default function AsanaAction({
       )
     }
 
+    if (supportsDueMode && showDueModeSelector) {
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            Due field
+          </p>
+          <NodeDropdownField
+            options={[
+              { label: 'Due on (date)', value: 'dueOn' },
+              { label: 'Due at (datetime)', value: 'dueAt' }
+            ]}
+            value={dueMode}
+            onChange={(val) =>
+              handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
+            }
+            disabled={!effectiveCanEdit}
+          />
+        </div>
+      )
+    }
+
     if (field === 'dueOn') {
       const dateValue = typeof value === 'string' ? value : ''
       return (
@@ -2497,9 +2529,20 @@ export default function AsanaAction({
 
   if (isSoloPlan) {
     return (
-      <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-100">
-        Asana actions are available on the Workspace plan. Upgrade to connect
-        and run Asana nodes.
+      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+        <div className="flex items-start justify-between gap-2">
+          <span>
+            'Asana actions are available on workspace plans and above. Upgrade
+            in Settings → Plan to run this step.'
+          </span>
+          <button
+            type="button"
+            onClick={handlePlanUpgradeClick}
+            className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+          >
+            Upgrade
+          </button>
+        </div>
       </div>
     )
   }
@@ -2550,25 +2593,6 @@ export default function AsanaAction({
               disabled={!effectiveCanEdit}
             />
           </div>
-
-          {supportsDueMode && showDueModeSelector && (
-            <div className="space-y-1">
-              <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                Due field
-              </p>
-              <NodeDropdownField
-                options={[
-                  { label: 'Due on (date)', value: 'dueOn' },
-                  { label: 'Due at (datetime)', value: 'dueAt' }
-                ]}
-                value={dueMode}
-                onChange={(val) =>
-                  handleDueModeChange(val === 'dueAt' ? 'dueAt' : 'dueOn')
-                }
-                disabled={!effectiveCanEdit}
-              />
-            </div>
-          )}
 
           <div className="space-y-3">
             {visibleFields.required.length > 0 && (

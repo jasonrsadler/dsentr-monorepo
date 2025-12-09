@@ -158,21 +158,6 @@ function AsanaActionNodeContent({
               exit={{ opacity: 0, height: 0 }}
               className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
             >
-              {controller.planRestrictionMessage ? (
-                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
-                  <div className="flex items-start justify-between gap-2">
-                    <span>{controller.planRestrictionMessage}</span>
-                    <button
-                      type="button"
-                      onClick={controller.handlePlanUpgradeClick}
-                      className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
-                    >
-                      Upgrade
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
               <AsanaAction nodeId={id} canEdit={effectiveCanEdit} />
 
               <p className="text-xs text-zinc-500">Execution Options</p>
@@ -206,6 +191,35 @@ function AsanaActionNodeContent({
           )}
         </AnimatePresence>
       </div>
+      <AnimatePresence>
+        {controller.confirmingDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl"
+          >
+            <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl shadow-md w-56">
+              <p className="text-sm mb-3">Delete this node?</p>
+              <p className="text-sm mb-3">This action can not be undone</p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={controller.cancelDelete}
+                  className="px-2 py-1 text-xs rounded border"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={controller.confirmDelete}
+                  className="px-2 py-1 text-xs rounded bg-red-500 text-white hover:bg-red-600"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
