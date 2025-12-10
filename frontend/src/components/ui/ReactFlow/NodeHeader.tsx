@@ -17,7 +17,6 @@ interface NodeHeaderProps {
 }
 
 export default function NodeHeader({
-  nodeId,
   label,
   dirty,
   hasValidationErrors,

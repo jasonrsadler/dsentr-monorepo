@@ -258,6 +258,49 @@ export default function Dashboard() {
       new CustomEvent('open-plan-settings', { detail: { tab: 'plan' } })
     )
   }, [])
+  const handleSaveRef = useRef<() => Promise<boolean>>(async () => true)
+  const waitForSaveCompletion = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        if (!useWorkflowStore.getState().isSaving) {
+          resolve()
+          return
+        }
+        const unsubscribe = useWorkflowStore.subscribe((state) => {
+          if (!state.isSaving) {
+            unsubscribe()
+            resolve()
+          }
+        })
+      }),
+    []
+  )
+  const saveIfDirty = useCallback(async () => {
+    await waitForSaveCompletion()
+    const { isDirty } = useWorkflowStore.getState()
+    if (!isDirty) {
+      return true
+    }
+    const saved = await handleSaveRef.current()
+    if (!saved) {
+      return false
+    }
+    await waitForSaveCompletion()
+    return !useWorkflowStore.getState().isDirty
+  }, [waitForSaveCompletion])
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<{ resolve?: (ok: boolean) => void }>
+      const resolve = custom.detail?.resolve
+      if (!resolve) return
+      void saveIfDirty()
+        .then((ok) => resolve(ok))
+        .catch(() => resolve(false))
+    }
+    window.addEventListener('dsentr-request-workflow-save', handler as any)
+    return () =>
+      window.removeEventListener('dsentr-request-workflow-save', handler as any)
+  }, [saveIfDirty])
   // Global run status aggregator for toolbar (across all workflows)
   const [globalRunStatus, setGlobalRunStatus] = useState<
     'idle' | 'queued' | 'running'
@@ -584,47 +627,16 @@ export default function Dashboard() {
   )
 
   const selectWorkflow = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (id === currentWorkflowId) return
 
-      // If current workflow has unsaved changes, prompt before switching
-      if (useWorkflowStore.getState().isDirty) {
-        setPendingSwitchId(id)
-        setShowSwitchConfirm(true)
-        return
-      }
+      const saved = await saveIfDirty()
+      if (!saved) return
 
       doSelectWorkflow(id)
     },
-    [currentWorkflowId, doSelectWorkflow]
+    [currentWorkflowId, doSelectWorkflow, saveIfDirty]
   )
-
-  // Confirm-to-switch dialog state
-  const [showSwitchConfirm, setShowSwitchConfirm] = useState(false)
-  const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null)
-
-  // After save completes successfully (dirty=false and not saving), perform pending switch
-  useEffect(() => {
-    const isDirty = useWorkflowStore.getState().isDirty
-    if (
-      showSwitchConfirm &&
-      pendingSwitchId &&
-      !isWorkflowActionBusy &&
-      !workflowSaving &&
-      !isDirty
-    ) {
-      const target = pendingSwitchId
-      setShowSwitchConfirm(false)
-      setPendingSwitchId(null)
-      doSelectWorkflow(target)
-    }
-  }, [
-    showSwitchConfirm,
-    pendingSwitchId,
-    isWorkflowActionBusy,
-    workflowSaving,
-    doSelectWorkflow
-  ])
 
   // Warn on browser tab close/refresh when there are unsaved changes
   useEffect(() => {
@@ -661,6 +673,8 @@ export default function Dashboard() {
     // Guard against rapid double-clicks while a create is in-flight
     if (isWorkflowActionBusy || workflowSaving || !canEditCurrentWorkflow)
       return
+    const saved = await saveIfDirty()
+    if (!saved) return
     if (planTier === 'solo' && workflows.length >= 3) {
       setError(
         'You have reached the solo plan limit of 3 saved workflows. Upgrade in Settings → Plan to create additional workflows.'
@@ -713,7 +727,8 @@ export default function Dashboard() {
     canEditCurrentWorkflow,
     usageWorkspaceId,
     pushGraphToStore,
-    activeWorkspaceId
+    activeWorkspaceId,
+    saveIfDirty
   ])
 
   const stopPolling = useCallback(() => {
@@ -1026,10 +1041,8 @@ export default function Dashboard() {
 
   const handleRunWorkflow = useCallback(async () => {
     if (!currentWorkflow) return
-    if (useWorkflowStore.getState().isDirty) {
-      window.alert('Please save the workflow before running.')
-      return
-    }
+    const saved = await saveIfDirty()
+    if (!saved) return
     if (runAvailability?.disabled) {
       setError(runAvailability.reason || 'Workspace run quota reached.')
       return
@@ -1067,7 +1080,8 @@ export default function Dashboard() {
     refreshPlanUsage,
     runAvailability,
     markWorkspaceRunCap,
-    usageWorkspaceId
+    usageWorkspaceId,
+    saveIfDirty
   ])
 
   // Overlay: subscribe to SSE for active run to reduce client work
@@ -1242,18 +1256,21 @@ export default function Dashboard() {
     [currentWorkflowIdValue, normalizeWorkflowData, pushGraphToStore, setError]
   )
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    const workflowState = useWorkflowStore.getState()
+    if (!workflowState.isDirty) {
+      return true
+    }
     if (
       !currentWorkflow ||
       isWorkflowActionBusy ||
       workflowSaving ||
       !canEditCurrentWorkflow
     ) {
-      return
+      return false
     }
 
-    const { getGraph, setSaving, markClean } = useWorkflowStore.getState()
-    void markClean
+    const { getGraph, setSaving } = workflowState
 
     setSaving(true)
     setError(null)
@@ -1290,6 +1307,7 @@ export default function Dashboard() {
       const normalized = normalizeWorkflowData(updated.data ?? payloadGraph)
       // After a successful save, reflect the server graph and mark clean
       pushGraphToStore(normalized, false)
+      return true
     } catch (err) {
       console.error('Failed to save workflow', err)
       if ((err as any)?.code === 'conflict') {
@@ -1301,7 +1319,7 @@ export default function Dashboard() {
           setError(
             'Save was blocked because someone else saved a newer version. Reload the latest changes to continue.'
           )
-          return
+          return false
         }
       }
       if (
@@ -1317,6 +1335,7 @@ export default function Dashboard() {
         setError((err as any)?.message || 'Failed to save workflow.')
         window.alert('Failed to save workflow. Please try again.')
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -1330,6 +1349,8 @@ export default function Dashboard() {
     pushGraphToStore,
     setError
   ])
+
+  handleSaveRef.current = handleSave
 
   const handleLockWorkflow = useCallback(async () => {
     if (!currentWorkflow || lockBusy || !canLockWorkflow) return
@@ -2371,59 +2392,6 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-
-      {/* Unsaved changes confirm switch dialog */}
-      {showSwitchConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => {
-              setShowSwitchConfirm(false)
-              setPendingSwitchId(null)
-            }}
-          />
-          <div className="relative bg-white dark:bg-zinc-900 rounded-xl shadow-xl w-[420px] p-4 border border-zinc-200 dark:border-zinc-700">
-            <h3 className="font-semibold mb-2">Unsaved changes</h3>
-            <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-4">
-              Save your current workflow before switching?
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setShowSwitchConfirm(false)
-                  setPendingSwitchId(null)
-                }}
-                className="px-3 py-1 text-sm rounded border"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (!pendingSwitchId) return
-                  // Trigger save; the useEffect will perform the switch after save succeeds
-                  handleSave()
-                }}
-                className="px-3 py-1 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                disabled={workflowSaving || isWorkflowActionBusy}
-              >
-                {workflowSaving ? 'Saving…' : 'Save and Switch'}
-              </button>
-              <button
-                onClick={() => {
-                  if (!pendingSwitchId) return
-                  const target = pendingSwitchId
-                  setShowSwitchConfirm(false)
-                  setPendingSwitchId(null)
-                  doSelectWorkflow(target)
-                }}
-                className="px-3 py-1 text-sm rounded bg-red-600 text-white hover:bg-red-700"
-              >
-                Discard and Switch
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Settings modal moved to DashboardLayout */}
 

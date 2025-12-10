@@ -696,7 +696,6 @@ export default function AsanaAction({
     useState<AsanaTask | null>(null)
 
   const [additionalFieldErrors, setAdditionalFieldErrors] = useState(false)
-  const [tasksFull, setTasksFull] = useState<AsanaTask[]>([])
   const [taskDetailsMap, setTaskDetailsMap] = useState<Map<string, AsanaTask>>(
     new Map()
   )
@@ -1060,7 +1059,7 @@ export default function AsanaAction({
     }
 
     applyAsanaPatch(patch)
-  }, [selectedTaskDetails])
+  }, [selectedTaskDetails, applyAsanaPatch])
 
   useEffect(() => {
     setDueAtMonth(getInitialMonth(dueAtParts.date))
@@ -1628,9 +1627,14 @@ export default function AsanaAction({
           }
         } else {
           // Fallback: just use the name from taskOptions
-          const found = taskOptions.find((o) => o.value === taskGid)
+          const found = taskOptions.find(
+            (o) => typeof o === 'object' && o.value === taskGid
+          )
           if (found) {
-            next.name = typeof found.label === 'string' ? found.label : ''
+            next.name =
+              typeof found === 'object' && typeof found.label === 'string'
+                ? found.label
+                : ''
           }
           next.additionalFields = []
         }
@@ -1652,7 +1656,8 @@ export default function AsanaAction({
       !taskOptionsLoading // Don't run while loading
     ) {
       // Make sure the first task is actually in our details map
-      const firstTaskGid = taskOptions[0].value
+      const firstTaskGid =
+        typeof taskOptions[0] === 'object' ? taskOptions[0].value : ''
       if (taskDetailsMap.has(firstTaskGid)) {
         handleTaskSelect(firstTaskGid)
       }
@@ -1677,7 +1682,7 @@ export default function AsanaAction({
     ) {
       // Check if the current taskGid exists in the loaded tasks
       const taskExists = taskOptions.some(
-        (opt) => opt.value === asanaParams.taskGid
+        (opt) => typeof opt === 'object' && opt.value === asanaParams.taskGid
       )
 
       if (!taskExists) {
@@ -1790,7 +1795,12 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [asanaConnectionOptions, shouldFetchWorkspaces]) // Remove asanaParams.workspaceGid and workspaceOptions from deps
+  }, [
+    asanaConnectionOptions,
+    shouldFetchWorkspaces,
+    asanaParams.workspaceGid,
+    workspaceOptions.length
+  ]) // Remove asanaParams.workspaceGid and workspaceOptions from deps
 
   useEffect(() => {
     setProjectOptions([])
@@ -1845,7 +1855,9 @@ export default function AsanaAction({
     asanaConnectionOptions,
     debouncedWorkspaceGid,
     isSoloPlan,
-    visibility.projectGid
+    visibility.projectGid,
+    asanaParams.projectGid,
+    projectOptions.length
     // Remove asanaParams.projectGid and projectOptions from deps
   ])
 
@@ -2135,9 +2147,12 @@ export default function AsanaAction({
     }
   }, [
     asanaConnectionOptions,
+    asanaParams.taskGid,
     debouncedWorkspaceGid,
     debouncedProjectGid,
     isSoloPlan,
+    taskDetailsMap.size,
+    taskOptions.length,
     visibility.parentTaskGid,
     visibility.storyGid,
     visibility.taskGid
@@ -2149,13 +2164,13 @@ export default function AsanaAction({
 
     console.log('[singleFetch] fetching', asanaParams.taskGid)
 
-    fetchAsanaTaskDetails(asanaParams.taskGid, asanaConnectionOptions)
+    fetchAsanaTaskDetails(asanaParams.taskGid, asanaConnectionOptions ?? {})
       .then((task) => {
         console.log('[singleFetch] got', task)
         setSelectedTaskDetails(task)
       })
       .catch((err) => console.log('[singleFetch] error', err))
-  }, [asanaParams.taskGid])
+  }, [asanaConnectionOptions, asanaParams.taskGid])
 
   useEffect(() => {
     if (!selectedTaskDetails) return
@@ -2182,7 +2197,7 @@ export default function AsanaAction({
 
     console.log('[prefill] applying', next)
     applyAsanaPatch(next)
-  }, [selectedTaskDetails])
+  }, [applyAsanaPatch, selectedTaskDetails])
 
   useEffect(() => {
     setCommentOptions([])

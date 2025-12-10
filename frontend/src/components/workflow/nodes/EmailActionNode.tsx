@@ -72,8 +72,7 @@ interface EmailActionNodeContentProps {
 function EmailActionNodeContent({
   id,
   baseProps,
-  providerName,
-  ServiceComponent
+  providerName
 }: EmailActionNodeContentProps) {
   const {
     selected,

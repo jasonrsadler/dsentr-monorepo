@@ -18,12 +18,14 @@ The workflow designer combines a canvas, toolbar, and run console so you can bui
 ## Saving and Version Safety
 
 - Saving writes the sanitized node and edge graph back to the API, normalizes the server response, and clears the dirty flag. Validation violations (such as using a premium feature on a Solo plan) display inline errors and keep unsaved changes on the canvas for correction.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L820-L920】
-- Switching workflows with unsaved changes triggers a confirmation dialog; DSentr delays the switch until the current graph is clean to prevent accidental loss.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L336-L388】
+- Switching workflows now auto-save any unsaved changes before loading the next workflow so navigation never discards pending edits.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L600-L680】
+- Starting OAuth connections from Settings → Integrations triggers an auto-save of dirty workflows before redirecting to the provider so configuration changes are preserved.【F:src/components/settings/tabs/IntegrationsTab.tsx†L250-L360】【F:src/layouts/DashboardLayouts/Dashboard.tsx†L240-L340】
 - Closing the browser tab while unsaved changes exist prompts a standard “are you sure” dialog, reducing the risk of losing edits.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L388-L420】
 
 ## Running Workflows
 
 - Start runs from the toolbar. The run overlay displays live node-by-node execution status, failed steps, and success indicators, updating via server-sent events and falling back to polling if needed.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L520-L744】【F:src/layouts/DashboardLayouts/Dashboard.tsx†L744-L844】
+- Starting a run automatically saves any pending workflow edits before queueing execution so the latest configuration is always used.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L1000-L1080】
 - A global runs stream feeds the toolbar status pill so you can see when any workflow is queued or running across the workspace.【F:src/layouts/DashboardLayouts/Dashboard.tsx†L744-L820】
 - Cancelling or retrying runs is managed from the Settings → Engine tab; the overlay focuses on visibility while heavy operations live in the administration surface.【F:src/components/settings/tabs/EngineTab.tsx†L106-L188】
 

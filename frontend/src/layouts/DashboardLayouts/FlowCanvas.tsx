@@ -1289,6 +1289,7 @@ export default function FlowCanvas({
           nodesConnectable={canEdit}
           className="flex-1"
           onSelectionChange={handleSelectionChange}
+          minZoom={0.1}
         >
           <Background gap={16} size={1} />
           <div className={isDark ? 'text-white' : 'text-black'}>

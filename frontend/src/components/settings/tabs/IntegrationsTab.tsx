@@ -23,6 +23,7 @@ import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog'
 import GoogleIcon from '@/assets/svg-components/third-party/GoogleIcon'
 import MicrosoftIcon from '@/assets/svg-components/third-party/MicrosoftIcon'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
 export type IntegrationNotice =
   | { kind: 'connected'; provider?: OAuthProvider }
@@ -110,6 +111,8 @@ export default function IntegrationsTab({
   const [connections, setConnections] =
     useState<GroupedConnectionsSnapshot | null>(null)
   const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
+  const [connectingProvider, setConnectingProvider] =
+    useState<OAuthProvider | null>(null)
   const [promoteDialogProvider, setPromoteDialogProvider] =
     useState<OAuthProvider | null>(null)
   const [promoteBusyProvider, setPromoteBusyProvider] =
@@ -138,6 +141,7 @@ export default function IntegrationsTab({
       currentWorkspace?.workspace.plan ?? userPlan ?? undefined
     )
   }, [currentWorkspace?.workspace.plan, userPlan])
+  const workflowIsDirty = useWorkflowStore((state) => state.isDirty)
   const isSoloPlan = planTier === 'solo'
   const isViewer = workspaceRole === 'viewer'
   const canPromote = workspaceRole === 'owner' || workspaceRole === 'admin'
@@ -253,16 +257,62 @@ export default function IntegrationsTab({
       : `${providerName} failed to connect.`
   }, [notice])
 
-  const handleConnect = (provider: OAuthProvider) => {
-    if (isSoloPlan || isViewer) {
-      return
-    }
-    const url = new URL(`${API_BASE_URL}/api/oauth/${provider}/start`)
-    if (workspaceId) {
-      url.searchParams.set('workspace', workspaceId)
-    }
-    window.location.href = url.toString()
-  }
+  const requestWorkflowSave = useCallback(async () => {
+    if (!workflowIsDirty) return true
+    if (typeof window === 'undefined') return true
+    return await new Promise<boolean>((resolve) => {
+      let settled = false
+      const finish = (ok: boolean) => {
+        if (settled) return
+        settled = true
+        resolve(ok)
+      }
+      try {
+        window.dispatchEvent(
+          new CustomEvent('dsentr-request-workflow-save', {
+            detail: { resolve: finish, reason: 'oauth-connect' }
+          })
+        )
+      } catch {
+        finish(false)
+        return
+      }
+      setTimeout(() => finish(false), 8000)
+    })
+  }, [workflowIsDirty])
+
+  const handleConnect = useCallback(
+    async (provider: OAuthProvider) => {
+      if (isSoloPlan || isViewer || connectingProvider) {
+        return
+      }
+      setConnectingProvider(provider)
+      try {
+        const saved = await requestWorkflowSave()
+        if (!saved) {
+          setError(
+            'Failed to save your workflow before connecting. Please save and try again.'
+          )
+          return
+        }
+        const url = new URL(`${API_BASE_URL}/api/oauth/${provider}/start`)
+        if (workspaceId) {
+          url.searchParams.set('workspace', workspaceId)
+        }
+        window.location.href = url.toString()
+      } finally {
+        setConnectingProvider(null)
+      }
+    },
+    [
+      isSoloPlan,
+      isViewer,
+      connectingProvider,
+      requestWorkflowSave,
+      workspaceId,
+      setError
+    ]
+  )
 
   const toggleProvider = useCallback((providerKey: OAuthProvider) => {
     setExpandedProviders((prev) => ({
@@ -666,10 +716,16 @@ export default function IntegrationsTab({
                         <button
                           aria-label={`Connect ${provider.name}`}
                           onClick={() => handleConnect(provider.key)}
-                          disabled={isSoloPlan || isViewer}
+                          disabled={
+                            isSoloPlan ||
+                            isViewer ||
+                            connectingProvider === provider.key
+                          }
                           className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          Connect
+                          {connectingProvider === provider.key
+                            ? 'Saving...'
+                            : 'Connect'}
                         </button>
                       )}
                     </div>

@@ -19,6 +19,7 @@
 - WebhooksTab: Added positive confirmation states for the Signing Key "Copy" button ("Copied!") and HMAC settings "Save" button ("Saving…" → "Saved!") to clearly indicate the action was applied.
 - WebhooksTab: Restored copy-to-clipboard controls for the HMAC language examples and added a signing key rotation button that surfaces success state, refreshes the derived webhook URL, and warns that both credentials change together.
 - IntegrationsTab: Removed redundant client-side filtering of workspace OAuth connections by `workspaceId`. Backend now enforces workspace scoping for the connections listing endpoint, so the UI consumes the `workspace` array as returned.
+- Integrations connect buttons now request a workflow auto-save before redirecting to provider OAuth pages so unsaved canvas edits aren't lost during auth flows.
 - Node inline secret creation fields now disable browser/password-manager autofill (autocomplete off/new-password + lp/1p ignore) so quick-create flows don't get prefilled with unrelated credentials.
 - Delay and Formatter logic nodes now use inline component delete confirmations instead of `window.confirm`, matching other workflow node modals on the canvas.
 - Settings > Integrations: converted provider cards to collapsible accordion items (default collapsed) so the collapsed view only shows the provider name/icon space while keeping expanded content identical for future provider additions.
