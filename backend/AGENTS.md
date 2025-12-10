@@ -56,3 +56,4 @@ itly coordinated.
 - CORS now accepts a dedicated `ADMIN_ORIGIN` so the admin frontend can be hosted separately from the user app.
 - Added Delay workflow node execution support with resumable run scheduling (`resume_at`) so waits persist and resume reliably.
 - Added Formatter workflow node execution with typed operations (strings, numbers, JSON, dates, booleans), path-aware JSON access, and snapshot-friendly outputs so logic nodes can reshape data safely between steps.
+- Added a Slack channel listing endpoint that validates personal or workspace OAuth tokens, enforces workspace plan/membership rules, and paginates Slack API responses so channel dropdowns stay in sync with connected accounts.

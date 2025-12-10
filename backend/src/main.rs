@@ -70,6 +70,7 @@ use routes::{
         secrets::{delete_secret, list_secrets, upsert_secret},
         user_settings::{get_user_settings, update_user_settings},
     },
+    slack::list_channels as list_slack_channels,
     workflows::{
         cancel_all_runs_for_workflow, cancel_workflow_run, create_workflow, delete_workflow,
         download_run_json, get_egress_allowlist, get_webhook_config, get_webhook_url, get_workflow,
@@ -640,6 +641,11 @@ async fn main() -> Result<()> {
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());
 
+    let slack_routes = Router::new()
+        .route("/channels", get(list_slack_channels))
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
+
     let asana_routes = Router::new()
         .route("/workspaces", get(list_asana_workspaces))
         .route(
@@ -744,6 +750,7 @@ async fn main() -> Result<()> {
         .nest("/api/oauth", oauth_routes)
         .nest("/api/google", google_routes)
         .nest("/api/microsoft", microsoft_routes)
+        .nest("/api/slack", slack_routes)
         .nest("/api/asana", asana_routes)
         .nest("/api/options", options_routes)
         .nest("/api/admin", admin_routes)

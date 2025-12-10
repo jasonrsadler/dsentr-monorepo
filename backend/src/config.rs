@@ -91,7 +91,7 @@ impl Config {
         // process-level `DOTENV_DISABLE` is set by other tooling (e.g., frontend).
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let env_path = std::path::Path::new(manifest_dir).join(".env");
-        if env_path.exists() {
+        if env_path.exists() && !dotenv_disabled_backend {
             match dotenvy::from_path(&env_path) {
                 Ok(_) => {
                     eprintln!("Loaded backend .env from {}", env_path.display());
@@ -319,8 +319,10 @@ mod tests {
             .map(|&key| (key, env::var(key).ok()))
             .collect();
         let dotenv_disable_snapshot = env::var("DOTENV_DISABLE").ok();
+        let dotenv_disable_backend_snapshot = env::var("DOTENV_DISABLE_BACKEND").ok();
 
         env::set_var("DOTENV_DISABLE", "1");
+        env::set_var("DOTENV_DISABLE_BACKEND", "1");
         for key in REQUIRED_VARS.iter() {
             env::remove_var(key);
         }
@@ -347,6 +349,10 @@ mod tests {
         match dotenv_disable_snapshot {
             Some(value) => env::set_var("DOTENV_DISABLE", value),
             None => env::remove_var("DOTENV_DISABLE"),
+        }
+        match dotenv_disable_backend_snapshot {
+            Some(value) => env::set_var("DOTENV_DISABLE_BACKEND", value),
+            None => env::remove_var("DOTENV_DISABLE_BACKEND"),
         }
 
         drop(guard);

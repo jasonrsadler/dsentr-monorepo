@@ -266,3 +266,4 @@ OAuth connections grouping (Google Sheets, Microsoft Teams):
 - Added a Delay (Wait) logic node with palette entry, validation, and config UI so workflows can pause before continuing to downstream steps.
 - Delay node config now offers a mode dropdown (duration vs. datetime) with date/hour/minute/second pickers that emit UTC ISO strings and validate the chosen mode.
 - Added a Formatter (Transform) logic node with grouped operation selection, validation, and palette/flyout integration so users can reshape or convert data between workflow steps without custom code.
+- Slack action now hides the manual channel input when an OAuth connection is selected, fetching channels for that connection via a dropdown populated from the backend list endpoint so users pick from accessible channels.

@@ -14,6 +14,7 @@ import {
   type GroupedConnectionsSnapshot,
   type OAuthProvider
 } from '@/lib/oauthApi'
+import { fetchSlackChannels, type SlackChannel } from '@/lib/slackApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { useActionParams } from '@/stores/workflowSelectors'
 import { useWorkflowStore } from '@/stores/workflowStore'
@@ -287,6 +288,9 @@ export default function SlackAction({
     activeConnection,
     usingConnection
   } = validation
+  const activeConnectionId = activeConnection?.connectionId?.trim() ?? ''
+  const activeConnectionScope: ConnectionScope =
+    activeConnection?.connectionScope === 'workspace' ? 'workspace' : 'personal'
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
@@ -296,6 +300,12 @@ export default function SlackAction({
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [connectionsError, setConnectionsError] = useState<string | null>(null)
   const refreshRequestIdRef = useRef(0)
+  const [channelOptions, setChannelOptions] = useState<
+    NodeDropdownOptionGroup[]
+  >([])
+  const [channelsLoading, setChannelsLoading] = useState(false)
+  const [channelsError, setChannelsError] = useState<string | null>(null)
+  const channelRequestIdRef = useRef(0)
 
   const pickProviderConnections = useCallback(
     (
@@ -515,6 +525,63 @@ export default function SlackAction({
     return personalAvailable || workspaceAvailable
   }, [connectionState])
 
+  const buildChannelOptions = useCallback(
+    (channels: SlackChannel[]): NodeDropdownOptionGroup[] => {
+      if (!channels.length) return []
+
+      const makeLabel = (channel: SlackChannel) => {
+        const base = channel.name.startsWith('#')
+          ? channel.name
+          : `#${channel.name}`
+        return channel.isPrivate ? `${base} (private)` : base
+      }
+
+      const publicChannels = channels.filter(
+        (channel) => channel.isPrivate !== true
+      )
+      const privateChannels = channels.filter(
+        (channel) => channel.isPrivate === true
+      )
+
+      const groups: NodeDropdownOptionGroup[] = []
+
+      if (publicChannels.length > 0) {
+        groups.push({
+          label: 'Public channels',
+          options: publicChannels.map((channel) => ({
+            label: makeLabel(channel),
+            value: channel.id
+          }))
+        })
+      }
+
+      if (privateChannels.length > 0) {
+        groups.push({
+          label: 'Private channels',
+          options: privateChannels.map((channel) => ({
+            label: makeLabel(channel),
+            value: channel.id
+          }))
+        })
+      }
+
+      if (groups.length === 0) {
+        return [
+          {
+            label: 'Channels',
+            options: channels.map((channel) => ({
+              label: makeLabel(channel),
+              value: channel.id
+            }))
+          }
+        ]
+      }
+
+      return groups
+    },
+    []
+  )
+
   const selectedConnectionValue = useMemo(() => {
     if (!usingConnection || !activeConnection) return 'manual'
     const id = activeConnection.connectionId?.trim()
@@ -609,17 +676,112 @@ export default function SlackAction({
     [applySlackPatch]
   )
 
+  const refreshChannels = useCallback(async () => {
+    if (!usingConnection || !activeConnectionId) {
+      return
+    }
+
+    const requestId = channelRequestIdRef.current + 1
+    channelRequestIdRef.current = requestId
+    setChannelsLoading(true)
+    setChannelsError(null)
+
+    const isStale = () =>
+      !mountedRef.current || channelRequestIdRef.current !== requestId
+
+    try {
+      const channels = await fetchSlackChannels({
+        scope: activeConnectionScope,
+        connectionId: activeConnectionId
+      })
+      if (isStale()) {
+        return
+      }
+      setChannelOptions(buildChannelOptions(channels))
+
+      if (
+        slackParams.channel &&
+        !channels.some((channel) => channel.id === slackParams.channel)
+      ) {
+        applySlackPatch({ channel: '' })
+      }
+    } catch (error) {
+      if (isStale()) {
+        return
+      }
+      setChannelOptions([])
+      setChannelsError(
+        error instanceof Error
+          ? error.message
+          : "We couldn't load Slack channels. Try again."
+      )
+    } finally {
+      if (!isStale()) {
+        setChannelsLoading(false)
+      }
+    }
+  }, [
+    activeConnectionId,
+    activeConnectionScope,
+    applySlackPatch,
+    buildChannelOptions,
+    slackParams.channel,
+    usingConnection
+  ])
+
+  useEffect(() => {
+    if (!usingConnection || !activeConnectionId) {
+      setChannelOptions([])
+      setChannelsError(null)
+      setChannelsLoading(false)
+      return
+    }
+
+    refreshChannels()
+  }, [activeConnectionId, refreshChannels, usingConnection])
+
   const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="flex flex-col gap-2">
-      <NodeInputField
-        placeholder="Channel (e.g. #general)"
-        value={slackParams.channel || ''}
-        onChange={handleChannelChange}
-      />
-      {validationErrors.channel && (
-        <p className={errorClass}>{validationErrors.channel}</p>
+      {usingConnection ? (
+        <>
+          <NodeDropdownField
+            options={channelOptions}
+            value={slackParams.channel || ''}
+            onChange={handleChannelChange}
+            placeholder="Select Slack channel"
+            loading={channelsLoading}
+            disabled={!activeConnectionId}
+            emptyMessage="No Slack channels available"
+          />
+          {validationErrors.channel && (
+            <p className={errorClass}>{validationErrors.channel}</p>
+          )}
+          {channelsError && (
+            <div className="flex items-center justify-between gap-2 text-xs text-red-500">
+              <span className="flex-1">{channelsError}</span>
+              <button
+                type="button"
+                className="whitespace-nowrap text-blue-600 hover:underline"
+                onClick={refreshChannels}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <NodeInputField
+            placeholder="Channel (e.g. #general)"
+            value={slackParams.channel || ''}
+            onChange={handleChannelChange}
+          />
+          {validationErrors.channel && (
+            <p className={errorClass}>{validationErrors.channel}</p>
+          )}
+        </>
       )}
 
       <NodeDropdownField

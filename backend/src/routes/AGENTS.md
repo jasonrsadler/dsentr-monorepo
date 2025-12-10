@@ -79,3 +79,4 @@
 - Added Asana metadata routes (workspaces, projects, tags, teams, users, sections) behind authenticated OAuth so the frontend can populate dropdowns without exposing tokens.
 - Added Asana OAuth route support (start + callback + provider parsing) so the new Asana integration can authenticate alongside Google, Microsoft, and Slack.
 - Added Asana task and comment metadata endpoints (workspace-plan only) to back new dropdowns while keeping Solo users blocked server-side.
+- Added a Slack channels route that pulls channel lists via personal or workspace OAuth tokens, applies plan/membership checks, and paginates Slack API responses for the Slack action dropdown.
