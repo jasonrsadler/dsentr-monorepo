@@ -1,16 +1,14 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 
-import RunCustomCodeAction from '../Actions/RunCustomCodeAction'
 import NodeHeader from '../../ui/ReactFlow/NodeHeader'
-import NodeInputField from '../../ui/InputFields/NodeInputField'
-import NodeCheckBoxField from '../../ui/InputFields/NodeCheckboxField'
 import BaseActionNode, {
   type BaseActionNodeChildrenProps
 } from './BaseActionNode'
 import useActionNodeController, {
   type ActionNodeData
 } from './useActionNodeController'
+import ActionNodeSummary from './ActionNodeSummary'
 import type { RunAvailability } from '@/types/runAvailability'
 
 interface RunCustomCodeActionNodeProps {
@@ -95,9 +93,8 @@ function RunCustomCodeActionNodeContent({
     <motion.div
       className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       style={{
-        width: controller.expanded ? 'auto' : 256,
-        minWidth: controller.expanded ? 256 : undefined,
-        maxWidth: controller.expanded ? 400 : undefined
+        width: 256,
+        minWidth: 256
       }}
     >
       <Handle
@@ -126,7 +123,8 @@ function RunCustomCodeActionNodeContent({
           label={controller.label}
           dirty={controller.dirty}
           hasValidationErrors={controller.combinedHasValidationErrors}
-          expanded={controller.expanded}
+          expanded={false}
+          showExpandToggle={false}
           onLabelChange={controller.handleLabelChange}
           onExpanded={controller.handleToggleExpanded}
           onConfirmingDelete={controller.requestDelete}
@@ -135,52 +133,7 @@ function RunCustomCodeActionNodeContent({
           <p className="mt-2 text-xs text-red-500">{controller.labelError}</p>
         )}
 
-        <AnimatePresence>
-          {controller.expanded && (
-            <motion.div
-              key="expanded-content"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
-            >
-              <RunCustomCodeAction
-                nodeId={id}
-                canEdit={controller.effectiveCanEdit}
-              />
-
-              <p className="text-xs text-zinc-500">Execution Options</p>
-              <div className="flex gap-2 items-center">
-                <NodeInputField
-                  type="number"
-                  value={String(controller.timeout)}
-                  onChange={(value) => {
-                    controller.handleTimeoutChange(Number(value))
-                  }}
-                  className="w-20 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
-                />
-                <span className="text-xs">ms timeout</span>
-                <NodeInputField
-                  type="number"
-                  value={String(controller.retries)}
-                  onChange={(value) => {
-                    controller.handleRetriesChange(Number(value))
-                  }}
-                  className="w-12 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
-                />
-                <span className="text-xs">retries</span>
-                <NodeCheckBoxField
-                  checked={controller.stopOnError}
-                  onChange={(value) => {
-                    controller.handleStopOnErrorChange(value)
-                  }}
-                >
-                  Stop on error
-                </NodeCheckBoxField>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <ActionNodeSummary hint="Open the custom code flyout to edit inputs, outputs, and script content." />
       </div>
 
       <AnimatePresence>

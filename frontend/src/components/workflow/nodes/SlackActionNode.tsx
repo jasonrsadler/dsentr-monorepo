@@ -1,10 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 
-import SlackAction from '../Actions/Messaging/Services/SlackAction'
 import NodeHeader from '../../ui/ReactFlow/NodeHeader'
-import NodeInputField from '../../ui/InputFields/NodeInputField'
-import NodeCheckBoxField from '../../ui/InputFields/NodeCheckboxField'
 import BaseActionNode, {
   type BaseActionNodeChildrenProps
 } from './BaseActionNode'
@@ -12,6 +9,7 @@ import useActionNodeController, {
   type ActionNodeData
 } from './useActionNodeController'
 import useMessagingActionRestriction from './useMessagingActionRestriction'
+import ActionNodeSummary from './ActionNodeSummary'
 import type { RunAvailability } from '@/types/runAvailability'
 
 interface SlackActionNodeProps {
@@ -98,7 +96,7 @@ function SlackActionNodeContent({
     remove
   })
 
-  const { planRestrictionMessage: messagingRestrictionMessage, isRestricted } =
+  const { planRestrictionMessage: messagingRestrictionMessage } =
     useMessagingActionRestriction({
       provider: 'slack',
       isSoloPlan: controller.isSoloPlan,
@@ -120,9 +118,8 @@ function SlackActionNodeContent({
     <motion.div
       className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       style={{
-        width: controller.expanded ? 'auto' : 256,
-        minWidth: controller.expanded ? 256 : undefined,
-        maxWidth: controller.expanded ? 400 : undefined
+        width: 256,
+        minWidth: 256
       }}
     >
       <Handle
@@ -151,7 +148,8 @@ function SlackActionNodeContent({
           label={controller.label}
           dirty={controller.dirty}
           hasValidationErrors={controller.combinedHasValidationErrors}
-          expanded={controller.expanded}
+          expanded={false}
+          showExpandToggle={false}
           onLabelChange={controller.handleLabelChange}
           onExpanded={controller.handleToggleExpanded}
           onConfirmingDelete={controller.requestDelete}
@@ -159,69 +157,11 @@ function SlackActionNodeContent({
         {controller.labelError && (
           <p className="mt-2 text-xs text-red-500">{controller.labelError}</p>
         )}
-
-        <AnimatePresence>
-          {controller.expanded && (
-            <motion.div
-              key="expanded-content"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
-            >
-              {planRestrictionMessage ? (
-                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
-                  <div className="flex items-start justify-between gap-2">
-                    <span>{planRestrictionMessage}</span>
-                    <button
-                      type="button"
-                      onClick={controller.handlePlanUpgradeClick}
-                      className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
-                    >
-                      Upgrade
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              <SlackAction
-                nodeId={id}
-                canEdit={effectiveCanEdit}
-                isRestricted={isRestricted}
-              />
-
-              <p className="text-xs text-zinc-500">Execution Options</p>
-              <div className="flex gap-2 items-center">
-                <NodeInputField
-                  type="number"
-                  value={String(controller.timeout)}
-                  onChange={(value) => {
-                    controller.handleTimeoutChange(Number(value))
-                  }}
-                  className="w-20 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
-                />
-                <span className="text-xs">ms timeout</span>
-                <NodeInputField
-                  type="number"
-                  value={String(controller.retries)}
-                  onChange={(value) => {
-                    controller.handleRetriesChange(Number(value))
-                  }}
-                  className="w-12 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
-                />
-                <span className="text-xs">retries</span>
-                <NodeCheckBoxField
-                  checked={controller.stopOnError}
-                  onChange={(value) => {
-                    controller.handleStopOnErrorChange(value)
-                  }}
-                >
-                  Stop on error
-                </NodeCheckBoxField>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <ActionNodeSummary
+          planRestrictionMessage={planRestrictionMessage}
+          onPlanUpgrade={controller.handlePlanUpgradeClick}
+          hint="Open the Slack flyout to choose a channel and message details."
+        />
       </div>
 
       <AnimatePresence>

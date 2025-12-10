@@ -31,6 +31,8 @@ seCallback`, `useMemo`) to prevent infinite renders.
 - Leaving a workspace is initiated from the Members settings tab. The "Leave workspace" button must be disabled for owners, call the `leaveWorkspace` API when allowed, refresh cached memberships, and send users back to their Solo workspace (or next available one) when the server responds with `403`.
 
 ## Change Reasons
+- Workflow flyout width increased (about 2x) so node configuration has more breathing room when editing.
+- Workflow canvas nodes now keep configuration in the flyout only; canvas cards are minimal, open the flyout on selection, and defer API-heavy option loads until the flyout is visible (e.g., Asana dropdowns) to avoid thundering herd calls on load.
 - Refreshed public navigation styling and added a Dashboard shortcut for authenticated users before logout.
 - Added a public Pricing page covering Solo and Workspace plans (pricing grid, callout, FAQ) and routed it via /pricing in the marketing layout.
 - Added a static sitemap at `public/sitemap.xml` that lists all public/non-auth pages plus the documentation site to improve search engine indexing coverage.

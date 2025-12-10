@@ -103,6 +103,7 @@ import GoogleChatAction from '@/components/workflow/Actions/Messaging/Services/G
 import SheetsAction from '@/components/workflow/Actions/Google/SheetsAction'
 import HttpRequestAction from '@/components/workflow/Actions/HttpRequestAction'
 import RunCustomCodeAction from '@/components/workflow/Actions/RunCustomCodeAction'
+import AsanaAction from '@/components/workflow/Actions/Asana/AsanaAction'
 import useActionNodeController, {
   type ActionNodeData
 } from '@/components/workflow/nodes/useActionNodeController'
@@ -498,7 +499,7 @@ function normalizeDropType(rawType: string): DropDescriptor {
       nodeType: 'trigger',
       labelBase: 'Trigger',
       idPrefix: 'trigger',
-      expanded: true,
+      expanded: false,
       data: {} as ActionNodeData
     }
   }
@@ -508,7 +509,7 @@ function normalizeDropType(rawType: string): DropDescriptor {
       nodeType: 'condition',
       labelBase: 'Condition',
       idPrefix: 'condition',
-      expanded: true,
+      expanded: false,
       data: {} as ActionNodeData
     }
   }
@@ -1120,22 +1121,6 @@ export default function FlowCanvas({
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
-  const handleSelectionChange = useCallback(
-    ({
-      nodes: selectedNodes
-    }: OnSelectionChangeParams<WorkflowNode, WorkflowEdge>) => {
-      const lastSelected =
-        selectedNodes && selectedNodes.length > 0
-          ? selectedNodes[selectedNodes.length - 1]
-          : null
-      const nextId = lastSelected?.id ?? null
-      syncSelectionToStore(nextId)
-      // Do NOT open the flyout on selection; only the arrow button should open it.
-      // Edge selection is intentionally left to React Flow so custom edge menus work.
-    },
-    [syncSelectionToStore]
-  )
-
   const handleFlyoutOpen = useCallback(
     (nodeId: string | null) => {
       if (!nodeId) {
@@ -1148,6 +1133,21 @@ export default function FlowCanvas({
       setFlyoutNodeId((prev) => (prev === nodeId ? prev : nodeId))
     },
     [syncSelectionToStore]
+  )
+
+  const handleSelectionChange = useCallback(
+    ({
+      nodes: selectedNodes
+    }: OnSelectionChangeParams<WorkflowNode, WorkflowEdge>) => {
+      const lastSelected =
+        selectedNodes && selectedNodes.length > 0
+          ? selectedNodes[selectedNodes.length - 1]
+          : null
+      const nextId = lastSelected?.id ?? null
+      handleFlyoutOpen(nextId)
+      // Edge selection is intentionally left to React Flow so custom edge menus work.
+    },
+    [handleFlyoutOpen]
   )
 
   const noopFlyout = useCallback(() => undefined, [])
@@ -1187,7 +1187,8 @@ export default function FlowCanvas({
       'actionGoogleChat',
       'actionSheets',
       'actionHttp',
-      'actionCode'
+      'actionCode',
+      'actionAsana'
     ])
     if (known.has(t)) {
       return t as ActionDropSubtype
@@ -1303,7 +1304,7 @@ export default function FlowCanvas({
 
         {flyoutNode ? (
           <WorkflowFlyoutProvider value={flyoutPreviewContextValue}>
-            <aside className="flex w-full md:w-[360px] xl:w-[420px] shrink-0 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur flex-col">
+            <aside className="flex w-full md:w-[720px] xl:w-[840px] shrink-0 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur flex-col">
               <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between gap-2">
                 <div>
                   <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -1561,6 +1562,10 @@ function FlyoutActionFields({
             nodeId={nodeId}
             canEdit={controller.effectiveCanEdit}
           />
+        )
+      case 'actionAsana':
+        return controller.planRestrictionMessage ? null : (
+          <AsanaAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
         )
       case 'actionCode':
         return (

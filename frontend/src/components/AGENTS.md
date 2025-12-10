@@ -1,6 +1,7 @@
 # Components Agent Notes
 
 ## Change Reasons
+- Workflow canvas nodes now render minimal on-canvas shells, auto-open the flyout on selection, and defer configuration (and any API-backed dropdowns like Asana's) to the flyout only to avoid heavy loads during workflow hydration.
 - Added a Pricing link to the marketing navigation (desktop and mobile), refreshed the public nav styling, and added a signed-in Dashboard shortcut ahead of logout.
 - HTTP Request node: surface a warning when the URL targets `VITE_API_BASE_URL` so users avoid self-calling workflows that can loop indefinitely and rack up overage charges.
 - Google Sheets action: guard against automatically falling back to the personal credential after a shared workspace connection is removed by tracking when a workspace selection is cleared. This keeps users from silently swapping credentials and mirrors the React Flow safety patterns for avoiding redundant updates.
@@ -26,6 +27,7 @@
 - Integration tab revocation/removal tests now open accordion panels before querying actions to match the collapsed default state.
 - Settings > Integrations: mapped providers to dedicated logo components and render the Slack logo inside the 40x40 placeholder while keeping the slot reusable for future provider icons.
 - Slack logo SVG now uses a padded viewBox and full-size scaling so it fits cleanly within the 40x40 header placeholder without crowding the border.
+- Google Sheets flyout picker now sends client/app IDs, scope, and the fetched OAuth token to Drive Picker and blocks missing-config cases so the picker works in the flyout without console errors.
 
 ## Affected Areas
 - Settings > LogsTab: change history list

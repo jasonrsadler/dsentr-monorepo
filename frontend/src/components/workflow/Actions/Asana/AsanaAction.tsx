@@ -507,7 +507,7 @@ const sanitizeAsanaParams = (
   // Operation --------------------------------------
   if (params.operation !== undefined) {
     const raw = cleanString(params.operation)
-    const valid = OPERATION_OPTIONS.find(o => o.value === raw)
+    const valid = OPERATION_OPTIONS.find((o) => o.value === raw)
     base.operation = valid ? valid.value : DEFAULT_PARAMS.operation
   }
 
@@ -520,7 +520,10 @@ const sanitizeAsanaParams = (
     base.connectionId = cleanString(params.connectionId)
   }
 
-  if (params.connection !== undefined && typeof params.connection === 'object') {
+  if (
+    params.connection !== undefined &&
+    typeof params.connection === 'object'
+  ) {
     const c = params.connection as AsanaConnectionSelection
     const scope = normalizeScope(c.connectionScope)
     const id = cleanString(c.connectionId)
@@ -559,9 +562,8 @@ const sanitizeAsanaParams = (
 
   for (const key of stringFields) {
     if (params[key] !== undefined) {
-  base[key] = cleanString(params[key]).trim()
-}
-
+      base[key] = cleanString(params[key]).trim()
+    }
   }
 
   // Booleans ----------------------------------------
@@ -690,12 +692,14 @@ export default function AsanaAction({
   const storeCanEdit = useWorkflowStore((state) => state.canEdit)
   const effectiveCanEdit = canEdit && storeCanEdit
 
-  const [selectedTaskDetails, setSelectedTaskDetails] = useState<AsanaTask | null>(null)
+  const [selectedTaskDetails, setSelectedTaskDetails] =
+    useState<AsanaTask | null>(null)
 
   const [additionalFieldErrors, setAdditionalFieldErrors] = useState(false)
   const [tasksFull, setTasksFull] = useState<AsanaTask[]>([])
-  const [taskDetailsMap, setTaskDetailsMap] = useState<Map<string, AsanaTask>>(new Map())
-
+  const [taskDetailsMap, setTaskDetailsMap] = useState<Map<string, AsanaTask>>(
+    new Map()
+  )
 
   const validation = useMemo(
     () => validateAsanaParams(asanaParams, additionalFieldErrors),
@@ -703,36 +707,35 @@ export default function AsanaAction({
   )
 
   const applyAsanaPatch = useCallback(
-  (patch: Partial<AsanaActionParams>) => {
-    if (!effectiveCanEdit) return
+    (patch: Partial<AsanaActionParams>) => {
+      if (!effectiveCanEdit) return
 
-    const next = sanitizeAsanaParams({ ...asanaParams, ...patch })
-    const nextValidation = validateAsanaParams(next, additionalFieldErrors)
+      const next = sanitizeAsanaParams({ ...asanaParams, ...patch })
+      const nextValidation = validateAsanaParams(next, additionalFieldErrors)
 
-    if (deepEqual(asanaParams, next)) {
-      if (next.hasValidationErrors !== nextValidation.hasErrors) {
-        updateNodeData(nodeId, {
-          hasValidationErrors: nextValidation.hasErrors
-        })
+      if (deepEqual(asanaParams, next)) {
+        if (next.hasValidationErrors !== nextValidation.hasErrors) {
+          updateNodeData(nodeId, {
+            hasValidationErrors: nextValidation.hasErrors
+          })
+        }
+        return
       }
-      return
-    }
 
-    updateNodeData(nodeId, {
-      params: next,
-      dirty: true,
-      hasValidationErrors: nextValidation.hasErrors
-    })
-  },
-  [
-    additionalFieldErrors,
-    asanaParams,
-    effectiveCanEdit,
-    nodeId,
-    updateNodeData
-  ]
-)
-
+      updateNodeData(nodeId, {
+        params: next,
+        dirty: true,
+        hasValidationErrors: nextValidation.hasErrors
+      })
+    },
+    [
+      additionalFieldErrors,
+      asanaParams,
+      effectiveCanEdit,
+      nodeId,
+      updateNodeData
+    ]
+  )
 
   const handleOperationChange = useCallback(
     (op: string) => {
@@ -1034,36 +1037,34 @@ export default function AsanaAction({
   )
 
   useEffect(() => {
-  if (!selectedTaskDetails) return
+    if (!selectedTaskDetails) return
 
-  const t = selectedTaskDetails
+    const t = selectedTaskDetails
 
-  const patch: Partial<AsanaActionParams> = {
-    name: t.name ?? '',
-    notes: t.notes ?? '',
-    completed: t.completed ?? false,
-    assignee: t.assignee?.gid ?? '',
-    dueOn: t.due_on ?? '',
-    dueAt: t.due_at ?? '',
-    additionalFields:
-      t.custom_fields?.map(cf => {
-        const key = cf.name ?? cf.gid
-        let value = ''
-        if (cf.text_value != null) value = cf.text_value
-        else if (cf.number_value != null) value = String(cf.number_value)
-        else if (cf.enum_value?.name != null) value = cf.enum_value.name
-        return { key, value }
-      }) ?? []
-  }
+    const patch: Partial<AsanaActionParams> = {
+      name: t.name ?? '',
+      notes: t.notes ?? '',
+      completed: t.completed ?? false,
+      assignee: t.assignee?.gid ?? '',
+      dueOn: t.due_on ?? '',
+      dueAt: t.due_at ?? '',
+      additionalFields:
+        t.custom_fields?.map((cf) => {
+          const key = cf.name ?? cf.gid
+          let value = ''
+          if (cf.text_value != null) value = cf.text_value
+          else if (cf.number_value != null) value = String(cf.number_value)
+          else if (cf.enum_value?.name != null) value = cf.enum_value.name
+          return { key, value }
+        }) ?? []
+    }
 
-  applyAsanaPatch(patch)
-}, [selectedTaskDetails])
+    applyAsanaPatch(patch)
+  }, [selectedTaskDetails])
 
   useEffect(() => {
     setDueAtMonth(getInitialMonth(dueAtParts.date))
   }, [dueAtParts.date])
-
-  
 
   const dueAtTimeString = useMemo(
     () =>
@@ -1509,25 +1510,25 @@ export default function AsanaAction({
   )
 
   const handleProjectSelect = useCallback(
-  (projectGid: string) => {
-    applyAsanaPatch({
-      projectGid,
-      sectionGid: '',
-      taskGid: '',        // Clear task selection
-      parentTaskGid: '',
-      storyGid: '',
-      // Also clear the populated fields from the previous task
-      name: '',
-      notes: '',
-      assignee: '',
-      completed: false,
-      dueOn: '',
-      dueAt: '',
-      additionalFields: []
-    })
-  },
-  [applyAsanaPatch]
-)
+    (projectGid: string) => {
+      applyAsanaPatch({
+        projectGid,
+        sectionGid: '',
+        taskGid: '', // Clear task selection
+        parentTaskGid: '',
+        storyGid: '',
+        // Also clear the populated fields from the previous task
+        name: '',
+        notes: '',
+        assignee: '',
+        completed: false,
+        dueOn: '',
+        dueAt: '',
+        additionalFields: []
+      })
+    },
+    [applyAsanaPatch]
+  )
 
   const handleTagSelect = useCallback(
     (tagGid: string) => {
@@ -1565,135 +1566,141 @@ export default function AsanaAction({
   >(null)
 
   const handleTaskSelect = useCallback(
-  (taskGid: string) => {
-    const next: Partial<AsanaActionParams> = { taskGid, storyGid: '' }
-    
-    // For updateTask operation, populate fields from the task data
-    if (asanaParams.operation === 'updateTask') {
-      const taskDetails = taskDetailsMap.get(taskGid)
-      
-      // Populate all fields from the task data
-      if (taskDetails) {
-        next.name = taskDetails.name || ''
-        next.notes = taskDetails.notes || ''
-        next.assignee = taskDetails.assignee?.gid || ''
-        next.completed = taskDetails.completed || false
-        
-        // Handle due dates - prioritize due_at over due_on
-        if (taskDetails.due_at) {
-          next.dueAt = taskDetails.due_at
-          next.dueOn = ''
-        } else if (taskDetails.due_on) {
-          next.dueOn = taskDetails.due_on
-          next.dueAt = ''
+    (taskGid: string) => {
+      const next: Partial<AsanaActionParams> = { taskGid, storyGid: '' }
+
+      // For updateTask operation, populate fields from the task data
+      if (asanaParams.operation === 'updateTask') {
+        const taskDetails = taskDetailsMap.get(taskGid)
+
+        // Populate all fields from the task data
+        if (taskDetails) {
+          next.name = taskDetails.name || ''
+          next.notes = taskDetails.notes || ''
+          next.assignee = taskDetails.assignee?.gid || ''
+          next.completed = taskDetails.completed || false
+
+          // Handle due dates - prioritize due_at over due_on
+          if (taskDetails.due_at) {
+            next.dueAt = taskDetails.due_at
+            next.dueOn = ''
+          } else if (taskDetails.due_on) {
+            next.dueOn = taskDetails.due_on
+            next.dueAt = ''
+          } else {
+            next.dueOn = ''
+            next.dueAt = ''
+          }
+
+          // Map custom_fields to additionalFields key-value pairs
+          if (
+            Array.isArray(taskDetails.custom_fields) &&
+            taskDetails.custom_fields.length > 0
+          ) {
+            const additionalFields: KeyValue[] = taskDetails.custom_fields
+              .map((cf) => {
+                let value = ''
+
+                if (cf.enum_value?.name) {
+                  value = cf.enum_value.name
+                } else if (
+                  cf.text_value !== null &&
+                  cf.text_value !== undefined
+                ) {
+                  value = String(cf.text_value)
+                } else if (
+                  cf.number_value !== null &&
+                  cf.number_value !== undefined
+                ) {
+                  value = String(cf.number_value)
+                }
+
+                return {
+                  key: cf.name || cf.gid,
+                  value: value
+                }
+              })
+              .filter((pair) => pair.key && pair.value)
+
+            next.additionalFields = additionalFields
+          } else {
+            next.additionalFields = []
+          }
         } else {
-          next.dueOn = ''
-          next.dueAt = ''
-        }
-        
-        // Map custom_fields to additionalFields key-value pairs
-        if (Array.isArray(taskDetails.custom_fields) && taskDetails.custom_fields.length > 0) {
-          const additionalFields: KeyValue[] = taskDetails.custom_fields
-            .map((cf) => {
-              let value = ''
-              
-              if (cf.enum_value?.name) {
-                value = cf.enum_value.name
-              } else if (cf.text_value !== null && cf.text_value !== undefined) {
-                value = String(cf.text_value)
-              } else if (cf.number_value !== null && cf.number_value !== undefined) {
-                value = String(cf.number_value)
-              }
-              
-              return {
-                key: cf.name || cf.gid,
-                value: value
-              }
-            })
-            .filter(pair => pair.key && pair.value)
-          
-          next.additionalFields = additionalFields
-        } else {
+          // Fallback: just use the name from taskOptions
+          const found = taskOptions.find((o) => o.value === taskGid)
+          if (found) {
+            next.name = typeof found.label === 'string' ? found.label : ''
+          }
           next.additionalFields = []
         }
-      } else {
-        // Fallback: just use the name from taskOptions
-        const found = taskOptions.find((o) => o.value === taskGid)
-        if (found) {
-          next.name = typeof found.label === 'string' ? found.label : ''
-        }
-        next.additionalFields = []
+      }
+
+      applyAsanaPatch(next)
+    },
+    [applyAsanaPatch, asanaParams.operation, taskOptions, taskDetailsMap]
+  )
+
+  // Auto-populate first task for updateTask operation
+  useEffect(() => {
+    if (
+      asanaParams.operation === 'updateTask' &&
+      taskOptions.length > 0 &&
+      !asanaParams.taskGid && // Only if no task selected yet
+      taskDetailsMap.size > 0 &&
+      hasProjectSelected &&
+      !taskOptionsLoading // Don't run while loading
+    ) {
+      // Make sure the first task is actually in our details map
+      const firstTaskGid = taskOptions[0].value
+      if (taskDetailsMap.has(firstTaskGid)) {
+        handleTaskSelect(firstTaskGid)
       }
     }
-    
-    applyAsanaPatch(next)
-  },
-  [
-    applyAsanaPatch, 
-    asanaParams.operation, 
+  }, [
+    asanaParams.operation,
+    asanaParams.taskGid,
     taskOptions,
-    taskDetailsMap
-  ]
-)
+    taskDetailsMap,
+    hasProjectSelected,
+    handleTaskSelect,
+    taskOptionsLoading // Add this dependency
+  ])
 
-// Auto-populate first task for updateTask operation
-useEffect(() => {
-  if (
-    asanaParams.operation === 'updateTask' &&
-    taskOptions.length > 0 &&
-    !asanaParams.taskGid && // Only if no task selected yet
-    taskDetailsMap.size > 0 &&
-    hasProjectSelected &&
-    !taskOptionsLoading // Don't run while loading
-  ) {
-    // Make sure the first task is actually in our details map
-    const firstTaskGid = taskOptions[0].value
-    if (taskDetailsMap.has(firstTaskGid)) {
-      handleTaskSelect(firstTaskGid)
-    }
-  }
-}, [
-  asanaParams.operation,
-  asanaParams.taskGid,
-  taskOptions,
-  taskDetailsMap,
-  hasProjectSelected,
-  handleTaskSelect,
-  taskOptionsLoading // Add this dependency
-])
+  // Clear task selection if the selected task is not in the current project
+  useEffect(() => {
+    if (
+      asanaParams.operation === 'updateTask' &&
+      asanaParams.taskGid &&
+      taskOptions.length > 0 &&
+      !taskOptionsLoading
+    ) {
+      // Check if the current taskGid exists in the loaded tasks
+      const taskExists = taskOptions.some(
+        (opt) => opt.value === asanaParams.taskGid
+      )
 
-// Clear task selection if the selected task is not in the current project
-useEffect(() => {
-  if (
-    asanaParams.operation === 'updateTask' &&
-    asanaParams.taskGid &&
-    taskOptions.length > 0 &&
-    !taskOptionsLoading
-  ) {
-    // Check if the current taskGid exists in the loaded tasks
-    const taskExists = taskOptions.some(opt => opt.value === asanaParams.taskGid)
-    
-    if (!taskExists) {
-      // Current task doesn't exist in this project, clear it
-      applyAsanaPatch({
-        taskGid: '',
-        name: '',
-        notes: '',
-        assignee: '',
-        completed: false,
-        dueOn: '',
-        dueAt: '',
-        additionalFields: []
-      })
+      if (!taskExists) {
+        // Current task doesn't exist in this project, clear it
+        applyAsanaPatch({
+          taskGid: '',
+          name: '',
+          notes: '',
+          assignee: '',
+          completed: false,
+          dueOn: '',
+          dueAt: '',
+          additionalFields: []
+        })
+      }
     }
-  }
-}, [
-  asanaParams.operation,
-  asanaParams.taskGid,
-  taskOptions,
-  taskOptionsLoading,
-  applyAsanaPatch
-])
+  }, [
+    asanaParams.operation,
+    asanaParams.taskGid,
+    taskOptions,
+    taskOptionsLoading,
+    applyAsanaPatch
+  ])
 
   useEffect(() => {
     if (asanaParams.operation !== 'updateTask') return
@@ -1738,111 +1745,109 @@ useEffect(() => {
     [hasConnection, isSoloPlan, visibility.workspaceGid]
   )
 
-  
   useEffect(() => {
-  setWorkspaceOptions([])
-  setWorkspaceOptionsError(null)
-  
-  // Only fetch if we actually need to show the workspace dropdown
-  if (!asanaConnectionOptions || !shouldFetchWorkspaces) {
-    setWorkspaceOptionsLoading(false)
-    return
-  }
+    setWorkspaceOptions([])
+    setWorkspaceOptionsError(null)
 
-  // Don't fetch if we already have a workspace selected and options loaded
-  if (asanaParams.workspaceGid && workspaceOptions.length > 0) {
-    setWorkspaceOptionsLoading(false)
-    return
-  }
+    // Only fetch if we actually need to show the workspace dropdown
+    if (!asanaConnectionOptions || !shouldFetchWorkspaces) {
+      setWorkspaceOptionsLoading(false)
+      return
+    }
 
-  let cancelled = false
-  setWorkspaceOptionsLoading(true)
-  fetchAsanaWorkspaces(asanaConnectionOptions)
-    .then((workspaces: AsanaWorkspace[]) => {
-      if (cancelled) return
-      const options = workspaces.map((workspace) => ({
-        value: workspace.gid,
-        label: workspace.name || workspace.gid
-      }))
-      setWorkspaceOptions(options)
-      setWorkspaceOptionsError(null)
-    })
-    .catch((err: unknown) => {
-      if (cancelled) return
-      setWorkspaceOptionsError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to load Asana workspaces for this connection'
-      )
-    })
-    .finally(() => {
-      if (!cancelled) {
-        setWorkspaceOptionsLoading(false)
-      }
-    })
+    // Don't fetch if we already have a workspace selected and options loaded
+    if (asanaParams.workspaceGid && workspaceOptions.length > 0) {
+      setWorkspaceOptionsLoading(false)
+      return
+    }
 
-  return () => {
-    cancelled = true
-  }
-}, [asanaConnectionOptions, shouldFetchWorkspaces]) // Remove asanaParams.workspaceGid and workspaceOptions from deps
-  
-
-useEffect(() => {
-  setProjectOptions([])
-  setProjectOptionsError(null)
-  setProjectOptionsLoading(false)
-  
-  const workspaceGid = debouncedWorkspaceGid
-  
-  if (
-    !visibility.projectGid ||
-    !workspaceGid ||
-    !asanaConnectionOptions ||
-    isSoloPlan
-  ) {
-    return
-  }
-
-  // Don't fetch if we already have a project selected and options loaded
-  if (asanaParams.projectGid && projectOptions.length > 0) {
-    return
-  }
-
-  let cancelled = false
-  setProjectOptionsLoading(true)
-  fetchAsanaProjects(workspaceGid, asanaConnectionOptions)
-    .then((projects: AsanaProject[]) => {
-      if (cancelled) return
-      setProjectOptions(
-        projects.map((project) => ({
-          value: project.gid,
-          label: project.name || project.gid
+    let cancelled = false
+    setWorkspaceOptionsLoading(true)
+    fetchAsanaWorkspaces(asanaConnectionOptions)
+      .then((workspaces: AsanaWorkspace[]) => {
+        if (cancelled) return
+        const options = workspaces.map((workspace) => ({
+          value: workspace.gid,
+          label: workspace.name || workspace.gid
         }))
-      )
-      setProjectOptionsError(null)
-    })
-    .catch((err: unknown) => {
-      if (cancelled) return
-      setProjectOptionsError(
-        err instanceof Error ? err.message : 'Failed to load Asana projects'
-      )
-    })
-    .finally(() => {
-      if (!cancelled) {
-        setProjectOptionsLoading(false)
-      }
-    })
+        setWorkspaceOptions(options)
+        setWorkspaceOptionsError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setWorkspaceOptionsError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load Asana workspaces for this connection'
+        )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setWorkspaceOptionsLoading(false)
+        }
+      })
 
-  return () => {
-    cancelled = true
-  }
-}, [
-  asanaConnectionOptions,
-  debouncedWorkspaceGid,
-  isSoloPlan,
-  visibility.projectGid
-  // Remove asanaParams.projectGid and projectOptions from deps
-])
+    return () => {
+      cancelled = true
+    }
+  }, [asanaConnectionOptions, shouldFetchWorkspaces]) // Remove asanaParams.workspaceGid and workspaceOptions from deps
+
+  useEffect(() => {
+    setProjectOptions([])
+    setProjectOptionsError(null)
+    setProjectOptionsLoading(false)
+
+    const workspaceGid = debouncedWorkspaceGid
+
+    if (
+      !visibility.projectGid ||
+      !workspaceGid ||
+      !asanaConnectionOptions ||
+      isSoloPlan
+    ) {
+      return
+    }
+
+    // Don't fetch if we already have a project selected and options loaded
+    if (asanaParams.projectGid && projectOptions.length > 0) {
+      return
+    }
+
+    let cancelled = false
+    setProjectOptionsLoading(true)
+    fetchAsanaProjects(workspaceGid, asanaConnectionOptions)
+      .then((projects: AsanaProject[]) => {
+        if (cancelled) return
+        setProjectOptions(
+          projects.map((project) => ({
+            value: project.gid,
+            label: project.name || project.gid
+          }))
+        )
+        setProjectOptionsError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setProjectOptionsError(
+          err instanceof Error ? err.message : 'Failed to load Asana projects'
+        )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setProjectOptionsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    asanaConnectionOptions,
+    debouncedWorkspaceGid,
+    isSoloPlan,
+    visibility.projectGid
+    // Remove asanaParams.projectGid and projectOptions from deps
+  ])
 
   useEffect(() => {
     setTagOptions([])
@@ -2061,121 +2066,123 @@ useEffect(() => {
     visibility.sectionGid
   ])
 
-useEffect(() => {
-  setTaskOptions([])
-  setTaskOptionsError(null)
-  setTaskDetailsMap(new Map())
-  
-  const workspaceGid = debouncedWorkspaceGid
-  const shouldFetchTasks =
-    (visibility.taskGid || visibility.parentTaskGid || visibility.storyGid) &&
-    debouncedWorkspaceGid &&
-    debouncedProjectGid
-    
-  if (!shouldFetchTasks || !asanaConnectionOptions || isSoloPlan) {
-    setTaskOptionsLoading(false)
-    return
-  }
+  useEffect(() => {
+    setTaskOptions([])
+    setTaskOptionsError(null)
+    setTaskDetailsMap(new Map())
 
-  // Don't fetch if we already have a task selected and options loaded
-  if (asanaParams.taskGid && taskOptions.length > 0 && taskDetailsMap.size > 0) {
-    setTaskOptionsLoading(false)
-    return
-  }
+    const workspaceGid = debouncedWorkspaceGid
+    const shouldFetchTasks =
+      (visibility.taskGid || visibility.parentTaskGid || visibility.storyGid) &&
+      debouncedWorkspaceGid &&
+      debouncedProjectGid
 
-  let cancelled = false
-  setTaskOptionsLoading(true)
-  fetchAsanaTasks(
-    workspaceGid,
-    asanaConnectionOptions,
-    debouncedProjectGid || undefined
-  )
-    .then((tasks: AsanaTask[]) => {
-      if (cancelled) return
-      
-      const detailsMap = new Map<string, AsanaTask>()
-      tasks.forEach(task => {
-        detailsMap.set(task.gid, task)
+    if (!shouldFetchTasks || !asanaConnectionOptions || isSoloPlan) {
+      setTaskOptionsLoading(false)
+      return
+    }
+
+    // Don't fetch if we already have a task selected and options loaded
+    if (
+      asanaParams.taskGid &&
+      taskOptions.length > 0 &&
+      taskDetailsMap.size > 0
+    ) {
+      setTaskOptionsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setTaskOptionsLoading(true)
+    fetchAsanaTasks(
+      workspaceGid,
+      asanaConnectionOptions,
+      debouncedProjectGid || undefined
+    )
+      .then((tasks: AsanaTask[]) => {
+        if (cancelled) return
+
+        const detailsMap = new Map<string, AsanaTask>()
+        tasks.forEach((task) => {
+          detailsMap.set(task.gid, task)
+        })
+        setTaskDetailsMap(detailsMap)
+
+        setTaskOptions(
+          tasks.map((task) => ({
+            value: task.gid,
+            label: task.name || task.gid
+          }))
+        )
+        setTaskOptionsError(null)
       })
-      setTaskDetailsMap(detailsMap)
-      
-      setTaskOptions(
-        tasks.map((task) => ({
-          value: task.gid,
-          label: task.name || task.gid
-        }))
-      )
-      setTaskOptionsError(null)
-    })
-    .catch((err: unknown) => {
-      if (cancelled) return
-      setTaskOptionsError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to load Asana tasks for this workspace'
-      )
-    })
-    .finally(() => {
-      if (!cancelled) {
-        setTaskOptionsLoading(false)
-      }
-    })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setTaskOptionsError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load Asana tasks for this workspace'
+        )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTaskOptionsLoading(false)
+        }
+      })
 
-  return () => {
-    cancelled = true
-  }
-}, [
-  asanaConnectionOptions,
-  debouncedWorkspaceGid,
-  debouncedProjectGid,
-  isSoloPlan,
-  visibility.parentTaskGid,
-  visibility.storyGid,
-  visibility.taskGid
-  // Remove asanaParams.taskGid, taskOptions, taskDetailsMap from deps
-])
+    return () => {
+      cancelled = true
+    }
+  }, [
+    asanaConnectionOptions,
+    debouncedWorkspaceGid,
+    debouncedProjectGid,
+    isSoloPlan,
+    visibility.parentTaskGid,
+    visibility.storyGid,
+    visibility.taskGid
+    // Remove asanaParams.taskGid, taskOptions, taskDetailsMap from deps
+  ])
 
   useEffect(() => {
-  if (!asanaParams.taskGid) return
+    if (!asanaParams.taskGid) return
 
-  console.log("[singleFetch] fetching", asanaParams.taskGid)
+    console.log('[singleFetch] fetching', asanaParams.taskGid)
 
-  fetchAsanaTaskDetails(asanaParams.taskGid, asanaConnectionOptions)
-    .then(task => {
-      console.log("[singleFetch] got", task)
-      setSelectedTaskDetails(task)
-    })
-    .catch(err => console.log("[singleFetch] error", err))
-}, [asanaParams.taskGid])
+    fetchAsanaTaskDetails(asanaParams.taskGid, asanaConnectionOptions)
+      .then((task) => {
+        console.log('[singleFetch] got', task)
+        setSelectedTaskDetails(task)
+      })
+      .catch((err) => console.log('[singleFetch] error', err))
+  }, [asanaParams.taskGid])
 
-useEffect(() => {
-  if (!selectedTaskDetails) return
+  useEffect(() => {
+    if (!selectedTaskDetails) return
 
-  const record = selectedTaskDetails
+    const record = selectedTaskDetails
 
-  const next: Partial<AsanaActionParams> = {
-    name: record.name ?? '',
-    notes: record.notes ?? '',
-    completed: record.completed ?? false,
-    assignee: record.assignee?.gid ?? '',
-    dueOn: record.due_on ?? '',
-    dueAt: record.due_at ?? '',
-    additionalFields:
-      record.custom_fields?.map(cf => {
-        const key = cf.name ?? cf.gid
-        let value = ''
-        if (cf.text_value != null) value = cf.text_value
-        else if (cf.number_value != null) value = String(cf.number_value)
-        else if (cf.enum_value?.name != null) value = cf.enum_value.name
-        return { key, value }
-      }) ?? []
-  }
+    const next: Partial<AsanaActionParams> = {
+      name: record.name ?? '',
+      notes: record.notes ?? '',
+      completed: record.completed ?? false,
+      assignee: record.assignee?.gid ?? '',
+      dueOn: record.due_on ?? '',
+      dueAt: record.due_at ?? '',
+      additionalFields:
+        record.custom_fields?.map((cf) => {
+          const key = cf.name ?? cf.gid
+          let value = ''
+          if (cf.text_value != null) value = cf.text_value
+          else if (cf.number_value != null) value = String(cf.number_value)
+          else if (cf.enum_value?.name != null) value = cf.enum_value.name
+          return { key, value }
+        }) ?? []
+    }
 
-  console.log("[prefill] applying", next)
-  applyAsanaPatch(next)
-}, [selectedTaskDetails])
-
-
+    console.log('[prefill] applying', next)
+    applyAsanaPatch(next)
+  }, [selectedTaskDetails])
 
   useEffect(() => {
     setCommentOptions([])

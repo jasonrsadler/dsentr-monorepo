@@ -1,34 +1,12 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
-import {
-  ArrowUpRight,
-  ChevronUp,
-  ChevronDown,
-  Trash2,
-  CalendarDays,
-  Clock,
-  Globe2,
-  RefreshCcw
-} from 'lucide-react'
-import TriggerTypeDropdown from './TriggerTypeDropdown'
-import KeyValuePair from '../ui/ReactFlow/KeyValuePair'
-import {
-  CalendarMonth,
-  formatDisplayDate,
-  formatDisplayTime,
-  getInitialMonth,
-  parseTime,
-  toISODateString
-} from '../ui/schedule/utils'
-import { ScheduleCalendar } from '../ui/schedule/ScheduleCalendar'
-import { ScheduleTimePicker } from '../ui/schedule/ScheduleTimePicker'
-import { ScheduleTimezonePicker } from '../ui/schedule/ScheduleTimezonePicker'
+import { formatDisplayDate, formatDisplayTime } from '../ui/schedule/utils'
 import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
+import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
 import { normalizePlanTier } from '@/lib/planTiers'
 import { errorMessage } from '@/lib/errorMessage'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
-import { useWorkflowFlyout } from '@/components/workflow/useWorkflowFlyout'
 import type { RunAvailability } from '@/types/runAvailability'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
@@ -46,18 +24,6 @@ type ScheduleConfig = {
     every: number
     unit: RepeatUnit
   }
-}
-
-function scheduleConfigsEqual(a: ScheduleConfig, b: ScheduleConfig) {
-  if (a.startDate !== b.startDate) return false
-  if (a.startTime !== b.startTime) return false
-  if (a.timezone !== b.timezone) return false
-
-  const repeatA = a.repeat
-  const repeatB = b.repeat
-  if (!repeatA && !repeatB) return true
-  if (!repeatA || !repeatB) return false
-  return repeatA.every === repeatB.every && repeatA.unit === repeatB.unit
 }
 
 function normalizeScheduleConfig(
@@ -203,11 +169,9 @@ function TriggerNodeContent({
   id,
   selected,
   label,
-  expanded,
   dirty,
   nodeData,
   updateData,
-  toggleExpanded,
   remove,
   effectiveCanEdit,
   onRun,
@@ -220,15 +184,8 @@ function TriggerNodeContent({
   runAvailability
 }: TriggerNodeContentProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [editing, setEditing] = useState(false)
   const [running, setRunning] = useState(false)
-  const [datePickerOpen, setDatePickerOpen] = useState(false)
-  const [timePickerOpen, setTimePickerOpen] = useState(false)
-  const [timezonePickerOpen, setTimezonePickerOpen] = useState(false)
-  const [timezoneSearch, setTimezoneSearch] = useState('')
-  const { openFlyout, activeNodeId, isFlyoutRender } = useWorkflowFlyout()
-  const flyoutActive = activeNodeId === id
-  const showFlyoutShortcut = !isFlyoutRender
+  const lastPlanNoticeRef = useRef<string | null>(null)
 
   const rawInputs = nodeData?.inputs
   const inputs = useMemo<TriggerInput[]>(
@@ -254,22 +211,6 @@ function TriggerNodeContent({
     [nodeData?.scheduleConfig, defaultTimezone]
   )
 
-  const [datePickerMonth, setDatePickerMonth] = useState<CalendarMonth>(() =>
-    getInitialMonth(scheduleConfig.startDate)
-  )
-
-  useEffect(() => {
-    setDatePickerMonth((prev) => {
-      const next = getInitialMonth(scheduleConfig.startDate)
-      return prev.year === next.year && prev.month === next.month ? prev : next
-    })
-  }, [scheduleConfig.startDate])
-
-  const datePickerContainerRef = useRef<HTMLDivElement | null>(null)
-  const timePickerContainerRef = useRef<HTMLDivElement | null>(null)
-  const timezonePickerContainerRef = useRef<HTMLDivElement | null>(null)
-  const lastPlanNoticeRef = useRef<string | null>(null)
-
   const scheduleRestricted = isSoloPlan && normalizedTriggerType === 'schedule'
   const scheduleRestrictionMessage = scheduleRestricted
     ? SCHEDULE_RESTRICTION_MESSAGE
@@ -285,115 +226,6 @@ function TriggerNodeContent({
     onRestrictionNotice(scheduleRestrictionMessage)
   }, [scheduleRestrictionMessage, onRestrictionNotice])
 
-  const timezoneOptions = useMemo(() => {
-    const options: string[] = []
-    if (typeof Intl !== 'undefined') {
-      const maybeSupported = (Intl as any).supportedValuesOf
-      if (typeof maybeSupported === 'function') {
-        try {
-          const supported = maybeSupported('timeZone')
-          if (Array.isArray(supported)) {
-            options.push(...supported)
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    options.push(defaultTimezone || 'UTC')
-    options.push('UTC')
-    if (scheduleConfig.timezone) {
-      options.push(scheduleConfig.timezone)
-    }
-    return Array.from(new Set(options))
-  }, [defaultTimezone, scheduleConfig.timezone])
-
-  const filteredTimezoneOptions = useMemo(() => {
-    const needle = timezoneSearch.trim().toLowerCase()
-    if (!needle) return timezoneOptions
-    return timezoneOptions.filter((tz) => tz.toLowerCase().includes(needle))
-  }, [timezoneOptions, timezoneSearch])
-
-  const selectedTime = useMemo(
-    () => parseTime(scheduleConfig.startTime),
-    [scheduleConfig.startTime]
-  )
-
-  const todayISO = useMemo(() => {
-    const now = new Date()
-    return toISODateString(now.getFullYear(), now.getMonth(), now.getDate())
-  }, [])
-
-  useEffect(() => {
-    if (normalizedTriggerType === 'schedule') return
-    setDatePickerOpen(false)
-    setTimePickerOpen(false)
-    setTimezonePickerOpen(false)
-  }, [normalizedTriggerType])
-
-  useEffect(() => {
-    if (!datePickerOpen) return
-    const handleMouseDown = (event: MouseEvent) => {
-      if (!datePickerContainerRef.current?.contains(event.target as Node)) {
-        setDatePickerOpen(false)
-      }
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setDatePickerOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [datePickerOpen])
-
-  useEffect(() => {
-    if (!timePickerOpen) return
-    const handleMouseDown = (event: MouseEvent) => {
-      if (!timePickerContainerRef.current?.contains(event.target as Node)) {
-        setTimePickerOpen(false)
-      }
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setTimePickerOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [timePickerOpen])
-
-  useEffect(() => {
-    if (!timezonePickerOpen) {
-      setTimezoneSearch('')
-      return
-    }
-    const handleMouseDown = (event: MouseEvent) => {
-      if (!timezonePickerContainerRef.current?.contains(event.target as Node)) {
-        setTimezonePickerOpen(false)
-      }
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setTimezonePickerOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [timezonePickerOpen])
-
   const openPlanSettings = useCallback(() => {
     try {
       window.dispatchEvent(
@@ -403,18 +235,6 @@ function TriggerNodeContent({
       console.error(errorMessage(err))
     }
   }, [])
-
-  const updateSchedule = useCallback(
-    (updater: (previous: ScheduleConfig) => ScheduleConfig) => {
-      if (!effectiveCanEdit) return
-      const next = updater(scheduleConfig)
-      if (scheduleConfigsEqual(scheduleConfig, next)) {
-        return
-      }
-      updateData({ scheduleConfig: next, dirty: true })
-    },
-    [effectiveCanEdit, scheduleConfig, updateData]
-  )
 
   const hasInvalidInputs = useMemo(() => {
     if (inputs.length === 0) return false
@@ -457,34 +277,10 @@ function TriggerNodeContent({
     [effectiveCanEdit, updateData]
   )
 
-  const handleTriggerTypeChange = useCallback(
-    (value: string) => {
-      if (!effectiveCanEdit) return
-      if (value === 'Schedule' && scheduleRestricted) {
-        openPlanSettings()
-        return
-      }
-      updateData({ triggerType: value, dirty: true })
-    },
-    [effectiveCanEdit, openPlanSettings, scheduleRestricted, updateData]
-  )
-
-  const handleBlockedTriggerSelect = useCallback(
-    (value: string) => {
-      if (value === 'Schedule') {
-        openPlanSettings()
-      }
-    },
-    [openPlanSettings]
-  )
-
-  const handleInputsChange = useCallback(
-    (updatedVars: TriggerInput[]) => {
-      if (!effectiveCanEdit) return
-      updateData({ inputs: updatedVars, dirty: true })
-    },
-    [effectiveCanEdit, updateData]
-  )
+  const handleConfirmDelete = useCallback(() => {
+    if (!effectiveCanEdit) return
+    setConfirmingDelete(true)
+  }, [effectiveCanEdit])
 
   const runBlocked = Boolean(runAvailability?.disabled)
   const runBlockedReason =
@@ -501,8 +297,6 @@ function TriggerNodeContent({
     }
   }, [id, inputs, onRun, runBlocked])
 
-  const repeatEnabled = !!scheduleConfig.repeat
-
   const ringClass = isFailed
     ? 'ring-2 ring-red-500'
     : isSucceeded
@@ -515,9 +309,8 @@ function TriggerNodeContent({
     <motion.div
       className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       style={{
-        width: expanded ? 'auto' : 256,
-        minWidth: expanded ? 256 : undefined,
-        maxWidth: expanded ? 400 : undefined
+        width: 256,
+        minWidth: 256
       }}
     >
       <Handle
@@ -531,72 +324,21 @@ function TriggerNodeContent({
         }}
       />
       <div className="p-3">
-        <div className="flex justify-between items-center">
-          {editing ? (
-            <input
-              value={label}
-              onChange={(event) => handleLabelChange(event.target.value)}
-              onBlur={() => setEditing(false)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  event.currentTarget.blur()
-                }
-              }}
-              className="text-sm font-semibold bg-transparent border-b border-zinc-400 focus:outline-none w-full"
-            />
-          ) : (
-            <h3
-              onDoubleClick={() => {
-                if (!effectiveCanEdit) return
-                setEditing(true)
-              }}
-              className="text-sm font-semibold cursor-pointer relative"
-            >
-              {label}
-              {(dirty || combinedHasValidationErrors) && (
-                <span className="absolute -right-3 top-1 w-2 h-2 rounded-full bg-blue-500" />
-              )}
-            </h3>
-          )}
-          <div className="flex items-center gap-1">
-            {showFlyoutShortcut ? (
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  openFlyout(id)
-                }}
-                className={`p-1 rounded transition text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 ${flyoutActive ? 'opacity-100 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-100' : ''}`}
-                title="Open in detail flyout"
-                aria-label="Open in detail flyout"
-                aria-pressed={flyoutActive}
-              >
-                <ArrowUpRight size={16} />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => toggleExpanded()}
-              className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"
-            >
-              {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!effectiveCanEdit) return
-                setConfirmingDelete(true)
-              }}
-              className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded"
-              title="Delete node"
-            >
-              <Trash2 size={16} className="text-red-600" />
-            </button>
-          </div>
-        </div>
-
+        <NodeHeader
+          nodeId={id}
+          label={label}
+          dirty={dirty}
+          hasValidationErrors={combinedHasValidationErrors}
+          expanded={false}
+          showExpandToggle={false}
+          onLabelChange={handleLabelChange}
+          onExpanded={() => undefined}
+          onConfirmingDelete={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            handleConfirmDelete()
+          }}
+        />
         {labelError && (
           <p className="mt-2 text-xs text-red-500">{labelError}</p>
         )}
@@ -614,302 +356,67 @@ function TriggerNodeContent({
           {running ? 'Running...' : 'Run'}
         </button>
 
-        <AnimatePresence>
-          {expanded && (
-            <motion.div
-              key="expanded-content"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2"
-            >
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    Trigger Type
-                  </label>
-                  <div className="mt-2">
-                    <TriggerTypeDropdown
-                      value={triggerType}
-                      onChange={handleTriggerTypeChange}
-                      disabledOptions={
-                        scheduleRestricted
-                          ? {
-                              Schedule: SCHEDULE_RESTRICTION_MESSAGE
-                            }
-                          : {}
-                      }
-                      onBlockedSelect={handleBlockedTriggerSelect}
-                    />
-                    {scheduleRestricted && (
-                      <p className="mt-2 text-xs text-red-500">
-                        {SCHEDULE_RESTRICTION_MESSAGE}{' '}
-                        <button
-                          type="button"
-                          onClick={openPlanSettings}
-                          className="text-blue-500 hover:underline"
-                        >
-                          Upgrade
-                        </button>
-                      </p>
-                    )}
-                  </div>
-                </div>
+        {scheduleRestrictionMessage ? (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+            <div className="flex items-start justify-between gap-2">
+              <span>{scheduleRestrictionMessage}</span>
+              <button
+                type="button"
+                onClick={openPlanSettings}
+                className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+              >
+                Upgrade
+              </button>
+            </div>
+          </div>
+        ) : null}
 
-                {triggerType === 'Schedule' ? (
-                  <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                        Schedule Settings
-                      </h4>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!effectiveCanEdit) return
-                          setDatePickerOpen(false)
-                          setTimePickerOpen(false)
-                          setTimezonePickerOpen(false)
-                          updateSchedule((prev) => {
-                            if (prev.repeat) {
-                              return {
-                                startDate: prev.startDate,
-                                startTime: prev.startTime,
-                                timezone: prev.timezone
-                              }
-                            }
-                            return {
-                              ...prev,
-                              repeat: {
-                                every: 1,
-                                unit: 'days'
-                              }
-                            }
-                          })
-                        }}
-                        className="flex items-center gap-2 text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        <RefreshCcw className="h-3 w-3" />
-                        {repeatEnabled ? 'Disable repeat' : 'Enable repeat'}
-                      </button>
-                    </div>
-                    <div className="mt-4 space-y-4">
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                          Start Date
-                        </label>
-                        <div
-                          ref={datePickerContainerRef}
-                          className="relative mt-2"
-                        >
-                          <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!effectiveCanEdit) return
-                              setTimePickerOpen(false)
-                              setTimezonePickerOpen(false)
-                              setDatePickerOpen((prev) => !prev)
-                            }}
-                            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                          >
-                            {formatDisplayDate(scheduleConfig.startDate)}
-                          </button>
-                          <AnimatePresence>
-                            {datePickerOpen && (
-                              <motion.div
-                                initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                                transition={{ duration: 0.15 }}
-                                className="absolute left-0 right-0 z-20 mt-2"
-                              >
-                                <ScheduleCalendar
-                                  month={datePickerMonth}
-                                  selectedDate={scheduleConfig.startDate}
-                                  todayISO={todayISO}
-                                  onMonthChange={(nextMonth) =>
-                                    setDatePickerMonth(nextMonth)
-                                  }
-                                  onSelectDate={(isoDate) => {
-                                    updateSchedule((prev) => ({
-                                      ...prev,
-                                      startDate: isoDate
-                                    }))
-                                    setDatePickerOpen(false)
-                                  }}
-                                />
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <div>
-                          <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                            Start Time
-                          </label>
-                          <div
-                            ref={timePickerContainerRef}
-                            className="relative mt-2"
-                          >
-                            <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!effectiveCanEdit) return
-                                setDatePickerOpen(false)
-                                setTimezonePickerOpen(false)
-                                setTimePickerOpen((prev) => !prev)
-                              }}
-                              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                            >
-                              {formatDisplayTime(scheduleConfig.startTime)}
-                            </button>
-                            <AnimatePresence>
-                              {timePickerOpen && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                                  transition={{ duration: 0.15 }}
-                                  className="absolute left-0 right-0 z-20 mt-2"
-                                >
-                                  <ScheduleTimePicker
-                                    selectedTime={selectedTime}
-                                    onSelect={(time) => {
-                                      updateSchedule((prev) => ({
-                                        ...prev,
-                                        startTime: time
-                                      }))
-                                    }}
-                                    onClose={() => setTimePickerOpen(false)}
-                                  />
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                            Timezone
-                          </label>
-                          <div
-                            ref={timezonePickerContainerRef}
-                            className="relative mt-2"
-                          >
-                            <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!effectiveCanEdit) return
-                                setDatePickerOpen(false)
-                                setTimePickerOpen(false)
-                                setTimezonePickerOpen((prev) => !prev)
-                              }}
-                              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                            >
-                              {scheduleConfig.timezone || 'Select timezone'}
-                            </button>
-                            <AnimatePresence>
-                              {timezonePickerOpen && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                                  transition={{ duration: 0.15 }}
-                                  className="absolute left-0 z-30 mt-2"
-                                >
-                                  <ScheduleTimezonePicker
-                                    options={filteredTimezoneOptions}
-                                    selectedTimezone={scheduleConfig.timezone}
-                                    search={timezoneSearch}
-                                    onSearchChange={(value) =>
-                                      setTimezoneSearch(value)
-                                    }
-                                    onSelect={(timezone) => {
-                                      updateSchedule((prev) => ({
-                                        ...prev,
-                                        timezone
-                                      }))
-                                      setTimezonePickerOpen(false)
-                                    }}
-                                  />
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-                        </div>
-                      </div>
-
-                      {repeatEnabled && (
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <div>
-                            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                              Repeat every
-                            </label>
-                            <div className="mt-2 flex items-center gap-2">
-                              <input
-                                type="number"
-                                min="1"
-                                value={scheduleConfig.repeat?.every ?? 1}
-                                onChange={(event) => {
-                                  const rawValue = Number(event.target.value)
-                                  const clamped = Number.isFinite(rawValue)
-                                    ? Math.max(1, Math.floor(rawValue))
-                                    : 1
-                                  updateSchedule((prev) => ({
-                                    ...prev,
-                                    repeat: {
-                                      every: clamped,
-                                      unit: prev.repeat?.unit ?? 'days'
-                                    }
-                                  }))
-                                }}
-                                className="h-10 w-20 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                              />
-                              <select
-                                value={scheduleConfig.repeat?.unit ?? 'days'}
-                                onChange={(event) => {
-                                  const rawValue = event.target.value
-                                  const unit = repeatUnits.includes(
-                                    rawValue as RepeatUnit
-                                  )
-                                    ? (rawValue as RepeatUnit)
-                                    : 'days'
-                                  updateSchedule((prev) => ({
-                                    ...prev,
-                                    repeat: {
-                                      every: prev.repeat?.every ?? 1,
-                                      unit
-                                    }
-                                  }))
-                                }}
-                                className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pr-8 text-sm font-semibold capitalize text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 sm:w-40"
-                              >
-                                {repeatUnits.map((unit) => (
-                                  <option key={unit} value={unit}>
-                                    {unit.charAt(0).toUpperCase() +
-                                      unit.slice(1)}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-              <KeyValuePair
-                key={`kv-${id}-${nodeData?.wfEpoch ?? ''}`}
-                title="Input Variables"
-                variables={inputs}
-                onChange={(updatedVars) => handleInputsChange(updatedVars)}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="mt-3 space-y-2 text-xs text-zinc-600 dark:text-zinc-300">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+              Type
+            </span>
+            <span className="text-zinc-900 dark:text-zinc-100">
+              {triggerType}
+            </span>
+          </div>
+          {normalizedTriggerType === 'schedule' ? (
+            <div className="rounded-lg border border-dashed border-zinc-200 bg-white/60 px-3 py-2 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
+              <p>
+                Start:{' '}
+                {scheduleConfig.startDate
+                  ? formatDisplayDate(scheduleConfig.startDate)
+                  : 'Not set'}
+              </p>
+              <p>
+                Time:{' '}
+                {scheduleConfig.startTime
+                  ? formatDisplayTime(scheduleConfig.startTime)
+                  : 'Not set'}
+              </p>
+              <p>Timezone: {scheduleConfig.timezone || 'Not set'}</p>
+              {scheduleConfig.repeat ? (
+                <p>
+                  Repeats every {scheduleConfig.repeat.every}{' '}
+                  {scheduleConfig.repeat.unit}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+              Inputs
+            </span>
+            <span className="text-zinc-900 dark:text-zinc-100">
+              {inputs.length
+                ? `${inputs.length} variable${inputs.length === 1 ? '' : 's'}`
+                : 'None'}
+            </span>
+          </div>
+          <p className="text-zinc-500 dark:text-zinc-400">
+            Configure this trigger in the flyout.
+          </p>
+        </div>
       </div>
 
       <AnimatePresence>

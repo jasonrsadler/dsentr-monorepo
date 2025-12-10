@@ -1,14 +1,6 @@
-import {
-  useState,
-  useMemo,
-  useCallback,
-  useEffect,
-  type MouseEvent
-} from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
-import NodeInputField from '@/components/ui/InputFields/NodeInputField'
-import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
 import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
 import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
@@ -83,11 +75,9 @@ function ConditionNodeContent({
   id,
   selected,
   label,
-  expanded,
   dirty,
   nodeData,
   updateData,
-  toggleExpanded,
   remove,
   effectiveCanEdit,
   isRunning,
@@ -157,72 +147,15 @@ function ConditionNodeContent({
     [effectiveCanEdit, updateData]
   )
 
-  const handleToggleExpanded = useCallback(
-    (event: MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault()
-      toggleExpanded()
-    },
-    [toggleExpanded]
-  )
-
-  const handleConfirmDelete = useCallback(
-    (event: MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault()
-      if (!effectiveCanEdit) return
-      setConfirmingDelete(true)
-    },
-    [effectiveCanEdit]
-  )
+  const handleConfirmDelete = useCallback(() => {
+    if (!effectiveCanEdit) return
+    setConfirmingDelete(true)
+  }, [effectiveCanEdit])
 
   const handleDelete = useCallback(() => {
     setConfirmingDelete(false)
     remove()
   }, [remove])
-
-  const handleFieldChange = useCallback(
-    (nextField: string) => {
-      if (!effectiveCanEdit) return
-      const { expression: nextExpression, hasValidationErrors: nextHasErrors } =
-        computeConditionState(nextField, operator, value)
-      updateData({
-        field: nextField,
-        expression: nextExpression,
-        hasValidationErrors: nextHasErrors,
-        dirty: true
-      })
-    },
-    [computeConditionState, effectiveCanEdit, operator, updateData, value]
-  )
-
-  const handleOperatorChange = useCallback(
-    (nextOperator: string) => {
-      if (!effectiveCanEdit) return
-      const { expression: nextExpression, hasValidationErrors: nextHasErrors } =
-        computeConditionState(field, nextOperator, value)
-      updateData({
-        operator: nextOperator,
-        expression: nextExpression,
-        hasValidationErrors: nextHasErrors,
-        dirty: true
-      })
-    },
-    [computeConditionState, effectiveCanEdit, field, updateData, value]
-  )
-
-  const handleValueChange = useCallback(
-    (nextValue: string) => {
-      if (!effectiveCanEdit) return
-      const { expression: nextExpression, hasValidationErrors: nextHasErrors } =
-        computeConditionState(field, operator, nextValue)
-      updateData({
-        value: nextValue,
-        expression: nextExpression,
-        hasValidationErrors: nextHasErrors,
-        dirty: true
-      })
-    },
-    [computeConditionState, effectiveCanEdit, field, operator, updateData]
-  )
 
   const ringClass = isFailed
     ? 'ring-2 ring-red-500'
@@ -236,9 +169,8 @@ function ConditionNodeContent({
     <motion.div
       className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       style={{
-        width: expanded ? 'auto' : 256,
-        minWidth: 256,
-        maxWidth: 400
+        width: 256,
+        minWidth: 256
       }}
     >
       <Handle
@@ -289,54 +221,37 @@ function ConditionNodeContent({
           label={label}
           dirty={dirty}
           hasValidationErrors={combinedHasValidationErrors}
-          expanded={expanded}
+          expanded={false}
+          showExpandToggle={false}
           onLabelChange={handleLabelChange}
-          onExpanded={handleToggleExpanded}
+          onExpanded={() => undefined}
           onConfirmingDelete={handleConfirmDelete}
         />
         {labelError && (
           <p className="mt-2 text-xs text-red-500">{labelError}</p>
         )}
 
-        <AnimatePresence>
-          {expanded && (
-            <motion.div
-              key="expanded-content"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
-            >
-              <NodeInputField
-                placeholder="Field name"
-                value={field}
-                onChange={handleFieldChange}
-              />
-              {hasValidationErrors && !field.trim() && (
-                <p className="text-red-500 text-xs mt-1">Field is required</p>
-              )}
-              <NodeDropdownField
-                options={[
-                  'equals',
-                  'not equals',
-                  'greater than',
-                  'less than',
-                  'contains'
-                ]}
-                value={operator}
-                onChange={handleOperatorChange}
-              />
-              <NodeInputField
-                placeholder="Comparison value"
-                value={value}
-                onChange={handleValueChange}
-              />
-              {hasValidationErrors && !value.trim() && (
-                <p className="text-red-500 text-xs mt-1">Value is required</p>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="mt-3 space-y-2 text-xs text-zinc-600 dark:text-zinc-300">
+          <p className="font-semibold text-zinc-700 dark:text-zinc-200">
+            Condition expression
+          </p>
+          <div className="rounded-lg border border-dashed border-zinc-200 bg-white/60 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/60">
+            {expression ? (
+              <p className="break-words text-zinc-700 dark:text-zinc-200">
+                {expression}
+              </p>
+            ) : (
+              <p className="text-zinc-500 dark:text-zinc-400">
+                Configure this condition in the flyout.
+              </p>
+            )}
+          </div>
+          {hasValidationErrors ? (
+            <p className="text-red-500">
+              Field and value are required for this condition.
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <AnimatePresence>
