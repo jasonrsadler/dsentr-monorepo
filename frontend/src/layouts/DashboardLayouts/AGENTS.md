@@ -9,6 +9,7 @@
 - Runs tab replaced by a separate Runs button that opens a sidebar drawer so the Designer tab stays active while run details live in the slide-out panel.
 - Runs drawer only mounts when open, preventing it from overlaying or obscuring the canvas when closed.
 - Runs button styled as a tab beside Designer and the runs panel now slides up from the bottom with animation to avoid blocking the node sidebar.
+- Trigger run actions now pass the trigger id to manual run requests so multi-trigger workflows start from the selected entry instead of dispatching every trigger.
 
 ## Notes
 - Pickers are locally stateful and wrapped in useMemo/useCallback with click-outside + Escape handling to avoid React Flow re-render loops.

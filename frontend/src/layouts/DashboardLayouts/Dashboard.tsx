@@ -1039,50 +1039,55 @@ export default function Dashboard() {
     }
   }, [runsDrawerOpen, currentWorkflowIdValue])
 
-  const handleRunWorkflow = useCallback(async () => {
-    if (!currentWorkflow) return
-    const saved = await saveIfDirty()
-    if (!saved) return
-    if (runAvailability?.disabled) {
-      setError(runAvailability.reason || 'Workspace run quota reached.')
-      return
-    }
-    try {
-      setActiveRun(null)
-      setNodeRuns([])
-      const run = await startWorkflowRun(currentWorkflow.id)
-      setActiveRun(run)
-      currentPollRunIdRef.current = run.id
-      pollRun(currentWorkflow.id, run.id)
-      void refreshPlanUsage(usageWorkspaceId)
+  const handleRunWorkflow = useCallback(
+    async (startNodeId?: string) => {
+      if (!currentWorkflow) return
+      const saved = await saveIfDirty()
+      if (!saved) return
+      if (runAvailability?.disabled) {
+        setError(runAvailability.reason || 'Workspace run quota reached.')
+        return
+      }
       try {
-        window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
-      } catch (e) {
-        console.error(errorMessage(e))
+        setActiveRun(null)
+        setNodeRuns([])
+        const run = await startWorkflowRun(currentWorkflow.id, {
+          startFromNodeId: startNodeId
+        })
+        setActiveRun(run)
+        currentPollRunIdRef.current = run.id
+        pollRun(currentWorkflow.id, run.id)
+        void refreshPlanUsage(usageWorkspaceId)
+        try {
+          window.dispatchEvent(new CustomEvent('dsentr-resume-global-poll'))
+        } catch (e) {
+          console.error(errorMessage(e))
+        }
+      } catch (e: any) {
+        console.error('Failed to start run', e)
+        if ((e as any)?.code === 'workspace_run_limit') {
+          markWorkspaceRunCap()
+        }
+        if (Array.isArray(e?.violations) && e.violations.length > 0) {
+          setError(e.violations[0]?.message || e?.message || null)
+        } else {
+          setError(
+            e?.message ||
+              'Failed to start run. Check your plan limits and try again.'
+          )
+        }
       }
-    } catch (e: any) {
-      console.error('Failed to start run', e)
-      if ((e as any)?.code === 'workspace_run_limit') {
-        markWorkspaceRunCap()
-      }
-      if (Array.isArray(e?.violations) && e.violations.length > 0) {
-        setError(e.violations[0]?.message || e?.message || null)
-      } else {
-        setError(
-          e?.message ||
-            'Failed to start run. Check your plan limits and try again.'
-        )
-      }
-    }
-  }, [
-    currentWorkflow,
-    pollRun,
-    refreshPlanUsage,
-    runAvailability,
-    markWorkspaceRunCap,
-    usageWorkspaceId,
-    saveIfDirty
-  ])
+    },
+    [
+      currentWorkflow,
+      pollRun,
+      refreshPlanUsage,
+      runAvailability,
+      markWorkspaceRunCap,
+      usageWorkspaceId,
+      saveIfDirty
+    ]
+  )
 
   // Overlay: subscribe to SSE for active run to reduce client work
   useEffect(() => {

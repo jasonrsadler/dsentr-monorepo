@@ -23,3 +23,4 @@
 - Scheduled run quota checks now tolerate solo-plan workspaces by skipping workspace-only limits instead of logging plan-required warnings.
 - Runaway workflow protection blocks runs in the worker before execution, records a `runaway_protection_triggered` event, fails the run without retries, and skips workspace quota/overage increments when the limit is exceeded.
 - Worker/AppState test scaffolding now seeds the Asana OAuth provider config so executor paths compile with the expanded provider set.
+- Scheduled runs now resolve a matching schedule trigger and seed `_start_from_node` so only the intended branch executes instead of activating every trigger in multi-trigger workflows.

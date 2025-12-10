@@ -572,7 +572,7 @@ export interface WorkflowNodeRunRecord {
 
 export async function startWorkflowRun(
   workflowId: string,
-  opts?: { idempotencyKey?: string; context?: any }
+  opts?: { idempotencyKey?: string; context?: any; startFromNodeId?: string }
 ): Promise<WorkflowRunRecord> {
   const csrfToken = await getCsrfToken()
   const res = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/run`, {
@@ -582,7 +582,15 @@ export async function startWorkflowRun(
       'x-csrf-token': csrfToken
     },
     credentials: 'include',
-    body: JSON.stringify(opts ?? {})
+    body: JSON.stringify(
+      opts
+        ? {
+            idempotency_key: opts.idempotencyKey,
+            context: opts.context,
+            start_from_node_id: opts.startFromNodeId
+          }
+        : {}
+    )
   })
   let body: any = null
   try {

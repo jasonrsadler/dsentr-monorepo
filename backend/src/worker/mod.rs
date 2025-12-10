@@ -400,6 +400,10 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     }
     snapshot["_trigger_context"] = context;
 
+    if let Some(start_id) = find_schedule_trigger_start_node(&snapshot, &schedule.config) {
+        snapshot["_start_from_node"] = Value::String(start_id);
+    }
+
     let connection_metadata = workflow_connection_metadata::collect(&snapshot);
     workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
 
@@ -532,6 +536,43 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
         .await?;
 
     Ok(())
+}
+
+fn find_schedule_trigger_start_node(snapshot: &Value, schedule_config: &Value) -> Option<String> {
+    let nodes = snapshot.get("nodes")?.as_array()?;
+    let mut fallback: Option<String> = None;
+
+    for node in nodes {
+        let Some(node_type) = node.get("type").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !node_type.eq_ignore_ascii_case("trigger") {
+            continue;
+        }
+        let Some(id) = node.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let data = node.get("data").and_then(|v| v.as_object());
+        let trigger_type = data
+            .and_then(|map| map.get("triggerType"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Manual");
+        if !trigger_type.eq_ignore_ascii_case("schedule") {
+            continue;
+        }
+        if let Some(map) = data {
+            if let Some(cfg) = map.get("scheduleConfig") {
+                if cfg == schedule_config {
+                    return Some(id.to_string());
+                }
+            }
+        }
+        if fallback.is_none() {
+            fallback = Some(id.to_string());
+        }
+    }
+
+    fallback
 }
 
 #[cfg(test)]
@@ -1134,6 +1175,19 @@ mod tests {
             data: json!({
                 "nodes": [
                     {
+                        "id": "schedule-1",
+                        "type": "trigger",
+                        "data": {
+                            "label": "Schedule",
+                            "triggerType": "schedule",
+                            "scheduleConfig": {
+                                "startDate": "2024-01-01",
+                                "startTime": "00:00",
+                                "timezone": "UTC"
+                            }
+                        }
+                    },
+                    {
                         "data": {
                             "connection": {
                                 "connectionScope": "workspace",
@@ -1148,7 +1202,8 @@ mod tests {
                             }
                         }
                     }
-                ]
+                ],
+                "edges": []
             }),
             concurrency_limit: 1,
             egress_allowlist: vec![],
@@ -1350,6 +1405,13 @@ mod tests {
         let recorded_runs = runs.lock().unwrap();
         assert_eq!(recorded_runs.len(), 1);
         assert_eq!(recorded_runs[0].workflow_id, workflow_id);
+        assert_eq!(
+            recorded_runs[0]
+                .snapshot
+                .get("_start_from_node")
+                .and_then(|v| v.as_str()),
+            Some("schedule-1")
+        );
 
         assert!(marks.lock().unwrap().contains(&schedule.id));
     }

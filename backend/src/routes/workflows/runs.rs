@@ -40,6 +40,7 @@ pub struct StartWorkflowRunRequest {
     pub idempotency_key: Option<String>,
     pub context: Option<serde_json::Value>,
     pub priority: Option<i32>,
+    pub start_from_node_id: Option<String>,
 }
 
 pub(crate) fn redact_secrets(value: &mut serde_json::Value) {
@@ -83,6 +84,29 @@ pub(crate) fn redact_node_runs(mut node_runs: Vec<WorkflowNodeRun>) -> Vec<Workf
         }
     }
     node_runs
+}
+
+fn find_trigger_start(snapshot: &serde_json::Value, node_id: &str) -> Option<String> {
+    let trimmed = node_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let nodes = snapshot.get("nodes")?.as_array()?;
+    for node in nodes {
+        let Some(id) = node.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if id != trimmed {
+            continue;
+        }
+        let Some(kind) = node.get("type").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if kind.eq_ignore_ascii_case("trigger") {
+            return Some(id.to_string());
+        }
+    }
+    None
 }
 
 pub async fn start_workflow_run(
@@ -215,9 +239,14 @@ pub async fn start_workflow_run(
         }
     }
 
-    let (idempotency_key_owned, trigger_ctx, priority) = match payload {
-        Some(Json(req)) => (req.idempotency_key, req.context, req.priority),
-        None => (None, None, None),
+    let (idempotency_key_owned, trigger_ctx, priority, start_from_node_id) = match payload {
+        Some(Json(req)) => (
+            req.idempotency_key,
+            req.context,
+            req.priority,
+            req.start_from_node_id,
+        ),
+        None => (None, None, None, None),
     };
     let idempotency_key = idempotency_key_owned.as_deref();
 
@@ -258,6 +287,12 @@ pub async fn start_workflow_run(
     }
 
     let connection_metadata = workflow_connection_metadata::collect(&snapshot);
+
+    if let Some(start_id) = start_from_node_id.as_deref() {
+        if let Some(valid_start) = find_trigger_start(&snapshot, start_id) {
+            snapshot["_start_from_node"] = serde_json::Value::String(valid_start);
+        }
+    }
     workflow_connection_metadata::embed(&mut snapshot, &connection_metadata);
 
     match app_state
@@ -598,7 +633,9 @@ pub async fn rerun_workflow_run(
         snapshot["_trigger_context"] = ctx;
     }
     if let Some(start_id) = payload.start_from_node_id {
-        snapshot["_start_from_node"] = serde_json::Value::String(start_id);
+        if let Some(valid_start) = find_trigger_start(&snapshot, &start_id) {
+            snapshot["_start_from_node"] = serde_json::Value::String(valid_start);
+        }
     }
 
     if let Some(obj) = snapshot.as_object_mut() {
@@ -832,7 +869,7 @@ mod tests {
     use axum::body::to_bytes;
     use reqwest::Client;
     use serde_json::Value;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use time::{Duration, OffsetDateTime};
 
     fn test_config() -> Arc<Config> {
@@ -1102,6 +1139,123 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["success"], Value::Bool(true));
         assert!(workspace_repo.last_period_starts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn start_workflow_run_seeds_start_from_node_when_provided() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let workflow = Workflow {
+            id: Uuid::new_v4(),
+            user_id: owner_id,
+            workspace_id: Some(workspace_id),
+            name: "multi-trigger".into(),
+            description: None,
+            data: json!({
+                "nodes": [
+                    {"id": "manual-1", "type": "trigger", "data": {"label": "Manual"}},
+                    {"id": "schedule-1", "type": "trigger", "data": {"label": "Schedule", "triggerType": "schedule"}},
+                    {"id": "action-1", "type": "action", "data": {"label": "Action"}}
+                ],
+                "edges": []
+            }),
+            concurrency_limit: 1,
+            egress_allowlist: vec![],
+            require_hmac: false,
+            hmac_replay_window_sec: 0,
+            webhook_salt: Uuid::new_v4(),
+            locked_by: None,
+            locked_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+        let workflow_for_find = workflow.clone();
+        let captured_snapshot: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+
+        let mut repo = MockWorkflowRepository::new();
+        repo.expect_count_workspace_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
+        repo.expect_find_workflow_for_member()
+            .returning(move |user, workflow_id| {
+                let wf = workflow_for_find.clone();
+                assert_eq!(user, wf.user_id);
+                assert_eq!(workflow_id, wf.id);
+                Box::pin(async move { Ok(Some(wf)) })
+            });
+        let captured_clone = captured_snapshot.clone();
+        repo.expect_create_workflow_run().returning(
+            move |user_id_param, workflow_id_param, workspace_id_param, snapshot, _| {
+                let captured = captured_clone.clone();
+                Box::pin(async move {
+                    *captured.lock().unwrap() = Some(snapshot.clone());
+                    let run = WorkflowRun {
+                        id: Uuid::new_v4(),
+                        user_id: user_id_param,
+                        workflow_id: workflow_id_param,
+                        workspace_id: workspace_id_param,
+                        snapshot,
+                        status: "queued".into(),
+                        error: None,
+                        idempotency_key: None,
+                        started_at: OffsetDateTime::now_utc(),
+                        resume_at: OffsetDateTime::now_utc(),
+                        finished_at: None,
+                        created_at: OffsetDateTime::now_utc(),
+                        updated_at: OffsetDateTime::now_utc(),
+                    };
+                    Ok(CreateWorkflowRunOutcome { run, created: true })
+                })
+            },
+        );
+        repo.expect_record_run_event()
+            .returning(|event| {
+                let recorded_at = event.recorded_at.unwrap_or_else(OffsetDateTime::now_utc);
+                Box::pin(async move {
+                    Ok(WorkflowRunEvent {
+                        id: Uuid::new_v4(),
+                        workflow_run_id: event.workflow_run_id,
+                        workflow_id: event.workflow_id,
+                        workspace_id: event.workspace_id,
+                        triggered_by: event.triggered_by,
+                        connection_type: event.connection_type,
+                        connection_id: event.connection_id,
+                        recorded_at,
+                    })
+                })
+            })
+            .times(0..);
+
+        let workspace_repo: Arc<StaticWorkspaceMembershipRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::with_run_limit(5));
+        let state = test_state(
+            Arc::new(repo),
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+        );
+
+        let claims = claims_fixture(owner_id, "owner@example.com");
+        let response = start_workflow_run(
+            State(state),
+            AuthSession(claims),
+            Path(workflow.id),
+            Some(axum::Json(StartWorkflowRunRequest {
+                idempotency_key: None,
+                context: None,
+                priority: None,
+                start_from_node_id: Some("schedule-1".to_string()),
+            })),
+        )
+        .await;
+
+        assert!(response.status().is_success());
+        let snapshot = captured_snapshot
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("snapshot recorded");
+        assert_eq!(
+            snapshot.get("_start_from_node").and_then(|v| v.as_str()),
+            Some("schedule-1")
+        );
     }
 
     #[tokio::test]

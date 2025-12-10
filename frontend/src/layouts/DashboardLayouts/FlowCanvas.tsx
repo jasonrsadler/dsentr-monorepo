@@ -574,7 +574,7 @@ function normalizeDropType(rawType: string): DropDescriptor {
 interface FlowCanvasProps {
   isDark?: boolean
   workflowId?: string | null
-  onRunWorkflow?: () => void
+  onRunWorkflow?: (startNodeId?: string) => void
   runningIds?: Set<string>
   succeededIds?: Set<string>
   failedIds?: Set<string>
@@ -645,8 +645,8 @@ export default function FlowCanvas({
     onRunWorkflowRef.current = onRunWorkflow
   }, [onRunWorkflow])
 
-  const invokeRunWorkflow = useCallback(() => {
-    onRunWorkflowRef.current?.()
+  const invokeRunWorkflow = useCallback((startNodeId?: string) => {
+    onRunWorkflowRef.current?.(startNodeId)
   }, [])
   const invokeRunWorkflowRef = useRef(invokeRunWorkflow)
   useEffect(() => {
@@ -952,8 +952,8 @@ export default function FlowCanvas({
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
-          onRun={async () => {
-            invokeRunWorkflowRef.current?.()
+          onRun={async (nodeId) => {
+            invokeRunWorkflowRef.current?.(nodeId)
           }}
           planTier={normalizedPlanTierRef.current}
           onRestrictionNotice={onRestrictionNoticeRef.current}

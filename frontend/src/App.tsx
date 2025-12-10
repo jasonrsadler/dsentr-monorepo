@@ -22,6 +22,7 @@ import ConfirmAccountDeletion from '@/ConfirmAccountDeletion'
 import TermsOfServicePage from '@/TermsOfService'
 import PrivacyPolicyPage from '@/PrivacyPolicy'
 import CookieBanner from './components/CookieBanner'
+import SubprocessorsPage from './SubProcessors'
 
 export default function App() {
   const { isLoading, checkAuth } = useAuth()
@@ -64,6 +65,7 @@ export default function App() {
           />
           <Route path="/terms-of-service" element={<TermsOfServicePage />} />
           <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+          <Route path="/subprocessors" element={<SubprocessorsPage />} />
         </Route>
 
         <Route
