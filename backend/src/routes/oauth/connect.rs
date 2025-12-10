@@ -1,9 +1,8 @@
 use super::{
     helpers::{
-        build_state_cookie, handle_callback, redirect_with_error, CallbackQuery, GOOGLE_AUTH_URL,
-        GOOGLE_STATE_COOKIE, MICROSOFT_AUTH_URL, MICROSOFT_STATE_COOKIE,
-        OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_AUTH_URL, SLACK_STATE_COOKIE, ASANA_AUTH_URL,
-        ASANA_STATE_COOKIE,
+        build_state_cookie, handle_callback, redirect_with_error, CallbackQuery, ASANA_AUTH_URL,
+        ASANA_STATE_COOKIE, GOOGLE_AUTH_URL, GOOGLE_STATE_COOKIE, MICROSOFT_AUTH_URL,
+        MICROSOFT_STATE_COOKIE, OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_AUTH_URL, SLACK_STATE_COOKIE,
     },
     prelude::*,
 };

@@ -2,6 +2,7 @@
 import {
   listWorkflows,
   type WorkflowRecord,
+  type WorkflowWebhookEndpoint,
   getWebhookUrl,
   regenerateWebhookUrl,
   getWebhookConfig,
@@ -17,8 +18,10 @@ export default function WebhooksTab() {
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([])
   const [workflowId, setWorkflowId] = useState<string>('')
   const [url, setUrl] = useState<string>('')
+  const [triggerUrls, setTriggerUrls] = useState<WorkflowWebhookEndpoint[]>([])
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [copiedTrigger, setCopiedTrigger] = useState('')
   const [regenBusy, setRegenBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
 
@@ -82,11 +85,19 @@ export default function WebhooksTab() {
   useEffect(() => {
     if (!workflowId) {
       setUrl('')
+      setTriggerUrls([])
       return
     }
     setLoading(true)
     getWebhookUrl(workflowId)
-      .then(setUrl)
+      .then((res) => {
+        setUrl(res.url)
+        setTriggerUrls(res.triggers ?? [])
+      })
+      .catch(() => {
+        setUrl('')
+        setTriggerUrls([])
+      })
       .finally(() => setLoading(false))
   }, [workflowId])
 
@@ -112,12 +123,21 @@ export default function WebhooksTab() {
     [workflows, workflowId]
   )
 
-  const base = (API_BASE_URL || '').replace(/\/$/, '')
+  const base = useMemo(() => (API_BASE_URL || '').replace(/\/$/, ''), [])
   const fullUrl = url ? `${base}${url}` : url
+  const triggerFullUrls = useMemo(
+    () =>
+      triggerUrls.map((entry) => ({
+        label: entry.label,
+        url: entry.url ? `${base}${entry.url}` : ''
+      })),
+    [base, triggerUrls]
+  )
+  const exampleUrl = triggerFullUrls[0]?.url || fullUrl
   const hmacCurlSnippet = useMemo(() => {
-    if (!signingKey || !fullUrl) return ''
+    if (!signingKey || !exampleUrl) return ''
     return `export SIGNING_KEY_B64URL='${signingKey}'
-export URL='${fullUrl}'
+export URL='${exampleUrl}'
 body='{"price":"123"}'
 ts=$(date +%s)
 canonical=$(python3 - <<'PY' "$body"
@@ -136,11 +156,11 @@ curl -X POST \\
   -H "X-DSentr-Signature: v1=$sig" \\
   -d "$canonical" \\
   "$URL"`
-  }, [signingKey, fullUrl])
+  }, [signingKey, exampleUrl])
   const hmacPowerShellSnippet = useMemo(() => {
-    if (!signingKey || !fullUrl) return ''
+    if (!signingKey || !exampleUrl) return ''
     return `$SIGNING_KEY_B64URL = '${signingKey}'
-$URL = '${fullUrl}'
+$URL = '${exampleUrl}'
 $body = '{"price":"123"}'
 $canonical = ($body | ConvertFrom-Json) | ConvertTo-Json -Compress
 $ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()
@@ -151,12 +171,12 @@ $payload = [Text.Encoding]::UTF8.GetBytes($ts + '.' + $canonical)
 $sigHex = -join ($hmac.ComputeHash($payload) | ForEach-Object { $_.ToString('x2') })
 $headers = @{ 'Content-Type'='application/json'; 'X-DSentr-Timestamp'=$ts; 'X-DSentr-Signature'='v1=' + $sigHex }
 Invoke-RestMethod -Method POST -Uri $URL -Headers $headers -Body $canonical`
-  }, [signingKey, fullUrl])
+  }, [signingKey, exampleUrl])
   const hmacJavaScriptSnippet = useMemo(() => {
-    if (!signingKey || !fullUrl) return ''
+    if (!signingKey || !exampleUrl) return ''
     return `// Node 18+ (global fetch). Replace signing key and URL.
 const keyB64Url = '${signingKey}';
-const url = '${fullUrl}';
+const url = '${exampleUrl}';
 const body = { price: '123' };
 const ts = Math.floor(Date.now()/1000).toString();
 const canonical = JSON.stringify(body);
@@ -173,16 +193,23 @@ await fetch(url, {
   },
   body: canonical
 });`
-  }, [signingKey, fullUrl])
+  }, [signingKey, exampleUrl])
   useEffect(() => {
     setCopied(false)
+  }, [fullUrl])
+
+  useEffect(() => {
+    setCopiedTrigger('')
+  }, [triggerFullUrls])
+
+  useEffect(() => {
     setCopiedCurl(false)
     setCopiedPS(false)
     setCopiedJS(false)
     setCopiedHmacCurl(false)
     setCopiedHmacPS(false)
     setCopiedHmacJS(false)
-  }, [fullUrl])
+  }, [exampleUrl])
 
   useEffect(() => {
     setCopiedHmacCurl(false)
@@ -214,6 +241,10 @@ await fetch(url, {
 
       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-3">
         <h3 className="font-semibold mb-2">Webhook URL</h3>
+        <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-2">
+          Base webhook URL. Append a webhook trigger&apos;s name to target a
+          specific trigger node.
+        </p>
         {loading ? (
           <p className="text-sm text-zinc-500">Loading…</p>
         ) : fullUrl ? (
@@ -259,9 +290,58 @@ await fetch(url, {
           </p>
         )}
 
+        <div className="mt-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-medium text-xs">Trigger endpoints</div>
+            <span className="text-[11px] text-zinc-500">
+              Append the trigger name to the base URL to call a specific node.
+            </span>
+          </div>
+          {triggerFullUrls.length ? (
+            <div className="mt-2 space-y-2">
+              {triggerFullUrls.map((trigger) => (
+                <div
+                  key={trigger.label}
+                  className="flex flex-wrap items-center gap-2 rounded border border-zinc-200 bg-white/60 p-2 dark:border-zinc-700 dark:bg-zinc-900/60"
+                >
+                  <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                    {trigger.label}
+                  </span>
+                  <code className="text-xs px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 break-all">
+                    {trigger.url || 'Unavailable'}
+                  </code>
+                  <button
+                    className="text-xs px-2 py-1 rounded border"
+                    disabled={!trigger.url}
+                    onClick={async () => {
+                      if (!trigger.url) return
+                      const ok = await copyText(trigger.url)
+                      if (ok) {
+                        setCopiedTrigger(trigger.label)
+                        setTimeout(() => setCopiedTrigger(''), 1500)
+                      }
+                    }}
+                  >
+                    {copiedTrigger === trigger.label ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              Add a webhook trigger node to generate per-trigger URLs.
+            </p>
+          )}
+        </div>
+
         {/* Examples (basic, no HMAC) */}
         <div className="mt-3 space-y-2">
           <div className="font-medium text-xs">Examples</div>
+          <p className="text-[11px] text-zinc-500">
+            {triggerFullUrls[0]?.label
+              ? `Using ${triggerFullUrls[0].label} endpoint`
+              : 'Using the base webhook URL'}
+          </p>
 
           {/* curl */}
           <div className="relative">
@@ -270,11 +350,11 @@ await fetch(url, {
             </span>
             <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
               <code>
-                {fullUrl
+                {exampleUrl
                   ? `curl -X POST \\
   -H "Content-Type: application/json" \\
   -d '{"price":"123"}' \\
-  ${fullUrl}`
+  ${exampleUrl}`
                   : ''}
               </code>
             </pre>
@@ -283,8 +363,8 @@ await fetch(url, {
                 className="text-[10px] px-2 py-0.5 rounded border"
                 onClick={async () => {
                   const ok = await copyText(
-                    fullUrl
-                      ? `curl -X POST -H "Content-Type: application/json" -d '{"price":"123"}' ${fullUrl}`
+                    exampleUrl
+                      ? `curl -X POST -H "Content-Type: application/json" -d '{"price":"123"}' ${exampleUrl}`
                       : ''
                   )
                   if (ok) {
@@ -305,8 +385,8 @@ await fetch(url, {
             </span>
             <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
               <code>
-                {fullUrl
-                  ? `Invoke-RestMethod -Method POST \`\n  -Uri "${fullUrl}" \`\n  -ContentType "application/json" \`\n  -Body '{"price":"123"}'`
+                {exampleUrl
+                  ? `Invoke-RestMethod -Method POST \`\n  -Uri "${exampleUrl}" \`\n  -ContentType "application/json" \`\n  -Body '{"price":"123"}'`
                   : ''}
               </code>
             </pre>
@@ -315,8 +395,8 @@ await fetch(url, {
                 className="text-[10px] px-2 py-0.5 rounded border"
                 onClick={async () => {
                   const ok = await copyText(
-                    fullUrl
-                      ? `Invoke-RestMethod -Method POST -Uri "${fullUrl}" -ContentType "application/json" -Body '{"price":"123"}'`
+                    exampleUrl
+                      ? `Invoke-RestMethod -Method POST -Uri "${exampleUrl}" -ContentType "application/json" -Body '{"price":"123"}'`
                       : ''
                   )
                   if (ok) {
@@ -337,8 +417,8 @@ await fetch(url, {
             </span>
             <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded overflow-auto themed-scroll whitespace-pre-wrap break-words text-[11px]">
               <code>
-                {fullUrl
-                  ? `await fetch("${fullUrl}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ price: "123" })\n});`
+                {exampleUrl
+                  ? `await fetch("${exampleUrl}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ price: "123" })\n});`
                   : ''}
               </code>
             </pre>
@@ -347,8 +427,8 @@ await fetch(url, {
                 className="text-[10px] px-2 py-0.5 rounded border"
                 onClick={async () => {
                   const ok = await copyText(
-                    fullUrl
-                      ? `await fetch("${fullUrl}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ price: "123" })\n});`
+                    exampleUrl
+                      ? `await fetch("${exampleUrl}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ price: "123" })\n});`
                       : ''
                   )
                   if (ok) {
@@ -473,6 +553,9 @@ await fetch(url, {
                     }
                     if (result?.url) {
                       setUrl(result.url)
+                    }
+                    if (result?.triggers) {
+                      setTriggerUrls(result.triggers)
                     }
                     setJustRegeneratedSigning(true)
                     setTimeout(() => setJustRegeneratedSigning(false), 2000)
@@ -628,6 +711,7 @@ await fetch(url, {
                     setRegenBusy(true)
                     const result = await regenerateWebhookUrl(workflowId)
                     setUrl(result.url)
+                    setTriggerUrls(result.triggers ?? [])
                     if (result.signing_key) {
                       setSigningKey(result.signing_key)
                     }

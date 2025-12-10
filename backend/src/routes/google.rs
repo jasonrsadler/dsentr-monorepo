@@ -102,7 +102,8 @@ pub async fn list_spreadsheet_sheets(
         Ok(t) => t,
         Err(err) => {
             error!(%err, "failed to read google sheets response");
-            return JsonResponse::server_error("Failed to read Google Sheets response").into_response();
+            return JsonResponse::server_error("Failed to read Google Sheets response")
+                .into_response();
         }
     };
 
@@ -118,10 +119,8 @@ pub async fn list_spreadsheet_sheets(
             return JsonResponse::not_found("Spreadsheet not found").into_response();
         }
         if status.as_u16() == 429 {
-            return JsonResponse::too_many_requests(
-                "Google rate limit reached. Try again later.",
-            )
-            .into_response();
+            return JsonResponse::too_many_requests("Google rate limit reached. Try again later.")
+                .into_response();
         }
 
         return JsonResponse::server_error(&format!(
@@ -153,7 +152,8 @@ pub async fn list_spreadsheet_sheets(
         Ok(p) => p,
         Err(err) => {
             error!(%err, body = %body_text, "invalid json from google sheets");
-            return JsonResponse::server_error("Invalid response from Google Sheets API").into_response();
+            return JsonResponse::server_error("Invalid response from Google Sheets API")
+                .into_response();
         }
     };
 
@@ -174,7 +174,10 @@ pub async fn list_spreadsheet_sheets(
 
     // Update cache
     if let Ok(mut guard) = SHEETS_CACHE.lock() {
-        guard.insert(trimmed.to_string(), (Instant::now() + CACHE_TTL, out.clone()));
+        guard.insert(
+            trimmed.to_string(),
+            (Instant::now() + CACHE_TTL, out.clone()),
+        );
     }
 
     Json(SheetsResponse {
@@ -225,7 +228,8 @@ pub async fn list_spreadsheets_files(
         Ok(t) => t,
         Err(err) => {
             error!(%err, "failed to read google drive response");
-            return JsonResponse::server_error("Failed to read Google Drive response").into_response();
+            return JsonResponse::server_error("Failed to read Google Drive response")
+                .into_response();
         }
     };
 
@@ -238,7 +242,8 @@ pub async fn list_spreadsheets_files(
         }
         return JsonResponse::server_error(&format!(
             "Google Drive API error (status {}): {}",
-            status.as_u16(), body_text
+            status.as_u16(),
+            body_text
         ))
         .into_response();
     }
@@ -258,7 +263,8 @@ pub async fn list_spreadsheets_files(
         Ok(p) => p,
         Err(err) => {
             error!(%err, body = %body_text, "invalid json from google drive");
-            return JsonResponse::server_error("Invalid response from Google Drive API").into_response();
+            return JsonResponse::server_error("Invalid response from Google Drive API")
+                .into_response();
         }
     };
 
@@ -286,7 +292,8 @@ pub async fn get_google_access_token(
     };
 
     match determine_scope_and_token(&state, user_id, &query).await {
-        Ok(tok) => Json(serde_json::json!({ "success": true, "access_token": tok.access_token })).into_response(),
+        Ok(tok) => Json(serde_json::json!({ "success": true, "access_token": tok.access_token }))
+            .into_response(),
         Err(resp) => resp,
     }
 }
@@ -300,17 +307,17 @@ async fn determine_scope_and_token(
     query: &ConnectionQuery,
 ) -> Result<StoredOAuthTokenProxy, Response> {
     // Determine requested scope
-    let scope = query
-        .scope
-        .as_deref()
-        .unwrap_or("personal");
+    let scope = query.scope.as_deref().unwrap_or("personal");
 
     match scope {
         "workspace" => {
             let conn_id = match query.connection_id {
                 Some(id) => id,
                 None => {
-                    return Err(JsonResponse::bad_request("connection_id is required for workspace scope").into_response())
+                    return Err(JsonResponse::bad_request(
+                        "connection_id is required for workspace scope",
+                    )
+                    .into_response())
                 }
             };
 
@@ -332,7 +339,10 @@ async fn determine_scope_and_token(
                         Err(err) => Err(map_workspace_oauth_error(err)),
                     }
                 }
-                Err(_) => Err(JsonResponse::forbidden("Google connection not found or not allowed for this workspace").into_response()),
+                Err(_) => Err(JsonResponse::forbidden(
+                    "Google connection not found or not allowed for this workspace",
+                )
+                .into_response()),
             }
         }
         _ => match state
@@ -350,13 +360,17 @@ async fn determine_scope_and_token(
 
 fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> Response {
     match err {
-        WorkspaceOAuthError::NotFound => JsonResponse::forbidden("Connection not found").into_response(),
+        WorkspaceOAuthError::NotFound => {
+            JsonResponse::forbidden("Connection not found").into_response()
+        }
         WorkspaceOAuthError::Forbidden => JsonResponse::forbidden("Forbidden").into_response(),
         WorkspaceOAuthError::Database(e) => {
-            JsonResponse::server_error(&format!("Workspace OAuth database error: {}", e)).into_response()
+            JsonResponse::server_error(&format!("Workspace OAuth database error: {}", e))
+                .into_response()
         }
         WorkspaceOAuthError::Encryption(e) => {
-            JsonResponse::server_error(&format!("Workspace OAuth encryption error: {}", e)).into_response()
+            JsonResponse::server_error(&format!("Workspace OAuth encryption error: {}", e))
+                .into_response()
         }
         WorkspaceOAuthError::OAuth(e) => crate::routes::oauth::map_oauth_error(e),
     }
@@ -402,6 +416,9 @@ mod tests {
         assert_eq!(sheets.len(), 2);
         let first = sheets[0].properties.as_ref().unwrap();
         assert_eq!(first.title.as_deref(), Some("Sheet1"));
-        assert_eq!(first.sheet_id.as_ref().map(|n| n.as_i64().unwrap()), Some(0));
+        assert_eq!(
+            first.sheet_id.as_ref().map(|n| n.as_i64().unwrap()),
+            Some(0)
+        );
     }
 }

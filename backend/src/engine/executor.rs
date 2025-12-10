@@ -108,11 +108,14 @@ pub async fn execute_run(
         .cloned()
         .unwrap_or_default();
     if let Some(initial) = run.snapshot.get("_trigger_context") {
-        let trigger_key = graph
-            .nodes
-            .values()
-            .find(|n| n.kind == "trigger")
-            .map(|n| context_keys(n).0);
+        let start_node = run
+            .snapshot
+            .get("_start_from_node")
+            .and_then(|v| v.as_str())
+            .and_then(|id| graph.nodes.get(id))
+            .filter(|n| n.kind == "trigger")
+            .or_else(|| graph.nodes.values().find(|n| n.kind == "trigger"));
+        let trigger_key = start_node.map(|n| context_keys(n).0);
         let key = trigger_key.unwrap_or_else(|| "trigger".to_string());
         if !context.contains_key(&key) {
             context.insert(key, initial.clone());

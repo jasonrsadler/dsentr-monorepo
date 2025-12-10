@@ -1,3 +1,4 @@
+mod asana;
 mod code;
 pub(crate) mod delay;
 mod email;
@@ -5,7 +6,6 @@ pub(crate) mod formatter;
 mod google;
 mod http;
 mod messaging;
-mod asana;
 
 use serde_json::{json, Value};
 use uuid::Uuid;

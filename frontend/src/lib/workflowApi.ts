@@ -410,7 +410,41 @@ export async function clearWorkflowLogs(
   return { success: Boolean(data?.success ?? true) }
 }
 
-export async function getWebhookUrl(workflowId: string): Promise<string> {
+export type WorkflowWebhookEndpoint = {
+  label: string
+  url: string
+}
+
+export type WebhookUrlInfo = {
+  url: string
+  triggers: WorkflowWebhookEndpoint[]
+}
+
+function normalizeWebhookEndpoints(raw: any): WorkflowWebhookEndpoint[] {
+  if (!Array.isArray(raw)) return []
+  return raw.reduce<WorkflowWebhookEndpoint[]>((acc, entry) => {
+    if (!entry || typeof entry !== 'object') return acc
+    const url = typeof (entry as any).url === 'string' ? (entry as any).url : ''
+    if (!url) return acc
+    const label =
+      typeof (entry as any).label === 'string'
+        ? ((entry as any).label as string)
+        : url
+    acc.push({ label, url })
+    return acc
+  }, [])
+}
+
+function normalizeWebhookUrlPayload(data: any): WebhookUrlInfo {
+  return {
+    url: typeof data?.url === 'string' ? (data.url as string) : '',
+    triggers: normalizeWebhookEndpoints(data?.triggers)
+  }
+}
+
+export async function getWebhookUrl(
+  workflowId: string
+): Promise<WebhookUrlInfo> {
   const res = await fetch(
     `${API_BASE_URL}/api/workflows/${workflowId}/webhook-url`,
     {
@@ -418,12 +452,14 @@ export async function getWebhookUrl(workflowId: string): Promise<string> {
     }
   )
   const data = await handleJsonResponse(res)
-  return data.url as string
+  return normalizeWebhookUrlPayload(data)
 }
 
-export async function regenerateWebhookUrl(
-  workflowId: string
-): Promise<{ url: string; signing_key?: string }> {
+export async function regenerateWebhookUrl(workflowId: string): Promise<{
+  url: string
+  triggers: WorkflowWebhookEndpoint[]
+  signing_key?: string
+}> {
   const csrfToken = await getCsrfToken()
   const res = await fetch(
     `${API_BASE_URL}/api/workflows/${workflowId}/webhook/regenerate`,
@@ -434,8 +470,9 @@ export async function regenerateWebhookUrl(
     }
   )
   const data = await handleJsonResponse(res)
+  const payload = normalizeWebhookUrlPayload(data)
   return {
-    url: data.url as string,
+    ...payload,
     signing_key:
       typeof data.signing_key === 'string'
         ? (data.signing_key as string)
@@ -443,9 +480,11 @@ export async function regenerateWebhookUrl(
   }
 }
 
-export async function regenerateWebhookSigningKey(
-  workflowId: string
-): Promise<{ signing_key: string; url?: string }> {
+export async function regenerateWebhookSigningKey(workflowId: string): Promise<{
+  signing_key: string
+  url: string
+  triggers: WorkflowWebhookEndpoint[]
+}> {
   const csrfToken = await getCsrfToken()
   const res = await fetch(
     `${API_BASE_URL}/api/workflows/${workflowId}/webhook/signing-key/regenerate`,
@@ -456,9 +495,11 @@ export async function regenerateWebhookSigningKey(
     }
   )
   const data = await handleJsonResponse(res)
+  const payload = normalizeWebhookUrlPayload(data)
   return {
     signing_key: data.signing_key as string,
-    url: typeof data.url === 'string' ? (data.url as string) : undefined
+    url: payload.url,
+    triggers: payload.triggers
   }
 }
 

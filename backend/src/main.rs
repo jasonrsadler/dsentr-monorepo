@@ -40,18 +40,18 @@ use routes::auth::{
 };
 use routes::{
     account::{confirm_account_deletion, get_account_deletion_summary, request_account_deletion},
+    asana::{
+        list_projects as list_asana_projects, list_sections as list_asana_sections,
+        list_tags as list_asana_tags, list_task_stories as list_asana_task_stories,
+        list_tasks as list_asana_tasks, list_teams as list_asana_teams,
+        list_users as list_asana_users, list_workspaces as list_asana_workspaces,
+    },
     auth::{
         forgot_password::handle_forgot_password,
         github_login::{github_callback, github_login},
         google_login::{google_callback, google_login},
         handle_logout, handle_me, resend_verification_email,
         reset_password::{handle_reset_password, handle_verify_token},
-    },
-    asana::{
-        list_projects as list_asana_projects, list_sections as list_asana_sections,
-        list_tags as list_asana_tags, list_task_stories as list_asana_task_stories,
-        list_tasks as list_asana_tasks, list_teams as list_asana_teams,
-        list_users as list_asana_users, list_workspaces as list_asana_workspaces,
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
@@ -61,9 +61,10 @@ use routes::{
     },
     microsoft::{list_channel_members, list_team_channels, list_teams},
     oauth::{
-        asana_connect_callback, asana_connect_start, disconnect_connection, google_connect_callback,
-        google_connect_start, list_connections, microsoft_connect_callback,
-        microsoft_connect_start, refresh_connection, slack_connect_callback, slack_connect_start,
+        asana_connect_callback, asana_connect_start, disconnect_connection,
+        google_connect_callback, google_connect_start, list_connections,
+        microsoft_connect_callback, microsoft_connect_start, refresh_connection,
+        slack_connect_callback, slack_connect_start,
     },
     options::{
         secrets::{delete_secret, list_secrets, upsert_secret},
@@ -649,7 +650,6 @@ async fn main() -> Result<()> {
         .route("/workspaces/{workspace_gid}/users", get(list_asana_users))
         .route("/workspaces/{workspace_gid}/teams", get(list_asana_teams))
         .route("/workspaces/{workspace_gid}/tasks", get(list_asana_tasks))
-        
         .route("/projects/{project_gid}/sections", get(list_asana_sections))
         .route("/tasks/{task_gid}", get(get_task_details))
         .route("/tasks/{task_gid}/stories", get(list_asana_task_stories))
@@ -666,8 +666,12 @@ async fn main() -> Result<()> {
         });
 
     // Public webhook route (no CSRF, no auth)
-    let public_workflow_routes =
-        Router::new().route("/{workflow_id}/trigger/{token}", post(webhook_trigger));
+    let public_workflow_routes = Router::new()
+        .route("/{workflow_id}/trigger/{token}", post(webhook_trigger))
+        .route(
+            "/{workflow_id}/trigger/{token}/{trigger_label}",
+            post(webhook_trigger),
+        );
     let invite_private_routes = Router::new()
         .route("/invites", get(routes::workspaces::list_pending_invites))
         .route(
@@ -688,8 +692,8 @@ async fn main() -> Result<()> {
     let invite_routes = invite_private_routes.merge(invite_public_routes);
 
     // Google provider routes
-    use routes::google::{list_spreadsheet_sheets, list_spreadsheets_files};
     use routes::google::get_google_access_token;
+    use routes::google::{list_spreadsheet_sheets, list_spreadsheets_files};
 
     let google_routes = Router::new()
         .route(

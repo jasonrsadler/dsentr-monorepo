@@ -10,6 +10,7 @@ use crate::{
 };
 use axum::http::HeaderMap;
 use tracing::error;
+use urlencoding::encode;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -53,6 +54,100 @@ fn missing_webhook_secret_response() -> Response {
         .into_response()
 }
 
+#[derive(Debug, Clone)]
+struct WebhookTrigger {
+    id: String,
+    label: String,
+    normalized_label: String,
+}
+
+fn collect_webhook_triggers(snapshot: &serde_json::Value) -> Vec<WebhookTrigger> {
+    snapshot
+        .get("nodes")
+        .and_then(|arr| arr.as_array())
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|node| {
+                    let node_type = node.get("type")?.as_str()?;
+                    if node_type != "trigger" {
+                        return None;
+                    }
+                    let data = node.get("data")?;
+                    let trigger_type = data
+                        .get("triggerType")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or_default();
+                    if !trigger_type.eq_ignore_ascii_case("webhook") {
+                        return None;
+                    }
+                    let id = node.get("id")?.as_str()?.to_string();
+                    let raw_label = data
+                        .get("label")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim())
+                        .unwrap_or_default();
+                    let label = if raw_label.is_empty() {
+                        id.clone()
+                    } else {
+                        raw_label.to_string()
+                    };
+                    let normalized_label = label.to_lowercase();
+                    Some(WebhookTrigger {
+                        id,
+                        label,
+                        normalized_label,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn select_target_trigger<'a>(
+    triggers: &'a [WebhookTrigger],
+    requested_label: Option<&str>,
+) -> Option<&'a WebhookTrigger> {
+    if let Some(label) = requested_label.and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_lowercase())
+        }
+    }) {
+        triggers
+            .iter()
+            .find(|trigger| trigger.normalized_label == label)
+    } else if triggers.len() == 1 {
+        triggers.first()
+    } else {
+        None
+    }
+}
+
+fn build_trigger_urls(base_url: &str, triggers: &[WebhookTrigger]) -> Vec<serde_json::Value> {
+    triggers
+        .iter()
+        .map(|trigger| {
+            let encoded_label = encode(&trigger.label);
+            json!({
+                "label": trigger.label,
+                "url": format!("{}/{}", base_url, encoded_label)
+            })
+        })
+        .collect()
+}
+
+fn webhook_url_payload(base_url: String, triggers: &[WebhookTrigger]) -> serde_json::Value {
+    let trigger_urls = build_trigger_urls(&base_url, triggers);
+    json!({
+        "success": true,
+        "url": base_url,
+        "triggers": trigger_urls
+    })
+}
+
 pub async fn get_webhook_url(
     State(app_state): State<AppState>,
     AuthSession(claims): AuthSession,
@@ -74,7 +169,8 @@ pub async fn get_webhook_url(
             };
             let token = compute_webhook_token(&secret, wf.user_id, wf.id, wf.webhook_salt);
             let url = format!("/api/workflows/{}/trigger/{}", wf.id, token);
-            (StatusCode::OK, Json(json!({"success": true, "url": url }))).into_response()
+            let triggers = collect_webhook_triggers(&wf.data);
+            (StatusCode::OK, Json(webhook_url_payload(url, &triggers))).into_response()
         }
         Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
         Err(e) => {
@@ -84,12 +180,25 @@ pub async fn get_webhook_url(
     }
 }
 
+#[derive(Deserialize)]
+pub struct WebhookPathParams {
+    pub workflow_id: Uuid,
+    pub token: String,
+    pub trigger_label: Option<String>,
+}
+
 pub async fn webhook_trigger(
     State(app_state): State<AppState>,
-    Path((workflow_id, token)): Path<(Uuid, String)>,
+    Path(params): Path<WebhookPathParams>,
     headers: HeaderMap,
     body: Option<Json<serde_json::Value>>,
 ) -> Response {
+    let WebhookPathParams {
+        workflow_id,
+        token,
+        trigger_label,
+    } = params;
+
     let wf = match app_state
         .workflow_repo
         .find_workflow_by_id_public(workflow_id)
@@ -103,23 +212,10 @@ pub async fn webhook_trigger(
         }
     };
 
-    let trigger_type = wf
-        .data
-        .get("nodes")
-        .and_then(|arr| arr.as_array())
-        .and_then(|nodes| {
-            nodes
-                .iter()
-                .find(|n| n.get("type").and_then(|t| t.as_str()) == Some("trigger"))
-        })
-        .and_then(|trigger| {
-            trigger
-                .get("data")
-                .and_then(|d| d.get("triggerType"))
-                .and_then(|t| t.as_str())
-        });
+    let webhook_triggers = collect_webhook_triggers(&wf.data);
+    let selected_trigger = select_target_trigger(&webhook_triggers, trigger_label.as_deref());
 
-    if trigger_type != Some("Webhook") {
+    if webhook_triggers.is_empty() || selected_trigger.is_none() {
         // As if this workflow never existed.
         return JsonResponse::not_found("Workflow not found").into_response();
     }
@@ -270,6 +366,10 @@ pub async fn webhook_trigger(
     let mut snapshot = wf.data.clone();
     if let Some(Json(ctx)) = body {
         snapshot["_trigger_context"] = ctx;
+    }
+    if let Some(target) = selected_trigger {
+        snapshot["_start_from_node"] = serde_json::Value::String(target.id.clone());
+        snapshot["_start_trigger_label"] = serde_json::Value::String(target.label.clone());
     }
     snapshot["_egress_allowlist"] = serde_json::Value::Array(
         wf.egress_allowlist
@@ -449,11 +549,12 @@ pub async fn regenerate_webhook_token(
                     let signing_key =
                         compute_webhook_signing_key(&secret, w.user_id, w.id, new_salt);
                     let url = format!("/api/workflows/{}/trigger/{}", w.id, token);
-                    (
-                        StatusCode::OK,
-                        Json(json!({"success": true, "url": url, "signing_key": signing_key})),
-                    )
-                        .into_response()
+                    let triggers = collect_webhook_triggers(&w.data);
+                    let mut payload = webhook_url_payload(url, &triggers);
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert("signing_key".to_string(), json!(signing_key));
+                    }
+                    (StatusCode::OK, Json(payload)).into_response()
                 }
                 Ok(None) => JsonResponse::not_found("Workflow not found").into_response(),
                 Err(e) => {
@@ -538,13 +639,285 @@ pub async fn regenerate_webhook_signing_key(
 
     let url = format!("/api/workflows/{}/trigger/{}", wf.id, url_token);
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "success": true,
-            "signing_key": signing_key,
-            "url": url
-        })),
-    )
-        .into_response()
+    let triggers = collect_webhook_triggers(&wf.data);
+    let mut payload = webhook_url_payload(url, &triggers);
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("signing_key".to_string(), json!(signing_key));
+    }
+
+    (StatusCode::OK, Json(payload)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
+        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT, RUNAWAY_LIMIT_5MIN,
+    };
+    use crate::db::{
+        mock_db::{MockDb, StaticWorkspaceMembershipRepository},
+        mock_stripe_event_log_repository::MockStripeEventLogRepository,
+        workflow_repository::{
+            CreateWorkflowRunOutcome, MockWorkflowRepository, WorkflowRepository,
+        },
+        workspace_connection_repository::NoopWorkspaceConnectionRepository,
+        workspace_repository::WorkspaceRepository,
+    };
+    use crate::models::workflow::Workflow;
+    use crate::models::workflow_run::WorkflowRun;
+    use crate::services::{
+        oauth::{
+            github::mock_github_oauth::MockGitHubOAuth, google::mock_google_oauth::MockGoogleOAuth,
+            workspace_service::WorkspaceOAuthService,
+        },
+        smtp_mailer::MockMailer,
+    };
+    use crate::state::{test_pg_pool, AppState};
+    use crate::utils::jwt::JwtKeys;
+    use axum::body::to_bytes;
+    use axum::http::HeaderMap;
+    use reqwest::Client;
+    use serde_json::{json, Value};
+    use std::sync::Arc;
+    use time::OffsetDateTime;
+
+    fn test_config() -> Arc<Config> {
+        Arc::new(Config {
+            database_url: "postgres://localhost/test".into(),
+            frontend_origin: "https://app.example.com".into(),
+            admin_origin: "https://app.example.com".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/slack".into(),
+                },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "https://app.example.com/oauth/asana".into(),
+                },
+                token_encryption_key: vec![0; 32],
+            },
+            api_secrets_encryption_key: vec![1; 32],
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
+        })
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
+    }
+
+    fn workflow_fixture(workspace_id: Uuid, owner_id: Uuid, data: Value) -> Workflow {
+        let now = OffsetDateTime::now_utc();
+        Workflow {
+            id: Uuid::new_v4(),
+            user_id: owner_id,
+            workspace_id: Some(workspace_id),
+            name: "Workflow".into(),
+            description: None,
+            data,
+            concurrency_limit: 1,
+            egress_allowlist: vec![],
+            require_hmac: false,
+            hmac_replay_window_sec: 300,
+            webhook_salt: Uuid::new_v4(),
+            locked_by: None,
+            locked_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn test_state_with_config(
+        config: Arc<Config>,
+        workflow_repo: Arc<dyn WorkflowRepository>,
+        workspace_repo: Arc<dyn WorkspaceRepository>,
+    ) -> AppState {
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo,
+            workspace_repo,
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts: crate::services::oauth::account_service::OAuthAccountService::test_stub(
+            ),
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(crate::services::stripe::MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("worker-1".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        }
+    }
+
+    #[tokio::test]
+    async fn webhook_trigger_sets_start_node_for_named_trigger() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let data = json!({
+            "nodes": [
+                {"id": "wh-1", "type": "trigger", "data": {"label": "First", "triggerType": "Webhook"}},
+                {"id": "wh-2", "type": "trigger", "data": {"label": "Second", "triggerType": "Webhook"}}
+            ],
+            "edges": []
+        });
+        let workflow = workflow_fixture(workspace_id, owner_id, data);
+
+        let mut repo = MockWorkflowRepository::new();
+        let wf_for_public = workflow.clone();
+        repo.expect_count_workspace_runs_since()
+            .returning(|_, _| Box::pin(async { Ok(0) }));
+        repo.expect_find_workflow_by_id_public()
+            .returning(move |wf_id| {
+                let wf = wf_for_public.clone();
+                Box::pin(async move {
+                    assert_eq!(wf_id, wf.id);
+                    Ok(Some(wf))
+                })
+            });
+        repo.expect_create_workflow_run()
+            .returning(move |user_id, wf_id, ws_id, snapshot, _| {
+                assert_eq!(snapshot.get("_start_from_node"), Some(&json!("wh-2")));
+                assert_eq!(snapshot.get("_start_trigger_label"), Some(&json!("Second")));
+                assert_eq!(
+                    snapshot.get("_trigger_context"),
+                    Some(&json!({"hello": "world"}))
+                );
+                let now = OffsetDateTime::now_utc();
+                let run = WorkflowRun {
+                    id: Uuid::new_v4(),
+                    user_id,
+                    workflow_id: wf_id,
+                    workspace_id: ws_id,
+                    snapshot: snapshot.clone(),
+                    status: "queued".into(),
+                    error: None,
+                    idempotency_key: None,
+                    started_at: now,
+                    resume_at: now,
+                    finished_at: None,
+                    created_at: now,
+                    updated_at: now,
+                };
+                Box::pin(async move { Ok(CreateWorkflowRunOutcome { run, created: true }) })
+            });
+
+        let workspace_repo: Arc<StaticWorkspaceMembershipRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::allowing());
+        let config = test_config();
+        let token = compute_webhook_token(
+            &config.webhook_secret,
+            workflow.user_id,
+            workflow.id,
+            workflow.webhook_salt,
+        );
+        let state = test_state_with_config(
+            config,
+            Arc::new(repo),
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+        );
+
+        let response = webhook_trigger(
+            State(state),
+            Path(WebhookPathParams {
+                workflow_id: workflow.id,
+                token,
+                trigger_label: Some("Second".into()),
+            }),
+            HeaderMap::new(),
+            Some(Json(json!({"hello": "world"}))),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["success"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn webhook_trigger_requires_label_when_multiple() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let data = json!({
+            "nodes": [
+                {"id": "wh-1", "type": "trigger", "data": {"label": "Alpha", "triggerType": "Webhook"}},
+                {"id": "wh-2", "type": "trigger", "data": {"label": "Beta", "triggerType": "Webhook"}}
+            ],
+            "edges": []
+        });
+        let workflow = workflow_fixture(workspace_id, owner_id, data);
+
+        let mut repo = MockWorkflowRepository::new();
+        let wf_for_public = workflow.clone();
+        repo.expect_find_workflow_by_id_public()
+            .returning(move |wf_id| {
+                let wf = wf_for_public.clone();
+                Box::pin(async move {
+                    assert_eq!(wf_id, wf.id);
+                    Ok(Some(wf))
+                })
+            });
+        repo.expect_create_workflow_run().times(0);
+
+        let workspace_repo: Arc<StaticWorkspaceMembershipRepository> =
+            Arc::new(StaticWorkspaceMembershipRepository::allowing());
+        let config = test_config();
+        let token = compute_webhook_token(
+            &config.webhook_secret,
+            workflow.user_id,
+            workflow.id,
+            workflow.webhook_salt,
+        );
+        let state = test_state_with_config(
+            config,
+            Arc::new(repo),
+            workspace_repo.clone() as Arc<dyn WorkspaceRepository>,
+        );
+
+        let response = webhook_trigger(
+            State(state),
+            Path(WebhookPathParams {
+                workflow_id: workflow.id,
+                token,
+                trigger_label: None,
+            }),
+            HeaderMap::new(),
+            Some(Json(json!({"hello": "world"}))),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }

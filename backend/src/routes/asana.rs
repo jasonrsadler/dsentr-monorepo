@@ -89,8 +89,7 @@ struct UserPayload {
     email: Option<String>,
 }
 
-#[derive(Default)]
-#[derive(Deserialize, Serialize)]
+#[derive(Default, Deserialize, Serialize)]
 #[serde(default)]
 struct TaskPayload {
     gid: String,
@@ -103,8 +102,7 @@ struct TaskPayload {
     custom_fields: Option<Vec<AsanaCustomField>>,
 }
 
-#[derive(Default, Debug)]
-#[derive(Deserialize, Serialize)]
+#[derive(Default, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AsanaUserRef {
     pub gid: String,
@@ -112,8 +110,7 @@ pub struct AsanaUserRef {
     pub email: Option<String>,
 }
 
-#[derive(Default, Debug)]
-#[derive(Deserialize, Serialize)]
+#[derive(Default, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AsanaCustomField {
     pub gid: String,
@@ -128,8 +125,7 @@ pub struct AsanaCustomField {
     pub enum_value: Option<AsanaEnumValue>,
 }
 
-#[derive(Default, Debug)]
-#[derive(Deserialize, Serialize)]
+#[derive(Default, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AsanaEnumValue {
     pub name: Option<String>,
@@ -250,7 +246,6 @@ struct TaskRecord {
     assignee: Option<AsanaUserRef>,
     custom_fields: Option<Vec<AsanaCustomField>>,
 }
-
 
 #[derive(Debug, Deserialize)]
 struct StoryRecord {
@@ -550,12 +545,7 @@ pub async fn get_task_details(
     // Build TaskPayload
     let payload = TaskPayload {
         gid: record.gid.trim().to_string(),
-        name: record
-            .name
-            .as_deref()
-            .unwrap_or("Task")
-            .trim()
-            .to_string(),
+        name: record.name.as_deref().unwrap_or("Task").trim().to_string(),
         notes: record.notes,
         due_on: record.due_on,
         due_at: record.due_at,

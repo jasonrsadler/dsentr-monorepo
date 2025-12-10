@@ -13,7 +13,12 @@ use super::{ensure_run_membership, ensure_workspace_plan};
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
 
-fn read_required(params: &Value, key: &str, label: &str, context: &Value) -> Result<String, String> {
+fn read_required(
+    params: &Value,
+    key: &str,
+    label: &str,
+    context: &Value,
+) -> Result<String, String> {
     let raw = params
         .get(key)
         .and_then(|v| v.as_str())
@@ -52,7 +57,8 @@ fn parse_additional_fields(params: &Value, context: &Value) -> Map<String, Value
                 }
                 let raw_value = entry.get("value").and_then(|v| v.as_str()).unwrap_or("");
                 let templated = templ_str(raw_value, context);
-                let parsed = serde_json::from_str::<Value>(&templated).unwrap_or(Value::String(templated));
+                let parsed =
+                    serde_json::from_str::<Value>(&templated).unwrap_or(Value::String(templated));
                 map.insert(key, parsed);
             }
         }
@@ -68,7 +74,10 @@ async fn handle_response(response: reqwest::Response) -> Result<Value, String> {
         .map_err(|err| format!("Failed to read Asana response body: {err}"))?;
 
     if !status.is_success() {
-        return Err(format!("Asana request failed with status {}: {}", status, body));
+        return Err(format!(
+            "Asana request failed with status {}: {}",
+            status, body
+        ));
     }
 
     serde_json::from_str(&body)
@@ -87,11 +96,15 @@ fn map_oauth_error(err: OAuthAccountError) -> String {
 
 fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> String {
     match err {
-        WorkspaceOAuthError::Forbidden => "You no longer have access to this workspace connection.".to_string(),
+        WorkspaceOAuthError::Forbidden => {
+            "You no longer have access to this workspace connection.".to_string()
+        }
         WorkspaceOAuthError::NotFound => "Asana workspace connection not found.".to_string(),
         WorkspaceOAuthError::OAuth(inner) => map_oauth_error(inner),
         WorkspaceOAuthError::Database(err) => format!("Failed to load workspace connection: {err}"),
-        WorkspaceOAuthError::Encryption(err) => format!("Failed to decrypt workspace connection: {err}"),
+        WorkspaceOAuthError::Encryption(err) => {
+            format!("Failed to decrypt workspace connection: {err}")
+        }
     }
 }
 
@@ -127,7 +140,9 @@ pub(crate) async fn execute_asana(
                 .map_err(map_workspace_oauth_error)?;
 
             if connection.workspace_id != workspace_id {
-                return Err("The selected Asana connection belongs to another workspace".to_string());
+                return Err(
+                    "The selected Asana connection belongs to another workspace".to_string()
+                );
             }
             if connection.provider != ConnectedOAuthProvider::Asana {
                 return Err("Selected connection is not an Asana connection".to_string());
@@ -159,34 +174,34 @@ pub(crate) async fn execute_asana(
 
     match operation.as_str() {
         "createproject" => {
-          let workspace_gid = read_required(&params, "workspaceGid", "Workspace GID", context)?;
-          let name = read_required(&params, "name", "Name", context)?;
-          let notes = read_optional(&params, "notes", context);
-          let team_gid = read_optional(&params, "teamGid", context);
-          let archived = params.get("archived").and_then(|v| v.as_bool());
-          let mut payload = Map::new();
-          payload.insert("workspace".to_string(), Value::String(workspace_gid));
-          payload.insert("name".to_string(), Value::String(name));
-          if let Some(notes) = notes {
-              payload.insert("notes".to_string(), Value::String(notes));
-          }
-          if let Some(team) = team_gid {
-              payload.insert("team".to_string(), Value::String(team));
-          }
-          if let Some(flag) = archived {
-              payload.insert("archived".to_string(), Value::Bool(flag));
-          }
-          payload.extend(parse_additional_fields(&params, context));
-          let response = state
-              .http_client
-              .post(format!("{ASANA_BASE_URL}/projects"))
-              .bearer_auth(&access_token)
-              .json(&json!({ "data": payload }))
-              .send()
-              .await
-              .map_err(|err| format!("Failed to call Asana: {err}"))?;
-          let body = handle_response(response).await?;
-          Ok((body, None))
+            let workspace_gid = read_required(&params, "workspaceGid", "Workspace GID", context)?;
+            let name = read_required(&params, "name", "Name", context)?;
+            let notes = read_optional(&params, "notes", context);
+            let team_gid = read_optional(&params, "teamGid", context);
+            let archived = params.get("archived").and_then(|v| v.as_bool());
+            let mut payload = Map::new();
+            payload.insert("workspace".to_string(), Value::String(workspace_gid));
+            payload.insert("name".to_string(), Value::String(name));
+            if let Some(notes) = notes {
+                payload.insert("notes".to_string(), Value::String(notes));
+            }
+            if let Some(team) = team_gid {
+                payload.insert("team".to_string(), Value::String(team));
+            }
+            if let Some(flag) = archived {
+                payload.insert("archived".to_string(), Value::Bool(flag));
+            }
+            payload.extend(parse_additional_fields(&params, context));
+            let response = state
+                .http_client
+                .post(format!("{ASANA_BASE_URL}/projects"))
+                .bearer_auth(&access_token)
+                .json(&json!({ "data": payload }))
+                .send()
+                .await
+                .map_err(|err| format!("Failed to call Asana: {err}"))?;
+            let body = handle_response(response).await?;
+            Ok((body, None))
         }
         "deleteproject" => {
             let project_gid = read_required(&params, "projectGid", "Project GID", context)?;
@@ -313,7 +328,10 @@ pub(crate) async fn execute_asana(
             payload.insert("workspace".to_string(), Value::String(workspace_gid));
             payload.insert("name".to_string(), Value::String(name));
             if let Some(project) = read_optional(&params, "projectGid", context) {
-                payload.insert("projects".to_string(), Value::Array(vec![Value::String(project)]));
+                payload.insert(
+                    "projects".to_string(),
+                    Value::Array(vec![Value::String(project)]),
+                );
             }
             if let Some(notes) = read_optional(&params, "notes", context) {
                 payload.insert("notes".to_string(), Value::String(notes));
@@ -423,7 +441,9 @@ pub(crate) async fn execute_asana(
             }
             let response = state
                 .http_client
-                .get(format!("{ASANA_BASE_URL}/workspaces/{workspace_gid}/tasks/search"))
+                .get(format!(
+                    "{ASANA_BASE_URL}/workspaces/{workspace_gid}/tasks/search"
+                ))
                 .bearer_auth(&access_token)
                 .query(&query)
                 .send()

@@ -45,3 +45,4 @@ Operational notes:
 - Run creation endpoints (manual, rerun, webhook) enforce runaway workflow protection per workspace and return `429` with `{"error":"runaway_protection_triggered"}` when the recent-run limit is exceeded.
 - Workflow log listing now validates workspace membership and includes entries from all actors; deletions emit workspace-scoped history records so change logs capture who removed workflows.
 - Added optimistic concurrency and workflow SSE streaming so workspace users get the latest graph automatically and stale saves return 409 with the authoritative payload.
+- Webhook trigger URLs now accept a trigger name suffix; the handler validates the named webhook trigger and seeds runs with `_start_from_node` so multi-trigger workflows dispatch from the requested node.

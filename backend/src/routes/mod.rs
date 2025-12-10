@@ -1,13 +1,13 @@
 pub mod account;
 pub mod admin;
+pub mod asana;
 pub mod auth;
 pub mod billing;
 pub mod dashboard;
 pub mod early_access;
-pub mod issues;
-pub mod asana;
-pub mod microsoft;
 pub mod google;
+pub mod issues;
+pub mod microsoft;
 pub mod oauth;
 pub mod options;
 pub mod plan_limits;

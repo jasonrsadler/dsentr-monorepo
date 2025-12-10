@@ -97,7 +97,10 @@ impl Config {
                     eprintln!("Loaded backend .env from {}", env_path.display());
                 }
                 Err(err) => {
-                    eprintln!("Failed to load backend .env from {}: {err}", env_path.display());
+                    eprintln!(
+                        "Failed to load backend .env from {}: {err}",
+                        env_path.display()
+                    );
                 }
             }
         } else if !dotenv_disabled {
