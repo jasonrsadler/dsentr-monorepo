@@ -106,6 +106,7 @@ use crate::db::{
     workspace_connection_repository::WorkspaceConnectionRepository,
     workspace_repository::WorkspaceRepository,
 };
+use crate::routes::asana::get_task_details;
 use crate::services::pluggable_mailer::PluggableMailer;
 use crate::services::stripe::{LiveStripeService, StripeService};
 use crate::session::SESSION_CACHE;
@@ -648,7 +649,9 @@ async fn main() -> Result<()> {
         .route("/workspaces/{workspace_gid}/users", get(list_asana_users))
         .route("/workspaces/{workspace_gid}/teams", get(list_asana_teams))
         .route("/workspaces/{workspace_gid}/tasks", get(list_asana_tasks))
+        
         .route("/projects/{project_gid}/sections", get(list_asana_sections))
+        .route("/tasks/{task_gid}", get(get_task_details))
         .route("/tasks/{task_gid}/stories", get(list_asana_task_stories))
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());

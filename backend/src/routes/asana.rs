@@ -89,11 +89,56 @@ struct UserPayload {
     email: Option<String>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Default)]
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
 struct TaskPayload {
     gid: String,
     name: String,
+    notes: Option<String>,
+    due_on: Option<String>,
+    due_at: Option<String>,
+    completed: Option<bool>,
+    assignee: Option<AsanaUserRef>,
+    custom_fields: Option<Vec<AsanaCustomField>>,
+}
+
+#[derive(Default, Debug)]
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+pub struct AsanaUserRef {
+    pub gid: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(Default, Debug)]
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+pub struct AsanaCustomField {
+    pub gid: String,
+    pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub field_type: Option<String>,
+
+    pub text_value: Option<String>,
+    pub number_value: Option<f64>,
+
+    // enum fields
+    pub enum_value: Option<AsanaEnumValue>,
+}
+
+#[derive(Default, Debug)]
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+pub struct AsanaEnumValue {
+    pub name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct AsanaList<T> {
+    data: Vec<T>,
 }
 
 #[derive(Serialize)]
@@ -193,11 +238,19 @@ struct UserRecord {
     email: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
 struct TaskRecord {
     gid: String,
     name: Option<String>,
+    notes: Option<String>,
+    due_on: Option<String>,
+    due_at: Option<String>,
+    completed: Option<bool>,
+    assignee: Option<AsanaUserRef>,
+    custom_fields: Option<Vec<AsanaCustomField>>,
 }
+
 
 #[derive(Debug, Deserialize)]
 struct StoryRecord {
@@ -445,6 +498,73 @@ pub async fn list_tasks(
         .into_response(),
         Err(resp) => resp,
     }
+}
+
+#[derive(Deserialize)]
+struct AsanaSingle<T> {
+    data: T,
+}
+
+pub async fn get_task_details(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(task_gid): Path<String>,
+    Query(query): Query<ConnectionQuery>,
+) -> Response {
+    // Authenticate user
+    let user_id = match parse_user_id(&claims) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    // Check plan permissions
+    if let Err(resp) = ensure_workspace_plan_membership(&state, user_id).await {
+        return resp;
+    }
+
+    // Validate OAuth connection
+    let connection_query = ConnectionQuery {
+        scope: query.scope.clone(),
+        connection_id: query.connection_id,
+    };
+
+    let (access_token, _) = match ensure_asana_token(&state, user_id, &connection_query).await {
+        Ok(token) => token,
+        Err(resp) => return resp,
+    };
+
+    // Build Asana URL for a single task
+    let task_url = format!(
+        "{ASANA_BASE_URL}/tasks/{}?opt_fields=name,notes,due_on,due_at,completed,assignee.gid,assignee.name,assignee.email,custom_fields,custom_fields.name,custom_fields.type,custom_fields.text_value,custom_fields.number_value,custom_fields.enum_value.name",
+        urlencoding::encode(&task_gid)
+    );
+
+    // Fetch full single-task object (wrapped in "data")
+    let wrapped: AsanaSingle<TaskRecord> = match get_json(&state, &access_token, &task_url).await {
+        Ok(rec) => rec,
+        Err(resp) => return resp,
+    };
+
+    let record = wrapped.data;
+
+    // Build TaskPayload
+    let payload = TaskPayload {
+        gid: record.gid.trim().to_string(),
+        name: record
+            .name
+            .as_deref()
+            .unwrap_or("Task")
+            .trim()
+            .to_string(),
+        notes: record.notes,
+        due_on: record.due_on,
+        due_at: record.due_at,
+        completed: record.completed,
+        assignee: record.assignee,
+        custom_fields: record.custom_fields,
+    };
+
+    Json(payload).into_response()
 }
 
 pub async fn list_task_stories(
@@ -783,7 +903,7 @@ async fn fetch_tasks(
     }
 
     let url = format!(
-        "{ASANA_BASE_URL}/tasks?opt_fields=name&limit=50&project={}",
+        "{ASANA_BASE_URL}/tasks?opt_fields=name,notes,due_on,due_at,completed,assignee.gid,assignee.name,assignee.emailcustom_fields,custom_fields.name,custom_fields.type,custom_fields.text_value,custom_fields.number_value,custom_fields.enum_value.name&limit=50&project={}",
         urlencoding::encode(trimmed)
     );
 
@@ -802,6 +922,12 @@ async fn fetch_tasks(
                 .filter(|s| !s.is_empty())
                 .unwrap_or("Task")
                 .to_string(),
+            notes: r.notes,
+            due_on: r.due_on,
+            due_at: r.due_at,
+            completed: r.completed,
+            assignee: r.assignee,
+            custom_fields: r.custom_fields,
         })
         .collect())
 }

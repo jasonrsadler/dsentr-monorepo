@@ -32,7 +32,7 @@ interface UsersApiResponse extends AsanaApiResponse {
 }
 
 interface TasksApiResponse extends AsanaApiResponse {
-  tasks?: { gid?: string; name?: string | null }[]
+  tasks?: AsanaTask[] | null
 }
 
 interface StoriesApiResponse extends AsanaApiResponse {
@@ -73,6 +73,42 @@ export interface AsanaUser {
 export interface AsanaTask {
   gid: string
   name: string
+  notes: string
+  due_on: string | null
+  due_at: string | null
+  completed: boolean
+  assignee: {
+    gid: string
+    name: string
+    email: string | null
+  } | null
+  custom_fields: {
+    gid: string
+    name: string
+    type: string
+    text_value: string | null
+    number_value: number | null
+    enum_value: { name: string } | null
+  }[]
+}
+
+export interface AsanaUserRef {
+  gid: string
+  name: string | null
+  email: string | null
+}
+
+export interface AsanaCustomField {
+  gid: string
+  name: string | null
+  type: string | null
+  text_value: string | null
+  number_value: number | null
+  enum_value: AsanaEnumValue | null
+}
+
+export interface AsanaEnumValue {
+  name: string | null
 }
 
 export interface AsanaStory {
@@ -320,14 +356,47 @@ export async function fetchAsanaTasks(
 
   const tasks = Array.isArray(data.tasks) ? data.tasks : []
   return tasks
-    .filter((task) => typeof task?.gid === 'string' && task.gid)
-    .map((task) => {
-      const gid = task!.gid!.trim()
-      const name =
-        (task!.name && task!.name!.trim()) || (gid.length > 0 ? gid : 'Task')
-      return { gid, name }
-    })
+    .filter((t) => t && typeof t.gid === 'string' && t.gid.trim())
+    .map((t) => ({
+      gid: t.gid.trim(),
+      name: (t.name && t.name.trim()) || t.gid.trim(),
+      notes: t.notes ?? '',
+      due_on: t.due_on ?? null,
+      due_at: t.due_at ?? null,
+      completed: t.completed ?? false,
+      assignee: t.assignee
+        ? {
+            gid: t.assignee.gid ?? '',
+            name: t.assignee.name ?? '',
+            email: t.assignee.email ?? null
+          }
+        : null,
+      custom_fields: Array.isArray(t.custom_fields)
+        ? t.custom_fields.map((cf) => ({
+            gid: cf.gid ?? '',
+            name: cf.name ?? '',
+            type: cf.type ?? '',
+            text_value: cf.text_value ?? null,
+            number_value: cf.number_value ?? null,
+            enum_value: cf.enum_value
+              ? { name: cf.enum_value.name ?? '' }
+              : null
+          }))
+        : []
+    }))
     .filter((task) => task.gid.length > 0)
+}
+
+export async function fetchAsanaTaskDetails(
+  taskGid: string,
+  options?: AsanaConnectionOptions
+): Promise<AsanaTask> {
+  const task = encodeURIComponent(taskGid.trim())
+  const data = await requestJson<{ success: boolean; task: AsanaTask }>(
+    appendConnectionQuery(`/api/asana/tasks/${task}`, options),
+    'Asana task details'
+  )
+  return data.task
 }
 
 export async function fetchAsanaStories(
