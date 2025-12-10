@@ -10,6 +10,7 @@
 - Runs drawer only mounts when open, preventing it from overlaying or obscuring the canvas when closed.
 - Runs button styled as a tab beside Designer and the runs panel now slides up from the bottom with animation to avoid blocking the node sidebar.
 - Trigger run actions now pass the trigger id to manual run requests so multi-trigger workflows start from the selected entry instead of dispatching every trigger.
+- Flyout node deletion now uses the same confirmation modal as the on-canvas nodes instead of the browser confirm dialog, keeping delete flows consistent across both surfaces.
 
 ## Notes
 - Pickers are locally stateful and wrapped in useMemo/useCallback with click-outside + Escape handling to avoid React Flow re-render loops.

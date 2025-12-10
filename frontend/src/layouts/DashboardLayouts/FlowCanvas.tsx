@@ -1479,11 +1479,6 @@ function FlyoutActionFields({
     remove: () => useWorkflowStore.getState().removeNode(nodeId)
   })
 
-  const handleDeleteClick = useCallback(() => {
-    const ok = window.confirm('Delete this node? This action cannot be undone.')
-    if (ok) controller.confirmDelete()
-  }, [controller])
-
   const slackRestriction = useMessagingActionRestriction({
     provider: 'slack',
     isSoloPlan: controller.isSoloPlan,
@@ -1581,93 +1576,105 @@ function FlyoutActionFields({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="space-y-2">
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Input Node
-          </label>
-          <NodeDropdownField
-            options={[{ label: 'Nodes', options: inputNodeOptions }]}
-            value={currentInputId}
-            onChange={handleChangeInput}
-            placeholder="Select input node"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Output Node
-          </label>
-          <NodeDropdownField
-            options={[{ label: 'Nodes', options: outputNodeOptions }]}
-            value={currentOutputId}
-            onChange={handleChangeOutput}
-            placeholder="Select output node"
-          />
-        </div>
-      </div>
-
-      <NodeHeader
-        nodeId={nodeId}
-        label={controller.label}
-        dirty={controller.dirty}
-        hasValidationErrors={controller.combinedHasValidationErrors}
-        expanded={true}
-        onLabelChange={controller.handleLabelChange}
-        onExpanded={() => undefined}
-        onConfirmingDelete={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          handleDeleteClick()
-        }}
-      />
-      {controller.labelError ? (
-        <p className="text-xs text-red-500">{controller.labelError}</p>
-      ) : null}
-      {combinedRestrictionMessage ? (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
-          <div className="flex items-start justify-between gap-2">
-            <span>{combinedRestrictionMessage}</span>
-            <button
-              type="button"
-              onClick={controller.handlePlanUpgradeClick}
-              className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
-            >
-              Upgrade
-            </button>
+    <>
+      <div className="flex flex-col gap-3">
+        <div className="space-y-2">
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Input Node
+            </label>
+            <NodeDropdownField
+              options={[{ label: 'Nodes', options: inputNodeOptions }]}
+              value={currentInputId}
+              onChange={handleChangeInput}
+              placeholder="Select input node"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Output Node
+            </label>
+            <NodeDropdownField
+              options={[{ label: 'Nodes', options: outputNodeOptions }]}
+              value={currentOutputId}
+              onChange={handleChangeOutput}
+              placeholder="Select output node"
+            />
           </div>
         </div>
-      ) : null}
 
-      <div className="mt-2 space-y-3">{renderFields()}</div>
-      <div className="mt-4">
-        <p className="text-xs text-zinc-500">Execution Options</p>
-        <div className="mt-2 flex flex-wrap gap-2 items-center">
-          <NodeInputField
-            type="number"
-            value={String(controller.timeout)}
-            onChange={(value) => controller.handleTimeoutChange(Number(value))}
-            className="w-24 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
-          />
-          <span className="text-xs">ms timeout</span>
-          <NodeInputField
-            type="number"
-            value={String(controller.retries)}
-            onChange={(value) => controller.handleRetriesChange(Number(value))}
-            className="w-16 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
-          />
-          <span className="text-xs">retries</span>
-          <NodeCheckBoxField
-            checked={controller.stopOnError}
-            onChange={(value) =>
-              controller.handleStopOnErrorChange(Boolean(value))
-            }
-          >
-            Stop on error
-          </NodeCheckBoxField>
+        <NodeHeader
+          nodeId={nodeId}
+          label={controller.label}
+          dirty={controller.dirty}
+          hasValidationErrors={controller.combinedHasValidationErrors}
+          expanded={true}
+          onLabelChange={controller.handleLabelChange}
+          onExpanded={() => undefined}
+          onConfirmingDelete={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            controller.requestDelete()
+          }}
+        />
+        {controller.labelError ? (
+          <p className="text-xs text-red-500">{controller.labelError}</p>
+        ) : null}
+        {combinedRestrictionMessage ? (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
+            <div className="flex items-start justify-between gap-2">
+              <span>{combinedRestrictionMessage}</span>
+              <button
+                type="button"
+                onClick={controller.handlePlanUpgradeClick}
+                className="rounded border border-amber-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/60 dark:text-amber-100 dark:hover:bg-amber-400/10"
+              >
+                Upgrade
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-2 space-y-3">{renderFields()}</div>
+        <div className="mt-4">
+          <p className="text-xs text-zinc-500">Execution Options</p>
+          <div className="mt-2 flex flex-wrap gap-2 items-center">
+            <NodeInputField
+              type="number"
+              value={String(controller.timeout)}
+              onChange={(value) =>
+                controller.handleTimeoutChange(Number(value))
+              }
+              className="w-24 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
+            />
+            <span className="text-xs">ms timeout</span>
+            <NodeInputField
+              type="number"
+              value={String(controller.retries)}
+              onChange={(value) =>
+                controller.handleRetriesChange(Number(value))
+              }
+              className="w-16 text-xs p-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent"
+            />
+            <span className="text-xs">retries</span>
+            <NodeCheckBoxField
+              checked={controller.stopOnError}
+              onChange={(value) =>
+                controller.handleStopOnErrorChange(Boolean(value))
+              }
+            >
+              Stop on error
+            </NodeCheckBoxField>
+          </div>
         </div>
       </div>
-    </div>
+
+      <DeleteNodeModal
+        open={controller.confirmingDelete}
+        onCancel={controller.cancelDelete}
+        onConfirm={controller.confirmDelete}
+      />
+    </>
   )
 }
 
@@ -1732,14 +1739,19 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
   const labelError: string | null = nodeData?.labelError ?? null
   const triggerType: string =
     typeof nodeData?.triggerType === 'string' ? nodeData.triggerType : 'Manual'
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const handleLabelChange = useCallback(
     (value: string) => updateNodeData(nodeId, { label: value, dirty: true }),
     [nodeId, updateNodeData]
   )
   const handleDeleteClick = useCallback(() => {
-    const ok = window.confirm('Delete this node? This action cannot be undone.')
-    if (ok) useWorkflowStore.getState().removeNode(nodeId)
+    setConfirmingDelete(true)
+  }, [])
+  const handleCancelDelete = useCallback(() => setConfirmingDelete(false), [])
+  const handleConfirmDelete = useCallback(() => {
+    setConfirmingDelete(false)
+    useWorkflowStore.getState().removeNode(nodeId)
   }, [nodeId])
   const handleTriggerTypeChange = useCallback(
     (value: string) =>
@@ -1976,154 +1988,115 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
     }
   }, [timezonePickerOpen])
   return (
-    <div className="flex flex-col gap-3">
-      <div className="space-y-2">
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Input Node
-          </label>
-          <NodeDropdownField
-            options={[
-              {
-                label: 'Nodes',
-                options: [{ label: 'N/A', value: 'na', disabled: true }]
-              }
-            ]}
-            value="N/A"
-            onChange={() => undefined}
-            placeholder="N/A"
-            disabled
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Output Node
-          </label>
-          <NodeDropdownField
-            options={[{ label: 'Nodes', options: nodeOptions }]}
-            value={currentOutputId}
-            onChange={handleChangeOutput}
-            placeholder="Select output node"
-          />
-        </div>
-      </div>
-
-      <NodeHeader
-        nodeId={nodeId}
-        label={(nodeData?.label as string) || 'Trigger'}
-        dirty={Boolean(nodeData?.dirty)}
-        hasValidationErrors={Boolean(labelError)}
-        expanded={true}
-        onLabelChange={handleLabelChange}
-        onExpanded={() => undefined}
-        onConfirmingDelete={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          handleDeleteClick()
-        }}
-      />
-      {labelError ? <p className="text-xs text-red-500">{labelError}</p> : null}
-
-      <div>
-        <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Trigger Type
-        </label>
-        <div className="mt-2">
-          <TriggerTypeDropdown
-            value={triggerType}
-            onChange={handleTriggerTypeChange}
-            disabledOptions={
-              isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
-            }
-          />
-        </div>
-      </div>
-
-      {triggerType === 'Schedule' ? (
-        <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-              Schedule Settings
-            </h4>
-            <button
-              type="button"
-              onClick={() => {
-                if (scheduleConfig?.repeat) {
-                  // Disable repeat
-                  handleSchedulePatch({ repeat: undefined })
-                } else {
-                  handleSchedulePatch({ repeat: { every: 1, unit: 'days' } })
+    <>
+      <div className="flex flex-col gap-3">
+        <div className="space-y-2">
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Input Node
+            </label>
+            <NodeDropdownField
+              options={[
+                {
+                  label: 'Nodes',
+                  options: [{ label: 'N/A', value: 'na', disabled: true }]
                 }
-              }}
-              className="flex items-center gap-2 text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-            >
-              <RefreshCcw className="h-3 w-3" />
-              {scheduleConfig?.repeat ? 'Disable repeat' : 'Enable repeat'}
-            </button>
+              ]}
+              value="N/A"
+              onChange={() => undefined}
+              placeholder="N/A"
+              disabled
+            />
           </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Output Node
+            </label>
+            <NodeDropdownField
+              options={[{ label: 'Nodes', options: nodeOptions }]}
+              value={currentOutputId}
+              onChange={handleChangeOutput}
+              placeholder="Select output node"
+            />
+          </div>
+        </div>
 
-          <div className="mt-4 space-y-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Start Date
-              </label>
-              <div ref={datePickerContainerRef} className="relative mt-2">
-                <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTimePickerOpen(false)
-                    setTimezonePickerOpen(false)
-                    setDatePickerOpen((p) => !p)
-                  }}
-                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                >
-                  {formatDisplayDate(scheduleConfig?.startDate)}
-                </button>
-                <AnimatePresence>
-                  {datePickerOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute left-0 right-0 z-20 mt-2"
-                    >
-                      <ScheduleCalendar
-                        month={datePickerMonth}
-                        selectedDate={scheduleConfig?.startDate}
-                        todayISO={todayISO}
-                        onMonthChange={(m) => setDatePickerMonth(m)}
-                        onSelectDate={(isoDate) => {
-                          handleSchedulePatch({ startDate: isoDate })
-                          setDatePickerOpen(false)
-                        }}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+        <NodeHeader
+          nodeId={nodeId}
+          label={(nodeData?.label as string) || 'Trigger'}
+          dirty={Boolean(nodeData?.dirty)}
+          hasValidationErrors={Boolean(labelError)}
+          expanded={true}
+          onLabelChange={handleLabelChange}
+          onExpanded={() => undefined}
+          onConfirmingDelete={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleDeleteClick()
+          }}
+        />
+        {labelError ? (
+          <p className="text-xs text-red-500">{labelError}</p>
+        ) : null}
+
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Trigger Type
+          </label>
+          <div className="mt-2">
+            <TriggerTypeDropdown
+              value={triggerType}
+              onChange={handleTriggerTypeChange}
+              disabledOptions={
+                isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
+              }
+            />
+          </div>
+        </div>
+
+        {triggerType === 'Schedule' ? (
+          <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                Schedule Settings
+              </h4>
+              <button
+                type="button"
+                onClick={() => {
+                  if (scheduleConfig?.repeat) {
+                    // Disable repeat
+                    handleSchedulePatch({ repeat: undefined })
+                  } else {
+                    handleSchedulePatch({ repeat: { every: 1, unit: 'days' } })
+                  }
+                }}
+                className="flex items-center gap-2 text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                <RefreshCcw className="h-3 w-3" />
+                {scheduleConfig?.repeat ? 'Disable repeat' : 'Enable repeat'}
+              </button>
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+
+            <div className="mt-4 space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  Start Time
+                  Start Date
                 </label>
-                <div ref={timePickerContainerRef} className="relative mt-2">
-                  <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                <div ref={datePickerContainerRef} className="relative mt-2">
+                  <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
                   <button
                     type="button"
                     onClick={() => {
-                      setDatePickerOpen(false)
+                      setTimePickerOpen(false)
                       setTimezonePickerOpen(false)
-                      setTimePickerOpen((p) => !p)
+                      setDatePickerOpen((p) => !p)
                     }}
                     className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
                   >
-                    {formatDisplayTime(scheduleConfig?.startTime)}
+                    {formatDisplayDate(scheduleConfig?.startDate)}
                   </button>
                   <AnimatePresence>
-                    {timePickerOpen && (
+                    {datePickerOpen && (
                       <motion.div
                         initial={{ opacity: 0, scale: 0.95, y: -4 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -2131,65 +2104,14 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
                         transition={{ duration: 0.15 }}
                         className="absolute left-0 right-0 z-20 mt-2"
                       >
-                        <ScheduleTimePicker
-                          selectedTime={selectedTime}
-                          onSelect={(time) => {
-                            handleSchedulePatch({ startTime: time })
-                          }}
-                          onClose={() => setTimePickerOpen(false)}
-                        />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  Timezone
-                </label>
-                <div ref={timezonePickerContainerRef} className="relative mt-2">
-                  <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
-                  <button
-                    ref={timezoneButtonRef}
-                    type="button"
-                    onClick={() => {
-                      setDatePickerOpen(false)
-                      setTimePickerOpen(false)
-                      setTimezonePickerOpen((p) => !p)
-                    }}
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                  >
-                    <span
-                      className="block truncate"
-                      title={scheduleConfig?.timezone || 'Select timezone'}
-                    >
-                      {scheduleConfig?.timezone || 'Select timezone'}
-                    </span>
-                  </button>
-                  <AnimatePresence>
-                    {timezonePickerOpen && tzPos && (
-                      <motion.div
-                        ref={timezoneDropdownRef}
-                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                        transition={{ duration: 0.15 }}
-                        className="z-50"
-                        style={{
-                          position: 'fixed',
-                          top: tzPos.top,
-                          left: tzPos.left,
-                          width: tzPos.width
-                        }}
-                      >
-                        <ScheduleTimezonePicker
-                          options={filteredTimezoneOptions}
-                          selectedTimezone={scheduleConfig?.timezone || ''}
-                          search={timezoneSearch}
-                          onSearchChange={(v) => setTimezoneSearch(v)}
-                          onSelect={(tz) => {
-                            handleSchedulePatch({ timezone: tz })
-                            setTimezonePickerOpen(false)
+                        <ScheduleCalendar
+                          month={datePickerMonth}
+                          selectedDate={scheduleConfig?.startDate}
+                          todayISO={todayISO}
+                          onMonthChange={(m) => setDatePickerMonth(m)}
+                          onSelectDate={(isoDate) => {
+                            handleSchedulePatch({ startDate: isoDate })
+                            setDatePickerOpen(false)
                           }}
                         />
                       </motion.div>
@@ -2197,75 +2119,178 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
                   </AnimatePresence>
                 </div>
               </div>
-            </div>
-
-            {scheduleConfig?.repeat ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    Repeat every
+                    Start Time
                   </label>
-                  <div className="mt-2 flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      value={scheduleConfig?.repeat?.every ?? 1}
-                      onChange={(e) => {
-                        const raw = Number(e.target.value)
-                        const clamped = Number.isFinite(raw)
-                          ? Math.max(1, Math.floor(raw))
-                          : 1
-                        handleSchedulePatch({
-                          repeat: {
-                            every: clamped,
-                            unit: scheduleConfig?.repeat?.unit ?? 'days'
-                          }
-                        })
+                  <div ref={timePickerContainerRef} className="relative mt-2">
+                    <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDatePickerOpen(false)
+                        setTimezonePickerOpen(false)
+                        setTimePickerOpen((p) => !p)
                       }}
-                      className="h-10 w-20 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-                    />
-                    <select
-                      value={scheduleConfig?.repeat?.unit ?? 'days'}
-                      onChange={(e) => {
-                        const val = (e.target.value || 'days') as
-                          | 'minutes'
-                          | 'hours'
-                          | 'days'
-                          | 'weeks'
-                        const unit = (
-                          ['minutes', 'hours', 'days', 'weeks'] as const
-                        ).includes(val as any)
-                          ? val
-                          : 'days'
-                        handleSchedulePatch({
-                          repeat: {
-                            every: scheduleConfig?.repeat?.every ?? 1,
-                            unit
-                          }
-                        })
-                      }}
-                      className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pr-8 text-sm font-semibold capitalize text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 sm:w-40"
+                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
                     >
-                      {['minutes', 'hours', 'days', 'weeks'].map((u) => (
-                        <option key={u} value={u}>
-                          {u.charAt(0).toUpperCase() + u.slice(1)}
-                        </option>
-                      ))}
-                    </select>
+                      {formatDisplayTime(scheduleConfig?.startTime)}
+                    </button>
+                    <AnimatePresence>
+                      {timePickerOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                          transition={{ duration: 0.15 }}
+                          className="absolute left-0 right-0 z-20 mt-2"
+                        >
+                          <ScheduleTimePicker
+                            selectedTime={selectedTime}
+                            onSelect={(time) => {
+                              handleSchedulePatch({ startTime: time })
+                            }}
+                            onClose={() => setTimePickerOpen(false)}
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Timezone
+                  </label>
+                  <div
+                    ref={timezonePickerContainerRef}
+                    className="relative mt-2"
+                  >
+                    <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-300" />
+                    <button
+                      ref={timezoneButtonRef}
+                      type="button"
+                      onClick={() => {
+                        setDatePickerOpen(false)
+                        setTimePickerOpen(false)
+                        setTimezonePickerOpen((p) => !p)
+                      }}
+                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pl-10 text-left text-sm font-medium text-zinc-900 shadow-sm transition hover:border-blue-400 hover:shadow focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                    >
+                      <span
+                        className="block truncate"
+                        title={scheduleConfig?.timezone || 'Select timezone'}
+                      >
+                        {scheduleConfig?.timezone || 'Select timezone'}
+                      </span>
+                    </button>
+                    <AnimatePresence>
+                      {timezonePickerOpen && tzPos && (
+                        <motion.div
+                          ref={timezoneDropdownRef}
+                          initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                          transition={{ duration: 0.15 }}
+                          className="z-50"
+                          style={{
+                            position: 'fixed',
+                            top: tzPos.top,
+                            left: tzPos.left,
+                            width: tzPos.width
+                          }}
+                        >
+                          <ScheduleTimezonePicker
+                            options={filteredTimezoneOptions}
+                            selectedTimezone={scheduleConfig?.timezone || ''}
+                            search={timezoneSearch}
+                            onSearchChange={(v) => setTimezoneSearch(v)}
+                            onSelect={(tz) => {
+                              handleSchedulePatch({ timezone: tz })
+                              setTimezonePickerOpen(false)
+                            }}
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </div>
               </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
 
-      <KeyValuePair
-        title="Input Variables"
-        variables={inputs}
-        onChange={(vars) => handleInputsChange(vars)}
+              {scheduleConfig?.repeat ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      Repeat every
+                    </label>
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        value={scheduleConfig?.repeat?.every ?? 1}
+                        onChange={(e) => {
+                          const raw = Number(e.target.value)
+                          const clamped = Number.isFinite(raw)
+                            ? Math.max(1, Math.floor(raw))
+                            : 1
+                          handleSchedulePatch({
+                            repeat: {
+                              every: clamped,
+                              unit: scheduleConfig?.repeat?.unit ?? 'days'
+                            }
+                          })
+                        }}
+                        className="h-10 w-20 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                      />
+                      <select
+                        value={scheduleConfig?.repeat?.unit ?? 'days'}
+                        onChange={(e) => {
+                          const val = (e.target.value || 'days') as
+                            | 'minutes'
+                            | 'hours'
+                            | 'days'
+                            | 'weeks'
+                          const unit = (
+                            ['minutes', 'hours', 'days', 'weeks'] as const
+                          ).includes(val as any)
+                            ? val
+                            : 'days'
+                          handleSchedulePatch({
+                            repeat: {
+                              every: scheduleConfig?.repeat?.every ?? 1,
+                              unit
+                            }
+                          })
+                        }}
+                        className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 pr-8 text-sm font-semibold capitalize text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 sm:w-40"
+                      >
+                        {['minutes', 'hours', 'days', 'weeks'].map((u) => (
+                          <option key={u} value={u}>
+                            {u.charAt(0).toUpperCase() + u.slice(1)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        <KeyValuePair
+          title="Input Variables"
+          variables={inputs}
+          onChange={(vars) => handleInputsChange(vars)}
+        />
+      </div>
+
+      <DeleteNodeModal
+        open={confirmingDelete}
+        onCancel={handleCancelDelete}
+        onConfirm={handleConfirmDelete}
       />
-    </div>
+    </>
   )
 }
 
@@ -2346,6 +2371,7 @@ function FlyoutConditionFields({ nodeId }: FlyoutConditionFieldsProps) {
   const operator =
     typeof nodeData?.operator === 'string' ? nodeData.operator : 'equals'
   const value = typeof nodeData?.value === 'string' ? nodeData.value : ''
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const buildExpression = useCallback((f: string, op: string, v: string) => {
     const left = (f || '').trim()
@@ -2399,8 +2425,12 @@ function FlyoutConditionFields({ nodeId }: FlyoutConditionFieldsProps) {
     [nodeId, updateNodeData]
   )
   const handleDeleteClick = useCallback(() => {
-    const ok = window.confirm('Delete this node? This action cannot be undone.')
-    if (ok) useWorkflowStore.getState().removeNode(nodeId)
+    setConfirmingDelete(true)
+  }, [])
+  const handleCancelDelete = useCallback(() => setConfirmingDelete(false), [])
+  const handleConfirmDelete = useCallback(() => {
+    setConfirmingDelete(false)
+    useWorkflowStore.getState().removeNode(nodeId)
   }, [nodeId])
   const handleField = useCallback(
     (v: string) => updateNodeData(nodeId, { field: v, dirty: true }),
@@ -2416,99 +2446,109 @@ function FlyoutConditionFields({ nodeId }: FlyoutConditionFieldsProps) {
   )
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="space-y-2">
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Input Node
-          </label>
-          <NodeDropdownField
-            options={[
-              {
-                label: 'Nodes',
-                options: allNodes
-                  .filter((n) => n.id !== nodeId)
-                  .map((n) => ({ label: getNodeLabel(n), value: n.id }))
-              }
-            ]}
-            value={allEdges.find((e) => e.target === nodeId)?.source ?? ''}
-            onChange={(nextSourceId) => {
-              const state = useWorkflowStore.getState()
-              const base = state.edges.filter((e) => e.target !== nodeId)
-              const newEdge = {
-                id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
-                source: nextSourceId,
-                target: nodeId,
-                type: 'nodeEdge',
-                data: { edgeType: 'default' }
-              } as any
-              setEdges(normalizeEdgesForState([...base, newEdge]))
-            }}
-            placeholder="Select input node"
-          />
+    <>
+      <div className="flex flex-col gap-3">
+        <div className="space-y-2">
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Input Node
+            </label>
+            <NodeDropdownField
+              options={[
+                {
+                  label: 'Nodes',
+                  options: allNodes
+                    .filter((n) => n.id !== nodeId)
+                    .map((n) => ({ label: getNodeLabel(n), value: n.id }))
+                }
+              ]}
+              value={allEdges.find((e) => e.target === nodeId)?.source ?? ''}
+              onChange={(nextSourceId) => {
+                const state = useWorkflowStore.getState()
+                const base = state.edges.filter((e) => e.target !== nodeId)
+                const newEdge = {
+                  id: `e-${nextSourceId}-${nodeId}-${Date.now()}`,
+                  source: nextSourceId,
+                  target: nodeId,
+                  type: 'nodeEdge',
+                  data: { edgeType: 'default' }
+                } as any
+                setEdges(normalizeEdgesForState([...base, newEdge]))
+              }}
+              placeholder="Select input node"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              True Output
+            </label>
+            <NodeDropdownField
+              options={[{ label: 'Nodes', options: nodeOptions }]}
+              value={trueOutputId}
+              onChange={(v) => changeCondOutput('cond-true', v)}
+              placeholder="Select true output"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              False Output
+            </label>
+            <NodeDropdownField
+              options={[{ label: 'Nodes', options: nodeOptions }]}
+              value={falseOutputId}
+              onChange={(v) => changeCondOutput('cond-false', v)}
+              placeholder="Select false output"
+            />
+          </div>
         </div>
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            True Output
-          </label>
-          <NodeDropdownField
-            options={[{ label: 'Nodes', options: nodeOptions }]}
-            value={trueOutputId}
-            onChange={(v) => changeCondOutput('cond-true', v)}
-            placeholder="Select true output"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            False Output
-          </label>
-          <NodeDropdownField
-            options={[{ label: 'Nodes', options: nodeOptions }]}
-            value={falseOutputId}
-            onChange={(v) => changeCondOutput('cond-false', v)}
-            placeholder="Select false output"
-          />
-        </div>
+
+        <NodeHeader
+          nodeId={nodeId}
+          label={(nodeData?.label as string) || 'Condition'}
+          dirty={Boolean(nodeData?.dirty)}
+          hasValidationErrors={Boolean(labelError) || hasValidationErrors}
+          expanded={true}
+          onLabelChange={handleLabelChange}
+          onExpanded={() => undefined}
+          onConfirmingDelete={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleDeleteClick()
+          }}
+        />
+        {labelError ? (
+          <p className="text-xs text-red-500">{labelError}</p>
+        ) : null}
+
+        <NodeInputField
+          placeholder="Field name"
+          value={field}
+          onChange={handleField}
+        />
+        <NodeDropdownField
+          options={[
+            'equals',
+            'not equals',
+            'greater than',
+            'less than',
+            'contains'
+          ]}
+          value={operator}
+          onChange={handleOperator}
+        />
+        <NodeInputField
+          placeholder="Comparison value"
+          value={value}
+          onChange={handleValue}
+        />
       </div>
 
-      <NodeHeader
-        nodeId={nodeId}
-        label={(nodeData?.label as string) || 'Condition'}
-        dirty={Boolean(nodeData?.dirty)}
-        hasValidationErrors={Boolean(labelError) || hasValidationErrors}
-        expanded={true}
-        onLabelChange={handleLabelChange}
-        onExpanded={() => undefined}
-        onConfirmingDelete={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          handleDeleteClick()
-        }}
+      <DeleteNodeModal
+        open={confirmingDelete}
+        onCancel={handleCancelDelete}
+        onConfirm={handleConfirmDelete}
       />
-      {labelError ? <p className="text-xs text-red-500">{labelError}</p> : null}
-
-      <NodeInputField
-        placeholder="Field name"
-        value={field}
-        onChange={handleField}
-      />
-      <NodeDropdownField
-        options={[
-          'equals',
-          'not equals',
-          'greater than',
-          'less than',
-          'contains'
-        ]}
-        value={operator}
-        onChange={handleOperator}
-      />
-      <NodeInputField
-        placeholder="Comparison value"
-        value={value}
-        onChange={handleValue}
-      />
-    </div>
+    </>
   )
 }
 
@@ -2598,6 +2638,7 @@ function FlyoutDelayFields({ nodeId }: { nodeId: string }) {
   )
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
   const canEdit = useWorkflowStore((state) => state.canEdit)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const normalizedConfig = useMemo(
     () => normalizeDelayConfig(nodeData?.config as DelayConfig | undefined),
@@ -2627,14 +2668,17 @@ function FlyoutDelayFields({ nodeId }: { nodeId: string }) {
     [canEdit, nodeId, updateNodeData]
   )
 
-  const handleDelete = useCallback(() => {
+  const handleRequestDelete = useCallback(() => {
     if (!canEdit) return
-    const confirmed = window.confirm(
-      'Delete this node? This action cannot be undone.'
-    )
-    if (confirmed) {
-      useWorkflowStore.getState().removeNode(nodeId)
-    }
+    setConfirmingDelete(true)
+  }, [canEdit])
+
+  const handleCancelDelete = useCallback(() => setConfirmingDelete(false), [])
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!canEdit) return
+    setConfirmingDelete(false)
+    useWorkflowStore.getState().removeNode(nodeId)
   }, [canEdit, nodeId])
 
   const handleConfigChange = useCallback(
@@ -2657,30 +2701,89 @@ function FlyoutDelayFields({ nodeId }: { nodeId: string }) {
       : 'Delay'
 
   return (
-    <div className="flex flex-col gap-3">
-      <NodeHeader
-        nodeId={nodeId}
-        label={label}
-        dirty={Boolean(nodeData?.dirty)}
-        hasValidationErrors={
-          Boolean(nodeData?.labelError) ||
-          Boolean(nodeData?.hasValidationErrors)
-        }
-        expanded
-        onLabelChange={handleLabelChange}
-        onExpanded={() => undefined}
-        onConfirmingDelete={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          handleDelete()
-        }}
+    <>
+      <div className="flex flex-col gap-3">
+        <NodeHeader
+          nodeId={nodeId}
+          label={label}
+          dirty={Boolean(nodeData?.dirty)}
+          hasValidationErrors={
+            Boolean(nodeData?.labelError) ||
+            Boolean(nodeData?.hasValidationErrors)
+          }
+          expanded
+          onLabelChange={handleLabelChange}
+          onExpanded={() => undefined}
+          onConfirmingDelete={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleRequestDelete()
+          }}
+        />
+        <DelayNodeConfig
+          config={normalizedConfig}
+          onChange={handleConfigChange}
+          hasValidationErrors={hasValidationErrors}
+          canEdit={canEdit}
+        />
+      </div>
+
+      <DeleteNodeModal
+        open={confirmingDelete}
+        onCancel={handleCancelDelete}
+        onConfirm={handleConfirmDelete}
       />
-      <DelayNodeConfig
-        config={normalizedConfig}
-        onChange={handleConfigChange}
-        hasValidationErrors={hasValidationErrors}
-        canEdit={canEdit}
-      />
-    </div>
+    </>
+  )
+}
+
+interface DeleteNodeModalProps {
+  open: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}
+
+function DeleteNodeModal({ open, onCancel, onConfirm }: DeleteNodeModalProps) {
+  return (
+    <AnimatePresence>
+      {open ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.97 }}
+            className="w-full max-w-xs rounded-xl bg-white p-4 shadow-md dark:bg-zinc-800"
+          >
+            <p className="text-sm text-zinc-900 dark:text-zinc-100">
+              Delete this node?
+            </p>
+            <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-300">
+              This action can not be undone
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="rounded border border-zinc-300 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-700/50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                className="rounded bg-red-500 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-red-600"
+              >
+                Delete
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   )
 }
