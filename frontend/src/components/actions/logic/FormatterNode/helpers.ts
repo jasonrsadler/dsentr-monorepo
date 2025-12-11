@@ -226,8 +226,7 @@ const sanitizeFieldsForOperation = (
 export const normalizeFormatterConfig = (
   config?: FormatterConfig
 ): FormatterConfig => {
-  const operation =
-    typeof config?.operation === 'string' ? config.operation : ''
+  const operation = typeof config?.operation === 'string' ? config.operation : ''
   const input = typeof config?.input === 'string' ? config.input : ''
   const output_key =
     typeof config?.output_key === 'string' ? config.output_key : ''
