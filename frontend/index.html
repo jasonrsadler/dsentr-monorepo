@@ -17,12 +17,32 @@
       base-uri 'self'; object-src 'none'" />
   <base href="/" />
   <title>DSentr</title>
-</head>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "url": "https://app.dsentr.com/",
+    "name": "DSentr",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "https://app.dsentr.com/search?q={query}",
+      "query-input": "required name=query"
+    }
+  }
+  </script>
 
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/themeBootstrapper.ts"></script>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
-
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "DSentr",
+    "url": "https://app.dsentr.com/",
+    "logo": "https://app.dsentr.com/dsentr.svg"
+  }
+  </script>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/themeBootstrapper.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

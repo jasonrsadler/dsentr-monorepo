@@ -15,7 +15,6 @@ import {
   fetchAsanaSections,
   fetchAsanaStories,
   fetchAsanaTags,
-  fetchAsanaTaskDetails,
   fetchAsanaTasks,
   fetchAsanaTeams,
   fetchAsanaUsers,
@@ -703,7 +702,9 @@ const validateAsanaParams = (
     const hasProject = Boolean(params.projectGid?.trim())
     const hasTag = Boolean(params.tagGid?.trim())
     const hasAssignee = Boolean(params.assignee?.trim())
-    const selectedCount = [hasProject, hasTag, hasAssignee].filter(Boolean).length
+    const selectedCount = [hasProject, hasTag, hasAssignee].filter(
+      Boolean
+    ).length
 
     if (selectedCount === 0) {
       const message =
@@ -712,7 +713,8 @@ const validateAsanaParams = (
       errors.tagGid = message
       errors.assignee = message
     } else if (selectedCount > 1) {
-      const message = 'Choose only one of project, tag, or assignee for list tasks'
+      const message =
+        'Choose only one of project, tag, or assignee for list tasks'
       errors.projectGid = message
       errors.tagGid = message
       errors.assignee = message
@@ -1315,15 +1317,13 @@ export default function AsanaAction({
       (asanaParams.projectGid ?? '').trim(),
     [asanaParams.projectGid, asanaParams.projectSelection]
   )
-  const isManualProjectSelection =
-    projectSelectionValue === MANUAL_OPTION_VALUE
+  const isManualProjectSelection = projectSelectionValue === MANUAL_OPTION_VALUE
   const taskSelectionValue = useMemo(
     () =>
       (asanaParams.taskSelection ?? '').trim() ||
       (asanaParams.taskGid ?? '').trim(),
     [asanaParams.taskGid, asanaParams.taskSelection]
   )
-  const isManualTaskSelection = taskSelectionValue === MANUAL_OPTION_VALUE
   const parentTaskSelectionValue = useMemo(
     () =>
       (asanaParams.parentTaskSelection ?? '').trim() ||
@@ -2020,11 +2020,7 @@ export default function AsanaAction({
     ) {
       applyAsanaPatch({ taskSelection: MANUAL_OPTION_VALUE })
     }
-  }, [
-    applyAsanaPatch,
-    asanaParams.operation,
-    taskSelectionValue
-  ])
+  }, [applyAsanaPatch, asanaParams.operation, taskSelectionValue])
 
   const handleParentTaskSelect = useCallback(
     (parentTaskGid: string) => {
@@ -2623,21 +2619,14 @@ export default function AsanaAction({
           requiredOrdered.push('taskGid')
         }
         if (visibility['projectGid']) {
-          if (
-            req.includes('projectGid') ||
-            (opt.includes('projectGid') && asanaParams.operation !== 'createTask')
-          ) {
+          if (req.includes('projectGid') || opt.includes('projectGid')) {
             requiredOrdered.push('projectGid')
             const idx = optionalFiltered.indexOf('projectGid')
             if (idx !== -1) optionalFiltered.splice(idx, 1)
           }
         }
         req.forEach((f) => {
-          if (
-            f === 'workspaceGid' ||
-            f === 'projectGid' ||
-            f === 'taskGid'
-          )
+          if (f === 'workspaceGid' || f === 'projectGid' || f === 'taskGid')
             return
           requiredOrdered.push(f)
         })
@@ -2752,7 +2741,9 @@ export default function AsanaAction({
             value={currentValue}
             onChange={handleProjectInputChange}
             placeholder="Project GID (supports templates)"
-            disabled={!effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid}
+            disabled={
+              !effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid
+            }
           />
           {projectOptionsError && (
             <p className="text-xs text-red-500">{projectOptionsError}</p>
@@ -2891,7 +2882,9 @@ export default function AsanaAction({
             value={currentValue}
             onChange={handleTagInputChange}
             placeholder="Tag GID (supports templates)"
-            disabled={!effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid}
+            disabled={
+              !effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid
+            }
           />
           {tagOptionsError && (
             <p className="text-xs text-red-500">{tagOptionsError}</p>
@@ -2962,7 +2955,9 @@ export default function AsanaAction({
             value={currentValue}
             onChange={handleAssigneeInputChange}
             placeholder="Assignee GID (supports templates)"
-            disabled={!effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid}
+            disabled={
+              !effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid
+            }
           />
           {userOptionsError && (
             <p className="text-xs text-red-500">{userOptionsError}</p>
@@ -3272,7 +3267,7 @@ export default function AsanaAction({
                 </div>
               ) : null}
             </div>
-            </div>
+          </div>
           <NodeInputField
             value={asanaParams.dueAt ?? ''}
             onChange={(val) => {
@@ -3435,7 +3430,8 @@ export default function AsanaAction({
                 </p>
                 {asanaParams.operation === 'listTasks' && (
                   <div className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-400/50 dark:bg-amber-950/30 dark:text-amber-100">
-                    Provide exactly one: project, tag, or assignee (requires workspace). Selecting more than one will fail.
+                    Provide exactly one: project, tag, or assignee (requires
+                    workspace). Selecting more than one will fail.
                   </div>
                 )}
                 <div className="space-y-2">

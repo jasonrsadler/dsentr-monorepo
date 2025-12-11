@@ -249,7 +249,7 @@ export default function NodeDropdownField({
                 const label = group.label || 'Options'
                 const stateKey = group.label || `group-${groupIndex}`
                 const hasSearch = searchTerm.trim().length > 0
-                const isOpen = hasSearch ? true : openGroups[stateKey] ?? true
+                const isOpen = hasSearch ? true : (openGroups[stateKey] ?? true)
                 return (
                   <li
                     key={`${label}-${groupIndex}`}

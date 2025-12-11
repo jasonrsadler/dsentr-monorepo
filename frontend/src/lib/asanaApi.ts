@@ -406,7 +406,9 @@ export async function fetchAsanaTaskDetails(
     throw new Error('Asana task details missing task payload')
   }
 
-  const normalizeAssignee = (assignee: AsanaTask['assignee']) =>
+  const normalizeAssignee = (
+    assignee: AsanaTask['assignee'] | undefined
+  ): AsanaTask['assignee'] =>
     assignee
       ? {
           gid: assignee.gid ?? '',
@@ -416,7 +418,7 @@ export async function fetchAsanaTaskDetails(
       : null
 
   const normalizeCustomFields = (
-    customFields: AsanaTask['custom_fields']
+    customFields: AsanaTask['custom_fields'] | undefined
   ): AsanaTask['custom_fields'] =>
     Array.isArray(customFields)
       ? customFields.map((cf) => ({
