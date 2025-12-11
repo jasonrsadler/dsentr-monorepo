@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { AnimatePresence, motion } from 'framer-motion'
-import DelayNodeConfig from '@/components/actions/logic/DelayNode'
 import {
   normalizeDelayConfig,
   validateDelayConfig,
@@ -9,6 +8,7 @@ import {
 } from '@/components/actions/logic/DelayNode/helpers'
 import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
 import BaseNode, { type BaseNodeRenderProps } from '../BaseNode'
+import ActionNodeSummary from './ActionNodeSummary'
 import type { RunAvailability } from '@/types/runAvailability'
 
 export type DelayNodeData = {
@@ -51,7 +51,7 @@ export default function DelayNode({
       selected={selected}
       canEdit={canEdit}
       fallbackLabel="Delay"
-      defaultExpanded
+      defaultExpanded={false}
       defaultDirty
     >
       {(baseProps) => (
@@ -79,10 +79,8 @@ function DelayNodeContent({
   const {
     selected,
     label,
-    expanded,
     nodeData,
     updateData,
-    toggleExpanded,
     remove,
     effectiveCanEdit,
     isRunning,
@@ -173,9 +171,8 @@ function DelayNodeContent({
       key="expanded-content"
       className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       style={{
-        width: expanded ? 'auto' : 256,
-        minWidth: 256,
-        maxWidth: 400
+        width: 256,
+        minWidth: 256
       }}
     >
       <Handle
@@ -208,8 +205,9 @@ function DelayNodeContent({
             Boolean(nodeData?.labelError) ||
             Boolean(nodeData?.hasValidationErrors)
           }
-          expanded={expanded}
-          onExpanded={toggleExpanded}
+          expanded={false}
+          showExpandToggle={false}
+          onExpanded={() => undefined}
           onLabelChange={handleLabelChange}
           onConfirmingDelete={(e) => {
             e.preventDefault()
@@ -221,25 +219,7 @@ function DelayNodeContent({
         {nodeData?.labelError ? (
           <p className="text-xs text-red-500">{nodeData.labelError}</p>
         ) : null}
-
-        <AnimatePresence>
-          {nodeData?.expanded && (
-            <motion.div
-              key="expanded-content"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
-            >
-              <DelayNodeConfig
-                config={normalizedConfig}
-                onChange={handleConfigChange}
-                hasValidationErrors={hasValidationErrors}
-                canEdit={effectiveCanEdit}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <ActionNodeSummary hint="Open the Delay flyout to configure wait duration/date and jitter." />
       </div>
       <AnimatePresence>
         {confirmingDelete && (

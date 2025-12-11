@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { AnimatePresence, motion } from 'framer-motion'
-import FormatterNodeConfig from '@/components/actions/logic/FormatterNode'
 import {
   normalizeFormatterConfig,
   validateFormatterConfig,
@@ -9,6 +8,7 @@ import {
 } from '@/components/actions/logic/FormatterNode/helpers'
 import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
 import BaseNode, { type BaseNodeRenderProps } from '../BaseNode'
+import ActionNodeSummary from './ActionNodeSummary'
 import type { RunAvailability } from '@/types/runAvailability'
 
 export type FormatterNodeData = {
@@ -51,7 +51,7 @@ export default function FormatterNode({
       selected={selected}
       canEdit={canEdit}
       fallbackLabel="Formatter"
-      defaultExpanded
+      defaultExpanded={false}
       defaultDirty
     >
       {(baseProps) => (
@@ -79,10 +79,8 @@ function FormatterNodeContent({
   const {
     selected,
     label,
-    expanded,
     nodeData,
     updateData,
-    toggleExpanded,
     remove,
     effectiveCanEdit,
     isRunning,
@@ -116,38 +114,6 @@ function FormatterNodeContent({
     [effectiveCanEdit, updateData]
   )
 
-  const handleConfigChange = useCallback(
-    (nextConfig: FormatterConfig) => {
-      if (!effectiveCanEdit) return
-      const normalizedNext = normalizeFormatterConfig(nextConfig)
-      const nextValidation = validateFormatterConfig(normalizedNext)
-      const currentConfig = normalizeFormatterConfig(
-        nodeData?.config as FormatterConfig | undefined
-      )
-
-      const configsEqual =
-        JSON.stringify(currentConfig) === JSON.stringify(normalizedNext)
-      const validationEqual =
-        (nodeData?.hasValidationErrors ?? false) === nextValidation.hasErrors
-
-      if (configsEqual && validationEqual) {
-        return
-      }
-
-      updateData({
-        config: normalizedNext,
-        hasValidationErrors: nextValidation.hasErrors,
-        dirty: true
-      })
-    },
-    [
-      effectiveCanEdit,
-      nodeData?.config,
-      nodeData?.hasValidationErrors,
-      updateData
-    ]
-  )
-
   const requestDelete = useCallback(() => {
     if (!effectiveCanEdit) return
     setConfirmingDelete(true)
@@ -176,9 +142,8 @@ function FormatterNodeContent({
       className={`wf-node group relative rounded-2xl shadow-md border bg-white dark:bg-zinc-900 transition-all ${selected ? 'ring-2 ring-blue-500' : 'border-zinc-300 dark:border-zinc-700'} ${ringClass}`}
       key="expanded-content"
       style={{
-        width: expanded ? 'auto' : 256,
-        minWidth: 256,
-        maxWidth: 420
+        width: 256,
+        minWidth: 256
       }}
     >
       <Handle
@@ -211,8 +176,9 @@ function FormatterNodeContent({
             Boolean(nodeData?.labelError) ||
             Boolean(nodeData?.hasValidationErrors)
           }
-          expanded={expanded}
-          onExpanded={toggleExpanded}
+          expanded={false}
+          showExpandToggle={false}
+          onExpanded={() => undefined}
           onLabelChange={handleLabelChange}
           onConfirmingDelete={(e) => {
             e.preventDefault()
@@ -225,24 +191,9 @@ function FormatterNodeContent({
           <p className="text-xs text-red-500">{nodeData.labelError}</p>
         ) : null}
 
-        <AnimatePresence>
-          {nodeData?.expanded && (
-            <motion.div
-              key="expanded-content"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-3 border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-2"
-            >
-              <FormatterNodeConfig
-                config={normalizedConfig}
-                onChange={handleConfigChange}
-                validation={validation}
-                canEdit={effectiveCanEdit}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="mt-3 px-1">
+          <ActionNodeSummary hint="Open the Formatter flyout to edit operations and mappings." />
+        </div>
       </div>
       <AnimatePresence>
         {confirmingDelete && (

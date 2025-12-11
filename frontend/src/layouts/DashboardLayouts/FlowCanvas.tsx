@@ -522,22 +522,22 @@ function normalizeDropType(rawType: string): DropDescriptor {
         nodeType: 'formatter',
         labelBase: 'Formatter',
         idPrefix: 'logic-formatter',
-        expanded: true,
+        expanded: false,
         data: {
           config: createEmptyFormatterConfig(),
           hasValidationErrors: true
         } as FormatterNodeData
       }
     }
-    return {
-      nodeType: 'delay',
-      labelBase: 'Delay',
-      idPrefix: 'logic-delay',
-      expanded: true,
-      data: {
-        config: {
-          mode: 'duration',
-          wait_for: {
+      return {
+        nodeType: 'delay',
+        labelBase: 'Delay',
+        idPrefix: 'logic-delay',
+        expanded: false,
+        data: {
+          config: {
+            mode: 'duration',
+            wait_for: {
             minutes: undefined,
             hours: undefined,
             days: undefined

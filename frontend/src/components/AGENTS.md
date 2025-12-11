@@ -30,6 +30,7 @@
 - Settings > Integrations: mapped providers to dedicated logo components and render the Slack logo inside the 40x40 placeholder while keeping the slot reusable for future provider icons.
 - Slack logo SVG now uses a padded viewBox and full-size scaling so it fits cleanly within the 40x40 header placeholder without crowding the border.
 - Google Sheets flyout picker now sends client/app IDs, scope, and the fetched OAuth token to Drive Picker and blocks missing-config cases so the picker works in the flyout without console errors.
+- Delay and Formatter nodes now mirror other action nodes: canvas cards are minimal and configuration is handled exclusively in the flyout.
 - Slack action channel selection now hides the manual input when an OAuth connection is chosen and loads channels into a dropdown from the backend Slack channels endpoint.
 
 ## Affected Areas
