@@ -5,6 +5,17 @@
 - Asana workspace dropdown fetches now run once per visible connection instead of refiring on each render, preventing repeated backend/API calls when opening the flyout.
 - Asana project dropdown fetches are now gated the same way as workspace fetches, so opening the flyout no longer hammers the backend/Asana when the project field is visible.
 - Asana task dropdown fetches now respect the same guards (connection/workspace/project + visibility) to stop repeated backend/Asana calls when task/parent/comment selectors are shown in the flyout.
+- Asana delete task operation now surfaces the project selector once a workspace is picked so users can choose the task from the project-scoped dropdown just like update task.
+- Asana move task operation now surfaces the project selector after picking a workspace so tasks/sections can be chosen within that project.
+- Asana create subtask operation now surfaces the project selector after choosing a workspace so the task and parent subtask selectors are scoped to that project.
+- Asana create subtask now shows the parent task dropdown as soon as a project is selected so a parent task can be chosen before filling subtask details.
+- Asana create subtask now displays the same post-project fields (name, assignee, notes, due, additional fields) as create task, but only after a parent task is selected to avoid showing details prematurely.
+- Asana create subtask now places the due field toggle immediately after assignee (once a parent task is selected) to switch between due on/due at and show the matching picker set.
+- Asana create subtask optional field rendering no longer duplicates assignee/notes/due/additional fields; rest-list filtering now treats createSubtask like create/update task.
+- Asana list subtasks operation now shows the project selector after picking a workspace so parent task selection can be scoped to a project.
+- Asana list subtasks now reveals the parent task selector once a project is chosen so subtasks can be scoped to a specific task.
+- Asana add comment operation now shows the project dropdown after selecting a workspace so tasks can be chosen from that project before adding a comment.
+- Asana remove comment operation now shows the project dropdown after selecting a workspace so tasks/comments can be chosen from that project before removal.
 - Added a Pricing link to the marketing navigation (desktop and mobile), refreshed the public nav styling, and added a signed-in Dashboard shortcut ahead of logout.
 - HTTP Request node: surface a warning when the URL targets `VITE_API_BASE_URL` so users avoid self-calling workflows that can loop indefinitely and rack up overage charges.
 - Google Sheets action: guard against automatically falling back to the personal credential after a shared workspace connection is removed by tracking when a workspace selection is cleared. This keeps users from silently swapping credentials and mirrors the React Flow safety patterns for avoiding redundant updates.

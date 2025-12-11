@@ -377,12 +377,19 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   createSubtask: {
     label: 'Subtasks - Create subtask',
     required: ['workspaceGid', 'parentTaskGid', 'name'],
-    optional: ['assignee', 'dueOn', 'dueAt', 'notes', 'additionalFields']
+    optional: [
+      'projectGid',
+      'assignee',
+      'dueOn',
+      'dueAt',
+      'notes',
+      'additionalFields'
+    ]
   },
   listSubtasks: {
     label: 'Subtasks - List subtasks',
     required: ['workspaceGid', 'parentTaskGid'],
-    optional: ['limit']
+    optional: ['projectGid', 'limit']
   },
   createTask: {
     label: 'Tasks - Create task',
@@ -392,7 +399,8 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   deleteTask: {
     label: 'Tasks - Delete task',
-    required: ['workspaceGid', 'taskGid']
+    required: ['workspaceGid', 'taskGid'],
+    optional: ['projectGid']
   },
   getTask: {
     label: 'Tasks - Get task',
@@ -405,7 +413,8 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   moveTask: {
     label: 'Tasks - Move task to section',
-    required: ['workspaceGid', 'taskGid', 'sectionGid']
+    required: ['workspaceGid', 'taskGid', 'sectionGid'],
+    optional: ['projectGid']
   },
   searchTasks: {
     label: 'Tasks - Search tasks',
@@ -427,11 +436,13 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   addComment: {
     label: 'Comments - Add comment to task',
-    required: ['workspaceGid', 'taskGid', 'notes']
+    required: ['workspaceGid', 'taskGid', 'notes'],
+    optional: ['projectGid']
   },
   removeComment: {
     label: 'Comments - Remove comment',
-    required: ['workspaceGid', 'taskGid', 'storyGid']
+    required: ['workspaceGid', 'taskGid', 'storyGid'],
+    optional: ['projectGid']
   },
   addTaskProject: {
     label: 'Projects - Add task to project',
@@ -1331,24 +1342,26 @@ export default function AsanaAction({
       case 'createSubtask':
         enableWorkspace()
         if (hasWorkspaceSelected && hasProjectSelected) {
-          fieldVisibility.taskGid = true
-        }
-        if (
-          hasWorkspaceSelected &&
-          hasProjectSelected &&
-          hasParentTaskSelected
-        ) {
-          fieldVisibility.name = true
-          fieldVisibility.assignee = true
-          fieldVisibility.notes = true
-          fieldVisibility.dueOn = dueMode === 'dueOn'
-          fieldVisibility.dueAt = dueMode === 'dueAt'
-          fieldVisibility.additionalFields = true
+          fieldVisibility.parentTaskGid = true
+          if (hasParentTaskSelected) {
+            fieldVisibility.name = true
+            fieldVisibility.assignee = true
+            fieldVisibility.notes = true
+            if (dueMode != null) {
+              fieldVisibility.dueOn = dueMode === 'dueOn'
+              fieldVisibility.dueAt = dueMode === 'dueAt'
+            }
+            fieldVisibility.additionalFields = true
+          }
         }
         break
       case 'listSubtasks':
         enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
         if (hasWorkspaceSelected && hasProjectSelected) {
+          fieldVisibility.parentTaskGid = true
           fieldVisibility.taskGid = true
         }
         if (
@@ -1361,6 +1374,9 @@ export default function AsanaAction({
         break
       case 'addComment':
         enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
         if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
@@ -1370,6 +1386,9 @@ export default function AsanaAction({
         break
       case 'removeComment':
         enableWorkspace()
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
+        }
         if (hasWorkspaceSelected && hasProjectSelected) {
           fieldVisibility.taskGid = true
         }
@@ -1756,12 +1775,7 @@ export default function AsanaAction({
       !isSoloPlan &&
       visibility.projectGid &&
       debouncedWorkspaceGid,
-    [
-      debouncedWorkspaceGid,
-      hasConnection,
-      isSoloPlan,
-      visibility.projectGid
-    ]
+    [debouncedWorkspaceGid, hasConnection, isSoloPlan, visibility.projectGid]
   )
 
   const shouldFetchTasks = useMemo(
@@ -1862,11 +1876,7 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [
-    asanaConnectionOptions,
-    debouncedWorkspaceGid,
-    shouldFetchProjects
-  ])
+  }, [asanaConnectionOptions, debouncedWorkspaceGid, shouldFetchProjects])
 
   useEffect(() => {
     setTagOptions([])
@@ -3020,7 +3030,8 @@ export default function AsanaAction({
 
                     if (
                       asanaParams.operation === 'createTask' ||
-                      asanaParams.operation === 'updateTask'
+                      asanaParams.operation === 'updateTask' ||
+                      asanaParams.operation === 'createSubtask'
                     ) {
                       // 1) Assignee first
                       specialBefore.forEach((optField) => {
@@ -3079,7 +3090,8 @@ export default function AsanaAction({
                     const rest = visibleFields.optional.filter((f) => {
                       if (
                         asanaParams.operation === 'createTask' ||
-                        asanaParams.operation === 'updateTask'
+                        asanaParams.operation === 'updateTask' ||
+                        asanaParams.operation === 'createSubtask'
                       ) {
                         return ![
                           ...specialBefore,

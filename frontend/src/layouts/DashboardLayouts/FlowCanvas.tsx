@@ -529,15 +529,15 @@ function normalizeDropType(rawType: string): DropDescriptor {
         } as FormatterNodeData
       }
     }
-      return {
-        nodeType: 'delay',
-        labelBase: 'Delay',
-        idPrefix: 'logic-delay',
-        expanded: false,
-        data: {
-          config: {
-            mode: 'duration',
-            wait_for: {
+    return {
+      nodeType: 'delay',
+      labelBase: 'Delay',
+      idPrefix: 'logic-delay',
+      expanded: false,
+      data: {
+        config: {
+          mode: 'duration',
+          wait_for: {
             minutes: undefined,
             hours: undefined,
             days: undefined
@@ -1167,7 +1167,7 @@ export default function FlowCanvas({
       const zoom =
         typeof (reactFlow as any).getZoom === 'function'
           ? (reactFlow as any).getZoom()
-          : (reactFlow as any).viewport?.zoom ?? 1
+          : ((reactFlow as any).viewport?.zoom ?? 1)
       const width =
         (node.measured?.width as number | undefined) ??
         (node.width as number | undefined) ??
@@ -1176,7 +1176,7 @@ export default function FlowCanvas({
         (node.measured?.height as number | undefined) ??
         (node.height as number | undefined) ??
         200
-      const pos = node.positionAbsolute ?? node.position
+      const pos = node.position
       const centerX = pos.x + width / 2
       const centerY = pos.y + height / 2
       const reservePx = 420
@@ -1189,9 +1189,10 @@ export default function FlowCanvas({
     [reactFlow]
   )
 
-  const lastExplicitFlyoutOpenRef = useRef<{ id: string | null; ts: number }>(
-    { id: null, ts: 0 }
-  )
+  const lastExplicitFlyoutOpenRef = useRef<{ id: string | null; ts: number }>({
+    id: null,
+    ts: 0
+  })
 
   const handleFlyoutOpen = useCallback(
     (nodeId: string | null) => {

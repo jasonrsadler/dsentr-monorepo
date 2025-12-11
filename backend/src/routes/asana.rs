@@ -943,7 +943,12 @@ async fn fetch_task_stories(
                     .resource_subtype
                     .as_deref()
                     .map(str::trim)
-                    .map(|s| s.eq_ignore_ascii_case("comment"))
+                    .map(|s| {
+                        matches!(
+                            s.trim().to_ascii_lowercase().as_str(),
+                            "comment" | "comment_added"
+                        )
+                    })
                     .unwrap_or(false)
         })
         .map(|record| StoryPayload {

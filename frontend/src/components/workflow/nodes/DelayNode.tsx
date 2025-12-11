@@ -112,37 +112,6 @@ function DelayNodeContent({
     [effectiveCanEdit, updateData]
   )
 
-  const handleConfigChange = useCallback(
-    (nextConfig: DelayConfig) => {
-      if (!effectiveCanEdit) return
-      const normalizedNext = normalizeDelayConfig(nextConfig)
-      const nextHasErrors = validateDelayConfig(normalizedNext)
-      const currentHasErrors = nodeData?.hasValidationErrors ?? false
-      const currentConfig = normalizeDelayConfig(
-        nodeData?.config as DelayConfig | undefined
-      )
-
-      const configsEqual =
-        JSON.stringify(currentConfig) === JSON.stringify(normalizedNext)
-
-      if (configsEqual && currentHasErrors === nextHasErrors) {
-        return
-      }
-
-      updateData({
-        config: normalizedNext,
-        hasValidationErrors: nextHasErrors,
-        dirty: true
-      })
-    },
-    [
-      effectiveCanEdit,
-      nodeData?.config,
-      nodeData?.hasValidationErrors,
-      updateData
-    ]
-  )
-
   const requestDelete = useCallback(() => {
     if (!effectiveCanEdit) return
     setConfirmingDelete(true)
