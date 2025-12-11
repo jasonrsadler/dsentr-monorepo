@@ -518,6 +518,7 @@ mod tests {
                 id: self.listing.id,
                 workspace_id: self.listing.workspace_id,
                 owner_user_id: self.listing.owner_user_id,
+                user_oauth_token_id: self.listing.user_oauth_token_id,
                 workspace_name: "Workspace".into(),
                 provider: self.listing.provider,
                 account_email: self.listing.account_email.clone(),

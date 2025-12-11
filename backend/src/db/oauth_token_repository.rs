@@ -6,6 +6,7 @@ use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
 
 #[derive(Debug, Clone)]
 pub struct NewUserOAuthToken {
+    pub id: Option<Uuid>,
     pub user_id: Uuid,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
@@ -32,6 +33,11 @@ pub trait UserOAuthTokenRepository: Send + Sync {
         new_token: NewUserOAuthToken,
     ) -> Result<UserOAuthToken, sqlx::Error>;
 
+    async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+        let _ = token_id;
+        Err(sqlx::Error::RowNotFound)
+    }
+
     async fn find_by_user_and_provider(
         &self,
         user_id: Uuid,
@@ -44,6 +50,15 @@ pub trait UserOAuthTokenRepository: Send + Sync {
         provider: ConnectedOAuthProvider,
     ) -> Result<(), sqlx::Error>;
 
+    async fn delete_token_by_id(
+        &self,
+        user_id: Uuid,
+        token_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        let _ = (user_id, token_id);
+        Err(sqlx::Error::RowNotFound)
+    }
+
     async fn list_tokens_for_user(&self, user_id: Uuid)
         -> Result<Vec<UserOAuthToken>, sqlx::Error>;
 
@@ -53,4 +68,13 @@ pub trait UserOAuthTokenRepository: Send + Sync {
         provider: ConnectedOAuthProvider,
         is_shared: bool,
     ) -> Result<UserOAuthToken, sqlx::Error>;
+
+    async fn mark_shared_by_id(
+        &self,
+        token_id: Uuid,
+        is_shared: bool,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        let _ = (token_id, is_shared);
+        Err(sqlx::Error::RowNotFound)
+    }
 }

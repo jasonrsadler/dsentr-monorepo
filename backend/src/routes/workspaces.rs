@@ -88,6 +88,8 @@ pub struct CompleteOnboardingPayload {
 #[derive(Debug, Deserialize)]
 pub struct PromoteWorkspaceConnectionPayload {
     pub provider: ConnectedOAuthProvider,
+    #[serde(default)]
+    pub connection_id: Option<Uuid>,
 }
 
 async fn process_plan_change(
@@ -2038,7 +2040,7 @@ pub async fn promote_workspace_connection(
 
     match app_state
         .workspace_oauth
-        .promote_connection(workspace_id, user_id, payload.provider)
+        .promote_connection(workspace_id, user_id, payload.provider, payload.connection_id)
         .await
     {
         Ok(connection) => Json(json!({
@@ -2445,6 +2447,7 @@ mod tests {
                     id: record.id,
                     workspace_id: record.workspace_id,
                     owner_user_id: record.owner_user_id,
+                    user_oauth_token_id: record.user_oauth_token_id,
                     workspace_name: String::new(),
                     provider: record.provider,
                     account_email: record.account_email.clone(),
@@ -2471,6 +2474,7 @@ mod tests {
                     id: record.id,
                     workspace_id: record.workspace_id,
                     owner_user_id: record.owner_user_id,
+                    user_oauth_token_id: record.user_oauth_token_id,
                     workspace_name: String::new(),
                     provider: record.provider,
                     account_email: record.account_email.clone(),
@@ -3863,6 +3867,7 @@ mod tests {
             Path(workspace_id),
             Json(PromoteWorkspaceConnectionPayload {
                 provider: ConnectedOAuthProvider::Google,
+                connection_id: None,
             }),
         )
         .await;
@@ -3956,6 +3961,7 @@ mod tests {
             Path(workspace_id),
             Json(PromoteWorkspaceConnectionPayload {
                 provider: ConnectedOAuthProvider::Google,
+                connection_id: None,
             }),
         )
         .await;
@@ -4015,6 +4021,7 @@ mod tests {
             Path(workspace_id),
             Json(PromoteWorkspaceConnectionPayload {
                 provider: ConnectedOAuthProvider::Google,
+                connection_id: None,
             }),
         )
         .await;

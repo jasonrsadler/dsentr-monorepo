@@ -64,6 +64,8 @@ pub(crate) struct WorkspaceConnectionPayload {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) has_incoming_webhook: bool,
     pub(crate) owner: ConnectionOwnerPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) owner_token_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
