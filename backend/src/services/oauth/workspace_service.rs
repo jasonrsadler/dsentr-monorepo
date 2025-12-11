@@ -112,10 +112,15 @@ impl WorkspaceOAuthService {
         workspace_id: Uuid,
         actor_id: Uuid,
         provider: ConnectedOAuthProvider,
+        connection_id: Option<Uuid>,
     ) -> Result<WorkspaceConnection, WorkspaceOAuthError> {
         self.ensure_membership(actor_id, workspace_id).await?;
 
-        let token = self.load_token(actor_id, provider).await?;
+        let token = if let Some(token_id) = connection_id {
+            self.load_token_by_id(actor_id, token_id, provider).await?
+        } else {
+            self.load_token(actor_id, provider).await?
+        };
 
         let connection = self
             .workspace_connections
@@ -134,7 +139,7 @@ impl WorkspaceOAuthService {
 
         let _ = self
             .user_tokens
-            .mark_shared(actor_id, provider, true)
+            .mark_shared_by_id(token.id, true)
             .await?;
 
         let metadata = json!({
@@ -179,7 +184,11 @@ impl WorkspaceOAuthService {
             .await?;
 
         let personal_token_missing = self
-            .mark_personal_token_unshared_if_unused(connection.owner_user_id, connection.provider)
+            .mark_personal_token_unshared_if_unused(
+                connection.owner_user_id,
+                connection.provider,
+                connection.user_oauth_token_id,
+            )
             .await?;
 
         if personal_token_missing {
@@ -252,12 +261,12 @@ impl WorkspaceOAuthService {
             return Ok(());
         }
 
-        let mut processed_providers: Vec<ConnectedOAuthProvider> = connections
+        let mut processed_tokens: Vec<(ConnectedOAuthProvider, Uuid)> = connections
             .iter()
-            .map(|connection| connection.provider)
+            .map(|connection| (connection.provider, connection.user_oauth_token_id))
             .collect();
-        processed_providers.sort_by_key(|provider| Self::provider_sort_key(*provider));
-        processed_providers.dedup();
+        processed_tokens.sort_by_key(|(_, token_id)| *token_id);
+        processed_tokens.dedup_by(|a, b| a.1 == b.1);
 
         for connection in connections {
             if let Err(err) = self.workspace_connections.delete_by_id(connection.id).await {
@@ -299,9 +308,9 @@ impl WorkspaceOAuthService {
             }
         }
 
-        for provider in processed_providers {
+        for (provider, token_id) in processed_tokens {
             let personal_token_missing = self
-                .mark_personal_token_unshared_if_unused(removed_user_id, provider)
+                .mark_personal_token_unshared_if_unused(removed_user_id, provider, token_id)
                 .await?;
 
             if personal_token_missing {
@@ -374,6 +383,7 @@ impl WorkspaceOAuthService {
                             .mark_personal_token_unshared_if_unused(
                                 decrypted.owner_user_id,
                                 decrypted.provider,
+                                decrypted.user_oauth_token_id,
                             )
                             .await?;
 
@@ -428,7 +438,11 @@ impl WorkspaceOAuthService {
             .await?;
 
         let personal_token_missing = self
-            .mark_personal_token_unshared_if_unused(record.owner_user_id, record.provider)
+            .mark_personal_token_unshared_if_unused(
+                record.owner_user_id,
+                record.provider,
+                record.user_oauth_token_id,
+            )
             .await?;
 
         if personal_token_missing {
@@ -489,10 +503,11 @@ impl WorkspaceOAuthService {
         &self,
         owner_user_id: Uuid,
         provider: ConnectedOAuthProvider,
+        token_id: Uuid,
     ) -> Result<bool, WorkspaceOAuthError> {
         if self
             .workspace_connections
-            .has_connections_for_owner_provider(owner_user_id, provider)
+            .has_connections_for_token(token_id)
             .await?
         {
             return Ok(false);
@@ -500,7 +515,7 @@ impl WorkspaceOAuthService {
 
         match self
             .user_tokens
-            .mark_shared(owner_user_id, provider, false)
+            .mark_shared_by_id(token_id, false)
             .await
         {
             Ok(_) => Ok(false),
@@ -528,6 +543,28 @@ impl WorkspaceOAuthService {
         Ok(record)
     }
 
+    async fn load_token_by_id(
+        &self,
+        actor_id: Uuid,
+        token_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<UserOAuthToken, WorkspaceOAuthError> {
+        let record = self
+            .user_tokens
+            .find_by_id(token_id)
+            .await?
+            .ok_or(WorkspaceOAuthError::NotFound)?;
+
+        if record.user_id != actor_id
+            || record.workspace_id.is_some()
+            || record.provider != provider
+        {
+            return Err(WorkspaceOAuthError::Forbidden);
+        }
+
+        Ok(record)
+    }
+
     #[cfg(test)]
     pub fn test_stub() -> Arc<Self> {
         use async_trait::async_trait;
@@ -541,6 +578,13 @@ impl WorkspaceOAuthService {
                 _new_token: crate::db::oauth_token_repository::NewUserOAuthToken,
             ) -> Result<UserOAuthToken, sqlx::Error> {
                 Err(sqlx::Error::RowNotFound)
+            }
+
+            async fn find_by_id(
+                &self,
+                _token_id: Uuid,
+            ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+                Ok(None)
             }
 
             async fn find_by_user_and_provider(
@@ -559,6 +603,14 @@ impl WorkspaceOAuthService {
                 Ok(())
             }
 
+            async fn delete_token_by_id(
+                &self,
+                _user_id: Uuid,
+                _token_id: Uuid,
+            ) -> Result<(), sqlx::Error> {
+                Ok(())
+            }
+
             async fn list_tokens_for_user(
                 &self,
                 _user_id: Uuid,
@@ -570,6 +622,14 @@ impl WorkspaceOAuthService {
                 &self,
                 _user_id: Uuid,
                 _provider: ConnectedOAuthProvider,
+                _is_shared: bool,
+            ) -> Result<UserOAuthToken, sqlx::Error> {
+                Err(sqlx::Error::RowNotFound)
+            }
+
+            async fn mark_shared_by_id(
+                &self,
+                _token_id: Uuid,
                 _is_shared: bool,
             ) -> Result<UserOAuthToken, sqlx::Error> {
                 Err(sqlx::Error::RowNotFound)
@@ -1043,6 +1103,14 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
+        async fn find_by_id(
+            &self,
+            token_id: Uuid,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            let token = self.token.lock().unwrap();
+            Ok(token.clone().filter(|record| record.id == token_id))
+        }
+
         async fn find_by_user_and_provider(
             &self,
             user_id: Uuid,
@@ -1064,11 +1132,30 @@ mod tests {
             Ok(())
         }
 
-        async fn list_tokens_for_user(
+        async fn delete_token_by_id(
             &self,
             _user_id: Uuid,
+            token_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            let mut token = self.token.lock().unwrap();
+            if token.as_ref().map(|record| record.id == token_id).unwrap_or(false) {
+                *token = None;
+            }
+            Ok(())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            user_id: Uuid,
         ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
-            Ok(vec![])
+            Ok(self
+                .token
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|record| record.user_id == user_id)
+                .into_iter()
+                .collect())
         }
 
         async fn mark_shared(
@@ -1081,6 +1168,20 @@ mod tests {
             *flag = is_shared;
             let token = self.token.lock().unwrap();
             token.clone().ok_or(sqlx::Error::RowNotFound)
+        }
+
+        async fn mark_shared_by_id(
+            &self,
+            token_id: Uuid,
+            is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            let mut flag = self.shared_flag.lock().unwrap();
+            *flag = is_shared;
+            let token = self.token.lock().unwrap();
+            match token.clone().filter(|record| record.id == token_id) {
+                Some(record) => Ok(record),
+                None => Err(sqlx::Error::RowNotFound),
+            }
         }
     }
 
@@ -1162,6 +1263,7 @@ mod tests {
                     id: record.id,
                     workspace_id: record.workspace_id,
                     owner_user_id: record.owner_user_id,
+                    user_oauth_token_id: record.user_oauth_token_id,
                     workspace_name: String::new(),
                     provider: record.provider,
                     account_email: record.account_email.clone(),
@@ -1188,6 +1290,7 @@ mod tests {
                     id: record.id,
                     workspace_id: record.workspace_id,
                     owner_user_id: record.owner_user_id,
+                    user_oauth_token_id: record.user_oauth_token_id,
                     workspace_name: String::new(),
                     provider: record.provider,
                     account_email: record.account_email.clone(),
@@ -1236,6 +1339,27 @@ mod tests {
                 }
             }
 
+            Ok(())
+        }
+
+        async fn update_tokens_for_token(
+            &self,
+            user_oauth_token_id: Uuid,
+            access_token: String,
+            refresh_token: String,
+            expires_at: OffsetDateTime,
+            account_email: String,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.connection.lock().unwrap();
+            if let Some(conn) = guard.as_mut() {
+                if conn.user_oauth_token_id == user_oauth_token_id {
+                    conn.access_token = access_token;
+                    conn.refresh_token = refresh_token;
+                    conn.expires_at = expires_at;
+                    conn.account_email = account_email;
+                    conn.updated_at = OffsetDateTime::now_utc();
+                }
+            }
             Ok(())
         }
 
@@ -1306,6 +1430,17 @@ mod tests {
                 .unwrap_or(false))
         }
 
+        async fn has_connections_for_token(
+            &self,
+            user_oauth_token_id: Uuid,
+        ) -> Result<bool, sqlx::Error> {
+            let guard = self.connection.lock().unwrap();
+            Ok(guard
+                .as_ref()
+                .map(|record| record.user_oauth_token_id == user_oauth_token_id)
+                .unwrap_or(false))
+        }
+
         async fn mark_connections_stale_for_creator(
             &self,
             creator_id: Uuid,
@@ -1322,6 +1457,26 @@ mod tests {
                         workspace_id: conn.workspace_id,
                     });
                 }
+            }
+            Ok(affected)
+        }
+
+        async fn mark_connections_stale_for_token(
+            &self,
+            user_oauth_token_id: Uuid,
+        ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
+            let mut guard = self.connection.lock().unwrap();
+            let mut affected = Vec::new();
+            if let Some(conn) = guard
+                .as_mut()
+                .filter(|conn| conn.user_oauth_token_id == user_oauth_token_id)
+            {
+                conn.expires_at = OffsetDateTime::now_utc() - Duration::minutes(5);
+                conn.updated_at = OffsetDateTime::now_utc();
+                affected.push(StaleWorkspaceConnection {
+                    connection_id: conn.id,
+                    workspace_id: conn.workspace_id,
+                });
             }
             Ok(affected)
         }
@@ -1450,27 +1605,68 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
+        async fn find_by_id(
+            &self,
+            token_id: Uuid,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            let guard = self.tokens.lock().unwrap();
+            Ok(guard
+                .values()
+                .cloned()
+                .find(|token| token.id == token_id))
+        }
+
         async fn find_by_user_and_provider(
             &self,
-            _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
         ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
-            Ok(None)
+            Ok(self
+                .tokens
+                .lock()
+                .unwrap()
+                .get(&provider)
+                .cloned()
+                .filter(|token| token.user_id == user_id))
         }
 
         async fn delete_token(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            provider: ConnectedOAuthProvider,
         ) -> Result<(), sqlx::Error> {
+            self.tokens.lock().unwrap().remove(&provider);
+            Ok(())
+        }
+
+        async fn delete_token_by_id(
+            &self,
+            _user_id: Uuid,
+            token_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.tokens.lock().unwrap();
+            let target = guard
+                .iter()
+                .find(|(_, token)| token.id == token_id)
+                .map(|(provider, _)| *provider);
+            if let Some(provider) = target {
+                guard.remove(&provider);
+            }
             Ok(())
         }
 
         async fn list_tokens_for_user(
             &self,
-            _user_id: Uuid,
+            user_id: Uuid,
         ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
-            Ok(vec![])
+            Ok(self
+                .tokens
+                .lock()
+                .unwrap()
+                .values()
+                .cloned()
+                .filter(|token| token.user_id == user_id)
+                .collect())
         }
 
         async fn mark_shared(
@@ -1498,6 +1694,22 @@ mod tests {
                 return Ok(token.clone());
             }
 
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn mark_shared_by_id(
+            &self,
+            token_id: Uuid,
+            is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            let mut guard = self.tokens.lock().unwrap();
+            if let Some((_provider, token)) =
+                guard.iter_mut().find(|(_, token)| token.id == token_id)
+            {
+                token.is_shared = is_shared;
+                token.updated_at = OffsetDateTime::now_utc();
+                return Ok(token.clone());
+            }
             Err(sqlx::Error::RowNotFound)
         }
     }
@@ -1763,7 +1975,7 @@ mod tests {
         );
 
         let result = service
-            .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Google)
+            .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Google, None)
             .await
             .expect("promotion succeeds");
 
@@ -1822,7 +2034,7 @@ mod tests {
         );
 
         let result = service
-            .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Slack)
+            .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Slack, None)
             .await
             .expect("promotion succeeds");
 
@@ -1893,7 +2105,12 @@ mod tests {
         );
 
         let new_connection = service
-            .promote_connection(workspace_id, owner_b, ConnectedOAuthProvider::Google)
+            .promote_connection(
+                workspace_id,
+                owner_b,
+                ConnectedOAuthProvider::Google,
+                None,
+            )
             .await
             .expect("promotion succeeds for second user");
 

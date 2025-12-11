@@ -39,6 +39,7 @@ pub struct WorkspaceConnectionListing {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub owner_user_id: Uuid,
+    pub user_oauth_token_id: Uuid,
     pub workspace_name: String,
     pub provider: ConnectedOAuthProvider,
     pub account_email: String,
@@ -103,6 +104,17 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         expires_at: time::OffsetDateTime,
     ) -> Result<WorkspaceConnection, sqlx::Error>;
 
+    async fn update_tokens_for_token(
+        &self,
+        _user_oauth_token_id: Uuid,
+        _access_token: String,
+        _refresh_token: String,
+        _expires_at: time::OffsetDateTime,
+        _account_email: String,
+    ) -> Result<(), sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
     async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
 
     async fn delete_by_id(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
@@ -120,11 +132,25 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         provider: ConnectedOAuthProvider,
     ) -> Result<bool, sqlx::Error>;
 
+    async fn has_connections_for_token(
+        &self,
+        _user_oauth_token_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
     async fn mark_connections_stale_for_creator(
         &self,
         creator_id: Uuid,
         provider: ConnectedOAuthProvider,
     ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error>;
+
+    async fn mark_connections_stale_for_token(
+        &self,
+        _user_oauth_token_id: Uuid,
+    ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
+        Ok(Vec::new())
+    }
 
     async fn record_audit_event(
         &self,
@@ -221,6 +247,17 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Ok(())
     }
 
+    async fn update_tokens_for_token(
+        &self,
+        _user_oauth_token_id: Uuid,
+        _access_token: String,
+        _refresh_token: String,
+        _expires_at: time::OffsetDateTime,
+        _account_email: String,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
     async fn has_connections_for_owner_provider(
         &self,
         _owner_user_id: Uuid,
@@ -229,10 +266,24 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Ok(false)
     }
 
+    async fn has_connections_for_token(
+        &self,
+        _user_oauth_token_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
     async fn mark_connections_stale_for_creator(
         &self,
         _creator_id: Uuid,
         _provider: ConnectedOAuthProvider,
+    ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
+        Ok(Vec::new())
+    }
+
+    async fn mark_connections_stale_for_token(
+        &self,
+        _user_oauth_token_id: Uuid,
     ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
         Ok(Vec::new())
     }

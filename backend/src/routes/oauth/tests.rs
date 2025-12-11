@@ -272,6 +272,7 @@ fn workspace_connection_fixture(
         id: Uuid::new_v4(),
         workspace_id,
         owner_user_id,
+        user_oauth_token_id: Uuid::new_v4(),
         workspace_name: "Shared Workspace".into(),
         provider,
         account_email: account_email.into(),
@@ -509,6 +510,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         id: workspace_connection_id,
         workspace_id,
         owner_user_id: user_id,
+        user_oauth_token_id: personal_token_id,
         workspace_name: "Shared Workspace".into(),
         provider: ConnectedOAuthProvider::Google,
         account_email: "shared@example.com".into(),
@@ -1010,11 +1012,13 @@ async fn list_connections_includes_workspace_reconnect_flag() {
     let now = OffsetDateTime::now_utc();
     let workspace_id = Uuid::new_v4();
     let connection_id = Uuid::new_v4();
+    let user_oauth_token_id = Uuid::new_v4();
 
     let listing = WorkspaceConnectionListing {
         id: connection_id,
         workspace_id,
         owner_user_id: user_id,
+        user_oauth_token_id,
         workspace_name: "Requires Attention".into(),
         provider: ConnectedOAuthProvider::Microsoft,
         account_email: "shared@example.com".into(),

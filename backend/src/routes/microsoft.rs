@@ -838,6 +838,7 @@ mod tests {
         let user_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
+        let user_oauth_token_id = Uuid::new_v4();
         let now = OffsetDateTime::now_utc();
 
         let encrypted_access = encrypt_secret(&encryption_key, "workspace-access").unwrap();
@@ -847,6 +848,7 @@ mod tests {
             id: connection_id,
             workspace_id,
             owner_user_id: user_id,
+            user_oauth_token_id: user_oauth_token_id,
             workspace_name: "Workspace".into(),
             provider: ConnectedOAuthProvider::Microsoft,
             account_email: "shared@example.com".into(),
@@ -863,7 +865,7 @@ mod tests {
             workspace_id,
             created_by: user_id,
             owner_user_id: user_id,
-            user_oauth_token_id: Uuid::new_v4(),
+            user_oauth_token_id,
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypted_access,
             refresh_token: encrypted_refresh,

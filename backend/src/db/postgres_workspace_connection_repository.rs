@@ -137,6 +137,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 wc.id,
                 wc.workspace_id,
                 wc.owner_user_id,
+                wc.user_oauth_token_id,
                 w.name AS workspace_name,
                 wc.provider,
                 wc.account_email,
@@ -170,6 +171,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 wc.id,
                 wc.workspace_id,
                 wc.owner_user_id,
+                wc.user_oauth_token_id,
                 w.name AS workspace_name,
                 wc.provider,
                 wc.account_email,
@@ -300,6 +302,37 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         .await
     }
 
+    async fn update_tokens_for_token(
+        &self,
+        user_oauth_token_id: Uuid,
+        access_token: String,
+        refresh_token: String,
+        expires_at: OffsetDateTime,
+        account_email: String,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE workspace_connections
+            SET
+                access_token = $2,
+                refresh_token = $3,
+                expires_at = $4,
+                account_email = $5,
+                updated_at = now()
+            WHERE user_oauth_token_id = $1
+            "#,
+        )
+        .bind(user_oauth_token_id)
+        .bind(access_token)
+        .bind(refresh_token)
+        .bind(expires_at)
+        .bind(account_email)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error> {
         self.delete_by_id(connection_id).await
     }
@@ -363,6 +396,26 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         Ok(exists.unwrap_or(false))
     }
 
+    async fn has_connections_for_token(
+        &self,
+        user_oauth_token_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        let exists = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM workspace_connections
+                WHERE user_oauth_token_id = $1
+            )
+            "#,
+            user_oauth_token_id,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(exists.unwrap_or(false))
+    }
+
     async fn mark_connections_stale_for_creator(
         &self,
         creator_id: Uuid,
@@ -381,6 +434,34 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         )
         .bind(creator_id)
         .bind(provider)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(StaleWorkspaceConnection {
+                    connection_id: row.try_get("id")?,
+                    workspace_id: row.try_get("workspace_id")?,
+                })
+            })
+            .collect()
+    }
+
+    async fn mark_connections_stale_for_token(
+        &self,
+        user_oauth_token_id: Uuid,
+    ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            UPDATE workspace_connections
+            SET
+                expires_at = now() - INTERVAL '5 minutes',
+                updated_at = now()
+            WHERE user_oauth_token_id = $1
+            RETURNING id, workspace_id
+            "#,
+        )
+        .bind(user_oauth_token_id)
         .fetch_all(&self.pool)
         .await?;
 

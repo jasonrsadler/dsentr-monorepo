@@ -62,6 +62,8 @@ pub(crate) struct WorkspaceConnectionPayload {
     pub(crate) last_refreshed_at: OffsetDateTime,
     pub(crate) requires_reconnect: bool,
     pub(crate) owner: ConnectionOwnerPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) owner_token_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]

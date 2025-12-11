@@ -7,7 +7,6 @@ import { errorMessage } from '@/lib/errorMessage'
 import AsanaIcon from '@/assets/svg-components/third-party/AsanaIcon'
 import {
   OAuthProvider,
-  ProviderConnectionSet,
   WorkspaceConnectionInfo,
   disconnectProvider,
   fetchConnections,
@@ -16,7 +15,8 @@ import {
   unshareWorkspaceConnection,
   setCachedConnections,
   markProviderRevoked,
-  type GroupedConnectionsSnapshot
+  type GroupedConnectionsSnapshot,
+  type PersonalConnectionRecord
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
@@ -52,6 +52,13 @@ const PROVIDER_ICONS: Partial<
 
 const PROVIDERS: ProviderMeta[] = [
   {
+    key: 'asana',
+    name: 'Asana',
+    description:
+      'Connect Asana to create and update projects, tasks, and comments directly from your workflows.',
+    scopes: 'default email'
+  },
+  {
     key: 'google',
     name: 'Google',
     description:
@@ -71,29 +78,8 @@ const PROVIDERS: ProviderMeta[] = [
     description:
       'Connect your Slack workspace to post messages, manage channels, and automate collaboration from DSentr workflows.',
     scopes: 'chat:write channels:read users:read'
-  },
-  {
-    key: 'asana',
-    name: 'Asana',
-    description:
-      'Connect Asana to create and update projects, tasks, and comments directly from your workflows.',
-    scopes: 'default email'
   }
 ]
-
-const emptyProviderState = (): ProviderConnectionSet => ({
-  personal: {
-    scope: 'personal',
-    id: null,
-    connected: false,
-    accountEmail: undefined,
-    expiresAt: undefined,
-    lastRefreshedAt: undefined,
-    requiresReconnect: false,
-    isShared: false
-  },
-  workspace: []
-})
 
 // Provider state is derived on the fly from the grouped snapshot.
 
@@ -110,20 +96,25 @@ export default function IntegrationsTab({
   const [error, setError] = useState<string | null>(null)
   const [connections, setConnections] =
     useState<GroupedConnectionsSnapshot | null>(null)
-  const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
   const [connectingProvider, setConnectingProvider] =
     useState<OAuthProvider | null>(null)
-  const [promoteDialogProvider, setPromoteDialogProvider] =
-    useState<OAuthProvider | null>(null)
-  const [promoteBusyProvider, setPromoteBusyProvider] =
-    useState<OAuthProvider | null>(null)
+  const [busyConnectionIds, setBusyConnectionIds] = useState<Set<string>>(
+    () => new Set()
+  )
+  const [promoteDialog, setPromoteDialog] = useState<{
+    provider: OAuthProvider
+    connectionId: string
+  } | null>(null)
+  const [promoteBusyId, setPromoteBusyId] = useState<string | null>(null)
   const [removeDialog, setRemoveDialog] =
     useState<WorkspaceConnectionInfo | null>(null)
   const [removeBusyId, setRemoveBusyId] = useState<string | null>(null)
   const [disconnectDialog, setDisconnectDialog] = useState<{
     provider: OAuthProvider
+    connectionId: string | null
     sharedConnections: WorkspaceConnectionInfo[]
   } | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
   const [expandedProviders, setExpandedProviders] = useState<
     Record<OAuthProvider, boolean>
   >(() =>
@@ -134,6 +125,24 @@ export default function IntegrationsTab({
       },
       {} as Record<OAuthProvider, boolean>
     )
+  )
+
+  const setConnectionBusy = useCallback((connectionId: string, busy: boolean) => {
+    setBusyConnectionIds((prev) => {
+      const next = new Set(prev)
+      if (busy) {
+        next.add(connectionId)
+      } else {
+        next.delete(connectionId)
+      }
+      return next
+    })
+  }, [])
+
+  const isConnectionBusy = useCallback(
+    (connectionId?: string | null) =>
+      Boolean(connectionId && busyConnectionIds.has(connectionId)),
+    [busyConnectionIds]
   )
 
   const planTier = useMemo<PlanTier>((): PlanTier => {
@@ -324,9 +333,11 @@ export default function IntegrationsTab({
   const performDisconnect = useCallback(
     async (
       provider: OAuthProvider,
+      connectionId: string | null,
       sharedConnections: WorkspaceConnectionInfo[]
     ): Promise<boolean> => {
-      setBusyProvider(provider)
+      if (!connectionId) return false
+      setConnectionBusy(connectionId, true)
       try {
         for (const entry of sharedConnections) {
           if (removeBusyId === entry.id) {
@@ -337,33 +348,22 @@ export default function IntegrationsTab({
           }
           await unshareWorkspaceConnection(entry.workspaceId, entry.id)
         }
-        await disconnectProvider(provider)
+        await disconnectProvider(provider, connectionId)
         setConnections((prev) => {
           const next: GroupedConnectionsSnapshot = {
             personal: Array.isArray(prev?.personal)
-              ? prev!.personal.map((p) =>
-                  p.provider === provider
-                    ? {
-                        ...p,
-                        id: null,
-                        connected: false,
-                        requiresReconnect: false,
-                        isShared: false,
-                        accountEmail: undefined,
-                        expiresAt: undefined,
-                        lastRefreshedAt: undefined
-                      }
-                    : { ...p }
-                )
+              ? prev!.personal
+                  .filter((p) => !(p.provider === provider && p.id === connectionId))
+                  .map((p) => ({ ...p }))
               : [],
             workspace: Array.isArray(prev?.workspace)
               ? prev!.workspace
                   .filter(
                     (entry) =>
                       entry.provider !== provider ||
-                      !sharedConnections.some(
-                        (shared) => shared.id === entry.id
-                      )
+                      (entry.id !== connectionId &&
+                        entry.ownerTokenId !== connectionId &&
+                        !sharedConnections.some((shared) => shared.id === entry.id))
                   )
                   .map((entry) => ({ ...entry }))
               : []
@@ -379,64 +379,51 @@ export default function IntegrationsTab({
         setError(message)
         return false
       } finally {
-        setBusyProvider(null)
+        setConnectionBusy(connectionId, false)
       }
     },
-    [removeBusyId, workspaceId]
+    [removeBusyId, workspaceId, setConnectionBusy]
   )
 
   const handleDisconnect = useCallback(
-    (provider: OAuthProvider) => {
-      const status = (() => {
-        const personalRecord = connections?.personal.find(
-          (p) => p.provider === provider
-        )
-        const workspace = (connections?.workspace ?? []).filter(
-          (w) => w.provider === provider
-        )
-        return {
-          personal: personalRecord
-            ? {
-                scope: 'personal' as const,
-                id: personalRecord.id ?? null,
-                connected: Boolean(
-                  personalRecord.connected && personalRecord.id
-                ),
-                accountEmail: personalRecord.accountEmail,
-                expiresAt: personalRecord.expiresAt,
-                lastRefreshedAt: personalRecord.lastRefreshedAt,
-                requiresReconnect: Boolean(personalRecord.requiresReconnect),
-                isShared: Boolean(personalRecord.isShared)
-              }
-            : emptyProviderState().personal,
-          workspace
-        } as ProviderConnectionSet
-      })()
-      // backend enforces workspace boundary; use workspace entries as-is
-      const workspaceConnections = status?.workspace ?? []
+    (provider: OAuthProvider, personal: PersonalConnectionRecord) => {
+      const connectionId = personal.id ?? null
+      const workspaceConnections = (connections?.workspace ?? []).filter(
+        (w) =>
+          w.provider === provider &&
+          (!connectionId ||
+            w.ownerTokenId === connectionId ||
+            matchesCurrentUser(w))
+      )
       const sharedConnections = workspaceConnections.filter((entry) =>
         matchesCurrentUser(entry)
       )
 
       if (sharedConnections.length > 0) {
-        setDisconnectDialog({ provider, sharedConnections })
+        setDisconnectDialog({ provider, sharedConnections, connectionId })
         return
       }
 
-      void performDisconnect(provider, [])
+      void performDisconnect(provider, connectionId, [])
     },
     [connections, matchesCurrentUser, performDisconnect]
   )
 
-  const handleRefresh = async (provider: OAuthProvider) => {
-    setBusyProvider(provider)
+  const handleRefresh = async (
+    provider: OAuthProvider,
+    connectionId: string | null
+  ) => {
+    if (!connectionId) return
+    setConnectionBusy(connectionId, true)
     try {
-      const updated = await refreshProvider(provider)
+      const updated = await refreshProvider(provider, connectionId)
       setConnections((prev) => {
         const next: GroupedConnectionsSnapshot = {
           personal: Array.isArray(prev?.personal)
             ? prev!.personal.map((p) => {
-                if (p.provider !== provider) return { ...p }
+                if (p.provider !== provider || p.id !== connectionId) {
+                  return { ...p }
+                }
                 const patch: any = {
                   ...p,
                   connected: true,
@@ -468,27 +455,16 @@ export default function IntegrationsTab({
           const next: GroupedConnectionsSnapshot = {
             personal: Array.isArray(prev?.personal)
               ? prev!.personal.map((p) =>
-                  p.provider === provider
+                  p.provider === provider && p.id === connectionId
                     ? { ...p, connected: false, requiresReconnect: true }
                     : { ...p }
                 )
-              : [
-                  {
-                    provider,
-                    scope: 'personal',
-                    id: null,
-                    connected: false,
-                    accountEmail: undefined,
-                    expiresAt: undefined,
-                    lastRefreshedAt: undefined,
-                    requiresReconnect: true,
-                    isShared: false
-                  }
-                ],
+              : [],
             workspace: Array.isArray(prev?.workspace)
               ? prev!.workspace.filter((w) => w.provider !== provider)
               : []
           }
+          setCachedConnections(next, { workspaceId })
           return next
         })
         setError(
@@ -502,9 +478,20 @@ export default function IntegrationsTab({
         err instanceof Error ? err.message : 'Failed to refresh tokens'
       setError(message)
     } finally {
-      setBusyProvider(null)
+      setConnectionBusy(connectionId, false)
     }
   }
+
+  const filteredProviders = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
+    if (!term) return PROVIDERS
+    return PROVIDERS.filter((provider) => {
+      const haystack = `${provider.name} ${provider.description} ${provider.key}`
+        .toLowerCase()
+        .trim()
+      return haystack.includes(term)
+    })
+  }, [searchTerm])
 
   return (
     <div className="space-y-6">
