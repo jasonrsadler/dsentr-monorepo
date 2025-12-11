@@ -29,3 +29,5 @@
 - Email actions stop returning provider message IDs as `selectedNext` values; executor now falls back to outgoing edges when a selected next node is missing so downstream nodes still run after email sends.
 - Added a Formatter action module with typed string/number/json/date/bool transformations, JSON path reuse, and validation to keep logic node outputs predictable and resumable.
 - Added an Asana action executor that validates personal/workspace OAuth connections, enforces workspace plan membership, and supports project/task/subtask/comment/tag/user operations via the Asana REST API.
+- Asana list tasks now omits the workspace parameter when a project or tag is provided to comply with Asana API rules and avoid 400 errors.
+- Asana list tasks now enforces Asana's filter rules (project/tag or assignee + workspace; workspace alone rejected) to prevent invalid requests.

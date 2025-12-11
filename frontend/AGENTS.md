@@ -92,6 +92,10 @@ oUnusedLocals.
 - Asana create task now leaves project selection optional with a default "No Project" choice, shows the name/optional fields as soon as a workspace is selected, and pins the project dropdown to the top of the optional section so tasks can be created without assigning them to a project.
 - Asana update task now supports a "No Project" selection that reveals a manual Task GID input (fetches details on blur, auto-populates fields, hides the task dropdown), while keeping optional fields available once a task GID is provided.
 - Manual Task GID entry (No Project path) no longer triggers an API fetch or auto-prefill; dropdown task selection still pre-fills fields as before.
+- Asana get task now restores project dropdown visibility after workspace selection and task dropdown visibility after project selection.
+- Asana list tasks now includes a "No Project" choice, shows tag/assignee with workspace, and validates that project, tag, or assignee+workspace is present to satisfy Asana filtering rules.
+- Asana list tasks now offers "No Tag" and "No Assignee" dropdown choices so users can explicitly clear those filters while following the allowed query combinations.
+- Asana delete task supports a "No Project" option that hides the task dropdown and shows a manual Task GID input when no project is chosen.
 - Asana action fields are now sequenced strictly by dependency (connection → operation → workspace → downstream choices), and project/tag/team/user fetches run only when their dropdowns are visible to stop circular API triggers while configuring nodes.
 - Action nodes now deep-compare local state before notifying the canvas so update notifications don't trigger infinite React Flow rerender loops.
 - Action node prop-to-state sync skips redundant param updates to prevent React Flow dirty-check loops when toggling node UI.

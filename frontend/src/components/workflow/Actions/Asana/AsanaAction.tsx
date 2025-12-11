@@ -148,6 +148,16 @@ const NO_PROJECT_OPTION: NodeDropdownOption = {
   value: ''
 }
 
+const NO_TAG_OPTION: NodeDropdownOption = {
+  label: 'No Tag',
+  value: ''
+}
+
+const NO_ASSIGNEE_OPTION: NodeDropdownOption = {
+  label: 'No Assignee',
+  value: ''
+}
+
 type DateTimeParts = {
   date: string
   hour: number
@@ -415,7 +425,8 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   getTask: {
     label: 'Tasks - Get task',
-    required: ['workspaceGid', 'taskGid']
+    required: ['workspaceGid', 'taskGid'],
+    optional: ['projectGid']
   },
   listTasks: {
     label: 'Tasks - List tasks',
@@ -641,6 +652,29 @@ const validateAsanaParams = (
     const parsed = Number(params.limit)
     if (!Number.isFinite(parsed) || parsed < 0) {
       errors.limit = 'Limit must be a positive number'
+    }
+  }
+
+  // Asana list tasks requires either project or tag, or assignee + workspace.
+  if (params.operation === 'listTasks') {
+    const hasProject = Boolean(params.projectGid?.trim())
+    const hasTag = Boolean(params.tagGid?.trim())
+    const hasAssignee = Boolean(params.assignee?.trim())
+    const selectedCount = [hasProject, hasTag, hasAssignee].filter(Boolean).length
+
+    if (selectedCount === 0) {
+      const message =
+        'Provide exactly one filter: project, tag, or assignee (with workspace) to list tasks'
+      errors.projectGid = message
+      errors.tagGid = message
+      errors.assignee = message
+    } else if (selectedCount > 1) {
+      const message = 'Choose only one of project, tag, or assignee for list tasks'
+      errors.projectGid = message
+      errors.tagGid = message
+      errors.assignee = message
+    } else if (hasAssignee && !params.workspaceGid?.trim()) {
+      errors.assignee = 'Assignee requires workspace for list tasks'
     }
   }
 
@@ -987,14 +1021,16 @@ export default function AsanaAction({
   const [projectOptionsError, setProjectOptionsError] = useState<string | null>(
     null
   )
-  const projectDropdownOptions = useMemo<NodeDropdownOption[]>(
-    () =>
+  const projectDropdownOptions = useMemo<NodeDropdownOption[]>(() => {
+    const allowNoProject =
       asanaParams.operation === 'createTask' ||
-      asanaParams.operation === 'updateTask'
-        ? [NO_PROJECT_OPTION, ...projectOptions]
-        : projectOptions,
-    [asanaParams.operation, projectOptions]
-  )
+      asanaParams.operation === 'updateTask' ||
+      asanaParams.operation === 'deleteTask' ||
+      asanaParams.operation === 'listTasks'
+    return allowNoProject
+      ? [NO_PROJECT_OPTION, ...projectOptions]
+      : projectOptions
+  }, [asanaParams.operation, projectOptions])
 
   const [tagOptions, setTagOptions] = useState<NodeDropdownOption[]>([])
   const [tagOptionsLoading, setTagOptionsLoading] = useState(false)
@@ -1334,8 +1370,8 @@ export default function AsanaAction({
         break
       case 'listTasks':
         enableWorkspace()
-        fieldVisibility.projectGid = true
-        if (hasProjectSelected) {
+        if (hasWorkspaceSelected) {
+          fieldVisibility.projectGid = true
           fieldVisibility.tagGid = true
           fieldVisibility.assignee = true
           fieldVisibility.limit = true
@@ -1348,8 +1384,8 @@ export default function AsanaAction({
           fieldVisibility.projectGid = true
         }
 
-        // Show task selector only after a project is selected
-        if (hasWorkspaceSelected && hasProjectSelected) {
+        // Show task selector; allow manual Task GID when no project chosen
+        if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
         break
@@ -2477,7 +2513,9 @@ export default function AsanaAction({
     if (field === 'taskGid') {
       const currentValue = typeof value === 'string' ? value : ''
       const useManualTaskInput =
-        asanaParams.operation === 'updateTask' && !hasProjectSelected
+        (asanaParams.operation === 'updateTask' ||
+          asanaParams.operation === 'deleteTask') &&
+        !hasProjectSelected
 
       if (useManualTaskInput) {
         return (
@@ -2550,7 +2588,7 @@ export default function AsanaAction({
             {labelText}
           </p>
           <NodeDropdownField
-            options={tagOptions}
+            options={[NO_TAG_OPTION, ...tagOptions]}
             value={currentValue}
             onChange={handleTagSelect}
             placeholder={
@@ -2614,7 +2652,7 @@ export default function AsanaAction({
             {labelText}
           </p>
           <NodeDropdownField
-            options={userOptions}
+            options={[NO_ASSIGNEE_OPTION, ...userOptions]}
             value={currentValue}
             onChange={(gid) => applyAsanaPatch({ assignee: gid })}
             placeholder={
@@ -3049,6 +3087,11 @@ export default function AsanaAction({
                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   Required fields
                 </p>
+                {asanaParams.operation === 'listTasks' && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-400/50 dark:bg-amber-950/30 dark:text-amber-100">
+                    Provide exactly one: project, tag, or assignee (requires workspace). Selecting more than one will fail.
+                  </div>
+                )}
                 <div className="space-y-2">
                   {visibleFields?.required.map((field) =>
                     renderField(field, true)

@@ -19,6 +19,10 @@
 - Asana create task now treats project selection as optional with a default "No Project" option, surfaces the name/other optional fields as soon as a workspace is chosen, and pins the project dropdown as the first optional field so tasks can be created without assigning a project.
 - Asana update task now offers a "No Project" option, shows a manual Task GID input in that path (fetching task details on blur and auto-populating fields), hides the task dropdown when manual entry is used, and still surfaces optional fields once a task GID is present.
 - Manual Task GID entry in Asana update task no longer triggers an API fetch or auto-prefill; dropdown task selection still pre-fills fields as before.
+- Asana get task shows the project dropdown after workspace selection and the task dropdown after project selection to restore the expected dependency flow.
+- Asana list tasks adds a "No Project" option, exposes tag/assignee alongside workspace, and validates that either project, tag, or assignee+workspace is provided to match Asana API requirements.
+- Asana list tasks now includes "No Tag" and "No Assignee" options in their dropdowns to make the required filter combinations explicit.
+- Asana delete task now supports a "No Project" path that swaps the task dropdown for a manual Task GID input when no project is selected.
 - Added a Pricing link to the marketing navigation (desktop and mobile), refreshed the public nav styling, and added a signed-in Dashboard shortcut ahead of logout.
 - HTTP Request node: surface a warning when the URL targets `VITE_API_BASE_URL` so users avoid self-calling workflows that can loop indefinitely and rack up overage charges.
 - Google Sheets action: guard against automatically falling back to the personal credential after a shared workspace connection is removed by tracking when a workspace selection is cleared. This keeps users from silently swapping credentials and mirrors the React Flow safety patterns for avoiding redundant updates.

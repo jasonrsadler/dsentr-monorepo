@@ -382,16 +382,24 @@ pub(crate) async fn execute_asana(
         }
         "listtasks" => {
             let workspace_gid = read_required(&params, "workspaceGid", "Workspace GID", context)?;
-            let mut query: Vec<(String, String)> = vec![("workspace".to_string(), workspace_gid)];
-            if let Some(project) = read_optional(&params, "projectGid", context) {
+            let project = read_optional(&params, "projectGid", context);
+            let tag = read_optional(&params, "tagGid", context);
+            let assignee = read_optional(&params, "assignee", context);
+
+            let mut query: Vec<(String, String)> = Vec::new();
+
+            // Asana requires either project/tag OR assignee+workspace. Workspace alone is invalid.
+            if let Some(project) = project {
                 query.push(("project".to_string(), project));
-            }
-            if let Some(tag) = read_optional(&params, "tagGid", context) {
+            } else if let Some(tag) = tag {
                 query.push(("tag".to_string(), tag));
-            }
-            if let Some(assignee) = read_optional(&params, "assignee", context) {
+            } else if let Some(assignee) = assignee {
+                query.push(("workspace".to_string(), workspace_gid));
                 query.push(("assignee".to_string(), assignee));
+            } else {
+                return Err("Asana list tasks requires a project or tag, or an assignee with workspace".to_string());
             }
+
             if let Some(limit) = read_limit(&params, context) {
                 query.push(("limit".to_string(), limit.to_string()));
             }
