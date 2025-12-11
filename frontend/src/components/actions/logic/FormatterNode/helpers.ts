@@ -207,17 +207,15 @@ const sanitizeFieldsForOperation = (
       out[key] = Boolean(raw ?? defaults[key] ?? false)
       return
     }
-    const trimmed =
-      typeof raw === 'string'
-        ? raw.trim()
-        : typeof raw === 'number' || typeof raw === 'boolean'
-          ? raw
-          : undefined
-    if (trimmed !== undefined && trimmed !== '') {
-      out[key] = trimmed
+    if (
+      typeof raw === 'string' ||
+      typeof raw === 'number' ||
+      typeof raw === 'boolean'
+    ) {
+      out[key] = raw
       return
     }
-    if (defaults && key in defaults) {
+    if (defaults && key in defaults && out[key] === undefined) {
       out[key] = defaults[key]
     }
   })
@@ -228,10 +226,11 @@ const sanitizeFieldsForOperation = (
 export const normalizeFormatterConfig = (
   config?: FormatterConfig
 ): FormatterConfig => {
-  const operation = (config?.operation ?? '').trim()
+  const operation =
+    typeof config?.operation === 'string' ? config.operation : ''
   const input = typeof config?.input === 'string' ? config.input : ''
   const output_key =
-    typeof config?.output_key === 'string' ? config.output_key.trim() : ''
+    typeof config?.output_key === 'string' ? config.output_key : ''
   const fields = sanitizeFieldsForOperation(
     operation,
     (config?.fields as Record<string, any>) ?? {}
