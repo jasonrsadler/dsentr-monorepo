@@ -920,6 +920,7 @@ export default function FlowCanvas({
           key={`action-asana-${props.id}-${props?.data?.wfEpoch ?? ''}`}
           {...props}
           {...createSharedRunProps()}
+          planTier={normalizedPlanTierRef.current}
           isRunning={runningIdsRef.current.has(props.id)}
           isSucceeded={succeededIdsRef.current.has(props.id)}
           isFailed={failedIdsRef.current.has(props.id)}
