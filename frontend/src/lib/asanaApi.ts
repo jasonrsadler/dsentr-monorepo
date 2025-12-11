@@ -39,6 +39,10 @@ interface StoriesApiResponse extends AsanaApiResponse {
   stories?: { gid?: string; text?: string | null }[]
 }
 
+interface TaskDetailsApiResponse extends AsanaApiResponse {
+  task?: AsanaTask
+}
+
 export interface AsanaWorkspace {
   gid: string
   name: string
@@ -392,11 +396,49 @@ export async function fetchAsanaTaskDetails(
   options?: AsanaConnectionOptions
 ): Promise<AsanaTask> {
   const task = encodeURIComponent(taskGid.trim())
-  const data = await requestJson<{ success: boolean; task: AsanaTask }>(
+  const data = await requestJson<TaskDetailsApiResponse & Partial<AsanaTask>>(
     appendConnectionQuery(`/api/asana/tasks/${task}`, options),
     'Asana task details'
   )
-  return data.task
+
+  const rawTask = (data as TaskDetailsApiResponse).task ?? data
+  if (!rawTask || typeof rawTask.gid !== 'string') {
+    throw new Error('Asana task details missing task payload')
+  }
+
+  const normalizeAssignee = (assignee: AsanaTask['assignee']) =>
+    assignee
+      ? {
+          gid: assignee.gid ?? '',
+          name: assignee.name ?? '',
+          email: assignee.email ?? null
+        }
+      : null
+
+  const normalizeCustomFields = (
+    customFields: AsanaTask['custom_fields']
+  ): AsanaTask['custom_fields'] =>
+    Array.isArray(customFields)
+      ? customFields.map((cf) => ({
+          gid: cf.gid ?? '',
+          name: cf.name ?? '',
+          type: cf.type ?? '',
+          text_value: cf.text_value ?? null,
+          number_value: cf.number_value ?? null,
+          enum_value: cf.enum_value ? { name: cf.enum_value.name ?? '' } : null
+        }))
+      : []
+
+  return {
+    gid: rawTask.gid.trim(),
+    name: rawTask.name ?? rawTask.gid.trim(),
+    notes: rawTask.notes ?? '',
+    due_on: rawTask.due_on ?? null,
+    due_at: rawTask.due_at ?? null,
+    completed: rawTask.completed ?? false,
+    assignee: normalizeAssignee(rawTask.assignee),
+    custom_fields: normalizeCustomFields(rawTask.custom_fields)
+  }
 }
 
 export async function fetchAsanaStories(

@@ -5,8 +5,10 @@ interface NodeInputFieldProps {
   placeholder?: string
   value?: string
   onChange: (value: string) => void
+  onBlur?: (value: string) => void
   className?: string
   maxchars?: number
+  disabled?: boolean
 }
 
 export default function NodeInputField({
@@ -14,8 +16,10 @@ export default function NodeInputField({
   placeholder = '',
   value,
   onChange,
+  onBlur,
   className,
-  maxchars
+  maxchars,
+  disabled = false
 }: NodeInputFieldProps) {
   const [internalValue, setInternalValue] = useState(value ?? '')
   const latestValue = useRef(value ?? '')
@@ -67,6 +71,8 @@ export default function NodeInputField({
       className={className ?? inputClass}
       value={internalValue}
       onChange={(e) => handleChange(e.target.value)}
+      onBlur={() => onBlur?.(latestValue.current)}
+      disabled={disabled}
     />
   )
 }

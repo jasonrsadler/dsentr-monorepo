@@ -89,6 +89,9 @@ oUnusedLocals.
 - Asana node now fetches workspaces/projects/sections/tags/teams/users from the selected connection and renders dropdowns alongside manual GID inputs so users don’t have to look up IDs.
 - Asana node now enforces Workspace-plan-only UI (Solo shows an upgrade notice), replaces GID labels with dropdowns for tasks/comments, adds due-on/at toggling with pickers only, and prevents solo users from triggering metadata fetches.
 - Asana node dropdown fetch effects are gated by visibility to avoid redundant API calls while hidden fields stay collapsed, and the assignee label now omits “GID” for consistency with other fields.
+- Asana create task now leaves project selection optional with a default "No Project" choice, shows the name/optional fields as soon as a workspace is selected, and pins the project dropdown to the top of the optional section so tasks can be created without assigning them to a project.
+- Asana update task now supports a "No Project" selection that reveals a manual Task GID input (fetches details on blur, auto-populates fields, hides the task dropdown), while keeping optional fields available once a task GID is provided.
+- Manual Task GID entry (No Project path) no longer triggers an API fetch or auto-prefill; dropdown task selection still pre-fills fields as before.
 - Asana action fields are now sequenced strictly by dependency (connection → operation → workspace → downstream choices), and project/tag/team/user fetches run only when their dropdowns are visible to stop circular API triggers while configuring nodes.
 - Action nodes now deep-compare local state before notifying the canvas so update notifications don't trigger infinite React Flow rerender loops.
 - Action node prop-to-state sync skips redundant param updates to prevent React Flow dirty-check loops when toggling node UI.

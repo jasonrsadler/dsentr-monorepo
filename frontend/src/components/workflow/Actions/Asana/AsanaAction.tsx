@@ -143,6 +143,11 @@ const DEFAULT_PARAMS: AsanaActionParams = {
   hasValidationErrors: false
 }
 
+const NO_PROJECT_OPTION: NodeDropdownOption = {
+  label: 'No Project',
+  value: ''
+}
+
 type DateTimeParts = {
   date: string
   hour: number
@@ -393,9 +398,15 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   createTask: {
     label: 'Tasks - Create task',
-    // Project is shown before name in the UI flow (workspace -> project -> name)
-    required: ['workspaceGid', 'projectGid', 'name'],
-    optional: ['dueOn', 'dueAt', 'assignee', 'notes', 'additionalFields']
+    required: ['workspaceGid', 'name'],
+    optional: [
+      'projectGid',
+      'assignee',
+      'dueOn',
+      'dueAt',
+      'notes',
+      'additionalFields'
+    ]
   },
   deleteTask: {
     label: 'Tasks - Delete task',
@@ -716,6 +727,31 @@ export default function AsanaAction({
     [asanaParams, additionalFieldErrors]
   )
 
+  const buildTaskPrefillFromDetails = useCallback(
+    (task: AsanaTask | null | undefined): Partial<AsanaActionParams> => {
+      if (!task) return {}
+
+      return {
+        name: task.name ?? '',
+        notes: task.notes ?? '',
+        completed: task.completed ?? false,
+        assignee: task.assignee?.gid ?? '',
+        dueOn: task.due_on ?? '',
+        dueAt: task.due_at ?? '',
+        additionalFields:
+          task.custom_fields?.map((cf) => {
+            const key = cf.name ?? cf.gid
+            let value = ''
+            if (cf.text_value != null) value = cf.text_value
+            else if (cf.number_value != null) value = String(cf.number_value)
+            else if (cf.enum_value?.name != null) value = cf.enum_value.name
+            return { key, value }
+          }) ?? []
+      }
+    },
+    []
+  )
+
   const applyAsanaPatch = useCallback(
     (patch: Partial<AsanaActionParams>) => {
       if (!effectiveCanEdit) return
@@ -950,6 +986,14 @@ export default function AsanaAction({
   const [projectOptionsLoading, setProjectOptionsLoading] = useState(false)
   const [projectOptionsError, setProjectOptionsError] = useState<string | null>(
     null
+  )
+  const projectDropdownOptions = useMemo<NodeDropdownOption[]>(
+    () =>
+      asanaParams.operation === 'createTask' ||
+      asanaParams.operation === 'updateTask'
+        ? [NO_PROJECT_OPTION, ...projectOptions]
+        : projectOptions,
+    [asanaParams.operation, projectOptions]
   )
 
   const [tagOptions, setTagOptions] = useState<NodeDropdownOption[]>([])
@@ -1243,16 +1287,14 @@ export default function AsanaAction({
         enableWorkspace()
         if (hasWorkspaceSelected) {
           fieldVisibility.projectGid = true
-          if (hasProjectSelected) {
-            fieldVisibility.name = true
-            fieldVisibility.assignee = true
-            fieldVisibility.notes = true
-            if (dueMode != null) {
-              fieldVisibility.dueOn = dueMode === 'dueOn'
-              fieldVisibility.dueAt = dueMode === 'dueAt'
-            }
-            fieldVisibility.additionalFields = true
+          fieldVisibility.name = true
+          fieldVisibility.assignee = true
+          fieldVisibility.notes = true
+          if (dueMode != null) {
+            fieldVisibility.dueOn = dueMode === 'dueOn'
+            fieldVisibility.dueAt = dueMode === 'dueAt'
           }
+          fieldVisibility.additionalFields = true
         }
         break
       case 'updateTask':
@@ -1262,13 +1304,13 @@ export default function AsanaAction({
           fieldVisibility.projectGid = true
         }
 
-        // Show task selector only after a project is chosen
-        if (hasWorkspaceSelected && hasProjectSelected) {
+        // Show task selector/input after workspace is chosen (project optional)
+        if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
         }
 
-        // Show editable task fields only after a task is selected
-        if (hasWorkspaceSelected && hasProjectSelected && hasTaskSelected) {
+        // Show editable task fields once a task is selected (dropdown or manual)
+        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.name = true
           fieldVisibility.notes = true
           fieldVisibility.assignee = true
@@ -1452,10 +1494,9 @@ export default function AsanaAction({
         break
     }
 
-    // Ensure project selector is shown under a selected workspace whenever the
-    // operation declares `projectGid` as either required or optional. This
-    // centralizes the "project appears after workspace" rule instead of
-    // relying on each case to set it.
+    // Keep project positioned immediately after workspace in the required list
+    // when the operation expects it (leave createTask's optional project in
+    // the optional section).
     try {
       const cfg = OPERATION_FIELDS[op]
       if (hasWorkspaceSelected && cfg) {
@@ -1483,7 +1524,7 @@ export default function AsanaAction({
   const showDueModeSelector = useMemo(() => {
     switch (asanaParams.operation) {
       case 'createTask':
-        return hasProjectSelected
+        return hasWorkspaceSelected
       case 'updateTask':
         return hasTaskSelected
       case 'createSubtask':
@@ -1495,7 +1536,7 @@ export default function AsanaAction({
     asanaParams.operation,
     hasParentTaskSelected,
     hasTaskSelected,
-    hasProjectSelected
+    hasWorkspaceSelected
   ])
 
   const handleDueModeChange = useCallback(
@@ -1529,23 +1570,27 @@ export default function AsanaAction({
 
   const handleProjectSelect = useCallback(
     (projectGid: string) => {
-      applyAsanaPatch({
+      const nextPatch: Partial<AsanaActionParams> = {
         projectGid,
         sectionGid: '',
         taskGid: '', // Clear task selection
         parentTaskGid: '',
-        storyGid: '',
-        // Also clear the populated fields from the previous task
-        name: '',
-        notes: '',
-        assignee: '',
-        completed: false,
-        dueOn: '',
-        dueAt: '',
-        additionalFields: []
-      })
+        storyGid: ''
+      }
+
+      if (asanaParams.operation !== 'createTask') {
+        nextPatch.name = ''
+        nextPatch.notes = ''
+        nextPatch.assignee = ''
+        nextPatch.completed = false
+        nextPatch.dueOn = ''
+        nextPatch.dueAt = ''
+        nextPatch.additionalFields = []
+      }
+
+      applyAsanaPatch(nextPatch)
     },
-    [applyAsanaPatch]
+    [applyAsanaPatch, asanaParams.operation]
   )
 
   const handleTagSelect = useCallback(
@@ -1593,57 +1638,7 @@ export default function AsanaAction({
 
         // Populate all fields from the task data
         if (taskDetails) {
-          next.name = taskDetails.name || ''
-          next.notes = taskDetails.notes || ''
-          next.assignee = taskDetails.assignee?.gid || ''
-          next.completed = taskDetails.completed || false
-
-          // Handle due dates - prioritize due_at over due_on
-          if (taskDetails.due_at) {
-            next.dueAt = taskDetails.due_at
-            next.dueOn = ''
-          } else if (taskDetails.due_on) {
-            next.dueOn = taskDetails.due_on
-            next.dueAt = ''
-          } else {
-            next.dueOn = ''
-            next.dueAt = ''
-          }
-
-          // Map custom_fields to additionalFields key-value pairs
-          if (
-            Array.isArray(taskDetails.custom_fields) &&
-            taskDetails.custom_fields.length > 0
-          ) {
-            const additionalFields: KeyValue[] = taskDetails.custom_fields
-              .map((cf) => {
-                let value = ''
-
-                if (cf.enum_value?.name) {
-                  value = cf.enum_value.name
-                } else if (
-                  cf.text_value !== null &&
-                  cf.text_value !== undefined
-                ) {
-                  value = String(cf.text_value)
-                } else if (
-                  cf.number_value !== null &&
-                  cf.number_value !== undefined
-                ) {
-                  value = String(cf.number_value)
-                }
-
-                return {
-                  key: cf.name || cf.gid,
-                  value: value
-                }
-              })
-              .filter((pair) => pair.key && pair.value)
-
-            next.additionalFields = additionalFields
-          } else {
-            next.additionalFields = []
-          }
+          Object.assign(next, buildTaskPrefillFromDetails(taskDetails))
         } else {
           // Fallback: just use the name from taskOptions
           const found = taskOptions.find(
@@ -1661,7 +1656,45 @@ export default function AsanaAction({
 
       applyAsanaPatch(next)
     },
-    [applyAsanaPatch, asanaParams.operation, taskOptions, taskDetailsMap]
+    [
+      applyAsanaPatch,
+      asanaParams.operation,
+      taskOptions,
+      taskDetailsMap,
+      buildTaskPrefillFromDetails
+    ]
+  )
+
+  const handleManualTaskChange = useCallback(
+    (taskGid: string) => {
+      setSelectedTaskDetails(null)
+      applyAsanaPatch({ taskGid })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleManualTaskBlur = useCallback(
+    (taskGid: string) => {
+      if (
+        asanaParams.operation !== 'updateTask' ||
+        hasProjectSelected ||
+        !asanaConnectionOptions
+      ) {
+        return
+      }
+
+      const trimmed = taskGid.trim()
+      if (!trimmed) return
+
+      // Manual Task GID entry should not trigger API fetches or auto-prefill.
+      applyAsanaPatch({ taskGid: trimmed })
+    },
+    [
+      applyAsanaPatch,
+      asanaConnectionOptions,
+      asanaParams.operation,
+      hasProjectSelected
+    ]
   )
 
   // Auto-populate first task for updateTask operation
@@ -2156,44 +2189,23 @@ export default function AsanaAction({
   ])
 
   useEffect(() => {
-    if (!asanaParams.taskGid) return
-
-    console.log('[singleFetch] fetching', asanaParams.taskGid)
-
-    fetchAsanaTaskDetails(asanaParams.taskGid, asanaConnectionOptions ?? {})
-      .then((task) => {
-        console.log('[singleFetch] got', task)
-        setSelectedTaskDetails(task)
-      })
-      .catch((err) => console.log('[singleFetch] error', err))
-  }, [asanaConnectionOptions, asanaParams.taskGid])
-
-  useEffect(() => {
     if (!selectedTaskDetails) return
 
-    const record = selectedTaskDetails
-
-    const next: Partial<AsanaActionParams> = {
-      name: record.name ?? '',
-      notes: record.notes ?? '',
-      completed: record.completed ?? false,
-      assignee: record.assignee?.gid ?? '',
-      dueOn: record.due_on ?? '',
-      dueAt: record.due_at ?? '',
-      additionalFields:
-        record.custom_fields?.map((cf) => {
-          const key = cf.name ?? cf.gid
-          let value = ''
-          if (cf.text_value != null) value = cf.text_value
-          else if (cf.number_value != null) value = String(cf.number_value)
-          else if (cf.enum_value?.name != null) value = cf.enum_value.name
-          return { key, value }
-        }) ?? []
+    const next = buildTaskPrefillFromDetails(selectedTaskDetails)
+    if (Object.keys(next).length > 0) {
+      applyAsanaPatch(next)
     }
+  }, [applyAsanaPatch, buildTaskPrefillFromDetails, selectedTaskDetails])
 
-    console.log('[prefill] applying', next)
-    applyAsanaPatch(next)
-  }, [applyAsanaPatch, selectedTaskDetails])
+  useEffect(() => {
+    if (!asanaParams.taskGid?.trim()) {
+      setSelectedTaskDetails(null)
+    }
+  }, [asanaParams.taskGid])
+
+  useEffect(() => {
+    setSelectedTaskDetails(null)
+  }, [asanaParams.projectGid])
 
   useEffect(() => {
     setCommentOptions([])
@@ -2319,25 +2331,27 @@ export default function AsanaAction({
       }
 
       // include project immediately after workspace if visible
-      if (
-        visibility['projectGid'] &&
-        (req.includes('projectGid') || opt.includes('projectGid'))
-      ) {
-        requiredOrdered.push('projectGid')
-        // remove project from optionalFiltered if present
-        const idx = optionalFiltered.indexOf('projectGid')
-        if (idx !== -1) optionalFiltered.splice(idx, 1)
+      if (visibility['projectGid']) {
+        const projectIsRequired = req.includes('projectGid')
+        const projectIsOptional =
+          opt.includes('projectGid') && asanaParams.operation !== 'createTask'
+        if (projectIsRequired || projectIsOptional) {
+          requiredOrdered.push('projectGid')
+          // remove project from optionalFiltered if present
+          const idx = optionalFiltered.indexOf('projectGid')
+          if (idx !== -1) optionalFiltered.splice(idx, 1)
+        }
       }
+
+      // add remaining required fields (excluding workspace/project duplicates)
+      req.forEach((f) => {
+        if (f === 'workspaceGid' || f === 'projectGid') return
+        requiredOrdered.push(f)
+      })
+
+      // optionalFiltered already has project removed if promoted; keep order
+      return { required: requiredOrdered, optional: optionalFiltered }
     }
-
-    // add remaining required fields (excluding workspace/project duplicates)
-    req.forEach((f) => {
-      if (f === 'workspaceGid' || f === 'projectGid') return
-      requiredOrdered.push(f)
-    })
-
-    // optionalFiltered already has project removed if promoted; keep order
-    return { required: requiredOrdered, optional: optionalFiltered }
   }, [asanaParams.operation, visibility])
 
   const renderField = (field: FieldKey, _isRequired: boolean) => {
@@ -2400,7 +2414,7 @@ export default function AsanaAction({
             {labelText}
           </p>
           <NodeDropdownField
-            options={projectOptions}
+            options={projectDropdownOptions}
             value={currentValue}
             onChange={handleProjectSelect}
             placeholder={
@@ -2462,6 +2476,35 @@ export default function AsanaAction({
 
     if (field === 'taskGid') {
       const currentValue = typeof value === 'string' ? value : ''
+      const useManualTaskInput =
+        asanaParams.operation === 'updateTask' && !hasProjectSelected
+
+      if (useManualTaskInput) {
+        return (
+          <div key={field} className="space-y-1">
+            <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+              Task GID
+            </p>
+            <NodeInputField
+              value={currentValue}
+              onChange={handleManualTaskChange}
+              onBlur={handleManualTaskBlur}
+              disabled={
+                !effectiveCanEdit || !hasConnection || !debouncedWorkspaceGid
+              }
+              placeholder={
+                !hasConnection
+                  ? 'Select an Asana connection first'
+                  : debouncedWorkspaceGid
+                    ? 'Enter task GID'
+                    : 'Select a workspace first'
+              }
+            />
+            {error && <p className="text-xs text-red-500">{error}</p>}
+          </div>
+        )
+      }
+
       return (
         <div key={field} className="space-y-1">
           <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
@@ -3001,20 +3044,20 @@ export default function AsanaAction({
           </div>
 
           <div className="space-y-3">
-            {visibleFields.required.length > 0 && (
+            {visibleFields?.required && visibleFields.required.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   Required fields
                 </p>
                 <div className="space-y-2">
-                  {visibleFields.required.map((field) =>
+                  {visibleFields?.required.map((field) =>
                     renderField(field, true)
                   )}
                 </div>
               </div>
             )}
 
-            {visibleFields.optional.length > 0 && (
+            {visibleFields?.optional && visibleFields?.optional?.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   Optional fields
@@ -3022,7 +3065,10 @@ export default function AsanaAction({
                 <div className="space-y-2">
                   {(() => {
                     const nodes: React.ReactNode[] = []
-                    const specialBefore: FieldKey[] = ['assignee']
+                    const specialBefore: FieldKey[] =
+                      asanaParams.operation === 'createTask'
+                        ? ['projectGid', 'assignee']
+                        : ['assignee']
                     const specialAfter: FieldKey[] = [
                       'notes',
                       'additionalFields'
@@ -3087,7 +3133,7 @@ export default function AsanaAction({
                       })
                     }
 
-                    const rest = visibleFields.optional.filter((f) => {
+                    const rest = visibleFields?.optional.filter((f) => {
                       if (
                         asanaParams.operation === 'createTask' ||
                         asanaParams.operation === 'updateTask' ||
@@ -3102,7 +3148,7 @@ export default function AsanaAction({
                       }
                       return true
                     })
-                    rest.forEach((field) => {
+                    rest?.forEach((field) => {
                       const node = renderField(field, false)
                       if (node)
                         nodes.push(<div key={`opt-rest-${field}`}>{node}</div>)
