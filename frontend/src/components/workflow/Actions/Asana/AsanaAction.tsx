@@ -618,7 +618,7 @@ const sanitizeAsanaParams = (
 
   for (const key of stringFields) {
     if (params[key] !== undefined) {
-      base[key] = cleanString(params[key]).trim()
+      base[key] = cleanString(params[key])
     }
   }
 
