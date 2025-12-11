@@ -47,3 +47,4 @@ Styles live in `src/css/globals.css` under `.themed-scroll` and were previously 
 - Added a message center modal and header badge button so users can read admin replies, mark them read, and reply without leaving the dashboard.
 - Added a Delay (Wait) node configuration UI and validation so the workflow designer can pause flows without manual code.
 - Added a Formatter logic node UI with grouped dropdown selection, validation, and palette/flyout wiring so users can transform data without new components or custom styling.
+- Workflow nodes: dashed summary areas now show an explicit click affordance (hover overlay + pointer cursor) and open the flyout on mouseup without interfering with node dragging, fixing missed flyout openings when using the on-card hint zone.

@@ -144,6 +144,7 @@ function EmailActionNodeContent({
         )}
 
         <ActionNodeSummary
+          nodeId={id}
           hint={`Configure ${providerName} email settings in the flyout.`}
         />
       </div>

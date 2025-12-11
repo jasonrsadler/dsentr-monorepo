@@ -1,10 +1,14 @@
+import NodeFlyoutSurface from '../NodeFlyoutSurface'
+
 interface ActionNodeSummaryProps {
+  nodeId: string
   planRestrictionMessage?: string | null
   onPlanUpgrade?: () => void
   hint?: string
 }
 
 export default function ActionNodeSummary({
+  nodeId,
   planRestrictionMessage,
   onPlanUpgrade,
   hint = 'Configure this action in the flyout.'
@@ -28,9 +32,9 @@ export default function ActionNodeSummary({
         </div>
       ) : null}
 
-      <div className="rounded-lg border border-dashed border-zinc-200 bg-white/60 px-3 py-2 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+      <NodeFlyoutSurface nodeId={nodeId}>
         <p>{hint}</p>
-      </div>
+      </NodeFlyoutSurface>
     </div>
   )
 }

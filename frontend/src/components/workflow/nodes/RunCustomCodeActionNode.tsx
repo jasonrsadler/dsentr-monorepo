@@ -133,7 +133,10 @@ function RunCustomCodeActionNodeContent({
           <p className="mt-2 text-xs text-red-500">{controller.labelError}</p>
         )}
 
-        <ActionNodeSummary hint="Open the custom code flyout to edit inputs, outputs, and script content." />
+        <ActionNodeSummary
+          nodeId={id}
+          hint="Open the custom code flyout to edit inputs, outputs, and script content."
+        />
       </div>
 
       <AnimatePresence>

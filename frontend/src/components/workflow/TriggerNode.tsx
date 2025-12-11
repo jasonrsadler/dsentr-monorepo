@@ -4,6 +4,7 @@ import { Handle, Position } from '@xyflow/react'
 import { formatDisplayDate, formatDisplayTime } from '../ui/schedule/utils'
 import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
 import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
+import NodeFlyoutSurface from './NodeFlyoutSurface'
 import { normalizePlanTier } from '@/lib/planTiers'
 import { errorMessage } from '@/lib/errorMessage'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
@@ -380,29 +381,39 @@ function TriggerNodeContent({
               {triggerType}
             </span>
           </div>
-          {normalizedTriggerType === 'schedule' ? (
-            <div className="rounded-lg border border-dashed border-zinc-200 bg-white/60 px-3 py-2 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
-              <p>
-                Start:{' '}
-                {scheduleConfig.startDate
-                  ? formatDisplayDate(scheduleConfig.startDate)
-                  : 'Not set'}
-              </p>
-              <p>
-                Time:{' '}
-                {scheduleConfig.startTime
-                  ? formatDisplayTime(scheduleConfig.startTime)
-                  : 'Not set'}
-              </p>
-              <p>Timezone: {scheduleConfig.timezone || 'Not set'}</p>
-              {scheduleConfig.repeat ? (
+          <NodeFlyoutSurface
+            nodeId={id}
+            hoverLabel="Click to edit this trigger"
+            className="text-zinc-700 dark:text-zinc-200"
+          >
+            {normalizedTriggerType === 'schedule' ? (
+              <>
                 <p>
-                  Repeats every {scheduleConfig.repeat.every}{' '}
-                  {scheduleConfig.repeat.unit}
+                  Start:{' '}
+                  {scheduleConfig.startDate
+                    ? formatDisplayDate(scheduleConfig.startDate)
+                    : 'Not set'}
                 </p>
-              ) : null}
-            </div>
-          ) : null}
+                <p>
+                  Time:{' '}
+                  {scheduleConfig.startTime
+                    ? formatDisplayTime(scheduleConfig.startTime)
+                    : 'Not set'}
+                </p>
+                <p>Timezone: {scheduleConfig.timezone || 'Not set'}</p>
+                {scheduleConfig.repeat ? (
+                  <p>
+                    Repeats every {scheduleConfig.repeat.every}{' '}
+                    {scheduleConfig.repeat.unit}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-zinc-700 dark:text-zinc-200">
+                Configure this trigger in the flyout.
+              </p>
+            )}
+          </NodeFlyoutSurface>
           <div className="flex items-center justify-between">
             <span className="font-semibold text-zinc-700 dark:text-zinc-200">
               Inputs
@@ -413,9 +424,6 @@ function TriggerNodeContent({
                 : 'None'}
             </span>
           </div>
-          <p className="text-zinc-500 dark:text-zinc-400">
-            Configure this trigger in the flyout.
-          </p>
         </div>
       </div>
 

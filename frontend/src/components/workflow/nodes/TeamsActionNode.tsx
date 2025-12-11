@@ -158,6 +158,7 @@ function TeamsActionNodeContent({
           <p className="mt-2 text-xs text-red-500">{controller.labelError}</p>
         )}
         <ActionNodeSummary
+          nodeId={id}
           planRestrictionMessage={planRestrictionMessage}
           onPlanUpgrade={controller.handlePlanUpgradeClick}
           hint="Open the Teams flyout to configure channels and messages."

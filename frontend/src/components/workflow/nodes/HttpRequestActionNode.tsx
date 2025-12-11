@@ -133,7 +133,10 @@ function HttpRequestActionNodeContent({
           <p className="mt-2 text-xs text-red-500">{controller.labelError}</p>
         )}
 
-        <ActionNodeSummary hint="Open the HTTP flyout to configure the request details." />
+        <ActionNodeSummary
+          nodeId={id}
+          hint="Open the HTTP flyout to configure the request details."
+        />
       </div>
 
       <AnimatePresence>

@@ -149,6 +149,7 @@ function GoogleSheetsActionNodeContent({
         )}
 
         <ActionNodeSummary
+          nodeId={id}
           planRestrictionMessage={controller.planRestrictionMessage}
           onPlanUpgrade={
             controller.planRestrictionMessage

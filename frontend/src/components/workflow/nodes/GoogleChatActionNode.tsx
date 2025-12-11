@@ -148,7 +148,10 @@ function GoogleChatActionNodeContent({
           <p className="mt-2 text-xs text-red-500">{controller.labelError}</p>
         )}
 
-        <ActionNodeSummary hint="Open the Google Chat flyout to configure your message." />
+        <ActionNodeSummary
+          nodeId={id}
+          hint="Open the Google Chat flyout to configure your message."
+        />
       </div>
 
       <AnimatePresence>

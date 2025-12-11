@@ -12,6 +12,9 @@
 - Runs button styled as a tab beside Designer and the runs panel now slides up from the bottom with animation to avoid blocking the node sidebar.
 - Trigger run actions now pass the trigger id to manual run requests so multi-trigger workflows start from the selected entry instead of dispatching every trigger.
 - Flyout node deletion now uses the same confirmation modal as the on-canvas nodes instead of the browser confirm dialog, keeping delete flows consistent across both surfaces.
+- Flyout: clicking the dashed summary area on nodes now reliably keeps the flyout open (ignores the immediate empty selection event after an explicit open) while still allowing drag interactions.
+- Flyout: node selection alone no longer opens the flyout; only the dashed hint surface triggers it on mouseup, preventing accidental opens when grabbing other parts of a node.
+- Flyout: added a guard to ignore transient empty-selection events immediately after an explicit flyout open so the panel stays visible when clicking the designated dashed surface.
 
 ## Notes
 - Pickers are locally stateful and wrapped in useMemo/useCallback with click-outside + Escape handling to avoid React Flow re-render loops.

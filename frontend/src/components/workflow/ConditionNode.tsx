@@ -4,6 +4,7 @@ import { Handle, Position } from '@xyflow/react'
 import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
 import BaseNode, { type BaseNodeRenderProps } from './BaseNode'
 import { useWorkflowStore, type WorkflowState } from '@/stores/workflowStore'
+import NodeFlyoutSurface from './NodeFlyoutSurface'
 
 export type ConditionNodeData = {
   field?: string
@@ -235,7 +236,11 @@ function ConditionNodeContent({
           <p className="font-semibold text-zinc-700 dark:text-zinc-200">
             Condition expression
           </p>
-          <div className="rounded-lg border border-dashed border-zinc-200 bg-white/60 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/60">
+          <NodeFlyoutSurface
+            nodeId={id}
+            hoverLabel="Click to edit this condition"
+            className="text-zinc-700 dark:text-zinc-200"
+          >
             {expression ? (
               <p className="break-words text-zinc-700 dark:text-zinc-200">
                 {expression}
@@ -245,7 +250,7 @@ function ConditionNodeContent({
                 Configure this condition in the flyout.
               </p>
             )}
-          </div>
+          </NodeFlyoutSurface>
           {hasValidationErrors ? (
             <p className="text-red-500">
               Field and value are required for this condition.

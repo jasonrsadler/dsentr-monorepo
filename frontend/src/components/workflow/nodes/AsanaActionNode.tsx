@@ -147,6 +147,7 @@ function AsanaActionNodeContent({
           <p className="mt-2 text-xs text-red-500">{controller.labelError}</p>
         )}
         <ActionNodeSummary
+          nodeId={id}
           planRestrictionMessage={controller.planRestrictionMessage}
           onPlanUpgrade={controller.handlePlanUpgradeClick}
           hint="Open the Asana flyout to select a connection, operation, and fields."

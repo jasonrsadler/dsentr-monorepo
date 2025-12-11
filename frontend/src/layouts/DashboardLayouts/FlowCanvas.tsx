@@ -1160,8 +1160,13 @@ export default function FlowCanvas({
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
+  const lastExplicitFlyoutOpenRef = useRef<{ id: string | null; ts: number }>(
+    { id: null, ts: 0 }
+  )
+
   const handleFlyoutOpen = useCallback(
     (nodeId: string | null) => {
+      lastExplicitFlyoutOpenRef.current = { id: nodeId, ts: Date.now() }
       if (!nodeId) {
         syncSelectionToStore(null)
         setFlyoutNodeId((prev) => (prev === null ? prev : null))
@@ -1183,10 +1188,24 @@ export default function FlowCanvas({
           ? selectedNodes[selectedNodes.length - 1]
           : null
       const nextId = lastSelected?.id ?? null
-      handleFlyoutOpen(nextId)
+      const now = Date.now()
+      const lastExplicit = lastExplicitFlyoutOpenRef.current
+      const recentExplicit =
+        lastExplicit.id && now - lastExplicit.ts < 400 ? lastExplicit.id : null
+      if (!nextId && recentExplicit) {
+        return
+      }
+      syncSelectionToStore(nextId)
+      if (!nextId) {
+        setFlyoutNodeId(null)
+        return
+      }
+      // Do not auto-open or switch the flyout on selection alone; only the
+      // dashed hint surface calls handleFlyoutOpen. Leaving flyout state
+      // untouched keeps a manually opened panel visible when clicking the node body.
       // Edge selection is intentionally left to React Flow so custom edge menus work.
     },
-    [handleFlyoutOpen]
+    [syncSelectionToStore]
   )
 
   const noopFlyout = useCallback(() => undefined, [])
