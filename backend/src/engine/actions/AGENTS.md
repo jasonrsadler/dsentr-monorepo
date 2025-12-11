@@ -31,3 +31,4 @@
 - Added an Asana action executor that validates personal/workspace OAuth connections, enforces workspace plan membership, and supports project/task/subtask/comment/tag/user operations via the Asana REST API.
 - Asana list tasks now omits the workspace parameter when a project or tag is provided to comply with Asana API rules and avoid 400 errors.
 - Asana list tasks now enforces Asana's filter rules (project/tag or assignee + workspace; workspace alone rejected) to prevent invalid requests.
+- Asana add-task-to-project requests now only send the task + project IDs (no section payload) to mirror the updated UI flow and templated GID inputs.

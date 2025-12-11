@@ -1664,7 +1664,11 @@ function FlyoutActionFields({
         )
       case 'actionAsana':
         return controller.planRestrictionMessage ? null : (
-          <AsanaAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+          <AsanaAction
+            nodeId={nodeId}
+            canEdit={controller.effectiveCanEdit}
+            planTier={normalizedPlanTier}
+          />
         )
       case 'actionCode':
         return (

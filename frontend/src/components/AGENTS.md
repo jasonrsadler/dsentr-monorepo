@@ -53,6 +53,7 @@
 - Google Sheets flyout picker now sends client/app IDs, scope, and the fetched OAuth token to Drive Picker and blocks missing-config cases so the picker works in the flyout without console errors.
 - Delay and Formatter nodes now mirror other action nodes: canvas cards are minimal and configuration is handled exclusively in the flyout.
 - Slack action channel selection now hides the manual input when an OAuth connection is chosen and loads channels into a dropdown from the backend Slack channels endpoint.
+- Asana action flyout: dropdowns (operation/workspace/project/task/assignee/section/tag/comment) are searchable when large, project/task/tag/assignee/comment now include manual options with GID inputs that sync selection states, due date/time fields mirror ISO text inputs, and the add-task-to-project flow uses task GID + project selection only (no section picker).
 
 ## Affected Areas
 - Settings > LogsTab: change history list

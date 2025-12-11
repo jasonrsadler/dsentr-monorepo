@@ -526,9 +526,6 @@ pub(crate) async fn execute_asana(
             let project_gid = read_required(&params, "projectGid", "Project GID", context)?;
             let mut payload = Map::new();
             payload.insert("project".to_string(), Value::String(project_gid));
-            if let Some(section) = read_optional(&params, "sectionGid", context) {
-                payload.insert("section".to_string(), Value::String(section));
-            }
             let response = state
                 .http_client
                 .post(format!("{ASANA_BASE_URL}/tasks/{task_gid}/addProject"))

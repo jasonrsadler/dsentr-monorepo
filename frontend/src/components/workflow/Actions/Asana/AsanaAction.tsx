@@ -96,18 +96,24 @@ export interface AsanaActionParams extends Record<string, unknown> {
   connection?: AsanaConnectionSelection
   workspaceGid?: string
   projectGid?: string
+  projectSelection?: string
   taskGid?: string
+  taskSelection?: string
   parentTaskGid?: string
+  parentTaskSelection?: string
   sectionGid?: string
   tagGid?: string
+  tagSelection?: string
   userGid?: string
   storyGid?: string
+  storySelection?: string
   teamGid?: string
   name?: string
   notes?: string
   dueOn?: string
   dueAt?: string
   assignee?: string
+  assigneeSelection?: string
   query?: string
   completed?: boolean
   archived?: boolean
@@ -123,18 +129,24 @@ const DEFAULT_PARAMS: AsanaActionParams = {
   connection: undefined,
   workspaceGid: '',
   projectGid: '',
+  projectSelection: '',
   taskGid: '',
+  taskSelection: '',
   parentTaskGid: '',
+  parentTaskSelection: '',
   sectionGid: '',
   tagGid: '',
+  tagSelection: '',
   userGid: '',
   storyGid: '',
+  storySelection: '',
   teamGid: '',
   name: '',
   notes: '',
   dueOn: '',
   dueAt: '',
   assignee: '',
+  assigneeSelection: '',
   query: '',
   completed: false,
   archived: false,
@@ -156,6 +168,12 @@ const NO_TAG_OPTION: NodeDropdownOption = {
 const NO_ASSIGNEE_OPTION: NodeDropdownOption = {
   label: 'No Assignee',
   value: ''
+}
+
+const MANUAL_OPTION_VALUE = '__manual__'
+const MANUAL_OPTION: NodeDropdownOption = {
+  label: 'Manual',
+  value: MANUAL_OPTION_VALUE
 }
 
 type DateTimeParts = {
@@ -468,8 +486,7 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   addTaskProject: {
     label: 'Projects - Add task to project',
-    required: ['workspaceGid', 'taskGid', 'projectGid'],
-    optional: ['sectionGid']
+    required: ['workspaceGid', 'taskGid', 'projectGid']
   },
   removeTaskProject: {
     label: 'Projects - Remove task from project',
@@ -502,6 +519,7 @@ interface ValidationResult {
 interface AsanaActionProps {
   nodeId: string
   canEdit?: boolean
+  planTier?: string | null
 }
 
 const normalizeScope = (value?: string | null): '' | AsanaConnectionScope => {
@@ -577,18 +595,24 @@ const sanitizeAsanaParams = (
   const stringFields: (keyof AsanaActionParams)[] = [
     'workspaceGid',
     'projectGid',
+    'projectSelection',
     'taskGid',
+    'taskSelection',
     'parentTaskGid',
+    'parentTaskSelection',
     'sectionGid',
     'tagGid',
+    'tagSelection',
     'userGid',
     'storyGid',
+    'storySelection',
     'teamGid',
     'name',
     'notes',
     'dueOn',
     'dueAt',
     'assignee',
+    'assigneeSelection',
     'query',
     'limit'
   ]
@@ -597,6 +621,25 @@ const sanitizeAsanaParams = (
     if (params[key] !== undefined) {
       base[key] = cleanString(params[key]).trim()
     }
+  }
+
+  if (!base.projectSelection && base.projectGid) {
+    base.projectSelection = base.projectGid
+  }
+  if (!base.taskSelection && base.taskGid) {
+    base.taskSelection = base.taskGid
+  }
+  if (!base.parentTaskSelection && base.parentTaskGid) {
+    base.parentTaskSelection = base.parentTaskGid
+  }
+  if (!base.tagSelection && base.tagGid) {
+    base.tagSelection = base.tagGid
+  }
+  if (!base.storySelection && base.storyGid) {
+    base.storySelection = base.storyGid
+  }
+  if (!base.assigneeSelection && base.assignee) {
+    base.assigneeSelection = base.assignee
   }
 
   // Booleans ----------------------------------------
@@ -736,7 +779,8 @@ const resolveConnectionSelection = (
 
 export default function AsanaAction({
   nodeId,
-  canEdit = true
+  canEdit = true,
+  planTier
 }: AsanaActionProps) {
   const rawParams = useActionParams<Record<string, unknown>>(nodeId, 'asana')
   const asanaParams = useMemo(
@@ -828,9 +872,13 @@ export default function AsanaAction({
           // clear workspace so user re-selects it (shows only workspace picker)
           workspaceGid: '',
           projectGid: '',
+          projectSelection: '',
           taskGid: '',
+          taskSelection: '',
+          parentTaskSelection: '',
           name: '',
           assignee: '',
+          assigneeSelection: '',
           notes: '',
           dueOn: '',
           dueAt: '',
@@ -860,9 +908,10 @@ export default function AsanaAction({
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
-  const isSoloPlan = currentWorkspace?.workspace.plan
-    ? normalizePlanTier(currentWorkspace.workspace.plan) === 'solo'
-    : false
+  const normalizedPlanTierValue = normalizePlanTier(
+    planTier ?? currentWorkspace?.workspace.plan ?? null
+  )
+  const isSoloPlan = normalizedPlanTierValue === 'solo'
 
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null): ProviderConnectionSet => {
@@ -1028,8 +1077,8 @@ export default function AsanaAction({
       asanaParams.operation === 'deleteTask' ||
       asanaParams.operation === 'listTasks'
     return allowNoProject
-      ? [NO_PROJECT_OPTION, ...projectOptions]
-      : projectOptions
+      ? [NO_PROJECT_OPTION, MANUAL_OPTION, ...projectOptions]
+      : [MANUAL_OPTION, ...projectOptions]
   }, [asanaParams.operation, projectOptions])
 
   const [tagOptions, setTagOptions] = useState<NodeDropdownOption[]>([])
@@ -1102,8 +1151,12 @@ export default function AsanaAction({
   const [dueOnMonth, setDueOnMonth] = useState<CalendarMonth>(() =>
     getInitialMonth(asanaParams.dueOn)
   )
+  const [dueOnManuallyEdited, setDueOnManuallyEdited] = useState(false)
   useEffect(() => {
     setDueOnMonth(getInitialMonth(asanaParams.dueOn))
+    if (!asanaParams.dueOn) {
+      setDueOnManuallyEdited(false)
+    }
   }, [asanaParams.dueOn])
 
   const defaultTimezone = useMemo(() => {
@@ -1118,6 +1171,7 @@ export default function AsanaAction({
   const [dueAtTimeOpen, setDueAtTimeOpen] = useState(false)
   const [dueAtTimezoneOpen, setDueAtTimezoneOpen] = useState(false)
   const [dueAtTimezoneSearch, setDueAtTimezoneSearch] = useState('')
+  const [dueAtManuallyEdited, setDueAtManuallyEdited] = useState(false)
   const dueAtParts = useMemo(
     () => parseIsoDateTime(asanaParams.dueAt),
     [asanaParams.dueAt]
@@ -1154,7 +1208,10 @@ export default function AsanaAction({
 
   useEffect(() => {
     setDueAtMonth(getInitialMonth(dueAtParts.date))
-  }, [dueAtParts.date])
+    if (!asanaParams.dueAt) {
+      setDueAtManuallyEdited(false)
+    }
+  }, [asanaParams.dueAt, dueAtParts.date])
 
   const dueAtTimeString = useMemo(
     () =>
@@ -1201,6 +1258,7 @@ export default function AsanaAction({
         second ?? 0,
         tz || dueAtTimezone
       )
+      setDueAtManuallyEdited(false)
       applyAsanaPatch({ dueAt: iso ?? '' })
     },
     [applyAsanaPatch, dueAtTimezone]
@@ -1208,6 +1266,7 @@ export default function AsanaAction({
   const handleDueAtTimezoneSelect = useCallback(
     (tz: string) => {
       setDueAtTimezone(tz)
+      setDueAtManuallyEdited(false)
       if (dueAtParts.date) {
         updateDueAt(
           dueAtParts.date,
@@ -1250,6 +1309,45 @@ export default function AsanaAction({
   const hasProjectSelected = Boolean(asanaParams.projectGid?.trim())
   const hasTaskSelected = Boolean(asanaParams.taskGid?.trim())
   const hasParentTaskSelected = Boolean(asanaParams.parentTaskGid?.trim())
+  const projectSelectionValue = useMemo(
+    () =>
+      (asanaParams.projectSelection ?? '').trim() ||
+      (asanaParams.projectGid ?? '').trim(),
+    [asanaParams.projectGid, asanaParams.projectSelection]
+  )
+  const isManualProjectSelection =
+    projectSelectionValue === MANUAL_OPTION_VALUE
+  const taskSelectionValue = useMemo(
+    () =>
+      (asanaParams.taskSelection ?? '').trim() ||
+      (asanaParams.taskGid ?? '').trim(),
+    [asanaParams.taskGid, asanaParams.taskSelection]
+  )
+  const isManualTaskSelection = taskSelectionValue === MANUAL_OPTION_VALUE
+  const parentTaskSelectionValue = useMemo(
+    () =>
+      (asanaParams.parentTaskSelection ?? '').trim() ||
+      (asanaParams.parentTaskGid ?? '').trim(),
+    [asanaParams.parentTaskGid, asanaParams.parentTaskSelection]
+  )
+  const tagSelectionValue = useMemo(
+    () =>
+      (asanaParams.tagSelection ?? '').trim() ||
+      (asanaParams.tagGid ?? '').trim(),
+    [asanaParams.tagGid, asanaParams.tagSelection]
+  )
+  const storySelectionValue = useMemo(
+    () =>
+      (asanaParams.storySelection ?? '').trim() ||
+      (asanaParams.storyGid ?? '').trim(),
+    [asanaParams.storyGid, asanaParams.storySelection]
+  )
+  const assigneeSelectionValue = useMemo(
+    () =>
+      (asanaParams.assigneeSelection ?? '').trim() ||
+      (asanaParams.assignee ?? '').trim(),
+    [asanaParams.assignee, asanaParams.assigneeSelection]
+  )
 
   const visibility = useMemo(() => {
     const op = asanaParams.operation
@@ -1476,14 +1574,9 @@ export default function AsanaAction({
         break
       case 'addTaskProject':
         enableWorkspace()
-        if (hasWorkspaceSelected && hasProjectSelected) {
+        if (hasWorkspaceSelected) {
           fieldVisibility.taskGid = true
-        }
-        if (hasWorkspaceSelected && hasTaskSelected) {
           fieldVisibility.projectGid = true
-        }
-        if (hasWorkspaceSelected && hasTaskSelected && hasProjectSelected) {
-          fieldVisibility.sectionGid = true
         }
         break
       case 'removeTaskProject':
@@ -1592,13 +1685,20 @@ export default function AsanaAction({
       applyAsanaPatch({
         workspaceGid,
         projectGid: '',
+        projectSelection: '',
         sectionGid: '',
         tagGid: '',
+        tagSelection: '',
         teamGid: '',
         userGid: '',
         taskGid: '',
+        taskSelection: '',
         parentTaskGid: '',
-        storyGid: ''
+        parentTaskSelection: '',
+        storyGid: '',
+        storySelection: '',
+        assignee: '',
+        assigneeSelection: ''
       })
     },
     [applyAsanaPatch]
@@ -1606,12 +1706,17 @@ export default function AsanaAction({
 
   const handleProjectSelect = useCallback(
     (projectGid: string) => {
+      const isManual = projectGid === MANUAL_OPTION_VALUE
       const nextPatch: Partial<AsanaActionParams> = {
-        projectGid,
+        projectGid: isManual ? '' : projectGid,
+        projectSelection: projectGid,
         sectionGid: '',
-        taskGid: '', // Clear task selection
+        taskGid: '',
+        taskSelection: '',
         parentTaskGid: '',
-        storyGid: ''
+        parentTaskSelection: '',
+        storyGid: '',
+        storySelection: ''
       }
 
       if (asanaParams.operation !== 'createTask') {
@@ -1629,9 +1734,45 @@ export default function AsanaAction({
     [applyAsanaPatch, asanaParams.operation]
   )
 
+  const handleProjectInputChange = useCallback(
+    (projectGid: string) => {
+      applyAsanaPatch({
+        projectGid,
+        projectSelection: MANUAL_OPTION_VALUE,
+        sectionGid: '',
+        taskGid: '',
+        taskSelection: '',
+        parentTaskGid: '',
+        storyGid: '',
+        storySelection: ''
+      })
+    },
+    [applyAsanaPatch]
+  )
+
   const handleTagSelect = useCallback(
     (tagGid: string) => {
-      applyAsanaPatch({ tagGid })
+      if (tagGid === MANUAL_OPTION_VALUE) {
+        applyAsanaPatch({
+          tagGid: '',
+          tagSelection: MANUAL_OPTION_VALUE
+        })
+        return
+      }
+      applyAsanaPatch({
+        tagGid,
+        tagSelection: tagGid
+      })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleTagInputChange = useCallback(
+    (tagGid: string) => {
+      applyAsanaPatch({
+        tagGid,
+        tagSelection: MANUAL_OPTION_VALUE
+      })
     },
     [applyAsanaPatch]
   )
@@ -1653,6 +1794,33 @@ export default function AsanaAction({
     [applyAsanaPatch]
   )
 
+  const handleAssigneeSelect = useCallback(
+    (assignee: string) => {
+      if (assignee === MANUAL_OPTION_VALUE) {
+        applyAsanaPatch({
+          assignee: '',
+          assigneeSelection: MANUAL_OPTION_VALUE
+        })
+        return
+      }
+      applyAsanaPatch({
+        assignee,
+        assigneeSelection: assignee
+      })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleAssigneeInputChange = useCallback(
+    (assignee: string) => {
+      applyAsanaPatch({
+        assignee,
+        assigneeSelection: MANUAL_OPTION_VALUE
+      })
+    },
+    [applyAsanaPatch]
+  )
+
   const handleSectionSelect = useCallback(
     (sectionGid: string) => {
       applyAsanaPatch({ sectionGid })
@@ -1666,7 +1834,12 @@ export default function AsanaAction({
 
   const handleTaskSelect = useCallback(
     (taskGid: string) => {
-      const next: Partial<AsanaActionParams> = { taskGid, storyGid: '' }
+      const next: Partial<AsanaActionParams> = {
+        taskGid,
+        taskSelection: taskGid,
+        storyGid: '',
+        storySelection: ''
+      }
 
       // For updateTask operation, populate fields from the task data
       if (asanaParams.operation === 'updateTask') {
@@ -1701,10 +1874,25 @@ export default function AsanaAction({
     ]
   )
 
+  const handleTaskDropdownChange = useCallback(
+    (taskGid: string) => {
+      if (taskGid === MANUAL_OPTION_VALUE) {
+        applyAsanaPatch({ taskSelection: MANUAL_OPTION_VALUE })
+        return
+      }
+      handleTaskSelect(taskGid)
+    },
+    [applyAsanaPatch, handleTaskSelect]
+  )
+
   const handleManualTaskChange = useCallback(
     (taskGid: string) => {
       setSelectedTaskDetails(null)
-      applyAsanaPatch({ taskGid })
+      applyAsanaPatch({
+        taskGid,
+        taskSelection: MANUAL_OPTION_VALUE,
+        storySelection: ''
+      })
     },
     [applyAsanaPatch]
   )
@@ -1723,7 +1911,10 @@ export default function AsanaAction({
       if (!trimmed) return
 
       // Manual Task GID entry should not trigger API fetches or auto-prefill.
-      applyAsanaPatch({ taskGid: trimmed })
+      applyAsanaPatch({
+        taskGid: trimmed,
+        taskSelection: MANUAL_OPTION_VALUE
+      })
     },
     [
       applyAsanaPatch,
@@ -1777,13 +1968,16 @@ export default function AsanaAction({
         // Current task doesn't exist in this project, clear it
         applyAsanaPatch({
           taskGid: '',
+          taskSelection: '',
           name: '',
           notes: '',
           assignee: '',
+          assigneeSelection: '',
           completed: false,
           dueOn: '',
           dueAt: '',
-          additionalFields: []
+          additionalFields: [],
+          storySelection: ''
         })
       }
     }
@@ -1819,16 +2013,66 @@ export default function AsanaAction({
     applyAsanaPatch
   ])
 
+  useEffect(() => {
+    if (
+      asanaParams.operation === 'addTaskProject' &&
+      taskSelectionValue !== MANUAL_OPTION_VALUE
+    ) {
+      applyAsanaPatch({ taskSelection: MANUAL_OPTION_VALUE })
+    }
+  }, [
+    applyAsanaPatch,
+    asanaParams.operation,
+    taskSelectionValue
+  ])
+
   const handleParentTaskSelect = useCallback(
     (parentTaskGid: string) => {
-      applyAsanaPatch({ parentTaskGid })
+      if (parentTaskGid === MANUAL_OPTION_VALUE) {
+        applyAsanaPatch({
+          parentTaskGid: '',
+          parentTaskSelection: MANUAL_OPTION_VALUE
+        })
+        return
+      }
+      applyAsanaPatch({
+        parentTaskGid,
+        parentTaskSelection: parentTaskGid
+      })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleParentTaskInputChange = useCallback(
+    (parentTaskGid: string) => {
+      applyAsanaPatch({
+        parentTaskGid,
+        parentTaskSelection: MANUAL_OPTION_VALUE
+      })
     },
     [applyAsanaPatch]
   )
 
   const handleStorySelect = useCallback(
     (storyGid: string) => {
-      applyAsanaPatch({ storyGid })
+      if (storyGid === MANUAL_OPTION_VALUE) {
+        applyAsanaPatch({
+          storyGid: '',
+          storySelection: MANUAL_OPTION_VALUE
+        })
+        return
+      }
+      applyAsanaPatch({ storyGid, storySelection: storyGid })
+    },
+    [applyAsanaPatch]
+  )
+
+  const handleStoryInputChange = useCallback(
+    (storyGid: string) => {
+      applyAsanaPatch({
+        storyGid,
+        storySelection: MANUAL_OPTION_VALUE
+      })
     },
     [applyAsanaPatch]
   )
@@ -1851,14 +2095,20 @@ export default function AsanaAction({
     () =>
       hasConnection &&
       !isSoloPlan &&
+      asanaParams.operation !== 'addTaskProject' &&
+      taskSelectionValue !== MANUAL_OPTION_VALUE &&
+      !isManualProjectSelection &&
       (visibility.taskGid || visibility.parentTaskGid || visibility.storyGid) &&
       debouncedWorkspaceGid &&
       debouncedProjectGid,
     [
+      asanaParams.operation,
       debouncedProjectGid,
       debouncedWorkspaceGid,
       hasConnection,
+      isManualProjectSelection,
       isSoloPlan,
+      taskSelectionValue,
       visibility.parentTaskGid,
       visibility.storyGid,
       visibility.taskGid
@@ -2251,7 +2501,8 @@ export default function AsanaAction({
       !visibility.storyGid ||
       !taskGid ||
       !asanaConnectionOptions ||
-      isSoloPlan
+      isSoloPlan ||
+      storySelectionValue === MANUAL_OPTION_VALUE
     ) {
       setCommentOptionsLoading(false)
       return
@@ -2291,6 +2542,7 @@ export default function AsanaAction({
     asanaConnectionOptions,
     asanaParams.taskGid,
     isSoloPlan,
+    storySelectionValue,
     visibility.storyGid
   ])
 
@@ -2366,6 +2618,32 @@ export default function AsanaAction({
         requiredOrdered.push('workspaceGid')
       }
 
+      if (asanaParams.operation === 'addTaskProject') {
+        if (visibility['taskGid'] && req.includes('taskGid')) {
+          requiredOrdered.push('taskGid')
+        }
+        if (visibility['projectGid']) {
+          if (
+            req.includes('projectGid') ||
+            (opt.includes('projectGid') && asanaParams.operation !== 'createTask')
+          ) {
+            requiredOrdered.push('projectGid')
+            const idx = optionalFiltered.indexOf('projectGid')
+            if (idx !== -1) optionalFiltered.splice(idx, 1)
+          }
+        }
+        req.forEach((f) => {
+          if (
+            f === 'workspaceGid' ||
+            f === 'projectGid' ||
+            f === 'taskGid'
+          )
+            return
+          requiredOrdered.push(f)
+        })
+        return { required: requiredOrdered, optional: optionalFiltered }
+      }
+
       // include project immediately after workspace if visible
       if (visibility['projectGid']) {
         const projectIsRequired = req.includes('projectGid')
@@ -2433,6 +2711,7 @@ export default function AsanaAction({
               workspaceOptionsError ||
               'No Asana workspaces available for this connection'
             }
+            searchable
           />
           {workspaceOptionsError && (
             <p className="text-xs text-red-500">{workspaceOptionsError}</p>
@@ -2451,7 +2730,7 @@ export default function AsanaAction({
           </p>
           <NodeDropdownField
             options={projectDropdownOptions}
-            value={currentValue}
+            value={projectSelectionValue || currentValue}
             onChange={handleProjectSelect}
             placeholder={
               !hasConnection
@@ -2467,6 +2746,13 @@ export default function AsanaAction({
             }
             loading={projectOptionsLoading}
             emptyMessage={projectOptionsError || 'No projects available'}
+            searchable
+          />
+          <NodeInputField
+            value={currentValue}
+            onChange={handleProjectInputChange}
+            placeholder="Project GID (supports templates)"
+            disabled={!effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid}
           />
           {projectOptionsError && (
             <p className="text-xs text-red-500">{projectOptionsError}</p>
@@ -2501,6 +2787,7 @@ export default function AsanaAction({
             }
             loading={sectionOptionsLoading}
             emptyMessage={sectionOptionsError || 'No sections available'}
+            searchable
           />
           {sectionOptionsError && (
             <p className="text-xs text-red-500">{sectionOptionsError}</p>
@@ -2516,63 +2803,58 @@ export default function AsanaAction({
         (asanaParams.operation === 'updateTask' ||
           asanaParams.operation === 'deleteTask') &&
         !hasProjectSelected
-
-      if (useManualTaskInput) {
-        return (
-          <div key={field} className="space-y-1">
-            <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-              Task GID
-            </p>
-            <NodeInputField
-              value={currentValue}
-              onChange={handleManualTaskChange}
-              onBlur={handleManualTaskBlur}
-              disabled={
-                !effectiveCanEdit || !hasConnection || !debouncedWorkspaceGid
-              }
-              placeholder={
-                !hasConnection
-                  ? 'Select an Asana connection first'
-                  : debouncedWorkspaceGid
-                    ? 'Enter task GID'
-                    : 'Select a workspace first'
-              }
-            />
-            {error && <p className="text-xs text-red-500">{error}</p>}
-          </div>
-        )
-      }
+      const showTaskDropdown =
+        asanaParams.operation !== 'addTaskProject' && !useManualTaskInput
+      const taskDropdownValue = taskSelectionValue || currentValue
 
       return (
         <div key={field} className="space-y-1">
           <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
             {labelText}
           </p>
-          <NodeDropdownField
-            options={taskOptions}
+          {showTaskDropdown ? (
+            <NodeDropdownField
+              options={[MANUAL_OPTION, ...taskOptions]}
+              value={taskDropdownValue}
+              onChange={handleTaskDropdownChange}
+              placeholder={
+                !hasConnection
+                  ? 'Select an Asana connection first'
+                  : debouncedWorkspaceGid
+                    ? debouncedProjectGid
+                      ? taskOptionsLoading
+                        ? 'Loading tasks...'
+                        : 'Select task'
+                      : 'Select a project first'
+                    : 'Select a workspace first'
+              }
+              disabled={
+                !effectiveCanEdit ||
+                !hasConnection ||
+                taskOptionsLoading ||
+                !debouncedWorkspaceGid
+              }
+              loading={taskOptionsLoading}
+              emptyMessage={taskOptionsError || 'No tasks available'}
+              searchable
+            />
+          ) : null}
+          <NodeInputField
             value={currentValue}
-            onChange={handleTaskSelect}
+            onChange={handleManualTaskChange}
+            onBlur={handleManualTaskBlur}
+            disabled={
+              !effectiveCanEdit || !hasConnection || !debouncedWorkspaceGid
+            }
             placeholder={
               !hasConnection
                 ? 'Select an Asana connection first'
                 : debouncedWorkspaceGid
-                  ? debouncedProjectGid
-                    ? taskOptionsLoading
-                      ? 'Loading tasks...'
-                      : 'Select task'
-                    : 'Select a project first'
+                  ? 'Task GID (supports templates)'
                   : 'Select a workspace first'
             }
-            disabled={
-              !effectiveCanEdit ||
-              !hasConnection ||
-              taskOptionsLoading ||
-              !debouncedWorkspaceGid
-            }
-            loading={taskOptionsLoading}
-            emptyMessage={taskOptionsError || 'No tasks available'}
           />
-          {taskOptionsError && (
+          {taskOptionsError && showTaskDropdown && (
             <p className="text-xs text-red-500">{taskOptionsError}</p>
           )}
           {error && <p className="text-xs text-red-500">{error}</p>}
@@ -2588,8 +2870,8 @@ export default function AsanaAction({
             {labelText}
           </p>
           <NodeDropdownField
-            options={[NO_TAG_OPTION, ...tagOptions]}
-            value={currentValue}
+            options={[NO_TAG_OPTION, MANUAL_OPTION, ...tagOptions]}
+            value={tagSelectionValue || currentValue}
             onChange={handleTagSelect}
             placeholder={
               !hasConnection
@@ -2603,6 +2885,13 @@ export default function AsanaAction({
             disabled={!effectiveCanEdit || !hasConnection || tagOptionsLoading}
             loading={tagOptionsLoading}
             emptyMessage={tagOptionsError || 'No tags available'}
+            searchable
+          />
+          <NodeInputField
+            value={currentValue}
+            onChange={handleTagInputChange}
+            placeholder="Tag GID (supports templates)"
+            disabled={!effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid}
           />
           {tagOptionsError && (
             <p className="text-xs text-red-500">{tagOptionsError}</p>
@@ -2652,9 +2941,9 @@ export default function AsanaAction({
             {labelText}
           </p>
           <NodeDropdownField
-            options={[NO_ASSIGNEE_OPTION, ...userOptions]}
-            value={currentValue}
-            onChange={(gid) => applyAsanaPatch({ assignee: gid })}
+            options={[NO_ASSIGNEE_OPTION, MANUAL_OPTION, ...userOptions]}
+            value={assigneeSelectionValue || currentValue}
+            onChange={handleAssigneeSelect}
             placeholder={
               !hasConnection
                 ? 'Select an Asana connection first'
@@ -2667,6 +2956,13 @@ export default function AsanaAction({
             disabled={!effectiveCanEdit || !hasConnection || userOptionsLoading}
             loading={userOptionsLoading}
             emptyMessage={userOptionsError || 'No users available'}
+            searchable
+          />
+          <NodeInputField
+            value={currentValue}
+            onChange={handleAssigneeInputChange}
+            placeholder="Assignee GID (supports templates)"
+            disabled={!effectiveCanEdit || !hasConnection || !asanaParams.workspaceGid}
           />
           {userOptionsError && (
             <p className="text-xs text-red-500">{userOptionsError}</p>
@@ -2684,8 +2980,8 @@ export default function AsanaAction({
             {labelText}
           </p>
           <NodeDropdownField
-            options={taskOptions}
-            value={currentValue}
+            options={[MANUAL_OPTION, ...taskOptions]}
+            value={parentTaskSelectionValue || currentValue}
             onChange={handleParentTaskSelect}
             placeholder={
               !hasConnection
@@ -2706,6 +3002,15 @@ export default function AsanaAction({
             }
             loading={taskOptionsLoading}
             emptyMessage={taskOptionsError || 'No tasks available'}
+            searchable
+          />
+          <NodeInputField
+            value={currentValue}
+            onChange={handleParentTaskInputChange}
+            placeholder="Parent task GID (supports templates)"
+            disabled={
+              !effectiveCanEdit || !hasConnection || !debouncedWorkspaceGid
+            }
           />
           {taskOptionsError && (
             <p className="text-xs text-red-500">{taskOptionsError}</p>
@@ -2755,8 +3060,8 @@ export default function AsanaAction({
             {labelText}
           </p>
           <NodeDropdownField
-            options={commentOptions}
-            value={currentValue}
+            options={[MANUAL_OPTION, ...commentOptions]}
+            value={storySelectionValue || currentValue}
             onChange={handleStorySelect}
             placeholder={
               !asanaParams.taskGid
@@ -2773,6 +3078,18 @@ export default function AsanaAction({
             }
             loading={commentOptionsLoading}
             emptyMessage={commentOptionsError || 'No comments available'}
+            searchable
+          />
+          <NodeInputField
+            value={currentValue}
+            onChange={handleStoryInputChange}
+            placeholder="Comment GID (supports templates)"
+            disabled={
+              !effectiveCanEdit ||
+              !asanaParams.taskGid ||
+              !hasConnection ||
+              commentOptionsLoading
+            }
           />
           {commentOptionsError && (
             <p className="text-xs text-red-500">{commentOptionsError}</p>
@@ -2807,18 +3124,29 @@ export default function AsanaAction({
               <div className="absolute z-30 mt-2">
                 <ScheduleCalendar
                   month={dueOnMonth}
-                  selectedDate={dateValue}
+                  selectedDate={dueOnManuallyEdited ? '' : dateValue}
                   todayISO={todayIso}
                   onMonthChange={(month) => setDueOnMonth(month)}
                   onSelectDate={(isoDate) => {
                     setDueOnPickerOpen(false)
                     setDueOnMonth(getInitialMonth(isoDate))
+                    setDueOnManuallyEdited(false)
                     applyAsanaPatch({ dueOn: isoDate })
                   }}
                 />
               </div>
             ) : null}
           </div>
+          <NodeInputField
+            value={dateValue}
+            onChange={(val) => {
+              setDueOnManuallyEdited(true)
+              setDueOnPickerOpen(false)
+              applyAsanaPatch({ dueOn: val })
+            }}
+            placeholder="YYYY-MM-DD or template"
+            disabled={!effectiveCanEdit}
+          />
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
       )
@@ -2843,7 +3171,7 @@ export default function AsanaAction({
             >
               <span className="flex items-center gap-2">
                 <CalendarDays className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
-                {dueAtParts.valid
+                {dueAtParts.valid && !dueAtManuallyEdited
                   ? formatDisplayDate(dueAtParts.date)
                   : 'Select date'}
               </span>
@@ -2852,12 +3180,13 @@ export default function AsanaAction({
               <div className="absolute z-30 mt-2">
                 <ScheduleCalendar
                   month={dueAtMonth}
-                  selectedDate={dueAtParts.date}
+                  selectedDate={dueAtManuallyEdited ? '' : dueAtParts.date}
                   todayISO={todayIso}
                   onMonthChange={(month) => setDueAtMonth(month)}
                   onSelectDate={(isoDate) => {
                     setDueAtCalendarOpen(false)
                     setDueAtMonth(getInitialMonth(isoDate))
+                    setDueAtManuallyEdited(false)
                     updateDueAt(
                       isoDate,
                       dueAtParts.hour,
@@ -2883,7 +3212,7 @@ export default function AsanaAction({
               >
                 <span className="flex items-center gap-2">
                   <Clock className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
-                  {dueAtParts.valid
+                  {dueAtParts.valid && !dueAtManuallyEdited
                     ? formatDisplayTime(dueAtTimeString)
                     : 'Select time'}
                 </span>
@@ -2891,7 +3220,9 @@ export default function AsanaAction({
               {dueAtTimeOpen ? (
                 <div className="absolute z-30 mt-2">
                   <ScheduleTimePicker
-                    selectedTime={dueAtTimeParts}
+                    selectedTime={
+                      dueAtManuallyEdited ? undefined : dueAtTimeParts
+                    }
                     onSelect={(time) => {
                       const parsed = parseTime(time)
                       const nextHour = parsed?.hours ?? 0
@@ -2941,7 +3272,21 @@ export default function AsanaAction({
                 </div>
               ) : null}
             </div>
-          </div>
+            </div>
+          <NodeInputField
+            value={asanaParams.dueAt ?? ''}
+            onChange={(val) => {
+              setDueAtManuallyEdited(true)
+              setDueAtCalendarOpen(false)
+              setDueAtTimeOpen(false)
+              setDueAtTimezoneOpen(false)
+              setDueAtTimezone('')
+              setDueAtMonth(getInitialMonth(val))
+              applyAsanaPatch({ dueAt: val })
+            }}
+            placeholder="ISO datetime or template"
+            disabled={!effectiveCanEdit}
+          />
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
       )
@@ -3078,6 +3423,7 @@ export default function AsanaAction({
               value={asanaParams.operation}
               onChange={(val) => handleOperationChange(val as string)}
               disabled={!effectiveCanEdit}
+              searchable
             />
           </div>
 
