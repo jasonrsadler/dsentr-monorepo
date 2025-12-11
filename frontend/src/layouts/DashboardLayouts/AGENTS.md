@@ -2,6 +2,7 @@
 
 ## Change Reasons
 - Flyout Trigger schedule parity: replaced plain text inputs with the same calendar, time, and timezone pickers used on the Trigger node, and added repeat enable/fields to match node behavior.
+- Added quick-add overlays to palette/template cards and animated the workflow flyout open/close for smoother canvas interactions.
 - Plan usage refresh now skips workspace-scoped requests for solo plans and the solo banner displays remaining monthly runs to avoid stale or blocked usage data.
 - Dashboard now listens to workflow SSE updates, tracks `updated_at` versions, and surfaces conflict banners so workspace collaborators do not overwrite each other's saves.
 - Workflow switches, new workflow creation, and run attempts now auto-save dirty graphs before proceeding so navigation and executions never drop pending edits.

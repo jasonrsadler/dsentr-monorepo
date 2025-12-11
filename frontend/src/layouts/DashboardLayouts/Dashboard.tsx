@@ -7,7 +7,7 @@ import FlowCanvas from './FlowCanvas'
 import ActionIcon from '@/assets/svg-components/ActionIcon'
 import ConditionIcon from '@/assets/svg-components/ConditionIcon'
 import { ReactFlowProvider } from '@xyflow/react'
-import { ChevronDown, ChevronUp, Search } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Search } from 'lucide-react'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { selectIsSaving, useWorkflowStore } from '@/stores/workflowStore'
 import {
@@ -1418,6 +1418,16 @@ export default function Dashboard() {
     )
   )
   const [templatesOpen, setTemplatesOpen] = useState(false)
+  const paletteQuickAddRef = useRef<(dragType: string) => void>(() => {})
+  const registerPaletteQuickAdd = useCallback(
+    (handler: (dragType: string) => void) => {
+      paletteQuickAddRef.current = handler ?? (() => {})
+    },
+    []
+  )
+  const handlePaletteQuickAdd = useCallback((dragType: string) => {
+    paletteQuickAddRef.current?.(dragType)
+  }, [])
 
   // Collapsible state for action categories; initialized expanded
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
@@ -1439,13 +1449,48 @@ export default function Dashboard() {
     })).filter((g) => g.tiles.length > 0)
   }, [trimmedQuery])
 
+  function QuickAddButton({
+    label,
+    onClick,
+    disabled
+  }: {
+    label: string
+    onClick?: () => void
+    disabled?: boolean
+  }) {
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        draggable={false}
+        data-quick-add-button
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          if (disabled) return
+          onClick?.()
+        }}
+        onMouseDown={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }}
+        disabled={disabled}
+        style={{ cursor: 'pointer' }}
+        className="absolute right-2 top-1/2 -translate-y-1/2 z-20 inline-flex h-9 w-9 items-center justify-center rounded-md bg-black/80 text-emerald-400 opacity-0 shadow-lg ring-1 ring-emerald-400/40 backdrop-blur-sm transition-opacity duration-200 hover:bg-black/90 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 disabled:pointer-events-none disabled:opacity-0 cursor-pointer"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+    )
+  }
+
   function DraggableTile({
     label,
     description,
     icon,
     gradient,
     dragType,
-    disabled = false
+    disabled = false,
+    onQuickAdd
   }: {
     label: string
     description: string
@@ -1453,13 +1498,21 @@ export default function Dashboard() {
     gradient: string
     dragType: string
     disabled?: boolean
+    onQuickAdd?: (dragType: string) => void
   }) {
     const allowDrag = canEditCurrentWorkflow && !disabled
+    const allowQuickAdd = allowDrag && Boolean(onQuickAdd)
     return (
       <div
         draggable={allowDrag}
         onDragStart={(e) => {
           if (!allowDrag) {
+            e.preventDefault()
+            return
+          }
+          if (
+            (e.target as HTMLElement | null)?.closest('[data-quick-add-button]')
+          ) {
             e.preventDefault()
             return
           }
@@ -1480,7 +1533,12 @@ export default function Dashboard() {
             : 'opacity-60 cursor-not-allowed'
         ].join(' ')}
       >
-        <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <QuickAddButton
+          label={`Add ${label} to canvas`}
+          onClick={() => onQuickAdd?.(dragType)}
+          disabled={!allowQuickAdd}
+        />
+        <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
         <div className="relative z-10 flex items-center gap-2">
           <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-white/15 ring-1 ring-white/20">
             {icon}
@@ -1499,20 +1557,30 @@ export default function Dashboard() {
     label,
     description,
     onClick,
-    disabled
+    disabled,
+    onQuickAdd
   }: {
     label: string
     description?: string
     onClick: () => void
     disabled?: boolean
+    onQuickAdd?: () => void
   }) {
+    const allowQuickAdd = !disabled && Boolean(onQuickAdd)
     return (
       <button
         type="button"
         onClick={onClick}
         disabled={disabled}
-        className={`w-full text-left px-3 py-2 rounded-lg border bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-sm ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+        className={`relative group w-full text-left px-3 pr-12 py-2 rounded-lg border bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-sm ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
+        {allowQuickAdd ? (
+          <QuickAddButton
+            label={`Add ${label} template`}
+            onClick={onQuickAdd}
+            disabled={disabled}
+          />
+        ) : null}
         <div className="flex flex-col">
           <span className="text-sm font-medium">{label}</span>
           {description && (
@@ -1522,6 +1590,15 @@ export default function Dashboard() {
       </button>
     )
   }
+
+  const buildTemplateHandler = useCallback(
+    (builder: () => { nodes: any[]; edges: any[] }) => () => {
+      if (!isGraphEmpty) return
+      const { nodes, edges } = builder()
+      applyGraphToCanvas({ nodes, edges })
+    },
+    [applyGraphToCanvas, isGraphEmpty]
+  )
 
   // React to workflow deletions initiated from Settings modal
   useEffect(() => {
@@ -1553,6 +1630,444 @@ export default function Dashboard() {
     handleNewWorkflow,
     pushGraphToStore
   ])
+
+  const sendGridTemplate = buildTemplateHandler(() => {
+    const nodes = [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        position: { x: 80, y: 120 },
+        data: {
+          label: 'Trigger',
+          expanded: true,
+          inputs: [],
+          triggerType: 'Manual'
+        }
+      },
+      {
+        id: 'action-1',
+        type: 'actionEmail',
+        position: { x: 320, y: 120 },
+        data: {
+          label: 'Send Email',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'email',
+          params: {
+            service: 'SendGrid',
+            from: '',
+            to: '',
+            subject: 'Welcome to DSentr',
+            body: 'This is a sample email from DSentr.'
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      }
+    ]
+    const edges = [
+      {
+        id: 'e1',
+        source: 'trigger-1',
+        target: 'action-1',
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      }
+    ]
+    return { nodes, edges }
+  })
+
+  const amazonSesTemplate = buildTemplateHandler(() => {
+    const nodes = [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        position: { x: 80, y: 120 },
+        data: {
+          label: 'Trigger',
+          expanded: true,
+          inputs: [],
+          triggerType: 'Manual'
+        }
+      },
+      {
+        id: 'action-1',
+        type: 'actionEmail',
+        position: { x: 320, y: 120 },
+        data: {
+          label: 'Send Email',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'email',
+          params: {
+            service: 'Amazon SES',
+            region: 'us-east-1',
+            from: '',
+            to: '',
+            subject: 'Welcome to DSentr',
+            body: 'This is a sample email from DSentr.'
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      }
+    ]
+    const edges = [
+      {
+        id: 'e1',
+        source: 'trigger-1',
+        target: 'action-1',
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      }
+    ]
+    return { nodes, edges }
+  })
+
+  const mailgunTemplate = buildTemplateHandler(() => {
+    const nodes = [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        position: { x: 80, y: 120 },
+        data: {
+          label: 'Trigger',
+          expanded: true,
+          inputs: [],
+          triggerType: 'Manual'
+        }
+      },
+      {
+        id: 'action-1',
+        type: 'actionEmail',
+        position: { x: 320, y: 120 },
+        data: {
+          label: 'Send Email',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'email',
+          params: {
+            service: 'Mailgun',
+            region: 'US (api.mailgun.net)',
+            from: '',
+            to: '',
+            subject: 'Welcome to DSentr',
+            body: 'This is a sample email from DSentr.'
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      }
+    ]
+    const edges = [
+      {
+        id: 'e1',
+        source: 'trigger-1',
+        target: 'action-1',
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      }
+    ]
+    return { nodes, edges }
+  })
+
+  const messagingTemplate = buildTemplateHandler(() => {
+    const nodes = [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        position: { x: 80, y: 120 },
+        data: {
+          label: 'Trigger',
+          expanded: true,
+          inputs: [],
+          triggerType: 'Manual'
+        }
+      },
+      {
+        id: 'action-1',
+        type: 'actionSlack',
+        position: { x: 320, y: 120 },
+        data: {
+          label: 'Message',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'slack',
+          params: {
+            channel: '#general',
+            message: 'Hello from DSentr!',
+            token: '',
+            connectionScope: '',
+            connectionId: '',
+            accountEmail: ''
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      }
+    ]
+    const edges = [
+      {
+        id: 'e1',
+        source: 'trigger-1',
+        target: 'action-1',
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      }
+    ]
+    return { nodes, edges }
+  })
+
+  const sheetsTemplate = buildTemplateHandler(() => {
+    const nodes = [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        position: { x: 80, y: 120 },
+        data: {
+          label: 'Trigger',
+          expanded: true,
+          inputs: [],
+          triggerType: 'Manual'
+        }
+      },
+      {
+        id: 'action-1',
+        type: 'actionSheets',
+        position: { x: 320, y: 120 },
+        data: {
+          label: 'Google Sheets',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'sheets',
+          params: {
+            spreadsheetId: '',
+            worksheet: 'Sheet1',
+            columns: [
+              { key: 'timestamp', value: '{{now}}' },
+              { key: 'event', value: 'triggered' }
+            ],
+            accountEmail: '',
+            oauthConnectionScope: '',
+            oauthConnectionId: ''
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      }
+    ]
+    const edges = [
+      {
+        id: 'e1',
+        source: 'trigger-1',
+        target: 'action-1',
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      }
+    ]
+    return { nodes, edges }
+  })
+
+  const codeHttpTemplate = buildTemplateHandler(() => {
+    const nodes = [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        position: { x: 60, y: 120 },
+        data: {
+          label: 'Trigger',
+          expanded: true,
+          inputs: [],
+          triggerType: 'Manual'
+        }
+      },
+      {
+        id: 'action-1',
+        type: 'actionCode',
+        position: { x: 280, y: 80 },
+        data: {
+          label: 'Run Code',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'code',
+          params: {
+            code: '// transform inputs here\n// inputs available in scope: context\n// return an object to pass to next node',
+            inputs: [],
+            outputs: []
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      },
+      {
+        id: 'action-2',
+        type: 'actionHttp',
+        position: { x: 500, y: 120 },
+        data: {
+          label: 'HTTP Request',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'http',
+          params: {
+            method: 'GET',
+            url: 'https://api.example.com/resource',
+            headers: [],
+            queryParams: [],
+            bodyType: 'raw',
+            body: '',
+            formBody: [],
+            authType: 'none',
+            authUsername: '',
+            authPassword: '',
+            authToken: ''
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      }
+    ]
+    const edges = [
+      {
+        id: 'e1',
+        source: 'trigger-1',
+        target: 'action-1',
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      },
+      {
+        id: 'e2',
+        source: 'action-1',
+        target: 'action-2',
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      }
+    ]
+    return { nodes, edges }
+  })
+
+  const conditionBranchTemplate = buildTemplateHandler(() => {
+    const nodes = [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        position: { x: 40, y: 120 },
+        data: {
+          label: 'Trigger',
+          expanded: true,
+          inputs: [],
+          triggerType: 'Manual'
+        }
+      },
+      {
+        id: 'cond-1',
+        type: 'condition',
+        position: { x: 260, y: 120 },
+        data: {
+          label: 'If price > 100',
+          expanded: true,
+          field: 'price',
+          operator: 'greater than',
+          value: '100'
+        }
+      },
+      {
+        id: 'action-true',
+        type: 'actionEmail',
+        position: { x: 520, y: 60 },
+        data: {
+          label: 'Send Email (High)',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'email',
+          params: {
+            service: 'SMTP',
+            from: '',
+            to: '',
+            subject: 'High price detected',
+            body: 'Price exceeded threshold.'
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      },
+      {
+        id: 'action-false',
+        type: 'actionSlack',
+        position: { x: 520, y: 180 },
+        data: {
+          label: 'Slack Notify (Low)',
+          expanded: true,
+          inputs: [],
+          labelError: null,
+          hasLabelValidationError: false,
+          actionType: 'slack',
+          params: {
+            channel: '#alerts',
+            message: 'Price within normal range',
+            token: '',
+            connectionScope: '',
+            connectionId: '',
+            accountEmail: ''
+          },
+          timeout: 5000,
+          retries: 0,
+          stopOnError: true
+        }
+      }
+    ]
+    const edges = [
+      {
+        id: 'e1',
+        source: 'trigger-1',
+        target: 'cond-1',
+        type: 'nodeEdge',
+        data: { edgeType: 'default' }
+      },
+      {
+        id: 'e2',
+        source: 'cond-1',
+        sourceHandle: 'cond-true',
+        target: 'action-true',
+        type: 'nodeEdge',
+        data: { edgeType: 'default', outcome: 'true' },
+        label: 'True'
+      },
+      {
+        id: 'e3',
+        source: 'cond-1',
+        sourceHandle: 'cond-false',
+        target: 'action-false',
+        type: 'nodeEdge',
+        data: { edgeType: 'default', outcome: 'false' },
+        label: 'False'
+      }
+    ]
+    return { nodes, edges }
+  })
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] min-h-0">
@@ -1606,6 +2121,7 @@ export default function Dashboard() {
                 icon={<TriggerIcon />}
                 gradient="from-emerald-500 to-teal-600"
                 dragType="trigger"
+                onQuickAdd={handlePaletteQuickAdd}
               />
               <DraggableTile
                 label="Condition"
@@ -1613,6 +2129,7 @@ export default function Dashboard() {
                 icon={<ConditionIcon />}
                 gradient="from-amber-500 to-orange-600"
                 dragType="condition"
+                onQuickAdd={handlePaletteQuickAdd}
               />
               <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mt-1">
                 Actions
@@ -1662,7 +2179,11 @@ export default function Dashboard() {
                     {isOpen ? (
                       <div className="space-y-2">
                         {group.tiles.map((tile) => (
-                          <DraggableTile key={tile.id} {...tile} />
+                          <DraggableTile
+                            key={tile.id}
+                            {...tile}
+                            onQuickAdd={handlePaletteQuickAdd}
+                          />
                         ))}
                       </div>
                     ) : null}
@@ -1700,474 +2221,50 @@ export default function Dashboard() {
                     label="SendGrid Email"
                     description="Send via SendGrid"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 80, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'action-1',
-                          type: 'actionEmail',
-                          position: { x: 320, y: 120 },
-                          data: {
-                            label: 'Send Email',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'email',
-                            params: {
-                              service: 'SendGrid',
-                              from: '',
-                              to: '',
-                              subject: 'Welcome to DSentr',
-                              body: 'This is a sample email from DSentr.'
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'action-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
+                    onClick={sendGridTemplate}
+                    onQuickAdd={sendGridTemplate}
                   />
                   <TemplateButton
                     label="Amazon SES Email"
                     description="Send via Amazon SES"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 80, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'action-1',
-                          type: 'actionEmail',
-                          position: { x: 320, y: 120 },
-                          data: {
-                            label: 'Send Email',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'email',
-                            params: {
-                              service: 'Amazon SES',
-                              region: 'us-east-1',
-                              from: '',
-                              to: '',
-                              subject: 'Welcome to DSentr',
-                              body: 'This is a sample email from DSentr.'
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'action-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
+                    onClick={amazonSesTemplate}
+                    onQuickAdd={amazonSesTemplate}
                   />
                   <TemplateButton
                     label="Mailgun Email"
                     description="Send via Mailgun"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 80, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'action-1',
-                          type: 'actionEmail',
-                          position: { x: 320, y: 120 },
-                          data: {
-                            label: 'Send Email',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'email',
-                            params: {
-                              service: 'Mailgun',
-                              region: 'US (api.mailgun.net)',
-                              from: '',
-                              to: '',
-                              subject: 'Welcome to DSentr',
-                              body: 'This is a sample email from DSentr.'
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'action-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
+                    onClick={mailgunTemplate}
+                    onQuickAdd={mailgunTemplate}
                   />
                   <TemplateButton
                     label="Messaging"
                     description="Send a message (Chat)"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 80, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'action-1',
-                          type: 'actionSlack',
-                          position: { x: 320, y: 120 },
-                          data: {
-                            label: 'Message',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'slack',
-                            params: {
-                              channel: '#general',
-                              message: 'Hello from DSentr!',
-                              token: '',
-                              connectionScope: '',
-                              connectionId: '',
-                              accountEmail: ''
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'action-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
+                    onClick={messagingTemplate}
+                    onQuickAdd={messagingTemplate}
                   />
                   <TemplateButton
                     label="Google Sheets Append"
                     description="Append a row on trigger"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 80, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'action-1',
-                          type: 'actionSheets',
-                          position: { x: 320, y: 120 },
-                          data: {
-                            label: 'Google Sheets',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'sheets',
-                            params: {
-                              spreadsheetId: '',
-                              worksheet: 'Sheet1',
-                              columns: [
-                                { key: 'timestamp', value: '{{now}}' },
-                                { key: 'event', value: 'triggered' }
-                              ],
-                              accountEmail: '',
-                              oauthConnectionScope: '',
-                              oauthConnectionId: ''
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'action-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
+                    onClick={sheetsTemplate}
+                    onQuickAdd={sheetsTemplate}
                   />
                   <TemplateButton
-                    label="Run Code → HTTP"
+                    label="Run Code + HTTP"
                     description="Process then call an API"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 60, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'action-1',
-                          type: 'actionCode',
-                          position: { x: 280, y: 80 },
-                          data: {
-                            label: 'Run Code',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'code',
-                            params: {
-                              code: '// transform inputs here\n// inputs available in scope: context\n// return an object to pass to next node',
-                              inputs: [],
-                              outputs: []
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        },
-                        {
-                          id: 'action-2',
-                          type: 'actionHttp',
-                          position: { x: 500, y: 120 },
-                          data: {
-                            label: 'HTTP Request',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'http',
-                            params: {
-                              method: 'GET',
-                              url: 'https://api.example.com/resource',
-                              headers: [],
-                              queryParams: [],
-                              bodyType: 'raw',
-                              body: '',
-                              formBody: [],
-                              authType: 'none',
-                              authUsername: '',
-                              authPassword: '',
-                              authToken: ''
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'action-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        },
-                        {
-                          id: 'e2',
-                          source: 'action-1',
-                          target: 'action-2',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
+                    onClick={codeHttpTemplate}
+                    onQuickAdd={codeHttpTemplate}
                   />
                   <TemplateButton
                     label="Branch by Condition"
                     description="Split flow into two paths"
                     disabled={!canEditCurrentWorkflow || !isGraphEmpty}
-                    onClick={() => {
-                      if (!isGraphEmpty) return
-                      const nodes = [
-                        {
-                          id: 'trigger-1',
-                          type: 'trigger',
-                          position: { x: 40, y: 120 },
-                          data: {
-                            label: 'Trigger',
-                            expanded: true,
-                            inputs: [],
-                            triggerType: 'Manual'
-                          }
-                        },
-                        {
-                          id: 'cond-1',
-                          type: 'condition',
-                          position: { x: 260, y: 120 },
-                          data: {
-                            label: 'If price > 100',
-                            expanded: true,
-                            field: 'price',
-                            operator: 'greater than',
-                            value: '100'
-                          }
-                        },
-                        {
-                          id: 'action-true',
-                          type: 'actionEmail',
-                          position: { x: 520, y: 60 },
-                          data: {
-                            label: 'Send Email (High)',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'email',
-                            params: {
-                              service: 'SMTP',
-                              from: '',
-                              to: '',
-                              subject: 'High price detected',
-                              body: 'Price exceeded threshold.'
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        },
-                        {
-                          id: 'action-false',
-                          type: 'actionSlack',
-                          position: { x: 520, y: 180 },
-                          data: {
-                            label: 'Slack Notify (Low)',
-                            expanded: true,
-                            inputs: [],
-                            labelError: null,
-                            hasLabelValidationError: false,
-                            actionType: 'slack',
-                            params: {
-                              channel: '#alerts',
-                              message: 'Price within normal range',
-                              token: '',
-                              connectionScope: '',
-                              connectionId: '',
-                              accountEmail: ''
-                            },
-                            timeout: 5000,
-                            retries: 0,
-                            stopOnError: true
-                          }
-                        }
-                      ]
-                      const edges = [
-                        {
-                          id: 'e1',
-                          source: 'trigger-1',
-                          target: 'cond-1',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default' }
-                        },
-                        {
-                          id: 'e2',
-                          source: 'cond-1',
-                          sourceHandle: 'cond-true',
-                          target: 'action-true',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default', outcome: 'true' },
-                          label: 'True'
-                        },
-                        {
-                          id: 'e3',
-                          source: 'cond-1',
-                          sourceHandle: 'cond-false',
-                          target: 'action-false',
-                          type: 'nodeEdge',
-                          data: { edgeType: 'default', outcome: 'false' },
-                          label: 'False'
-                        }
-                      ]
-                      applyGraphToCanvas({ nodes, edges })
-                    }}
+                    onClick={conditionBranchTemplate}
+                    onQuickAdd={conditionBranchTemplate}
                   />
                 </div>
               )}
@@ -2277,6 +2374,7 @@ export default function Dashboard() {
                       failedIds={failedIds}
                       planTier={planTier}
                       runAvailability={runAvailability}
+                      onRegisterQuickAdd={registerPaletteQuickAdd}
                       onRestrictionNotice={(message: string) =>
                         setError(message)
                       }

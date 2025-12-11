@@ -21,7 +21,8 @@ import {
   type NodeChange,
   type EdgeChange,
   type Connection,
-  type OnSelectionChangeParams
+  type OnSelectionChangeParams,
+  type XYPosition
 } from '@xyflow/react'
 import TriggerNode, {
   type TriggerNodeData
@@ -582,6 +583,7 @@ interface FlowCanvasProps {
   onRestrictionNotice?: (message: string) => void
   canEdit?: boolean
   runAvailability?: RunAvailability
+  onRegisterQuickAdd?: (handler: (dragType: string) => void) => void
 }
 
 export default function FlowCanvas({
@@ -594,7 +596,8 @@ export default function FlowCanvas({
   planTier,
   onRestrictionNotice,
   canEdit = true,
-  runAvailability
+  runAvailability,
+  onRegisterQuickAdd
 }: FlowCanvasProps) {
   const nodes = useWorkflowStore(selectNodes)
   const edges = useWorkflowStore(selectEdges)
@@ -670,6 +673,7 @@ export default function FlowCanvas({
       setEdges: state.setEdges
     }
   }, [])
+  const canvasBoundsRef = useRef<HTMLDivElement | null>(null)
 
   const runningIdsRef = useRef(runningIds)
   const succeededIdsRef = useRef(succeededIds)
@@ -1075,20 +1079,13 @@ export default function FlowCanvas({
     [setEdges]
   )
 
-  const onDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      event.preventDefault()
+  const addNodeAtPosition = useCallback(
+    (rawType: string, position: XYPosition) => {
       if (!canEditRef.current) return
-      const rawType = event.dataTransfer.getData('application/reactflow')
-      if (!rawType) return
-      const position = reactFlow.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY
-      })
       const currentNodes = useWorkflowStore.getState().nodes
       if (isSoloPlan && currentNodes.length >= 10) {
         onRestrictionNotice?.(
-          'Solo plan workflows support up to 10 nodes. Upgrade in Settings → Plan to add more steps.'
+          'Solo plan workflows support up to 10 nodes. Upgrade in Settings > Plan to add more steps.'
         )
         return
       }
@@ -1113,7 +1110,49 @@ export default function FlowCanvas({
       const normalizedNodes = normalizeNodesForState([...currentNodes, newNode])
       setNodes(normalizedNodes)
     },
-    [setNodes, isSoloPlan, onRestrictionNotice, reactFlow]
+    [isSoloPlan, onRestrictionNotice, setNodes]
+  )
+
+  const getViewportCenterPosition = useCallback((): XYPosition => {
+    const bounds = canvasBoundsRef.current?.getBoundingClientRect()
+    const fallbackPoint = {
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2
+    }
+    const point = bounds
+      ? { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+      : fallbackPoint
+    return reactFlow.screenToFlowPosition(point)
+  }, [reactFlow])
+
+  const handleQuickAdd = useCallback(
+    (rawType: string) => {
+      const position = getViewportCenterPosition()
+      addNodeAtPosition(rawType, position)
+    },
+    [addNodeAtPosition, getViewportCenterPosition]
+  )
+
+  useEffect(() => {
+    if (!onRegisterQuickAdd) return
+    onRegisterQuickAdd(handleQuickAdd)
+    return () => {
+      onRegisterQuickAdd(() => {})
+    }
+  }, [handleQuickAdd, onRegisterQuickAdd])
+
+  const onDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      const rawType = event.dataTransfer.getData('application/reactflow')
+      if (!rawType) return
+      const position = reactFlow.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY
+      })
+      addNodeAtPosition(rawType, position)
+    },
+    [addNodeAtPosition, reactFlow]
   )
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
@@ -1272,91 +1311,102 @@ export default function FlowCanvas({
   return (
     <WorkflowFlyoutProvider value={flyoutContextValue}>
       <div className="flex flex-1 min-h-0 flex-col md:flex-row">
-        <ReactFlow<WorkflowNode, WorkflowEdge>
-          key={workflowId || 'no-workflow'}
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          fitView
-          proOptions={{ hideAttribution: true }}
-          nodesDraggable={canEdit}
-          nodesConnectable={canEdit}
-          className="flex-1"
-          onSelectionChange={handleSelectionChange}
-          minZoom={0.1}
-        >
-          <Background gap={16} size={1} />
-          <div className={isDark ? 'text-white' : 'text-black'}>
-            <CustomControls />
-            <MiniMap
-              nodeColor={(node) =>
-                node.type === 'trigger' ? '#10B981' : '#6366F1'
-              }
-              style={{ background: 'transparent' }}
-            />
-          </div>
-        </ReactFlow>
+        <div ref={canvasBoundsRef} className="flex-1 min-h-0">
+          <ReactFlow<WorkflowNode, WorkflowEdge>
+            key={workflowId || 'no-workflow'}
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            fitView
+            proOptions={{ hideAttribution: true }}
+            nodesDraggable={canEdit}
+            nodesConnectable={canEdit}
+            className="h-full w-full"
+            onSelectionChange={handleSelectionChange}
+            minZoom={0.1}
+          >
+            <Background gap={16} size={1} />
+            <div className={isDark ? 'text-white' : 'text-black'}>
+              <CustomControls />
+              <MiniMap
+                nodeColor={(node) =>
+                  node.type === 'trigger' ? '#10B981' : '#6366F1'
+                }
+                style={{ background: 'transparent' }}
+              />
+            </div>
+          </ReactFlow>
+        </div>
 
-        {flyoutNode ? (
-          <WorkflowFlyoutProvider value={flyoutPreviewContextValue}>
-            <aside className="flex w-full md:w-[720px] xl:w-[840px] shrink-0 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur flex-col">
-              <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    Node details
+        <AnimatePresence>
+          {flyoutNode ? (
+            <WorkflowFlyoutProvider value={flyoutPreviewContextValue}>
+              <motion.aside
+                key={flyoutNode.id}
+                initial={{ opacity: 0, x: 28 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 28 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="flex w-full md:w-[720px] xl:w-[840px] shrink-0 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur flex-col"
+              >
+                <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      Node details
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                      {selectedNodeLabel}
+                    </div>
                   </div>
-                  <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-                    {selectedNodeLabel}
+                  <button
+                    type="button"
+                    onClick={() => setFlyoutNodeId(null)}
+                    className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                    aria-label="Close details"
+                    title="Close details"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-visible themed-scroll px-4 py-4">
+                  <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-4 overflow-visible">
+                    {flyoutNode.type === 'trigger' ? (
+                      <FlyoutTriggerFields
+                        nodeId={flyoutNode.id}
+                        isSoloPlan={isSoloPlan}
+                      />
+                    ) : flyoutNode.type === 'condition' ? (
+                      <FlyoutConditionFields nodeId={flyoutNode.id} />
+                    ) : flyoutNode.type === 'delay' ? (
+                      <FlyoutDelayFields nodeId={flyoutNode.id} />
+                    ) : flyoutNode.type === 'formatter' ? (
+                      <FlyoutFormatterFields nodeId={flyoutNode.id} />
+                    ) : flyoutSubtype ? (
+                      <FlyoutActionFields
+                        nodeId={flyoutNode.id}
+                        subtype={flyoutSubtype}
+                        normalizedPlanTier={normalizedPlanTier}
+                        canEdit={canEditRef.current}
+                        onRestrictionNotice={onRestrictionNoticeRef.current}
+                      />
+                    ) : (
+                      <p className="text-xs text-zinc-500">
+                        Fields for this node type are not available in the
+                        flyout yet.
+                      </p>
+                    )}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setFlyoutNodeId(null)}
-                  className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-                  aria-label="Close details"
-                  title="Close details"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-visible themed-scroll px-4 py-4">
-                <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-4 overflow-visible">
-                  {flyoutNode.type === 'trigger' ? (
-                    <FlyoutTriggerFields
-                      nodeId={flyoutNode.id}
-                      isSoloPlan={isSoloPlan}
-                    />
-                  ) : flyoutNode.type === 'condition' ? (
-                    <FlyoutConditionFields nodeId={flyoutNode.id} />
-                  ) : flyoutNode.type === 'delay' ? (
-                    <FlyoutDelayFields nodeId={flyoutNode.id} />
-                  ) : flyoutNode.type === 'formatter' ? (
-                    <FlyoutFormatterFields nodeId={flyoutNode.id} />
-                  ) : flyoutSubtype ? (
-                    <FlyoutActionFields
-                      nodeId={flyoutNode.id}
-                      subtype={flyoutSubtype}
-                      normalizedPlanTier={normalizedPlanTier}
-                      canEdit={canEditRef.current}
-                      onRestrictionNotice={onRestrictionNoticeRef.current}
-                    />
-                  ) : (
-                    <p className="text-xs text-zinc-500">
-                      Fields for this node type are not available in the flyout
-                      yet.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </aside>
-          </WorkflowFlyoutProvider>
-        ) : null}
+              </motion.aside>
+            </WorkflowFlyoutProvider>
+          ) : null}
+        </AnimatePresence>
       </div>
     </WorkflowFlyoutProvider>
   )
