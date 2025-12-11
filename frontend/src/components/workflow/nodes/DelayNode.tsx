@@ -219,7 +219,10 @@ function DelayNodeContent({
         {nodeData?.labelError ? (
           <p className="text-xs text-red-500">{nodeData.labelError}</p>
         ) : null}
-        <ActionNodeSummary hint="Open the Delay flyout to configure wait duration/date and jitter." />
+        <ActionNodeSummary
+          nodeId={id}
+          hint="Open the Delay flyout to configure wait duration/date and jitter."
+        />
       </div>
       <AnimatePresence>
         {confirmingDelete && (

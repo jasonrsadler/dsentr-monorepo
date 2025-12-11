@@ -15,6 +15,7 @@
 - Flyout: clicking the dashed summary area on nodes now reliably keeps the flyout open (ignores the immediate empty selection event after an explicit open) while still allowing drag interactions.
 - Flyout: node selection alone no longer opens the flyout; only the dashed hint surface triggers it on mouseup, preventing accidental opens when grabbing other parts of a node.
 - Flyout: added a guard to ignore transient empty-selection events immediately after an explicit flyout open so the panel stays visible when clicking the designated dashed surface.
+- Flyout: when opened from the dashed hint surface, the canvas pans smoothly to keep the activated node visible beside the flyout instead of being covered.
 
 ## Notes
 - Pickers are locally stateful and wrapped in useMemo/useCallback with click-outside + Escape handling to avoid React Flow re-render loops.

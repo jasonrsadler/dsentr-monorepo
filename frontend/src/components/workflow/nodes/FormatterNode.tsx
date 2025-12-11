@@ -192,7 +192,10 @@ function FormatterNodeContent({
         ) : null}
 
         <div className="mt-3 px-1">
-          <ActionNodeSummary hint="Open the Formatter flyout to edit operations and mappings." />
+          <ActionNodeSummary
+            nodeId={id}
+            hint="Open the Formatter flyout to edit operations and mappings."
+          />
         </div>
       </div>
       <AnimatePresence>

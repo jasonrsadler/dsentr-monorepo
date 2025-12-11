@@ -1160,6 +1160,35 @@ export default function FlowCanvas({
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
+  const panNodeIntoView = useCallback(
+    (nodeId: string) => {
+      const node = reactFlow.getNode(nodeId)
+      if (!node) return
+      const zoom =
+        typeof (reactFlow as any).getZoom === 'function'
+          ? (reactFlow as any).getZoom()
+          : (reactFlow as any).viewport?.zoom ?? 1
+      const width =
+        (node.measured?.width as number | undefined) ??
+        (node.width as number | undefined) ??
+        256
+      const height =
+        (node.measured?.height as number | undefined) ??
+        (node.height as number | undefined) ??
+        200
+      const pos = node.positionAbsolute ?? node.position
+      const centerX = pos.x + width / 2
+      const centerY = pos.y + height / 2
+      const reservePx = 420
+      const reserveFlow = reservePx / Math.max(zoom, 0.01)
+      reactFlow.setCenter(centerX + reserveFlow, centerY, {
+        zoom,
+        duration: 200
+      })
+    },
+    [reactFlow]
+  )
+
   const lastExplicitFlyoutOpenRef = useRef<{ id: string | null; ts: number }>(
     { id: null, ts: 0 }
   )
@@ -1174,9 +1203,13 @@ export default function FlowCanvas({
       }
 
       syncSelectionToStore(nodeId)
-      setFlyoutNodeId((prev) => (prev === nodeId ? prev : nodeId))
+      setFlyoutNodeId((prev) => {
+        if (prev === nodeId) return prev
+        requestAnimationFrame(() => panNodeIntoView(nodeId))
+        return nodeId
+      })
     },
-    [syncSelectionToStore]
+    [panNodeIntoView, syncSelectionToStore]
   )
 
   const handleSelectionChange = useCallback(

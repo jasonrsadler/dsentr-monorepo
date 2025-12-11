@@ -1750,23 +1750,50 @@ export default function AsanaAction({
     [hasConnection, isSoloPlan, visibility.workspaceGid]
   )
 
-  useEffect(() => {
-    setWorkspaceOptions([])
-    setWorkspaceOptionsError(null)
+  const shouldFetchProjects = useMemo(
+    () =>
+      hasConnection &&
+      !isSoloPlan &&
+      visibility.projectGid &&
+      debouncedWorkspaceGid,
+    [
+      debouncedWorkspaceGid,
+      hasConnection,
+      isSoloPlan,
+      visibility.projectGid
+    ]
+  )
 
+  const shouldFetchTasks = useMemo(
+    () =>
+      hasConnection &&
+      !isSoloPlan &&
+      (visibility.taskGid || visibility.parentTaskGid || visibility.storyGid) &&
+      debouncedWorkspaceGid &&
+      debouncedProjectGid,
+    [
+      debouncedProjectGid,
+      debouncedWorkspaceGid,
+      hasConnection,
+      isSoloPlan,
+      visibility.parentTaskGid,
+      visibility.storyGid,
+      visibility.taskGid
+    ]
+  )
+
+  useEffect(() => {
     // Only fetch if we actually need to show the workspace dropdown
     if (!asanaConnectionOptions || !shouldFetchWorkspaces) {
-      setWorkspaceOptionsLoading(false)
-      return
-    }
-
-    // Don't fetch if we already have a workspace selected and options loaded
-    if (asanaParams.workspaceGid && workspaceOptions.length > 0) {
+      setWorkspaceOptions([])
+      setWorkspaceOptionsError(null)
       setWorkspaceOptionsLoading(false)
       return
     }
 
     let cancelled = false
+    setWorkspaceOptions([])
+    setWorkspaceOptionsError(null)
     setWorkspaceOptionsLoading(true)
     fetchAsanaWorkspaces(asanaConnectionOptions)
       .then((workspaces: AsanaWorkspace[]) => {
@@ -1795,37 +1822,21 @@ export default function AsanaAction({
     return () => {
       cancelled = true
     }
-  }, [
-    asanaConnectionOptions,
-    shouldFetchWorkspaces,
-    asanaParams.workspaceGid,
-    workspaceOptions.length
-  ]) // Remove asanaParams.workspaceGid and workspaceOptions from deps
+  }, [asanaConnectionOptions, shouldFetchWorkspaces])
 
   useEffect(() => {
-    setProjectOptions([])
-    setProjectOptionsError(null)
-    setProjectOptionsLoading(false)
-
-    const workspaceGid = debouncedWorkspaceGid
-
-    if (
-      !visibility.projectGid ||
-      !workspaceGid ||
-      !asanaConnectionOptions ||
-      isSoloPlan
-    ) {
-      return
-    }
-
-    // Don't fetch if we already have a project selected and options loaded
-    if (asanaParams.projectGid && projectOptions.length > 0) {
+    if (!asanaConnectionOptions || !shouldFetchProjects) {
+      setProjectOptions([])
+      setProjectOptionsError(null)
+      setProjectOptionsLoading(false)
       return
     }
 
     let cancelled = false
+    setProjectOptions([])
+    setProjectOptionsError(null)
     setProjectOptionsLoading(true)
-    fetchAsanaProjects(workspaceGid, asanaConnectionOptions)
+    fetchAsanaProjects(debouncedWorkspaceGid, asanaConnectionOptions)
       .then((projects: AsanaProject[]) => {
         if (cancelled) return
         setProjectOptions(
@@ -1854,11 +1865,7 @@ export default function AsanaAction({
   }, [
     asanaConnectionOptions,
     debouncedWorkspaceGid,
-    isSoloPlan,
-    visibility.projectGid,
-    asanaParams.projectGid,
-    projectOptions.length
-    // Remove asanaParams.projectGid and projectOptions from deps
+    shouldFetchProjects
   ])
 
   useEffect(() => {
@@ -2079,35 +2086,21 @@ export default function AsanaAction({
   ])
 
   useEffect(() => {
-    setTaskOptions([])
-    setTaskOptionsError(null)
-    setTaskDetailsMap(new Map())
-
-    const workspaceGid = debouncedWorkspaceGid
-    const shouldFetchTasks =
-      (visibility.taskGid || visibility.parentTaskGid || visibility.storyGid) &&
-      debouncedWorkspaceGid &&
-      debouncedProjectGid
-
-    if (!shouldFetchTasks || !asanaConnectionOptions || isSoloPlan) {
-      setTaskOptionsLoading(false)
-      return
-    }
-
-    // Don't fetch if we already have a task selected and options loaded
-    if (
-      asanaParams.taskGid &&
-      taskOptions.length > 0 &&
-      taskDetailsMap.size > 0
-    ) {
+    if (!asanaConnectionOptions || !shouldFetchTasks) {
+      setTaskOptions([])
+      setTaskOptionsError(null)
+      setTaskDetailsMap(new Map())
       setTaskOptionsLoading(false)
       return
     }
 
     let cancelled = false
+    setTaskOptions([])
+    setTaskOptionsError(null)
+    setTaskDetailsMap(new Map())
     setTaskOptionsLoading(true)
     fetchAsanaTasks(
-      workspaceGid,
+      debouncedWorkspaceGid,
       asanaConnectionOptions,
       debouncedProjectGid || undefined
     )
@@ -2147,16 +2140,9 @@ export default function AsanaAction({
     }
   }, [
     asanaConnectionOptions,
-    asanaParams.taskGid,
     debouncedWorkspaceGid,
     debouncedProjectGid,
-    isSoloPlan,
-    taskDetailsMap.size,
-    taskOptions.length,
-    visibility.parentTaskGid,
-    visibility.storyGid,
-    visibility.taskGid
-    // Remove asanaParams.taskGid, taskOptions, taskDetailsMap from deps
+    shouldFetchTasks
   ])
 
   useEffect(() => {

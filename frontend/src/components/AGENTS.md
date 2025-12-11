@@ -2,6 +2,9 @@
 
 ## Change Reasons
 - Workflow canvas nodes now render minimal on-canvas shells, auto-open the flyout on selection, and defer configuration (and any API-backed dropdowns like Asana's) to the flyout only to avoid heavy loads during workflow hydration.
+- Asana workspace dropdown fetches now run once per visible connection instead of refiring on each render, preventing repeated backend/API calls when opening the flyout.
+- Asana project dropdown fetches are now gated the same way as workspace fetches, so opening the flyout no longer hammers the backend/Asana when the project field is visible.
+- Asana task dropdown fetches now respect the same guards (connection/workspace/project + visibility) to stop repeated backend/Asana calls when task/parent/comment selectors are shown in the flyout.
 - Added a Pricing link to the marketing navigation (desktop and mobile), refreshed the public nav styling, and added a signed-in Dashboard shortcut ahead of logout.
 - HTTP Request node: surface a warning when the URL targets `VITE_API_BASE_URL` so users avoid self-calling workflows that can loop indefinitely and rack up overage charges.
 - Google Sheets action: guard against automatically falling back to the personal credential after a shared workspace connection is removed by tracking when a workspace selection is cleared. This keeps users from silently swapping credentials and mirrors the React Flow safety patterns for avoiding redundant updates.
@@ -49,3 +52,4 @@ Styles live in `src/css/globals.css` under `.themed-scroll` and were previously 
 - Added a Delay (Wait) node configuration UI and validation so the workflow designer can pause flows without manual code.
 - Added a Formatter logic node UI with grouped dropdown selection, validation, and palette/flyout wiring so users can transform data without new components or custom styling.
 - Workflow nodes: dashed summary areas now show an explicit click affordance (hover overlay + pointer cursor) and open the flyout on mouseup without interfering with node dragging, fixing missed flyout openings when using the on-card hint zone.
+- Delay and Formatter nodes now use the same dashed hint surface to open their flyouts, matching the rest of the node cards.
