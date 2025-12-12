@@ -107,13 +107,15 @@ export default function NodeDropdownField({
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
 
+  const defaultOpenMap = useMemo(() => {
+    if (!hasGroups) return {}
+    return Object.fromEntries(normalizedGroups.map((g) => [g.key, true]))
+  }, [hasGroups, normalizedGroups])
+
   useEffect(() => {
     if (!hasGroups) return
-    const defaults = Object.fromEntries(
-      normalizedGroups.map((group) => [group.key, true])
-    )
-    setOpenGroups((prev) => ({ ...defaults, ...prev }))
-  }, [hasGroups, normalizedGroups])
+    setOpenGroups((prev) => ({ ...defaultOpenMap, ...prev }))
+  }, [hasGroups, defaultOpenMap])
 
   const selectableOptions = useMemo(
     () => normalizedGroups.flatMap((group) => group.options),

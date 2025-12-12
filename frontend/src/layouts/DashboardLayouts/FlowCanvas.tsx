@@ -110,6 +110,7 @@ import useActionNodeController, {
 } from '@/components/workflow/nodes/useActionNodeController'
 import useMessagingActionRestriction from '@/components/workflow/nodes/useMessagingActionRestriction'
 import type { RunAvailability } from '@/types/runAvailability'
+import { shallow } from 'zustand/shallow'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
   'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'
@@ -2661,52 +2662,64 @@ function FlyoutConditionFields({ nodeId }: FlyoutConditionFieldsProps) {
 }
 
 function FlyoutFormatterFields({ nodeId }: { nodeId: string }) {
-  const nodeData = useWorkflowStore(
+  const { label, hasValidationErrors, config } = useWorkflowStore(
     useCallback(
-      (state) =>
-        (state.nodes.find((n) => n.id === nodeId)?.data as FormatterNodeData) ??
-        {},
+      (state) => {
+        const node = state.nodes.find((n) => n.id === nodeId)
+        if (!node) {
+          return {
+            label: null,
+            dirty: false,
+            hasValidationErrors: false,
+            config: null
+          }
+        }
+        const d = node.data as FormatterNodeData
+        return {
+          label: d.label ?? null,
+          dirty: d.dirty ?? false,
+          hasValidationErrors: d.hasValidationErrors ?? false,
+          config: d.config ?? null
+        }
+      },
       [nodeId]
-    )
+    ),
+    shallow
   )
+
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
 
   const normalizedConfig = useMemo(
-    () =>
-      normalizeFormatterConfig(nodeData?.config as FormatterConfig | undefined),
-    [nodeData?.config]
+    () => normalizeFormatterConfig(config as FormatterConfig | undefined),
+    [config]
   )
+
   const validation = useMemo(
     () => validateFormatterConfig(normalizedConfig),
     [normalizedConfig]
   )
 
   useEffect(() => {
-    if ((nodeData?.hasValidationErrors ?? false) !== validation.hasErrors) {
+    if (hasValidationErrors !== validation.hasErrors) {
       updateNodeData(nodeId, { hasValidationErrors: validation.hasErrors })
     }
-  }, [
-    nodeData?.hasValidationErrors,
-    nodeId,
-    updateNodeData,
-    validation.hasErrors
-  ])
+  }, [hasValidationErrors, validation.hasErrors, nodeId, updateNodeData])
 
   const handleConfigChange = useCallback(
     (nextConfig: FormatterConfig) => {
       const normalizedNext = normalizeFormatterConfig(nextConfig)
       const nextValidation = validateFormatterConfig(normalizedNext)
-      const currentConfig = normalizeFormatterConfig(
-        nodeData?.config as FormatterConfig | undefined
-      )
-      const configsEqual =
-        JSON.stringify(currentConfig) === JSON.stringify(normalizedNext)
-      const validationEqual =
-        (nodeData?.hasValidationErrors ?? false) === nextValidation.hasErrors
 
-      if (configsEqual && validationEqual) {
-        return
-      }
+      const currentNormalized = normalizeFormatterConfig(
+        config as FormatterConfig | undefined
+      )
+
+      const configEqual =
+        JSON.stringify(currentNormalized) === JSON.stringify(normalizedNext)
+
+      const validationEqual = hasValidationErrors === nextValidation.hasErrors
+
+      if (configEqual && validationEqual) return
 
       updateNodeData(nodeId, {
         config: normalizedNext,
@@ -2714,13 +2727,10 @@ function FlyoutFormatterFields({ nodeId }: { nodeId: string }) {
         dirty: true
       })
     },
-    [nodeData?.config, nodeData?.hasValidationErrors, nodeId, updateNodeData]
+    [config, hasValidationErrors, nodeId, updateNodeData]
   )
 
-  const title =
-    typeof nodeData?.label === 'string' && nodeData.label.trim()
-      ? nodeData.label
-      : 'Formatter'
+  const title = typeof label === 'string' && label.trim() ? label : 'Formatter'
 
   return (
     <div className="space-y-3">
@@ -2737,36 +2747,55 @@ function FlyoutFormatterFields({ nodeId }: { nodeId: string }) {
 }
 
 function FlyoutDelayFields({ nodeId }: { nodeId: string }) {
-  const nodeData = useWorkflowStore(
-    useCallback(
-      (state) =>
-        (state.nodes.find((n) => n.id === nodeId)?.data as DelayNodeData) ?? {},
-      [nodeId]
+  const { label, dirty, hasValidationErrors, config, labelError } =
+    useWorkflowStore(
+      useCallback(
+        (state) => {
+          const node = state.nodes.find((n) => n.id === nodeId)
+          if (!node) {
+            return {
+              label: null,
+              dirty: false,
+              hasValidationErrors: false,
+              config: null,
+              labelError: null
+            }
+          }
+
+          const d = node.data as DelayNodeData
+
+          return {
+            label: d.label ?? null,
+            dirty: d.dirty ?? false,
+            hasValidationErrors: d.hasValidationErrors ?? false,
+            config: d.config ?? null,
+            labelError: d.labelError ?? null
+          }
+        },
+        [nodeId]
+      ),
+      shallow
     )
-  )
-  const updateNodeData = useWorkflowStore((state) => state.updateNodeData)
-  const canEdit = useWorkflowStore((state) => state.canEdit)
+
+  const updateNodeData = useWorkflowStore((s) => s.updateNodeData)
+  const canEdit = useWorkflowStore((s) => s.canEdit)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const normalizedConfig = useMemo(
-    () => normalizeDelayConfig(nodeData?.config as DelayConfig | undefined),
-    [nodeData?.config]
+    () => normalizeDelayConfig(config as DelayConfig | undefined),
+    [config]
   )
-  const hasValidationErrors = useMemo(
+
+  const validationHasErrors = useMemo(
     () => validateDelayConfig(normalizedConfig),
     [normalizedConfig]
   )
 
   useEffect(() => {
-    if ((nodeData?.hasValidationErrors ?? false) !== hasValidationErrors) {
-      updateNodeData(nodeId, { hasValidationErrors })
+    if (hasValidationErrors !== validationHasErrors) {
+      updateNodeData(nodeId, { hasValidationErrors: validationHasErrors })
     }
-  }, [
-    hasValidationErrors,
-    nodeData?.hasValidationErrors,
-    nodeId,
-    updateNodeData
-  ])
+  }, [hasValidationErrors, validationHasErrors, nodeId, updateNodeData])
 
   const handleLabelChange = useCallback(
     (v: string) => {
@@ -2776,12 +2805,28 @@ function FlyoutDelayFields({ nodeId }: { nodeId: string }) {
     [canEdit, nodeId, updateNodeData]
   )
 
+  const handleConfigChange = useCallback(
+    (nextConfig: DelayConfig) => {
+      if (!canEdit) return
+      const normalizedNext = normalizeDelayConfig(nextConfig)
+      const nextErrors = validateDelayConfig(normalizedNext)
+      updateNodeData(nodeId, {
+        config: normalizedNext,
+        hasValidationErrors: nextErrors,
+        dirty: true
+      })
+    },
+    [canEdit, nodeId, updateNodeData]
+  )
+
   const handleRequestDelete = useCallback(() => {
     if (!canEdit) return
     setConfirmingDelete(true)
   }, [canEdit])
 
-  const handleCancelDelete = useCallback(() => setConfirmingDelete(false), [])
+  const handleCancelDelete = useCallback(() => {
+    setConfirmingDelete(false)
+  }, [])
 
   const handleConfirmDelete = useCallback(() => {
     if (!canEdit) return
@@ -2789,35 +2834,18 @@ function FlyoutDelayFields({ nodeId }: { nodeId: string }) {
     useWorkflowStore.getState().removeNode(nodeId)
   }, [canEdit, nodeId])
 
-  const handleConfigChange = useCallback(
-    (nextConfig: DelayConfig) => {
-      if (!canEdit) return
-      const normalizedNext = normalizeDelayConfig(nextConfig)
-      const nextHasErrors = validateDelayConfig(normalizedNext)
-      updateNodeData(nodeId, {
-        config: normalizedNext,
-        hasValidationErrors: nextHasErrors,
-        dirty: true
-      })
-    },
-    [canEdit, nodeId, updateNodeData]
-  )
-
-  const label =
-    typeof nodeData?.label === 'string' && nodeData.label.trim()
-      ? nodeData.label
-      : 'Delay'
+  const resolvedLabel =
+    typeof label === 'string' && label.trim() ? label : 'Delay'
 
   return (
     <>
       <div className="flex flex-col gap-3">
         <NodeHeader
           nodeId={nodeId}
-          label={label}
-          dirty={Boolean(nodeData?.dirty)}
+          label={resolvedLabel}
+          dirty={dirty}
           hasValidationErrors={
-            Boolean(nodeData?.labelError) ||
-            Boolean(nodeData?.hasValidationErrors)
+            Boolean(labelError) || Boolean(hasValidationErrors)
           }
           expanded
           onLabelChange={handleLabelChange}
@@ -2828,10 +2856,11 @@ function FlyoutDelayFields({ nodeId }: { nodeId: string }) {
             handleRequestDelete()
           }}
         />
+
         <DelayNodeConfig
           config={normalizedConfig}
           onChange={handleConfigChange}
-          hasValidationErrors={hasValidationErrors}
+          hasValidationErrors={validationHasErrors}
           canEdit={canEdit}
         />
       </div>
