@@ -493,11 +493,11 @@ const OPERATION_FIELDS: Record<AsanaOperation, OperationConfig> = {
   },
   addTaskTag: {
     label: 'Tags - Add task tag',
-    required: ['workspaceGid', 'taskGid', 'tagGid']
+    required: ['workspaceGid', 'projectGid', 'taskGid', 'tagGid']
   },
   removeTaskTag: {
     label: 'Tags - Remove task tag',
-    required: ['workspaceGid', 'taskGid', 'tagGid']
+    required: ['workspaceGid', 'projectGid', 'taskGid', 'tagGid']
   },
   getUser: {
     label: 'Users - Get user',
