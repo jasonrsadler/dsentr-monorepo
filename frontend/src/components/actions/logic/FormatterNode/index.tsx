@@ -44,30 +44,65 @@ const FIELD_DEFINITIONS: Partial<
   ],
   'string.split': [
     { key: 'delimiter', label: 'Delimiter', type: 'text', placeholder: ',' },
-    { key: 'index', label: 'Index', type: 'number', placeholder: '0' }
+    {
+      key: 'index',
+      label: 'Index',
+      type: 'number',
+      placeholder: '0 or {{template}}'
+    }
   ],
   'string.substring': [
-    { key: 'start', label: 'Start Index', type: 'number', placeholder: '0' },
-    { key: 'length', label: 'Length', type: 'number', placeholder: '4' }
+    {
+      key: 'start',
+      label: 'Start Index',
+      type: 'number',
+      placeholder: '0 or {{template}}'
+    },
+    {
+      key: 'length',
+      label: 'Length',
+      type: 'number',
+      placeholder: '4 or {{template}}'
+    }
   ],
   'number.add': [
-    { key: 'value', label: 'Value', type: 'number', placeholder: '10' }
+    {
+      key: 'value',
+      label: 'Value',
+      type: 'number',
+      placeholder: '10 or {{template}}'
+    }
   ],
   'number.subtract': [
-    { key: 'value', label: 'Value', type: 'number', placeholder: '5' }
+    {
+      key: 'value',
+      label: 'Value',
+      type: 'number',
+      placeholder: '5 or {{template}}'
+    }
   ],
   'number.multiply': [
-    { key: 'value', label: 'Value', type: 'number', placeholder: '2' }
+    {
+      key: 'value',
+      label: 'Value',
+      type: 'number',
+      placeholder: '2 or {{template}}'
+    }
   ],
   'number.divide': [
-    { key: 'value', label: 'Value', type: 'number', placeholder: '3' }
+    {
+      key: 'value',
+      label: 'Value',
+      type: 'number',
+      placeholder: '3 or {{template}}'
+    }
   ],
   'number.round': [
     {
       key: 'decimal_places',
       label: 'Decimal Places',
       type: 'number',
-      placeholder: '0'
+      placeholder: '0 or {{template}}'
     }
   ],
   'json.pick': [
@@ -116,9 +151,24 @@ const FIELD_DEFINITIONS: Partial<
     }
   ],
   'date.adjust': [
-    { key: 'days', label: 'Days', type: 'number', placeholder: '0' },
-    { key: 'hours', label: 'Hours', type: 'number', placeholder: '0' },
-    { key: 'minutes', label: 'Minutes', type: 'number', placeholder: '0' }
+    {
+      key: 'days',
+      label: 'Days',
+      type: 'number',
+      placeholder: '0 or {{template}}'
+    },
+    {
+      key: 'hours',
+      label: 'Hours',
+      type: 'number',
+      placeholder: '0 or {{template}}'
+    },
+    {
+      key: 'minutes',
+      label: 'Minutes',
+      type: 'number',
+      placeholder: '0 or {{template}}'
+    }
   ],
   'date.extract': [
     {
@@ -289,12 +339,8 @@ export default function FormatterNodeConfig({
                     {field.label}
                   </span>
                   <NodeInputField
-                    type={field.type === 'number' ? 'number' : 'text'}
-                    value={
-                      field.type === 'number'
-                        ? toFieldString(value)
-                        : (value as string)
-                    }
+                    type="text"
+                    value={toFieldString(value)}
                     onChange={(val) => handleFieldChange(field.key, val)}
                     placeholder={field.placeholder}
                   />

@@ -27,7 +27,7 @@ describe('DelayNodeConfig', () => {
       screen.getByText(/configure a duration or an absolute time/i)
     ).toBeInTheDocument()
 
-    const durationInputs = screen.getAllByPlaceholderText('0')
+    const durationInputs = screen.getAllByRole('textbox')
     fireEvent.change(durationInputs[2], { target: { value: '5' } })
 
     await waitFor(() => {

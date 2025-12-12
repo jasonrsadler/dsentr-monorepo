@@ -142,7 +142,14 @@ export default function DelayNodeConfig({
   )
 
   const updateWaitUntil = useCallback(
-    (dateStr, hour, minute, second, timezone, rawOverride) => {
+    (
+      dateStr: string,
+      hour: number,
+      minute: number,
+      second: number,
+      timezone?: string,
+      rawOverride?: string
+    ) => {
       if (rawOverride) {
         emitConfig({
           ...normalizedConfig,
