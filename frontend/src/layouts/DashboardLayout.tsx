@@ -34,6 +34,7 @@ import HelpButton from '@/components/help/HelpButton'
 import MessagesButton from '@/components/support/MessagesButton'
 import MessageCenter from '@/components/support/MessageCenter'
 import { fetchIssueThreads } from '@/lib/issuesApi'
+import { settingsTabIcons } from '@/components/settings/tabs/SettingsTabIcons'
 
 export default function DashboardLayout() {
   const user = useAuth((state) => state.user)
@@ -239,7 +240,10 @@ export default function DashboardLayout() {
       { key: 'workflows', label: 'Workflows' },
       { key: 'danger', label: 'Danger Zone' }
     ]
-    return base
+    return base.map((tab) => ({
+      ...tab,
+      icon: settingsTabIcons[tab.key]
+    }))
   }, [planTier])
 
   useEffect(() => {
