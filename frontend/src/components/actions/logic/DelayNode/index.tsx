@@ -142,13 +142,14 @@ export default function DelayNodeConfig({
   )
 
   const updateWaitUntil = useCallback(
-    (
-      dateStr: string,
-      hour: number,
-      minute: number,
-      second: number,
-      timezone?: string
-    ) => {
+    (dateStr, hour, minute, second, timezone, rawOverride) => {
+      if (rawOverride) {
+        emitConfig({
+          ...normalizedConfig,
+          wait_until: rawOverride
+        })
+        return
+      }
       const iso = buildIso(dateStr, hour, minute, second, timezone)
       emitConfig({
         ...normalizedConfig,
@@ -218,10 +219,10 @@ export default function DelayNodeConfig({
                 Days
               </span>
               <NodeInputField
-                type="number"
-                value={toFieldValue(waitFor.days)}
+                type="text"
+                value={String(waitFor.days ?? '')}
                 onChange={(val) => handleDurationChange('days', val)}
-                placeholder="0"
+                placeholder="0 or {{template}}"
               />
             </div>
             <div>
@@ -229,10 +230,10 @@ export default function DelayNodeConfig({
                 Hours
               </span>
               <NodeInputField
-                type="number"
-                value={toFieldValue(waitFor.hours)}
+                type="text"
+                value={String(waitFor.hours ?? '')}
                 onChange={(val) => handleDurationChange('hours', val)}
-                placeholder="0"
+                placeholder="0 or {{template}}"
               />
             </div>
             <div>
@@ -240,10 +241,10 @@ export default function DelayNodeConfig({
                 Minutes
               </span>
               <NodeInputField
-                type="number"
-                value={toFieldValue(waitFor.minutes)}
+                type="text"
+                value={String(waitFor.minutes ?? '')}
                 onChange={(val) => handleDurationChange('minutes', val)}
-                placeholder="0"
+                placeholder="0 or {{template}}"
               />
             </div>
           </div>
@@ -289,7 +290,8 @@ function DateTimeFields({
     hour: number,
     minute: number,
     second: number,
-    timezone?: string
+    timezone?: string,
+    rawOverride?: string
   ) => void
 }) {
   const parts = useMemo(() => parseWaitUntil(waitUntil), [waitUntil])
@@ -575,7 +577,19 @@ function DateTimeFields({
           </div>
         </div>
       </div>
-
+      <div className="mt-3">
+        <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          ISO Datetime (overrides pickers)
+        </label>
+        <NodeInputField
+          type="text"
+          value={waitUntil ?? ''}
+          placeholder="2025-12-09T15:30:00-05:00 or {{template}}"
+          onChange={(val) => {
+            onChange('', 0, 0, 0, undefined, val)
+          }}
+        />
+      </div>
       <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
         Date/time is captured in UTC and saved as ISO 8601.
       </p>
