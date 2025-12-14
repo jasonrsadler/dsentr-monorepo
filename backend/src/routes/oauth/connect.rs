@@ -259,7 +259,7 @@ pub async fn slack_connect_start(
         .append_pair("client_id", &state.config.oauth.slack.client_id)
         .append_pair("redirect_uri", &state.config.oauth.slack.redirect_uri)
         .append_pair("response_type", "code")
-        //  This is only for bot apps - dont use scope, only user_scope ---> .append_pair("scope", state.oauth_accounts.slack_scopes())
+        .append_pair("scope", state.oauth_accounts.slack_bot_scopes())
         .append_pair("user_scope", state.oauth_accounts.slack_scopes())
         .append_pair("state", &state_token);
 

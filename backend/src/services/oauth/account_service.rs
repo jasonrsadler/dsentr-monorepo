@@ -203,6 +203,11 @@ impl OAuthAccountService {
         "offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMember.Read.All ChannelMessage.Send"
     }
 
+    pub fn slack_bot_scopes(&self) -> &'static str {
+        // Bot token scopes for listing channels and sending messages as the app bot user.
+        "incoming-webhook,chat:write"
+    }
+
     pub fn slack_scopes(&self) -> &'static str {
         "chat:write,channels:read,groups:read,users:read,users:read.email"
     }
