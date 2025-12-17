@@ -15,7 +15,20 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
         &self,
         new_token: NewUserOAuthToken,
     ) -> Result<UserOAuthToken, sqlx::Error> {
-        // Enforce personal tokens only at this layer by ensuring workspace_id is NULL on write
+        if let Some(existing) = self
+            .find_by_user_and_provider(new_token.user_id, new_token.provider)
+            .await?
+        {
+            self.update_token(existing.id, new_token).await
+        } else {
+            self.insert_token(new_token).await
+        }
+    }
+
+    async fn insert_token(
+        &self,
+        new_token: NewUserOAuthToken,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
         let query = r#"
             INSERT INTO user_oauth_tokens (
                 user_id,
@@ -29,14 +42,6 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 updated_at
             )
             VALUES ($1, NULL, $2::oauth_connection_provider, $3, $4, $5, $6, $7, now())
-            ON CONFLICT (user_id, provider)
-            DO UPDATE SET
-                access_token = EXCLUDED.access_token,
-                refresh_token = EXCLUDED.refresh_token,
-                expires_at = EXCLUDED.expires_at,
-                account_email = EXCLUDED.account_email,
-                metadata = EXCLUDED.metadata,
-                updated_at = now()
             RETURNING
                 id,
                 user_id,
@@ -64,6 +69,76 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
             .await
     }
 
+    async fn update_token(
+        &self,
+        token_id: Uuid,
+        new_token: NewUserOAuthToken,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        let query = r#"
+            UPDATE user_oauth_tokens
+            SET
+                user_id = $2,
+                provider = $3::oauth_connection_provider,
+                access_token = $4,
+                refresh_token = $5,
+                expires_at = $6,
+                account_email = $7,
+                metadata = $8,
+                updated_at = now()
+            WHERE id = $1 AND workspace_id IS NULL
+            RETURNING
+                id,
+                user_id,
+                workspace_id,
+                provider,
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                metadata,
+                is_shared,
+                created_at,
+                updated_at
+        "#;
+
+        sqlx::query_as::<_, UserOAuthToken>(query)
+            .bind(token_id)
+            .bind(new_token.user_id)
+            .bind(new_token.provider as ConnectedOAuthProvider)
+            .bind(new_token.access_token)
+            .bind(new_token.refresh_token)
+            .bind(new_token.expires_at)
+            .bind(new_token.account_email)
+            .bind(new_token.metadata)
+            .fetch_one(&self.pool)
+            .await
+    }
+
+    async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+        let query = r#"
+            SELECT
+                id,
+                user_id,
+                workspace_id,
+                provider,
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                metadata,
+                is_shared,
+                created_at,
+                updated_at
+            FROM user_oauth_tokens
+            WHERE id = $1 AND workspace_id IS NULL
+        "#;
+
+        sqlx::query_as::<_, UserOAuthToken>(query)
+            .bind(token_id)
+            .fetch_optional(&self.pool)
+            .await
+    }
+
     async fn find_by_user_and_provider(
         &self,
         user_id: Uuid,
@@ -85,6 +160,8 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 updated_at
             FROM user_oauth_tokens
             WHERE user_id = $1 AND provider = $2::oauth_connection_provider AND workspace_id IS NULL
+            ORDER BY updated_at DESC
+            LIMIT 1
         "#;
         sqlx::query_as::<_, UserOAuthToken>(query)
             .bind(user_id)
@@ -100,7 +177,15 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
     ) -> Result<(), sqlx::Error> {
         let query = r#"
             DELETE FROM user_oauth_tokens
-            WHERE user_id = $1 AND provider = $2::oauth_connection_provider AND workspace_id IS NULL
+            WHERE id IN (
+                SELECT id
+                FROM user_oauth_tokens
+                WHERE user_id = $1
+                  AND provider = $2::oauth_connection_provider
+                  AND workspace_id IS NULL
+                ORDER BY updated_at DESC
+                LIMIT 1
+            )
         "#;
         sqlx::query(query)
             .bind(user_id)
@@ -108,6 +193,53 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    async fn delete_token_by_id(&self, token_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            DELETE FROM user_oauth_tokens
+            WHERE id = $1 AND workspace_id IS NULL
+            "#,
+        )
+        .bind(token_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn list_by_user_and_provider(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+        let query = r#"
+            SELECT
+                id,
+                user_id,
+                workspace_id,
+                provider,
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                metadata,
+                is_shared,
+                created_at,
+                updated_at
+            FROM user_oauth_tokens
+            WHERE user_id = $1
+              AND provider = $2::oauth_connection_provider
+              AND workspace_id IS NULL
+            ORDER BY created_at ASC
+        "#;
+
+        sqlx::query_as::<_, UserOAuthToken>(query)
+            .bind(user_id)
+            .bind(provider as ConnectedOAuthProvider)
+            .fetch_all(&self.pool)
+            .await
     }
 
     async fn list_tokens_for_user(
@@ -147,7 +279,15 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
         let query = r#"
             UPDATE user_oauth_tokens
             SET is_shared = $3, updated_at = now()
-            WHERE user_id = $1 AND provider = $2::oauth_connection_provider AND workspace_id IS NULL
+            WHERE id IN (
+                SELECT id
+                FROM user_oauth_tokens
+                WHERE user_id = $1
+                  AND provider = $2::oauth_connection_provider
+                  AND workspace_id IS NULL
+                ORDER BY updated_at DESC
+                LIMIT 1
+            )
             RETURNING
                 id,
                 user_id,
@@ -165,6 +305,37 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
         sqlx::query_as::<_, UserOAuthToken>(query)
             .bind(user_id)
             .bind(provider as ConnectedOAuthProvider)
+            .bind(is_shared)
+            .fetch_one(&self.pool)
+            .await
+    }
+
+    async fn mark_shared_by_id(
+        &self,
+        token_id: Uuid,
+        is_shared: bool,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        let query = r#"
+            UPDATE user_oauth_tokens
+            SET is_shared = $2, updated_at = now()
+            WHERE id = $1 AND workspace_id IS NULL
+            RETURNING
+                id,
+                user_id,
+                workspace_id,
+                provider,
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                metadata,
+                is_shared,
+                created_at,
+                updated_at
+        "#;
+
+        sqlx::query_as::<_, UserOAuthToken>(query)
+            .bind(token_id)
             .bind(is_shared)
             .fetch_one(&self.pool)
             .await

@@ -33,6 +33,24 @@ pub trait UserOAuthTokenRepository: Send + Sync {
         new_token: NewUserOAuthToken,
     ) -> Result<UserOAuthToken, sqlx::Error>;
 
+    async fn insert_token(
+        &self,
+        new_token: NewUserOAuthToken,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        self.upsert_token(new_token).await
+    }
+
+    async fn update_token(
+        &self,
+        token_id: Uuid,
+        new_token: NewUserOAuthToken,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        let _ = token_id;
+        self.upsert_token(new_token).await
+    }
+
+    async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error>;
+
     async fn find_by_user_and_provider(
         &self,
         user_id: Uuid,
@@ -45,6 +63,20 @@ pub trait UserOAuthTokenRepository: Send + Sync {
         provider: ConnectedOAuthProvider,
     ) -> Result<(), sqlx::Error>;
 
+    async fn delete_token_by_id(&self, token_id: Uuid) -> Result<(), sqlx::Error> {
+        if let Some(record) = self.find_by_id(token_id).await? {
+            self.delete_token(record.user_id, record.provider).await
+        } else {
+            Err(sqlx::Error::RowNotFound)
+        }
+    }
+
+    async fn list_by_user_and_provider(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<Vec<UserOAuthToken>, sqlx::Error>;
+
     async fn list_tokens_for_user(&self, user_id: Uuid)
         -> Result<Vec<UserOAuthToken>, sqlx::Error>;
 
@@ -54,4 +86,17 @@ pub trait UserOAuthTokenRepository: Send + Sync {
         provider: ConnectedOAuthProvider,
         is_shared: bool,
     ) -> Result<UserOAuthToken, sqlx::Error>;
+
+    async fn mark_shared_by_id(
+        &self,
+        token_id: Uuid,
+        is_shared: bool,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        if let Some(record) = self.find_by_id(token_id).await? {
+            self.mark_shared(record.user_id, record.provider, is_shared)
+                .await
+        } else {
+            Err(sqlx::Error::RowNotFound)
+        }
+    }
 }

@@ -1,4 +1,4 @@
-import { JSX, useCallback, useEffect, useMemo, useState } from 'react'
+﻿import { JSX, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 
 import SlackIcon from '@/assets/svg-components/third-party/SlackIcon'
@@ -7,7 +7,6 @@ import { errorMessage } from '@/lib/errorMessage'
 import AsanaIcon from '@/assets/svg-components/third-party/AsanaIcon'
 import {
   OAuthProvider,
-  ProviderConnectionSet,
   WorkspaceConnectionInfo,
   disconnectProvider,
   fetchConnections,
@@ -15,8 +14,8 @@ import {
   promoteConnection,
   unshareWorkspaceConnection,
   setCachedConnections,
-  markProviderRevoked,
-  type GroupedConnectionsSnapshot
+  type GroupedConnectionsSnapshot,
+  type PersonalConnectionRecord
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
@@ -81,22 +80,6 @@ const PROVIDERS: ProviderMeta[] = [
   }
 ]
 
-const emptyProviderState = (): ProviderConnectionSet => ({
-  personal: {
-    scope: 'personal',
-    id: null,
-    connected: false,
-    accountEmail: undefined,
-    expiresAt: undefined,
-    lastRefreshedAt: undefined,
-    requiresReconnect: false,
-    isShared: false
-  },
-  workspace: []
-})
-
-// Provider state is derived on the fly from the grouped snapshot.
-
 export default function IntegrationsTab({
   notice,
   onDismissNotice
@@ -110,18 +93,20 @@ export default function IntegrationsTab({
   const [error, setError] = useState<string | null>(null)
   const [connections, setConnections] =
     useState<GroupedConnectionsSnapshot | null>(null)
+  const [providerQuery, setProviderQuery] = useState('')
   const [busyProvider, setBusyProvider] = useState<OAuthProvider | null>(null)
+  const [busyConnectionId, setBusyConnectionId] = useState<string | null>(null)
   const [connectingProvider, setConnectingProvider] =
     useState<OAuthProvider | null>(null)
-  const [promoteDialogProvider, setPromoteDialogProvider] =
-    useState<OAuthProvider | null>(null)
+  const [promoteDialogConnection, setPromoteDialogConnection] =
+    useState<PersonalConnectionRecord | null>(null)
   const [promoteBusyProvider, setPromoteBusyProvider] =
     useState<OAuthProvider | null>(null)
   const [removeDialog, setRemoveDialog] =
     useState<WorkspaceConnectionInfo | null>(null)
   const [removeBusyId, setRemoveBusyId] = useState<string | null>(null)
   const [disconnectDialog, setDisconnectDialog] = useState<{
-    provider: OAuthProvider
+    connection: PersonalConnectionRecord
     sharedConnections: WorkspaceConnectionInfo[]
   } | null>(null)
   const [expandedProviders, setExpandedProviders] = useState<
@@ -135,6 +120,19 @@ export default function IntegrationsTab({
       {} as Record<OAuthProvider, boolean>
     )
   )
+
+  const sortedProviders = useMemo(() => {
+    const term = providerQuery.trim().toLowerCase()
+    const ordered = [...PROVIDERS].sort((a, b) => a.name.localeCompare(b.name))
+    if (!term) {
+      return ordered
+    }
+    return ordered.filter(
+      (provider) =>
+        provider.name.toLowerCase().includes(term) ||
+        provider.description.toLowerCase().includes(term)
+    )
+  }, [providerQuery])
 
   const planTier = useMemo<PlanTier>((): PlanTier => {
     return normalizePlanTier(
@@ -190,6 +188,22 @@ export default function IntegrationsTab({
       return false
     },
     [currentUserDisplayName, currentUserEmail]
+  )
+
+  const resolveConnectionKey = useCallback(
+    (entry?: { connectionId?: string | null; id?: string | null } | null) => {
+      if (!entry) return null
+      const raw =
+        typeof entry.connectionId === 'string'
+          ? entry.connectionId
+          : typeof entry.id === 'string'
+            ? entry.id
+            : null
+      if (!raw) return null
+      const trimmed = raw.trim()
+      return trimmed.length > 0 ? trimmed : null
+    },
+    []
   )
 
   const openPlanSettings = useCallback(() => {
@@ -323,50 +337,44 @@ export default function IntegrationsTab({
 
   const performDisconnect = useCallback(
     async (
-      provider: OAuthProvider,
+      connection: PersonalConnectionRecord,
       sharedConnections: WorkspaceConnectionInfo[]
     ): Promise<boolean> => {
+      const provider = connection.provider
+      const connectionKey = resolveConnectionKey(connection)
       setBusyProvider(provider)
+      setBusyConnectionId(connectionKey)
       try {
         for (const entry of sharedConnections) {
-          if (removeBusyId === entry.id) {
-            continue
-          }
-          if (!entry.id) {
+          if (removeBusyId === entry.id || !entry.id) {
             continue
           }
           await unshareWorkspaceConnection(entry.workspaceId, entry.id)
         }
-        await disconnectProvider(provider)
+        await disconnectProvider(provider, connectionKey ?? undefined)
         setConnections((prev) => {
+          const nextPersonal = (prev?.personal ?? [])
+            .filter((p) => {
+              if (p.provider !== provider) return true
+              const personalKey = resolveConnectionKey(p)
+              if (connectionKey) {
+                return personalKey !== connectionKey
+              }
+              return personalKey !== resolveConnectionKey(connection)
+            })
+            .map((p) => ({ ...p }))
+          const sharedIds = new Set(
+            sharedConnections
+              .map((entry) => entry.id)
+              .filter((value): value is string => Boolean(value))
+          )
+          const nextWorkspace = (prev?.workspace ?? [])
+            .filter((entry) => (entry.id ? !sharedIds.has(entry.id) : true))
+            .map((entry) => ({ ...entry }))
+
           const next: GroupedConnectionsSnapshot = {
-            personal: Array.isArray(prev?.personal)
-              ? prev!.personal.map((p) =>
-                  p.provider === provider
-                    ? {
-                        ...p,
-                        id: null,
-                        connected: false,
-                        requiresReconnect: false,
-                        isShared: false,
-                        accountEmail: undefined,
-                        expiresAt: undefined,
-                        lastRefreshedAt: undefined
-                      }
-                    : { ...p }
-                )
-              : [],
-            workspace: Array.isArray(prev?.workspace)
-              ? prev!.workspace
-                  .filter(
-                    (entry) =>
-                      entry.provider !== provider ||
-                      !sharedConnections.some(
-                        (shared) => shared.id === entry.id
-                      )
-                  )
-                  .map((entry) => ({ ...entry }))
-              : []
+            personal: nextPersonal,
+            workspace: nextWorkspace
           }
           setCachedConnections(next, { workspaceId })
           return next
@@ -380,131 +388,144 @@ export default function IntegrationsTab({
         return false
       } finally {
         setBusyProvider(null)
+        setBusyConnectionId(null)
       }
     },
-    [removeBusyId, workspaceId]
+    [removeBusyId, resolveConnectionKey, workspaceId]
   )
 
   const handleDisconnect = useCallback(
-    (provider: OAuthProvider) => {
-      const status = (() => {
-        const personalRecord = connections?.personal.find(
-          (p) => p.provider === provider
-        )
-        const workspace = (connections?.workspace ?? []).filter(
-          (w) => w.provider === provider
-        )
-        return {
-          personal: personalRecord
-            ? {
-                scope: 'personal' as const,
-                id: personalRecord.id ?? null,
-                connected: Boolean(
-                  personalRecord.connected && personalRecord.id
-                ),
-                accountEmail: personalRecord.accountEmail,
-                expiresAt: personalRecord.expiresAt,
-                lastRefreshedAt: personalRecord.lastRefreshedAt,
-                requiresReconnect: Boolean(personalRecord.requiresReconnect),
-                isShared: Boolean(personalRecord.isShared)
-              }
-            : emptyProviderState().personal,
-          workspace
-        } as ProviderConnectionSet
-      })()
-      // backend enforces workspace boundary; use workspace entries as-is
-      const workspaceConnections = status?.workspace ?? []
-      const sharedConnections = workspaceConnections.filter((entry) =>
-        matchesCurrentUser(entry)
+    (connection: PersonalConnectionRecord) => {
+      const connectionKey = resolveConnectionKey(connection)
+      const workspaceConnections = (connections?.workspace ?? []).filter(
+        (entry) => {
+          if (entry.provider !== connection.provider) return false
+          const entryKey = resolveConnectionKey(entry)
+          if (connectionKey && entryKey) {
+            return entryKey === connectionKey
+          }
+          if (!connectionKey && !entryKey) {
+            return matchesCurrentUser(entry)
+          }
+          return entryKey === connectionKey
+        }
       )
 
+      const sharedConnections = workspaceConnections
       if (sharedConnections.length > 0) {
-        setDisconnectDialog({ provider, sharedConnections })
+        setDisconnectDialog({ connection, sharedConnections })
         return
       }
 
-      void performDisconnect(provider, [])
+      void performDisconnect(connection, [])
     },
-    [connections, matchesCurrentUser, performDisconnect]
+    [connections, matchesCurrentUser, performDisconnect, resolveConnectionKey]
   )
 
-  const handleRefresh = async (provider: OAuthProvider) => {
-    setBusyProvider(provider)
-    try {
-      const updated = await refreshProvider(provider)
-      setConnections((prev) => {
-        const next: GroupedConnectionsSnapshot = {
-          personal: Array.isArray(prev?.personal)
-            ? prev!.personal.map((p) => {
-                if (p.provider !== provider) return { ...p }
-                const patch: any = {
-                  ...p,
-                  connected: true,
-                  requiresReconnect: false
-                }
-                if (typeof updated.accountEmail !== 'undefined') {
-                  patch.accountEmail = updated.accountEmail
-                }
-                if (typeof updated.expiresAt !== 'undefined') {
-                  patch.expiresAt = updated.expiresAt
-                }
-                if (typeof updated.lastRefreshedAt !== 'undefined') {
-                  patch.lastRefreshedAt = updated.lastRefreshedAt
-                }
-                return patch
-              })
-            : [],
-          workspace: Array.isArray(prev?.workspace)
-            ? prev!.workspace.map((w) => ({ ...w }))
-            : []
-        }
-        setCachedConnections(next, { workspaceId })
-        return next
-      })
-    } catch (err) {
-      if (err && typeof err === 'object' && (err as any).requiresReconnect) {
-        markProviderRevoked(provider)
+  const handleRefresh = useCallback(
+    async (
+      provider: OAuthProvider,
+      target?: PersonalConnectionRecord | WorkspaceConnectionInfo
+    ) => {
+      const connectionKey = resolveConnectionKey(target)
+      setBusyProvider(provider)
+      setBusyConnectionId(connectionKey)
+      try {
+        const updated = await refreshProvider(
+          provider,
+          connectionKey ?? undefined
+        )
         setConnections((prev) => {
+          const mapConnection = <
+            T extends { provider: OAuthProvider } & {
+              connectionId?: string | null
+              id?: string | null
+            }
+          >(
+            entries: T[]
+          ): T[] =>
+            entries.map((entry) => {
+              if (entry.provider !== provider) return { ...entry }
+              const entryKey = resolveConnectionKey(entry)
+              if (connectionKey && entryKey !== connectionKey) {
+                return { ...entry }
+              }
+              const patch: any = {
+                ...entry,
+                connected: true,
+                requiresReconnect: false
+              }
+              if (typeof updated.accountEmail !== 'undefined') {
+                patch.accountEmail = updated.accountEmail
+              }
+              if (typeof updated.expiresAt !== 'undefined') {
+                patch.expiresAt = updated.expiresAt
+              }
+              if (typeof updated.lastRefreshedAt !== 'undefined') {
+                patch.lastRefreshedAt = updated.lastRefreshedAt
+              }
+              return patch
+            })
+
+          const nextPersonal = mapConnection(prev?.personal ?? [])
+          const nextWorkspace = mapConnection(prev?.workspace ?? [])
           const next: GroupedConnectionsSnapshot = {
-            personal: Array.isArray(prev?.personal)
-              ? prev!.personal.map((p) =>
-                  p.provider === provider
-                    ? { ...p, connected: false, requiresReconnect: true }
-                    : { ...p }
-                )
-              : [
-                  {
-                    provider,
-                    scope: 'personal',
-                    id: null,
-                    connected: false,
-                    accountEmail: undefined,
-                    expiresAt: undefined,
-                    lastRefreshedAt: undefined,
-                    requiresReconnect: true,
-                    isShared: false
-                  }
-                ],
-            workspace: Array.isArray(prev?.workspace)
-              ? prev!.workspace.filter((w) => w.provider !== provider)
-              : []
+            personal: nextPersonal,
+            workspace: nextWorkspace
           }
+          setCachedConnections(next, { workspaceId })
           return next
         })
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'Connection requires reconnection'
-        )
-        return
+      } catch (err) {
+        const requiresReconnect =
+          err && typeof err === 'object' && (err as any).requiresReconnect
+        if (requiresReconnect) {
+          setConnections((prev) => {
+            const nextPersonal = (prev?.personal ?? []).map((p) => {
+              if (p.provider !== provider) return { ...p }
+              const entryKey = resolveConnectionKey(p)
+              if (connectionKey && entryKey !== connectionKey) {
+                return { ...p }
+              }
+              return {
+                ...p,
+                connected: false,
+                requiresReconnect: true,
+                id: p.id ?? null
+              }
+            })
+            const nextWorkspace = (prev?.workspace ?? []).filter((w) => {
+              if (w.provider !== provider) return true
+              if (!connectionKey) {
+                return false
+              }
+              const entryKey = resolveConnectionKey(w)
+              return entryKey !== null && entryKey !== connectionKey
+            })
+            const next: GroupedConnectionsSnapshot = {
+              personal: nextPersonal,
+              workspace: nextWorkspace
+            }
+            setCachedConnections(next, { workspaceId })
+            return next
+          })
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Connection requires reconnection'
+          )
+          return
+        }
+        const message =
+          err instanceof Error ? err.message : 'Failed to refresh tokens'
+        setError(message)
+      } finally {
+        setBusyProvider(null)
+        setBusyConnectionId(null)
       }
-      const message =
-        err instanceof Error ? err.message : 'Failed to refresh tokens'
-      setError(message)
-    } finally {
-      setBusyProvider(null)
-    }
-  }
+    },
+    [resolveConnectionKey, workspaceId]
+  )
 
   return (
     <div className="space-y-6">
@@ -524,7 +545,7 @@ export default function IntegrationsTab({
           <div className="flex items-start justify-between gap-2">
             <span>
               OAuth integrations are available on workspace plans and above.
-              Upgrade in Settings → Plan to connect accounts for workflows.
+              Upgrade in Settings â†’ Plan to connect accounts for workflows.
             </span>
             <button
               type="button"
@@ -568,350 +589,459 @@ export default function IntegrationsTab({
 
       {loading ? (
         <div className="text-sm text-zinc-600 dark:text-zinc-300">
-          Loading integrations…
+          Loading integrations...
         </div>
       ) : (
         <div className="space-y-4">
-          {PROVIDERS.map((provider) => {
-            const status: ProviderConnectionSet = (() => {
-              const personalRecord = connections?.personal.find(
-                (p) => p.provider === provider.key
-              )
-              const workspace = (connections?.workspace ?? []).filter(
-                (w) => w.provider === provider.key
-              )
-              return {
-                personal: personalRecord
-                  ? {
-                      scope: 'personal' as const,
-                      id: personalRecord.id ?? null,
-                      connected: Boolean(
-                        personalRecord.connected && personalRecord.id
-                      ),
-                      accountEmail: personalRecord.accountEmail,
-                      expiresAt: personalRecord.expiresAt,
-                      lastRefreshedAt: personalRecord.lastRefreshedAt,
-                      requiresReconnect: Boolean(
-                        personalRecord.requiresReconnect
-                      ),
-                      isShared: Boolean(personalRecord.isShared)
-                    }
-                  : emptyProviderState().personal,
-                workspace
-              }
-            })()
-            const personal = status?.personal
-            const connected = personal?.connected ?? false
-            const accountEmail = personal?.accountEmail
-            const expiresAt = personal?.expiresAt
-            const lastRefreshedAt = personal?.lastRefreshedAt
-            const personalRequiresReconnect =
-              personal?.requiresReconnect ?? false
-            const busy = busyProvider === provider.key
-            const promoting = promoteBusyProvider === provider.key
-            const workspaceConnections = (status?.workspace ?? []).filter(
-              (entry) => !workspaceId || entry.workspaceId === workspaceId
-            )
-            const workspaceRequiresReconnect = workspaceConnections.some(
-              (entry) => entry.requiresReconnect
-            )
-            const promoteDisabled =
-              !workspaceId ||
-              promoting ||
-              busy ||
-              !connected ||
-              personal?.isShared
-            const isExpanded = expandedProviders[provider.key] ?? true
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label
+              htmlFor="integration-search"
+              className="text-sm font-semibold text-zinc-700 dark:text-zinc-200"
+            >
+              Search providers
+            </label>
+            <input
+              id="integration-search"
+              type="search"
+              value={providerQuery}
+              onChange={(event) => setProviderQuery(event.target.value)}
+              placeholder="Filter by name"
+              className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+            />
+          </div>
 
-            return (
-              <section
-                key={provider.key}
-                className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleProvider(provider.key)}
-                  aria-expanded={isExpanded}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-zinc-800/50"
+          {sortedProviders.length === 0 ? (
+            <div className="rounded-md border border-dashed border-zinc-300 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+              No providers match your search.
+            </div>
+          ) : (
+            sortedProviders.map((provider) => {
+              const personalConnections = (connections?.personal ?? []).filter(
+                (entry) => entry.provider === provider.key
+              )
+              const workspaceConnections = (
+                connections?.workspace ?? []
+              ).filter((entry) => entry.provider === provider.key)
+              const connected = personalConnections.some(
+                (entry) => entry.connected && resolveConnectionKey(entry)
+              )
+              const personalRequiresReconnect = personalConnections.some(
+                (entry) => entry.requiresReconnect
+              )
+              const workspaceRequiresReconnect = workspaceConnections.some(
+                (entry) => entry.requiresReconnect
+              )
+              const connecting = connectingProvider === provider.key
+              const busy = busyProvider === provider.key
+              const promoting = promoteBusyProvider === provider.key
+              const isExpanded = expandedProviders[provider.key] ?? true
+              const connectLabel =
+                personalConnections.length > 0 ? 'Add connection' : 'Connect'
+              const personalCount = personalConnections.length
+              const workspaceCount = workspaceConnections.length
+              const personalSorted = [...personalConnections].sort((a, b) => {
+                const aEmail = a.accountEmail ?? ''
+                const bEmail = b.accountEmail ?? ''
+                if (aEmail && bEmail && aEmail !== bEmail) {
+                  return aEmail.localeCompare(bEmail)
+                }
+                const aKey = resolveConnectionKey(a) ?? ''
+                const bKey = resolveConnectionKey(b) ?? ''
+                return aKey.localeCompare(bKey)
+              })
+              const workspaceSorted = [...workspaceConnections].sort((a, b) =>
+                (a.workspaceName ?? '').localeCompare(b.workspaceName ?? '')
+              )
+
+              return (
+                <section
+                  key={provider.key}
+                  className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50 text-xs font-semibold uppercase text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-500">
-                      {(() => {
-                        const Logo = PROVIDER_ICONS[provider.key]
-                        if (Logo) {
+                  <button
+                    type="button"
+                    onClick={() => toggleProvider(provider.key)}
+                    aria-expanded={isExpanded}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-zinc-800/50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50 text-xs font-semibold uppercase text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-500">
+                        {(() => {
+                          const Logo = PROVIDER_ICONS[provider.key]
+                          if (Logo) {
+                            return (
+                              <Logo
+                                aria-hidden="true"
+                                className="h-7 w-7"
+                                focusable="false"
+                              />
+                            )
+                          }
                           return (
-                            <Logo
-                              aria-hidden="true"
-                              className="h-7 w-7"
-                              focusable="false"
-                            />
+                            <span aria-hidden="true">
+                              {provider.name.slice(0, 1)}
+                            </span>
                           )
-                        }
-                        return (
-                          <span aria-hidden="true">
-                            {provider.name.slice(0, 1)}
-                          </span>
-                        )
-                      })()}
+                        })()}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                          {provider.name}
+                        </span>
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {personalCount} personal · {workspaceCount} workspace
+                        </span>
+                      </div>
                     </div>
-                    <span className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                      {provider.name}
-                    </span>
-                  </div>
-                  <ChevronDown
-                    aria-hidden="true"
-                    className={`h-5 w-5 text-zinc-500 transition-transform ${
-                      isExpanded ? 'rotate-180' : ''
-                    }`}
-                  />
-                </button>
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={`h-5 w-5 text-zinc-500 transition-transform ${
+                        isExpanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
 
-                <div
-                  aria-hidden={!isExpanded}
-                  className={`overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-out ${
-                    isExpanded
-                      ? 'max-h-[2000px] border-t border-zinc-200 px-4 pb-4 pt-2 opacity-100 dark:border-zinc-800'
-                      : 'max-h-0 border-t border-transparent px-4 pb-0 pt-0 opacity-0 dark:border-transparent'
-                  } ${!isExpanded ? '-translate-y-1 pointer-events-none' : 'translate-y-0'}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                        {provider.name}
-                      </h3>
-                      <p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
-                        {provider.description}
-                      </p>
+                  <div
+                    aria-hidden={!isExpanded}
+                    className={`overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-out ${
+                      isExpanded
+                        ? 'max-h-[2200px] border-t border-zinc-200 px-4 pb-4 pt-2 opacity-100 dark:border-zinc-800'
+                        : 'max-h-0 border-t border-transparent px-4 pb-0 pt-0 opacity-0 dark:border-transparent'
+                    } ${!isExpanded ? '-translate-y-1 pointer-events-none' : 'translate-y-0'}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                          {provider.name}
+                        </h3>
+                        <p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
+                          {provider.description}
+                        </p>
+                      </div>
+                      <button
+                        aria-label={`Connect ${provider.name}`}
+                        onClick={() => handleConnect(provider.key)}
+                        disabled={isSoloPlan || isViewer || connecting}
+                        className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {connecting ? 'Saving...' : connectLabel}
+                      </button>
                     </div>
-                    <div className="flex gap-2">
-                      {connected ? (
-                        <>
-                          <button
-                            onClick={() => handleRefresh(provider.key)}
-                            disabled={busy || promoting}
-                            className="rounded-md border border-zinc-300 px-3 py-1 text-sm text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                          >
-                            Refresh token
-                          </button>
-                          <button
-                            onClick={() => handleDisconnect(provider.key)}
-                            disabled={busy || promoting}
-                            className="rounded-md bg-red-500 px-3 py-1 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
-                          >
-                            Disconnect
-                          </button>
-                          {canPromote && !personal?.isShared ? (
-                            <button
-                              onClick={() =>
-                                setPromoteDialogProvider(provider.key)
-                              }
-                              disabled={promoteDisabled}
-                              className="rounded-md bg-indigo-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
-                            >
-                              Promote to Workspace
-                            </button>
-                          ) : null}
-                        </>
-                      ) : (
+
+                    <dl className="mt-4 grid grid-cols-1 gap-2 text-sm text-zinc-600 dark:text-zinc-300 sm:grid-cols-2">
+                      <div className="flex items-center gap-2">
+                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Status:
+                        </dt>
+                        <dd>
+                          {personalRequiresReconnect
+                            ? 'Reconnect required'
+                            : connected
+                              ? 'Connected'
+                              : 'Not connected'}
+                        </dd>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Personal connections:
+                        </dt>
+                        <dd>{personalCount || 'None'}</dd>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Workspace connections:
+                        </dt>
+                        <dd>{workspaceCount || 'None'}</dd>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Scopes:
+                        </dt>
+                        <dd className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          {provider.scopes}
+                        </dd>
+                      </div>
+                    </dl>
+                    {personalRequiresReconnect ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        One or more personal connections were revoked. Reconnect
+                        to restore access.
+                      </p>
+                    ) : null}
+
+                    <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Your connections
+                        </div>
                         <button
-                          aria-label={`Connect ${provider.name}`}
+                          aria-label={`Add ${provider.name} connection`}
                           onClick={() => handleConnect(provider.key)}
                           disabled={
                             isSoloPlan ||
                             isViewer ||
                             connectingProvider === provider.key
                           }
-                          className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
                         >
-                          {connectingProvider === provider.key
-                            ? 'Saving...'
-                            : 'Connect'}
+                          Add connection
                         </button>
+                      </div>
+                      {personalSorted.length === 0 ? (
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                          No personal connections have been created yet.
+                        </p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {personalSorted.map((entry, index) => {
+                            const entryKey = resolveConnectionKey(entry)
+                            const actionDisabled =
+                              busy || busyConnectionId === entryKey || promoting
+                            const requiresReconnect = entry.requiresReconnect
+                            return (
+                              <li
+                                key={
+                                  entryKey ??
+                                  entry.id ??
+                                  `${provider.key}-personal-${index}`
+                                }
+                                className={`rounded border px-3 py-2 text-xs ${
+                                  requiresReconnect
+                                    ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-500/70 dark:bg-red-500/10 dark:text-red-200'
+                                    : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="space-y-1">
+                                    <div className="font-medium text-zinc-700 dark:text-zinc-100">
+                                      {entry.accountEmail ||
+                                        'Delegated account'}
+                                    </div>
+                                    <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                      Connection ID: {entryKey ?? 'Unavailable'}
+                                    </div>
+                                    {entry.isShared ? (
+                                      <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
+                                        Shared with workspace
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      onClick={() =>
+                                        handleRefresh(provider.key, entry)
+                                      }
+                                      disabled={actionDisabled}
+                                      className="rounded-md border border-zinc-300 px-2 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                    >
+                                      Refresh
+                                    </button>
+                                    <button
+                                      onClick={() => handleDisconnect(entry)}
+                                      disabled={actionDisabled}
+                                      className="rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      Disconnect
+                                    </button>
+                                    {canPromote && !entry.isShared ? (
+                                      <button
+                                        onClick={() =>
+                                          setPromoteDialogConnection(entry)
+                                        }
+                                        disabled={
+                                          actionDisabled ||
+                                          !workspaceId ||
+                                          requiresReconnect
+                                        }
+                                        className="rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        Promote to workspace
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <div className="mt-1 space-y-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  {requiresReconnect ? (
+                                    <div className="font-semibold text-red-600 dark:text-red-300">
+                                      Reconnect required by the provider.
+                                    </div>
+                                  ) : null}
+                                  {entry.lastRefreshedAt ? (
+                                    <div>
+                                      Last refreshed{' '}
+                                      {new Date(
+                                        entry.lastRefreshedAt
+                                      ).toLocaleString()}
+                                    </div>
+                                  ) : null}
+                                  {entry.expiresAt ? (
+                                    <div>
+                                      Token expires{' '}
+                                      {new Date(
+                                        entry.expiresAt
+                                      ).toLocaleString()}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
+                    </div>
+
+                    {provider.key === 'slack' &&
+                    workspaceConnections.length > 0 ? (
+                      <div className="mt-3 rounded-md border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                        <div className="font-semibold text-zinc-800 dark:text-zinc-100">
+                          Slack connected to workspace
+                        </div>
+                        <div className="mt-0.5">
+                          Posting method:{' '}
+                          {workspaceConnections.some(
+                            (entry) => entry.hasIncomingWebhook
+                          )
+                            ? 'Incoming Webhook'
+                            : 'OAuth'}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
+                      <div className="font-semibold text-zinc-700 dark:text-zinc-200">
+                        Workspace connections
+                      </div>
+                      {workspaceRequiresReconnect ? (
+                        <p className="text-xs text-red-600 dark:text-red-400">
+                          One or more shared credentials were revoked. Workspace
+                          admins must reconnect them to continue using
+                          workflows.
+                        </p>
+                      ) : null}
+                      {workspaceSorted.length === 0 ? (
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                          No workspace connections have been shared yet.
+                        </p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {workspaceSorted.map((entry, index) => {
+                            const entryKey = resolveConnectionKey(entry)
+                            const workspaceKey =
+                              entry.workspaceConnectionId ?? entry.id
+                            return (
+                              <li
+                                key={
+                                  workspaceKey ??
+                                  entryKey ??
+                                  `${provider.key}-workspace-${index}`
+                                }
+                                className={`rounded border px-3 py-2 text-xs ${
+                                  entry.requiresReconnect
+                                    ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-500/70 dark:bg-red-500/10 dark:text-red-200'
+                                    : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="space-y-1">
+                                    <div className="font-medium text-zinc-700 dark:text-zinc-100">
+                                      {entry.workspaceName}
+                                    </div>
+                                    <div className="text-zinc-600 dark:text-zinc-300">
+                                      {entry.accountEmail ||
+                                        'Delegated account'}
+                                    </div>
+                                    <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                      Workspace connection ID:{' '}
+                                      {workspaceKey ?? 'Unknown'}
+                                    </div>
+                                    {entryKey ? (
+                                      <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                        Connection ID: {entryKey}
+                                      </div>
+                                    ) : null}
+                                    {entry.sharedByName ||
+                                    entry.sharedByEmail ? (
+                                      <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                        Shared by{' '}
+                                        {entry.sharedByName ||
+                                          'workspace admin'}
+                                        {entry.sharedByEmail
+                                          ? ` (${entry.sharedByEmail})`
+                                          : ''}
+                                      </div>
+                                    ) : null}
+                                    {entry.lastRefreshedAt ? (
+                                      <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                        Last refreshed{' '}
+                                        {new Date(
+                                          entry.lastRefreshedAt
+                                        ).toLocaleString()}
+                                      </div>
+                                    ) : null}
+                                    {entry.requiresReconnect ? (
+                                      <div className="text-[11px] font-semibold text-red-600 dark:text-red-300">
+                                        Reconnect required by the credential
+                                        owner.
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  {canPromote ? (
+                                    <div className="mt-1 flex justify-end">
+                                      <button
+                                        onClick={() => setRemoveDialog(entry)}
+                                        disabled={
+                                          removeBusyId === entry.id ||
+                                          busy ||
+                                          promoting
+                                        }
+                                        className="rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        Remove from workspace
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </li>
+                            )
+                          })}
+                        </ul>
                       )}
                     </div>
                   </div>
-
-                  <dl className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
-                    <div className="flex items-center gap-2">
-                      <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                        Status:
-                      </dt>
-                      <dd>
-                        {personalRequiresReconnect
-                          ? 'Reconnect required'
-                          : connected
-                            ? 'Connected'
-                            : 'Not connected'}
-                      </dd>
-                    </div>
-                    {personalRequiresReconnect ? (
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        This connection was revoked by the provider. Reconnect
-                        to restore access.
-                      </p>
-                    ) : null}
-                    {personal?.isShared ? (
-                      <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-300">
-                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                          Sharing:
-                        </dt>
-                        <dd>Promoted to workspace</dd>
-                      </div>
-                    ) : null}
-                    {accountEmail && (
-                      <div className="flex items-center gap-2">
-                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                          Account:
-                        </dt>
-                        <dd>{accountEmail}</dd>
-                      </div>
-                    )}
-                    {expiresAt && (
-                      <div className="flex items-center gap-2">
-                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                          Token expires:
-                        </dt>
-                        <dd>{new Date(expiresAt).toLocaleString()}</dd>
-                      </div>
-                    )}
-                    {lastRefreshedAt && (
-                      <div className="flex items-center gap-2">
-                        <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                          Last refreshed:
-                        </dt>
-                        <dd>{new Date(lastRefreshedAt).toLocaleString()}</dd>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <dt className="font-semibold text-zinc-700 dark:text-zinc-200">
-                        Scopes:
-                      </dt>
-                      <dd className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                        {provider.scopes}
-                      </dd>
-                    </div>
-                  </dl>
-                  {provider.key === 'slack' &&
-                  workspaceConnections.length > 0 ? (
-                    <div className="mt-3 rounded-md border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-                      <div className="font-semibold text-zinc-800 dark:text-zinc-100">
-                        Slack connected to workspace
-                      </div>
-                      <div className="mt-0.5">
-                        Posting method:{' '}
-                        {workspaceConnections.some(
-                          (entry) => entry.hasIncomingWebhook
-                        )
-                          ? 'Incoming Webhook'
-                          : 'OAuth'}
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
-                    <div className="font-semibold text-zinc-700 dark:text-zinc-200">
-                      Workspace connections
-                    </div>
-                    {workspaceRequiresReconnect ? (
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        One or more shared credentials were revoked. Workspace
-                        admins must reconnect them to continue using workflows.
-                      </p>
-                    ) : null}
-                    {workspaceConnections.length === 0 ? (
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        No workspace connections have been shared yet.
-                      </p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {workspaceConnections.map((entry) => (
-                          <li
-                            key={entry.id}
-                            className={`rounded border px-3 py-2 text-xs ${
-                              entry.requiresReconnect
-                                ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-500/70 dark:bg-red-500/10 dark:text-red-200'
-                                : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-                            }`}
-                          >
-                            <div className="font-medium text-zinc-700 dark:text-zinc-100">
-                              {entry.workspaceName}
-                            </div>
-                            <div className="text-zinc-600 dark:text-zinc-300">
-                              {entry.accountEmail || 'Delegated account'}
-                            </div>
-                            <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                              Shared by{' '}
-                              {entry.sharedByName || 'workspace admin'}
-                              {entry.sharedByEmail
-                                ? ` (${entry.sharedByEmail})`
-                                : ''}
-                            </div>
-                            {entry.lastRefreshedAt ? (
-                              <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                                Last refreshed{' '}
-                                {new Date(
-                                  entry.lastRefreshedAt
-                                ).toLocaleString()}
-                              </div>
-                            ) : null}
-                            {entry.requiresReconnect ? (
-                              <div className="text-[11px] font-semibold text-red-600 dark:text-red-300">
-                                Reconnect required by the credential owner.
-                              </div>
-                            ) : null}
-                            {canPromote ? (
-                              <div className="mt-2 flex justify-end">
-                                <button
-                                  onClick={() => setRemoveDialog(entry)}
-                                  disabled={
-                                    removeBusyId === entry.id ||
-                                    busy ||
-                                    promoting
-                                  }
-                                  className="rounded-md bg-red-500 px-2 py-1 text-xs font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
-                                >
-                                  Remove from workspace
-                                </button>
-                              </div>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              </section>
-            )
-          })}
+                </section>
+              )
+            })
+          )}
         </div>
       )}
       <ConfirmDialog
-        isOpen={promoteDialogProvider !== null}
+        isOpen={promoteDialogConnection !== null}
         title="Promote OAuth Connection"
         message="Share this connection with your workspace so other members can run workflows using it?"
         confirmText="Promote"
-        onCancel={() => setPromoteDialogProvider(null)}
+        onCancel={() => setPromoteDialogConnection(null)}
         onConfirm={async () => {
-          const provider = promoteDialogProvider
-          if (!provider) return
-          const personalRecord = connections?.personal.find(
-            (p) => p.provider === provider
-          )
+          const connection = promoteDialogConnection
+          if (!connection) return
+          const provider = connection.provider
+          const connectionId = resolveConnectionKey(connection)
           if (!workspaceId) {
             setError('No active workspace selected for promotion')
-            setPromoteDialogProvider(null)
+            setPromoteDialogConnection(null)
             return
           }
-          if (!personalRecord?.id) {
+          if (!connectionId) {
             setError('Missing connection identifier. Refresh and try again.')
-            setPromoteDialogProvider(null)
+            setPromoteDialogConnection(null)
             return
           }
           try {
             setPromoteBusyProvider(provider)
+            setBusyConnectionId(connectionId)
             const promotion = await promoteConnection({
               workspaceId,
               provider,
-              connectionId: personalRecord.id
+              connectionId
             })
             const workspaceConnectionId = promotion.workspaceConnectionId
             if (!workspaceConnectionId) {
@@ -928,34 +1058,33 @@ export default function IntegrationsTab({
             const sharedByEmail = currentUser?.email?.trim() || undefined
 
             setConnections((prev) => {
-              const next: GroupedConnectionsSnapshot = {
-                personal: Array.isArray(prev?.personal)
-                  ? prev!.personal.map((p) =>
-                      p.provider === provider
-                        ? { ...p, requiresReconnect: false, isShared: true }
-                        : { ...p }
-                    )
-                  : [],
-                workspace: Array.isArray(prev?.workspace)
-                  ? prev!.workspace
-                      .filter(
-                        (entry) =>
-                          entry.provider !== provider ||
-                          (entry.id !== workspaceConnectionId &&
-                            entry.id !== personalRecord.id)
-                      )
-                      .map((entry) => ({ ...entry }))
-                  : []
-              }
+              const nextPersonal = (prev?.personal ?? []).map((p) => {
+                if (p.provider !== provider) return { ...p }
+                const pKey = resolveConnectionKey(p)
+                if (pKey === connectionId) {
+                  return { ...p, requiresReconnect: false, isShared: true }
+                }
+                return { ...p }
+              })
+              const nextWorkspace = (prev?.workspace ?? [])
+                .filter(
+                  (entry) =>
+                    entry.provider !== provider ||
+                    (entry.id !== workspaceConnectionId &&
+                      entry.workspaceConnectionId !== workspaceConnectionId)
+                )
+                .map((entry) => ({ ...entry }))
 
               const workspaceEntry: WorkspaceConnectionInfo = {
                 scope: 'workspace',
                 id: workspaceConnectionId,
+                workspaceConnectionId,
+                connectionId,
                 connected: true,
                 provider,
-                accountEmail: personalRecord.accountEmail,
-                expiresAt: personalRecord.expiresAt,
-                lastRefreshedAt: personalRecord.lastRefreshedAt,
+                accountEmail: connection.accountEmail,
+                expiresAt: connection.expiresAt,
+                lastRefreshedAt: connection.lastRefreshedAt,
                 workspaceId,
                 workspaceName,
                 sharedByName,
@@ -964,7 +1093,10 @@ export default function IntegrationsTab({
                 hasIncomingWebhook: false
               }
 
-              next.workspace = [...next.workspace, workspaceEntry]
+              const next: GroupedConnectionsSnapshot = {
+                personal: nextPersonal,
+                workspace: [...nextWorkspace, workspaceEntry]
+              }
               setCachedConnections(next, { workspaceId })
               return next
             })
@@ -989,7 +1121,8 @@ export default function IntegrationsTab({
             )
           } finally {
             setPromoteBusyProvider(null)
-            setPromoteDialogProvider(null)
+            setBusyConnectionId(null)
+            setPromoteDialogConnection(null)
           }
         }}
       />
@@ -1073,8 +1206,11 @@ export default function IntegrationsTab({
             return 'Disconnect this OAuth credential?'
           }
           const providerName =
-            PROVIDERS.find((p) => p.key === disconnectDialog.provider)?.name ??
-            'this provider'
+            PROVIDERS.find(
+              (p) => p.key === disconnectDialog.connection.provider
+            )?.name ?? 'this provider'
+          const connectionId =
+            resolveConnectionKey(disconnectDialog.connection) ?? 'unknown id'
           const workspaces = disconnectDialog.sharedConnections
             .map((entry) =>
               entry.workspaceName?.trim().length
@@ -1090,7 +1226,7 @@ export default function IntegrationsTab({
                 : `${workspaces.slice(0, -1).join(', ')} and ${
                     workspaces[workspaces.length - 1]
                   }`
-          return `Disconnecting this ${providerName} credential will also remove the shared connection from ${workspaceText}. Existing workflows may stop working if they rely on it. Do you want to continue?`
+          return `Disconnecting this ${providerName} credential (ID ${connectionId}) will also remove the shared connection from ${workspaceText}. Existing workflows may stop working if they rely on it. Do you want to continue?`
         })()}
         confirmText="Remove credential"
         onCancel={() => {
@@ -1100,11 +1236,11 @@ export default function IntegrationsTab({
           if (!disconnectDialog) {
             return
           }
-          if (busyProvider === disconnectDialog.provider) {
+          if (busyProvider === disconnectDialog.connection.provider) {
             return
           }
           const ok = await performDisconnect(
-            disconnectDialog.provider,
+            disconnectDialog.connection,
             disconnectDialog.sharedConnections
           )
           if (ok) {

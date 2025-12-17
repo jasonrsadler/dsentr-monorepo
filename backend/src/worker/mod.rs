@@ -675,6 +675,7 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
@@ -915,6 +916,7 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
@@ -1113,6 +1115,7 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
@@ -1320,6 +1323,7 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
@@ -1488,6 +1492,7 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
@@ -1642,6 +1647,7 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {

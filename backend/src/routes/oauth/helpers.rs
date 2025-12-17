@@ -105,6 +105,7 @@ pub(crate) struct ConnectionsResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RefreshResponse {
     pub(crate) success: bool,
     pub(crate) requires_reconnect: bool,
@@ -113,6 +114,8 @@ pub(crate) struct RefreshResponse {
     pub(crate) expires_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub(crate) last_refreshed_at: Option<OffsetDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) connection_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) message: Option<String>,
 }

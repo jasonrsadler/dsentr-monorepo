@@ -18,7 +18,7 @@ pub struct NewWorkspaceConnection {
     pub workspace_id: Uuid,
     pub created_by: Uuid,
     pub owner_user_id: Uuid,
-    pub user_oauth_token_id: Uuid,
+    pub user_oauth_token_id: Option<Uuid>,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,
@@ -69,7 +69,20 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         connection_id: Uuid,
     ) -> Result<Option<WorkspaceConnection>, sqlx::Error>;
 
+    async fn get_by_id(&self, connection_id: Uuid) -> Result<WorkspaceConnection, sqlx::Error>;
+
     async fn list_for_workspace_provider(
+        &self,
+        workspace_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error>;
+
+    async fn find_by_source_token(
+        &self,
+        user_oauth_token_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error>;
+
+    async fn list_by_workspace_and_provider(
         &self,
         workspace_id: Uuid,
         provider: ConnectedOAuthProvider,
@@ -104,6 +117,18 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         incoming_webhook_url: Option<String>,
     ) -> Result<(), sqlx::Error>;
 
+    async fn update_tokens_for_connection(
+        &self,
+        connection_id: Uuid,
+        access_token: String,
+        refresh_token: String,
+        expires_at: time::OffsetDateTime,
+        account_email: String,
+        bot_user_id: Option<String>,
+        slack_team_id: Option<String>,
+        incoming_webhook_url: Option<String>,
+    ) -> Result<WorkspaceConnection, sqlx::Error>;
+
     async fn update_tokens(
         &self,
         connection_id: Uuid,
@@ -124,6 +149,14 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         workspace_id: Uuid,
         owner_user_id: Uuid,
         provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn delete_by_owner_and_provider_and_id(
+        &self,
+        workspace_id: Uuid,
+        owner_user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        connection_id: Uuid,
     ) -> Result<(), sqlx::Error>;
 
     async fn has_connections_for_owner_provider(
@@ -164,10 +197,29 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Ok(None)
     }
 
+    async fn get_by_id(&self, _connection_id: Uuid) -> Result<WorkspaceConnection, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
     async fn list_for_workspace_provider(
         &self,
         _workspace_id: Uuid,
         _provider: ConnectedOAuthProvider,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+        Ok(Vec::new())
+    }
+
+    async fn list_by_workspace_and_provider(
+        &self,
+        _workspace_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+        Ok(Vec::new())
+    }
+
+    async fn find_by_source_token(
+        &self,
+        _user_oauth_token_id: Uuid,
     ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
         Ok(Vec::new())
     }
@@ -209,6 +261,20 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Ok(())
     }
 
+    async fn update_tokens_for_connection(
+        &self,
+        _connection_id: Uuid,
+        _access_token: String,
+        _refresh_token: String,
+        _expires_at: time::OffsetDateTime,
+        _account_email: String,
+        _bot_user_id: Option<String>,
+        _slack_team_id: Option<String>,
+        _incoming_webhook_url: Option<String>,
+    ) -> Result<WorkspaceConnection, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
     async fn update_tokens(
         &self,
         _connection_id: Uuid,
@@ -235,6 +301,16 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         _workspace_id: Uuid,
         _owner_user_id: Uuid,
         _provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+
+    async fn delete_by_owner_and_provider_and_id(
+        &self,
+        _workspace_id: Uuid,
+        _owner_user_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+        _connection_id: Uuid,
     ) -> Result<(), sqlx::Error> {
         Ok(())
     }

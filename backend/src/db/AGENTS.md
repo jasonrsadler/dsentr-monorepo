@@ -49,3 +49,7 @@
 - Workflow log listing now returns all entries for a workflow (rather than filtering by actor) to support shared change-history views while preserving per-entry actor ids.
 - Workflow updates now accept an optional expected `updated_at` timestamp so the Postgres repo can enforce optimistic concurrency for shared workspace edits.
 - User OAuth tokens now carry an encrypted `metadata` column (populated for Slack webhook installs) so the initial incoming webhook URL survives until workspace promotion without depending on refresh responses.
+- User OAuth token repositories now support id-based lookups and provider-scoped listings, and workspace connection repositories add id-scoped getters plus connection-level update/delete helpers alongside existing provider-based variants.
+- User OAuth token repositories add insert/update/delete helpers keyed by token id so services can create multiple per-provider connections without provider-level overwrites, and Postgres implementations return the most recent token deterministically when falling back to provider lookups.
+- Workspace connection repositories now allow nullable token references and guard provider/owner/token identity on credential updates so shared connections stay consistent after personal token deletion.
+- Workspace connection repositories expose a `find_by_source_token` helper so shared connection refresh flows can locate and update dependent workspace credentials.

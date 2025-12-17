@@ -61,9 +61,9 @@ use routes::{
     },
     microsoft::{list_channel_members, list_team_channels, list_teams},
     oauth::{
-        asana_connect_callback, asana_connect_start, disconnect_connection,
-        google_connect_callback, google_connect_start, list_connections,
-        microsoft_connect_callback, microsoft_connect_start, refresh_connection,
+        asana_connect_callback, asana_connect_start, disconnect_connection, get_connection_by_id,
+        google_connect_callback, google_connect_start, list_connections, list_provider_connections,
+        microsoft_connect_callback, microsoft_connect_start, refresh_connection, revoke_connection,
         slack_connect_callback, slack_connect_start,
     },
     options::{
@@ -624,8 +624,11 @@ async fn main() -> Result<()> {
 
     let oauth_private_routes = Router::new()
         .route("/connections", get(list_connections))
+        .route("/connections/{connection_id}", get(get_connection_by_id))
+        .route("/{provider}/connections", get(list_provider_connections))
         .route("/{provider}/refresh", post(refresh_connection))
         .route("/{provider}/disconnect", delete(disconnect_connection))
+        .route("/{provider}/revoke", post(revoke_connection))
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());
 

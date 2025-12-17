@@ -2293,6 +2293,11 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
+        async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            let guard = self.tokens.lock().unwrap();
+            Ok(guard.values().find(|token| token.id == token_id).cloned())
+        }
+
         async fn find_by_user_and_provider(
             &self,
             user_id: Uuid,
@@ -2345,6 +2350,19 @@ mod tests {
             }
 
             Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn list_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            let guard = self.tokens.lock().unwrap();
+            Ok(guard
+                .values()
+                .filter(|token| token.user_id == user_id && token.provider == provider)
+                .cloned()
+                .collect())
         }
     }
 
@@ -2420,6 +2438,12 @@ mod tests {
                 .cloned())
         }
 
+        async fn get_by_id(&self, connection_id: Uuid) -> Result<WorkspaceConnection, sqlx::Error> {
+            self.find_by_id(connection_id)
+                .await?
+                .ok_or(sqlx::Error::RowNotFound)
+        }
+
         async fn list_for_workspace_provider(
             &self,
             workspace_id: Uuid,
@@ -2431,6 +2455,27 @@ mod tests {
                 .filter(|record| record.workspace_id == workspace_id && record.provider == provider)
                 .cloned()
                 .collect())
+        }
+
+        async fn find_by_source_token(
+            &self,
+            user_oauth_token_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            let guard = self.connections.lock().unwrap();
+            Ok(guard
+                .iter()
+                .filter(|record| record.user_oauth_token_id == Some(user_oauth_token_id))
+                .cloned()
+                .collect())
+        }
+
+        async fn list_by_workspace_and_provider(
+            &self,
+            workspace_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            self.list_for_workspace_provider(workspace_id, provider)
+                .await
         }
 
         async fn list_for_workspace(
@@ -2535,6 +2580,39 @@ mod tests {
             Ok(())
         }
 
+        async fn update_tokens_for_connection(
+            &self,
+            connection_id: Uuid,
+            access_token: String,
+            refresh_token: String,
+            expires_at: OffsetDateTime,
+            account_email: String,
+            bot_user_id: Option<String>,
+            slack_team_id: Option<String>,
+            incoming_webhook_url: Option<String>,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            let mut guard = self.connections.lock().unwrap();
+            if let Some(existing) = guard.iter_mut().find(|record| record.id == connection_id) {
+                existing.access_token = access_token;
+                existing.refresh_token = refresh_token;
+                existing.expires_at = expires_at;
+                existing.account_email = account_email;
+                if bot_user_id.is_some() {
+                    existing.bot_user_id = bot_user_id;
+                }
+                if slack_team_id.is_some() {
+                    existing.slack_team_id = slack_team_id;
+                }
+                if incoming_webhook_url.is_some() {
+                    existing.incoming_webhook_url = incoming_webhook_url;
+                }
+                existing.updated_at = OffsetDateTime::now_utc();
+                return Ok(existing.clone());
+            }
+
+            Err(sqlx::Error::RowNotFound)
+        }
+
         async fn update_tokens(
             &self,
             connection_id: Uuid,
@@ -2599,6 +2677,29 @@ mod tests {
             if !deleted_ids.is_empty() {
                 self.deleted.lock().unwrap().extend(deleted_ids);
             }
+            Ok(())
+        }
+
+        async fn delete_by_owner_and_provider_and_id(
+            &self,
+            workspace_id: Uuid,
+            owner_user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+            connection_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
+            let mut guard = self.connections.lock().unwrap();
+            let before_len = guard.len();
+            guard.retain(|record| {
+                !(record.workspace_id == workspace_id
+                    && record.owner_user_id == owner_user_id
+                    && record.provider == provider
+                    && record.id == connection_id)
+            });
+
+            if guard.len() != before_len {
+                self.deleted.lock().unwrap().push(connection_id);
+            }
+
             Ok(())
         }
 
@@ -3607,6 +3708,7 @@ mod tests {
                     redirect_uri: "https://app.example.com/oauth/asana".into(),
                 },
                 token_encryption_key: vec![0; 32],
+                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1; 32],
             stripe: StripeSettings {
@@ -3782,7 +3884,7 @@ mod tests {
             workspace_id,
             created_by: user_id,
             owner_user_id: user_id,
-            user_oauth_token_id: Uuid::new_v4(),
+            user_oauth_token_id: Some(Uuid::new_v4()),
             provider,
             access_token: "encrypted-access".into(),
             refresh_token: "encrypted-refresh".into(),
@@ -4076,6 +4178,7 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
+        let user_token_id = user_token.id;
         let user_repo = Arc::new(StubUserTokenRepo::with_token(user_token));
         let connection_repo = Arc::new(CapturingWorkspaceConnectionRepo::new());
 
@@ -4092,7 +4195,7 @@ mod tests {
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
-                user_oauth_token_id: Uuid::new_v4(),
+                user_oauth_token_id: Some(user_token_id),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -4212,7 +4315,7 @@ mod tests {
                 workspace_id,
                 created_by: creator_id,
                 owner_user_id: creator_id,
-                user_oauth_token_id: Uuid::new_v4(),
+                user_oauth_token_id: Some(Uuid::new_v4()),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),

@@ -6,13 +6,68 @@ use super::{
     },
     prelude::*,
 };
+use crate::db::workspace_connection_repository::WorkspaceConnectionListing;
+use crate::models::workspace::WorkspaceMembershipSummary;
+use crate::routes::auth::claims::Claims;
+use crate::services::oauth::account_service::StoredOAuthToken;
 use axum::http::StatusCode;
+
+#[derive(Debug, Deserialize)]
+pub struct ListConnectionsQuery {
+    pub workspace: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConnectionTarget {
+    #[serde(default)]
+    pub connection_id: Option<Uuid>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderConnectionsResponse {
+    success: bool,
+    provider: ConnectedOAuthProvider,
+    workspace_id: Uuid,
+    workspace_name: String,
+    personal: Vec<PersonalConnectionPayload>,
+    workspace: Vec<WorkspaceConnectionPayload>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionLookupResponse {
+    success: bool,
+    connection_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    personal: Option<PersonalConnectionPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace: Option<WorkspaceConnectionPayload>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DisconnectResponse {
+    success: bool,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_id: Option<Uuid>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RevokeResponse {
+    success: bool,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_id: Option<Uuid>,
+}
 
 async fn ensure_workspace_membership(
     app_state: &AppState,
     user_id: Uuid,
     workspace_id: Uuid,
-) -> Result<(), Response> {
+) -> Result<WorkspaceMembershipSummary, Response> {
     let memberships = app_state
         .workspace_repo
         .list_memberships_for_user(user_id)
@@ -41,18 +96,15 @@ async fn ensure_workspace_membership(
         .into_response());
     }
 
-    Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ListConnectionsQuery {
-    pub workspace: Uuid,
+    Ok(membership)
 }
 
 pub async fn refresh_connection(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(provider): Path<String>,
+    query: Query<ConnectionTarget>,
+    body: Option<Json<ConnectionTarget>>,
 ) -> Response {
     let provider = match parse_provider(&provider) {
         Some(p) => p,
@@ -66,6 +118,70 @@ pub async fn refresh_connection(
         Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
     };
 
+    let requested_connection_id = coalesce_connection_id(&query, body);
+    if requested_connection_id.is_none() {
+        warn!(
+            %user_id,
+            ?provider,
+            require_connection_id = state.config.oauth.require_connection_id,
+            "connection_id not supplied for refresh_connection request"
+        );
+        if state.config.oauth.require_connection_id {
+            return JsonResponse::bad_request("connection_id is required").into_response();
+        }
+    }
+
+    let fallback_connection_id = if requested_connection_id.is_some() {
+        requested_connection_id
+    } else {
+        lookup_provider_connection_id(&state, user_id, provider).await
+    };
+
+    if let Some(connection_id) = requested_connection_id {
+        match state
+            .oauth_accounts
+            .ensure_valid_access_token_for_connection(user_id, connection_id)
+            .await
+        {
+            Ok(token) => {
+                if token.provider != provider {
+                    return JsonResponse::bad_request("Connection does not match provider")
+                        .into_response();
+                }
+
+                return Json(RefreshResponse {
+                    success: true,
+                    requires_reconnect: false,
+                    account_email: Some(token.account_email),
+                    expires_at: Some(token.expires_at),
+                    last_refreshed_at: Some(token.updated_at),
+                    connection_id: Some(connection_id),
+                    message: None,
+                })
+                .into_response();
+            }
+            Err(OAuthAccountError::TokenRevoked { .. }) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(RefreshResponse {
+                        success: false,
+                        requires_reconnect: true,
+                        account_email: None,
+                        expires_at: None,
+                        last_refreshed_at: None,
+                        connection_id: Some(connection_id),
+                        message: Some(
+                            "The OAuth connection was revoked. Reconnect to restore access."
+                                .to_string(),
+                        ),
+                    }),
+                )
+                    .into_response();
+            }
+            Err(err) => return map_oauth_error(err),
+        }
+    }
+
     match state
         .oauth_accounts
         .ensure_valid_access_token(user_id, provider)
@@ -77,6 +193,7 @@ pub async fn refresh_connection(
             account_email: Some(token.account_email),
             expires_at: Some(token.expires_at),
             last_refreshed_at: Some(token.updated_at),
+            connection_id: Some(token.id),
             message: None,
         })
         .into_response(),
@@ -88,6 +205,7 @@ pub async fn refresh_connection(
                 account_email: None,
                 expires_at: None,
                 last_refreshed_at: None,
+                connection_id: fallback_connection_id,
                 message: Some(
                     "The OAuth connection was revoked. Reconnect to restore access.".to_string(),
                 ),
@@ -102,6 +220,8 @@ pub async fn disconnect_connection(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(provider): Path<String>,
+    query: Query<ConnectionTarget>,
+    body: Option<Json<ConnectionTarget>>,
 ) -> Response {
     let provider = match parse_provider(&provider) {
         Some(p) => p,
@@ -114,8 +234,59 @@ pub async fn disconnect_connection(
         Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
     };
 
+    let requested_connection_id = coalesce_connection_id(&query, body);
+    if requested_connection_id.is_none() {
+        warn!(
+            %user_id,
+            ?provider,
+            require_connection_id = state.config.oauth.require_connection_id,
+            "connection_id not supplied for disconnect_connection request"
+        );
+        if state.config.oauth.require_connection_id {
+            return JsonResponse::bad_request("connection_id is required").into_response();
+        }
+    }
+
+    if let Some(connection_id) = requested_connection_id {
+        let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
+            Ok(tokens) => tokens,
+            Err(err) => return map_oauth_error(err),
+        };
+
+        let Some(token) = personal_tokens
+            .into_iter()
+            .find(|token| token.id == connection_id)
+        else {
+            return JsonResponse::not_found("Connection not found").into_response();
+        };
+
+        if token.provider != provider {
+            return JsonResponse::bad_request("Connection does not match provider").into_response();
+        }
+
+        return match state
+            .oauth_accounts
+            .delete_token_by_connection(user_id, connection_id)
+            .await
+        {
+            Ok(()) => Json(DisconnectResponse {
+                success: true,
+                message: "Disconnected".to_string(),
+                connection_id: Some(connection_id),
+            })
+            .into_response(),
+            Err(err) => map_oauth_error(err),
+        };
+    }
+
+    let fallback_connection_id = lookup_provider_connection_id(&state, user_id, provider).await;
     match state.oauth_accounts.delete_tokens(user_id, provider).await {
-        Ok(()) => JsonResponse::success("Disconnected").into_response(),
+        Ok(()) => Json(DisconnectResponse {
+            success: true,
+            message: "Disconnected".to_string(),
+            connection_id: fallback_connection_id,
+        })
+        .into_response(),
         Err(err) => map_oauth_error(err),
     }
 }
@@ -131,9 +302,10 @@ pub async fn list_connections(
     };
 
     // Enforce workspace membership up-front
-    if let Err(resp) = ensure_workspace_membership(&state, user_id, params.workspace).await {
-        return resp;
-    }
+    let _membership = match ensure_workspace_membership(&state, user_id, params.workspace).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
 
     let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
         Ok(tokens) => tokens,
@@ -174,62 +346,21 @@ pub async fn list_connections(
             .into_response();
     }
 
-    let personal_owner = ConnectionOwnerPayload {
-        user_id,
-        name: format_shared_name(
-            &Some(claims.first_name.clone()),
-            &Some(claims.last_name.clone()),
-        ),
-        email: normalize_optional_field(&claims.email),
-    };
+    let personal_owner = connection_owner_from_claims(user_id, &claims);
 
     let mut personal = ProviderGroupedConnections::default();
     for token in personal_tokens {
         personal.push(
             token.provider,
-            PersonalConnectionPayload {
-                id: token.id,
-                provider: token.provider,
-                account_email: token.account_email,
-                expires_at: token.expires_at,
-                is_shared: token.is_shared,
-                last_refreshed_at: token.updated_at,
-                requires_reconnect: false,
-                owner: personal_owner.clone(),
-            },
+            personal_payload_from_token(token, &personal_owner),
         );
     }
 
     let mut workspace = ProviderGroupedConnections::default();
     for connection in workspace_connections {
-        let shared_by_name = format_shared_name(
-            &connection.shared_by_first_name,
-            &connection.shared_by_last_name,
-        );
-        let shared_by_email =
-            normalize_optional_field(connection.shared_by_email.as_deref().unwrap_or_default());
-        let owner = ConnectionOwnerPayload {
-            user_id: connection.owner_user_id,
-            name: shared_by_name.clone(),
-            email: shared_by_email.clone(),
-        };
-
         workspace.push(
             connection.provider,
-            WorkspaceConnectionPayload {
-                id: connection.id,
-                provider: connection.provider,
-                account_email: connection.account_email,
-                expires_at: connection.expires_at,
-                workspace_id: connection.workspace_id,
-                workspace_name: connection.workspace_name,
-                shared_by_name,
-                shared_by_email,
-                last_refreshed_at: connection.updated_at,
-                requires_reconnect: connection.requires_reconnect,
-                has_incoming_webhook: connection.has_incoming_webhook,
-                owner,
-            },
+            workspace_payload_from_listing(connection),
         );
     }
 
@@ -239,6 +370,314 @@ pub async fn list_connections(
         workspace,
     })
     .into_response()
+}
+
+pub async fn list_provider_connections(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(provider): Path<String>,
+    Query(params): Query<ListConnectionsQuery>,
+) -> Response {
+    let provider = match parse_provider(&provider) {
+        Some(p) => p,
+        None => {
+            return JsonResponse::bad_request("Unknown provider").into_response();
+        }
+    };
+
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
+    };
+
+    let membership = match ensure_workspace_membership(&state, user_id, params.workspace).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+
+    let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
+        Ok(tokens) => tokens
+            .into_iter()
+            .filter(|token| token.provider == provider)
+            .collect::<Vec<_>>(),
+        Err(OAuthAccountError::NotFound) => Vec::new(),
+        Err(err) => return map_oauth_error(err),
+    };
+
+    if let Err(err) = state
+        .oauth_accounts
+        .assert_personal_tokens_owned_by(user_id, &personal_tokens)
+        .await
+    {
+        error!(user_id = %user_id, ?err, "Personal OAuth token ownership assertion failed");
+        return JsonResponse::forbidden("Access to OAuth credentials is forbidden").into_response();
+    }
+
+    let workspace_connections = match state
+        .workspace_connection_repo
+        .list_for_workspace(params.workspace)
+        .await
+    {
+        Ok(connections) => connections
+            .into_iter()
+            .filter(|connection| connection.provider == provider)
+            .collect::<Vec<_>>(),
+        Err(err) => {
+            error!(workspace_id = %params.workspace, ?err, "Failed to load workspace OAuth connections");
+            return JsonResponse::server_error("Failed to load workspace connections")
+                .into_response();
+        }
+    };
+
+    let personal_owner = connection_owner_from_claims(user_id, &claims);
+    let personal = personal_tokens
+        .into_iter()
+        .map(|token| personal_payload_from_token(token, &personal_owner))
+        .collect::<Vec<_>>();
+    let workspace = workspace_connections
+        .into_iter()
+        .map(workspace_payload_from_listing)
+        .collect::<Vec<_>>();
+
+    Json(ProviderConnectionsResponse {
+        success: true,
+        provider,
+        workspace_id: params.workspace,
+        workspace_name: membership.workspace.name.clone(),
+        personal,
+        workspace,
+    })
+    .into_response()
+}
+
+pub async fn get_connection_by_id(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(connection_id): Path<Uuid>,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
+    };
+
+    let personal_owner = connection_owner_from_claims(user_id, &claims);
+
+    let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
+        Ok(tokens) => tokens,
+        Err(OAuthAccountError::NotFound) => Vec::new(),
+        Err(err) => return map_oauth_error(err),
+    };
+
+    if let Some(token) = personal_tokens
+        .iter()
+        .find(|token| token.id == connection_id)
+    {
+        return Json(ConnectionLookupResponse {
+            success: true,
+            connection_id,
+            personal: Some(personal_payload_from_token(token.clone(), &personal_owner)),
+            workspace: None,
+        })
+        .into_response();
+    }
+
+    let workspace_connections = match state
+        .workspace_connection_repo
+        .list_for_user_memberships(user_id)
+        .await
+    {
+        Ok(connections) => connections,
+        Err(err) => {
+            error!(
+                ?err,
+                user_id = %user_id,
+                %connection_id,
+                "Failed to load workspace OAuth connections for lookup"
+            );
+            return JsonResponse::server_error("Failed to load workspace connections")
+                .into_response();
+        }
+    };
+
+    let Some(target) = workspace_connections
+        .into_iter()
+        .find(|conn| conn.id == connection_id)
+    else {
+        return JsonResponse::not_found("Connection not found").into_response();
+    };
+
+    if let Err(resp) = ensure_workspace_membership(&state, user_id, target.workspace_id).await {
+        return resp;
+    }
+
+    Json(ConnectionLookupResponse {
+        success: true,
+        connection_id,
+        personal: None,
+        workspace: Some(workspace_payload_from_listing(target)),
+    })
+    .into_response()
+}
+
+pub async fn revoke_connection(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Path(provider): Path<String>,
+    query: Query<ConnectionTarget>,
+    body: Option<Json<ConnectionTarget>>,
+) -> Response {
+    let provider = match parse_provider(&provider) {
+        Some(p) => p,
+        None => {
+            return JsonResponse::bad_request("Unknown provider").into_response();
+        }
+    };
+
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
+    };
+
+    let requested_connection_id = coalesce_connection_id(&query, body);
+    if requested_connection_id.is_none() {
+        warn!(
+            %user_id,
+            ?provider,
+            require_connection_id = state.config.oauth.require_connection_id,
+            "connection_id not supplied for revoke_connection request"
+        );
+        if state.config.oauth.require_connection_id {
+            return JsonResponse::bad_request("connection_id is required").into_response();
+        }
+    }
+
+    if let Some(connection_id) = requested_connection_id {
+        let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
+            Ok(tokens) => tokens,
+            Err(err) => return map_oauth_error(err),
+        };
+
+        let Some(token) = personal_tokens
+            .into_iter()
+            .find(|token| token.id == connection_id)
+        else {
+            return JsonResponse::not_found("Connection not found").into_response();
+        };
+
+        if token.provider != provider {
+            return JsonResponse::bad_request("Connection does not match provider").into_response();
+        }
+
+        return match state
+            .oauth_accounts
+            .handle_revoked_token_by_connection(user_id, connection_id)
+            .await
+        {
+            Ok(()) => Json(RevokeResponse {
+                success: true,
+                message: "Revocation recorded".to_string(),
+                connection_id: Some(connection_id),
+            })
+            .into_response(),
+            Err(err) => map_oauth_error(err),
+        };
+    }
+
+    let fallback_connection_id = lookup_provider_connection_id(&state, user_id, provider).await;
+    match state
+        .oauth_accounts
+        .handle_revoked_token(user_id, provider)
+        .await
+    {
+        Ok(()) => Json(RevokeResponse {
+            success: true,
+            message: "Revocation recorded".to_string(),
+            connection_id: fallback_connection_id,
+        })
+        .into_response(),
+        Err(err) => map_oauth_error(err),
+    }
+}
+
+fn coalesce_connection_id(
+    query: &Query<ConnectionTarget>,
+    body: Option<Json<ConnectionTarget>>,
+) -> Option<Uuid> {
+    let from_body = body.and_then(|Json(payload)| payload.connection_id);
+    from_body.or(query.0.connection_id)
+}
+
+async fn lookup_provider_connection_id(
+    state: &AppState,
+    user_id: Uuid,
+    provider: ConnectedOAuthProvider,
+) -> Option<Uuid> {
+    state
+        .oauth_accounts
+        .list_tokens(user_id)
+        .await
+        .ok()?
+        .into_iter()
+        .find(|token| token.provider == provider)
+        .map(|token| token.id)
+}
+
+fn connection_owner_from_claims(user_id: Uuid, claims: &Claims) -> ConnectionOwnerPayload {
+    ConnectionOwnerPayload {
+        user_id,
+        name: format_shared_name(
+            &Some(claims.first_name.clone()),
+            &Some(claims.last_name.clone()),
+        ),
+        email: normalize_optional_field(&claims.email),
+    }
+}
+
+fn personal_payload_from_token(
+    token: StoredOAuthToken,
+    owner: &ConnectionOwnerPayload,
+) -> PersonalConnectionPayload {
+    PersonalConnectionPayload {
+        id: token.id,
+        provider: token.provider,
+        account_email: token.account_email,
+        expires_at: token.expires_at,
+        is_shared: token.is_shared,
+        last_refreshed_at: token.updated_at,
+        requires_reconnect: false,
+        owner: owner.clone(),
+    }
+}
+
+fn workspace_payload_from_listing(
+    connection: WorkspaceConnectionListing,
+) -> WorkspaceConnectionPayload {
+    let shared_by_name = format_shared_name(
+        &connection.shared_by_first_name,
+        &connection.shared_by_last_name,
+    );
+    let shared_by_email =
+        normalize_optional_field(connection.shared_by_email.as_deref().unwrap_or_default());
+    let owner = ConnectionOwnerPayload {
+        user_id: connection.owner_user_id,
+        name: shared_by_name.clone(),
+        email: shared_by_email.clone(),
+    };
+
+    WorkspaceConnectionPayload {
+        id: connection.id,
+        provider: connection.provider,
+        account_email: connection.account_email,
+        expires_at: connection.expires_at,
+        workspace_id: connection.workspace_id,
+        workspace_name: connection.workspace_name,
+        shared_by_name,
+        shared_by_email,
+        last_refreshed_at: connection.updated_at,
+        requires_reconnect: connection.requires_reconnect,
+        has_incoming_webhook: connection.has_incoming_webhook,
+        owner,
+    }
 }
 
 fn format_shared_name(first: &Option<String>, last: &Option<String>) -> Option<String> {

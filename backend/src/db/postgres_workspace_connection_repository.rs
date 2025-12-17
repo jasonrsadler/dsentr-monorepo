@@ -15,6 +15,12 @@ pub struct PostgresWorkspaceConnectionRepository {
     pub pool: PgPool,
 }
 
+struct WorkspaceConnectionIdentity {
+    provider: ConnectedOAuthProvider,
+    owner_user_id: Uuid,
+    user_oauth_token_id: Option<Uuid>,
+}
+
 #[async_trait]
 impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
     async fn insert_connection(
@@ -46,7 +52,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 workspace_id,
                 created_by,
                 owner_user_id,
-                user_oauth_token_id,
+                user_oauth_token_id as "user_oauth_token_id?",
                 provider as "provider: _",
                 access_token,
                 refresh_token,
@@ -89,7 +95,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 workspace_id,
                 created_by,
                 owner_user_id,
-                user_oauth_token_id,
+                user_oauth_token_id as "user_oauth_token_id?",
                 provider as "provider: _",
                 access_token,
                 refresh_token,
@@ -110,6 +116,12 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         .await
     }
 
+    async fn get_by_id(&self, connection_id: Uuid) -> Result<WorkspaceConnection, sqlx::Error> {
+        self.find_by_id(connection_id)
+            .await?
+            .ok_or(sqlx::Error::RowNotFound)
+    }
+
     async fn list_for_workspace_provider(
         &self,
         workspace_id: Uuid,
@@ -123,7 +135,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 workspace_id,
                 created_by,
                 owner_user_id,
-                user_oauth_token_id,
+                user_oauth_token_id as "user_oauth_token_id?",
                 provider as "provider: _",
                 access_token,
                 refresh_token,
@@ -142,6 +154,49 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             "#,
             workspace_id,
             provider as ConnectedOAuthProvider,
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn list_by_workspace_and_provider(
+        &self,
+        workspace_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+        self.list_for_workspace_provider(workspace_id, provider)
+            .await
+    }
+
+    async fn find_by_source_token(
+        &self,
+        user_oauth_token_id: Uuid,
+    ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+        sqlx::query_as!(
+            WorkspaceConnection,
+            r#"
+            SELECT
+                id,
+                workspace_id,
+                created_by,
+                owner_user_id,
+                user_oauth_token_id as "user_oauth_token_id?",
+                provider as "provider: _",
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                created_at,
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
+            FROM workspace_connections
+            WHERE user_oauth_token_id = $1
+            ORDER BY created_at ASC
+            "#,
+            user_oauth_token_id,
         )
         .fetch_all(&self.pool)
         .await
@@ -291,6 +346,88 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         Ok(())
     }
 
+    async fn update_tokens_for_connection(
+        &self,
+        connection_id: Uuid,
+        access_token: String,
+        refresh_token: String,
+        expires_at: OffsetDateTime,
+        account_email: String,
+        bot_user_id: Option<String>,
+        slack_team_id: Option<String>,
+        incoming_webhook_url: Option<String>,
+    ) -> Result<WorkspaceConnection, sqlx::Error> {
+        let identity = sqlx::query_as!(
+            WorkspaceConnectionIdentity,
+            r#"
+            SELECT
+                provider as "provider: _",
+                owner_user_id,
+                user_oauth_token_id
+            FROM workspace_connections
+            WHERE id = $1
+            "#,
+            connection_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+
+        if identity.user_oauth_token_id.is_none() {
+            return Err(sqlx::Error::RowNotFound);
+        }
+
+        sqlx::query_as!(
+            WorkspaceConnection,
+            r#"
+            UPDATE workspace_connections
+            SET
+                access_token = $2,
+                refresh_token = $3,
+                expires_at = $4,
+                account_email = $5,
+                updated_at = now(),
+                bot_user_id = COALESCE($6, bot_user_id),
+                slack_team_id = COALESCE($7, slack_team_id),
+                incoming_webhook_url = COALESCE($8, incoming_webhook_url)
+            WHERE id = $1
+              AND provider = $9::oauth_connection_provider
+              AND owner_user_id = $10
+              AND user_oauth_token_id IS NOT DISTINCT FROM $11
+            RETURNING
+                id,
+                workspace_id,
+                created_by,
+                owner_user_id,
+                user_oauth_token_id as "user_oauth_token_id?",
+                provider as "provider: _",
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                created_at,
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
+            "#,
+            connection_id,
+            access_token,
+            refresh_token,
+            expires_at,
+            account_email,
+            bot_user_id,
+            slack_team_id,
+            incoming_webhook_url,
+            identity.provider as ConnectedOAuthProvider,
+            identity.owner_user_id,
+            identity.user_oauth_token_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+    }
+
     async fn update_tokens(
         &self,
         connection_id: Uuid,
@@ -301,6 +438,26 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         slack_team_id: Option<String>,
         incoming_webhook_url: Option<String>,
     ) -> Result<WorkspaceConnection, sqlx::Error> {
+        let identity = sqlx::query_as!(
+            WorkspaceConnectionIdentity,
+            r#"
+            SELECT
+                provider as "provider: _",
+                owner_user_id,
+                user_oauth_token_id
+            FROM workspace_connections
+            WHERE id = $1
+            "#,
+            connection_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+
+        if identity.user_oauth_token_id.is_none() {
+            return Err(sqlx::Error::RowNotFound);
+        }
+
         sqlx::query_as!(
             WorkspaceConnection,
             r#"
@@ -314,12 +471,15 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 slack_team_id = COALESCE($6, slack_team_id),
                 incoming_webhook_url = COALESCE($7, incoming_webhook_url)
             WHERE id = $1
+              AND provider = $8::oauth_connection_provider
+              AND owner_user_id = $9
+              AND user_oauth_token_id IS NOT DISTINCT FROM $10
             RETURNING
                 id,
                 workspace_id,
                 created_by,
                 owner_user_id,
-                user_oauth_token_id,
+                user_oauth_token_id as "user_oauth_token_id?",
                 provider as "provider: _",
                 access_token,
                 refresh_token,
@@ -339,6 +499,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             bot_user_id,
             slack_team_id,
             incoming_webhook_url,
+            identity.provider as ConnectedOAuthProvider,
+            identity.owner_user_id,
+            identity.user_oauth_token_id,
         )
         .fetch_one(&self.pool)
         .await
@@ -377,6 +540,32 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             workspace_id,
             owner_user_id,
             provider as ConnectedOAuthProvider,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn delete_by_owner_and_provider_and_id(
+        &self,
+        workspace_id: Uuid,
+        owner_user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        connection_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+            DELETE FROM workspace_connections
+            WHERE workspace_id = $1
+              AND owner_user_id = $2
+              AND provider = $3::oauth_connection_provider
+              AND id = $4
+            "#,
+            workspace_id,
+            owner_user_id,
+            provider as ConnectedOAuthProvider,
+            connection_id,
         )
         .execute(&self.pool)
         .await?;

@@ -47,6 +47,7 @@ Runaway workflow protection toggle:
 
 OAuth connections response normalization:
 - `fetchConnections` now tolerates API responses where `personal`/`workspace` are provided as flat arrays instead of provider buckets by grouping entries client-side. This keeps the cached snapshot populated for tests and production regardless of response shape.
+- OAuth cached snapshot helpers now normalize `connectionId` to `undefined` (not `null`) and guard against `null` workspace connection ids so TypeScript builds stay strict while still tolerating partial API/test data.
 
 Vite 7 migration:
 - Moved Vitest options into `vitest.config.ts` and removed the `test` field from `vite.config.ts` because Vite 7's `UserConfig` no longer includes `test`. Mirrored aliases/plugins so test transforms and import paths match the app.

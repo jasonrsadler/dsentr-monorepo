@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id as \"user_oauth_token_id?\",\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at,\n                bot_user_id,\n                slack_team_id,\n                incoming_webhook_url,\n                metadata\n            FROM workspace_connections\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_oauth_token_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "provider: _",
+        "type_info": {
+          "Custom": {
+            "name": "oauth_connection_provider",
+            "kind": {
+              "Enum": [
+                "google",
+                "microsoft",
+                "slack",
+                "asana"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "access_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "refresh_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "account_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "bot_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "slack_team_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "incoming_webhook_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "f13dd00414521bd291a845fb3f35e14745c72e88490129bae573697693ec4823"
+}
