@@ -48,6 +48,10 @@ pub struct WorkspaceConnection {
     pub account_email: String,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    pub bot_user_id: Option<String>,
+    pub slack_team_id: Option<String>,
+    pub incoming_webhook_url: Option<String>,
+    pub metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

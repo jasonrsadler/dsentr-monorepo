@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE workspace_connections\n            SET\n                access_token = $2,\n                refresh_token = $3,\n                expires_at = $4,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING\n                id,\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            UPDATE workspace_connections\n            SET\n                access_token = $2,\n                refresh_token = $3,\n                expires_at = $4,\n                updated_at = now(),\n                bot_user_id = NULL,\n                slack_team_id = NULL,\n                incoming_webhook_url = NULL\n            WHERE id = $1\n            RETURNING\n                id,\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at,\n                bot_user_id,\n                slack_team_id,\n                incoming_webhook_url,\n                metadata\n            ",
   "describe": {
     "columns": [
       {
@@ -74,6 +74,26 @@
         "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "bot_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "slack_team_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "incoming_webhook_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "metadata",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
@@ -96,8 +116,12 @@
       false,
       false,
       false,
+      false,
+      true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "e98b03d983f14ec08b2d5e5c687616e619e339f14d3d54cc4374a22d1e0e4f68"
+  "hash": "eed665c854d39ad600643f00b9a9a1192d71d026a53e50532aa6d18032277b22"
 }

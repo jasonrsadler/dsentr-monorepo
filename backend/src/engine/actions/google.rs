@@ -1322,6 +1322,10 @@ mod tests {
             account_email: "workspace@example.com".into(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: None,
+            metadata: serde_json::Value::Null,
         };
 
         let (workspace_service, repo) =
@@ -1408,6 +1412,10 @@ mod tests {
             account_email: "workspace@example.com".into(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: None,
         };
 
         let (workspace_service, repo) =
@@ -1475,6 +1483,10 @@ mod tests {
             account_email: "workspace@example.com".into(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: None,
         };
 
         let (workspace_service, repo) =

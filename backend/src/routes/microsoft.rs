@@ -871,6 +871,10 @@ mod tests {
             account_email: "shared@example.com".into(),
             created_at: now,
             updated_at: now,
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: None,
         };
 
         let workspace_repo: Arc<dyn WorkspaceConnectionRepository> = Arc::new(

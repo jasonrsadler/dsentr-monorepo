@@ -34,9 +34,13 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 refresh_token,
                 expires_at,
                 account_email,
-                updated_at
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
             )
-            VALUES ($1, $2, $3, $4, $5::oauth_connection_provider, $6, $7, $8, $9, now())
+            VALUES ($1, $2, $3, $4, $5::oauth_connection_provider, $6, $7, $8, $9, now(), $10, $11, $12, $13)
             RETURNING
                 id,
                 workspace_id,
@@ -49,7 +53,11 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 expires_at,
                 account_email,
                 created_at,
-                updated_at
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
             "#,
             new_connection.workspace_id,
             new_connection.created_by,
@@ -60,6 +68,10 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             new_connection.refresh_token,
             new_connection.expires_at,
             new_connection.account_email,
+            new_connection.bot_user_id,
+            new_connection.slack_team_id,
+            new_connection.incoming_webhook_url,
+            new_connection.metadata,
         )
         .fetch_one(&self.pool)
         .await
@@ -84,7 +96,11 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 expires_at,
                 account_email,
                 created_at,
-                updated_at
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
             FROM workspace_connections
             WHERE id = $1
             "#,
@@ -114,7 +130,11 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 expires_at,
                 account_email,
                 created_at,
-                updated_at
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
             FROM workspace_connections
             WHERE workspace_id = $1
               AND provider = $2::oauth_connection_provider
@@ -243,7 +263,10 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 refresh_token = $4,
                 expires_at = $5,
                 account_email = $6,
-                updated_at = now()
+                updated_at = now(),
+                bot_user_id = NULL,
+                slack_team_id = NULL,
+                incoming_webhook_url = NULL
             WHERE owner_user_id = $1
               AND provider = $2
             "#,
@@ -275,7 +298,10 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 access_token = $2,
                 refresh_token = $3,
                 expires_at = $4,
-                updated_at = now()
+                updated_at = now(),
+                bot_user_id = NULL,
+                slack_team_id = NULL,
+                incoming_webhook_url = NULL
             WHERE id = $1
             RETURNING
                 id,
@@ -289,7 +315,11 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 expires_at,
                 account_email,
                 created_at,
-                updated_at
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
             "#,
             connection_id,
             access_token,

@@ -397,7 +397,10 @@ pub(crate) async fn execute_asana(
                 query.push(("workspace".to_string(), workspace_gid));
                 query.push(("assignee".to_string(), assignee));
             } else {
-                return Err("Asana list tasks requires a project or tag, or an assignee with workspace".to_string());
+                return Err(
+                    "Asana list tasks requires a project or tag, or an assignee with workspace"
+                        .to_string(),
+                );
             }
 
             if let Some(limit) = read_limit(&params, context) {

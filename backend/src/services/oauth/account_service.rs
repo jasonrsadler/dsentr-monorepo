@@ -428,7 +428,10 @@ impl OAuthAccountService {
         match provider {
             ConnectedOAuthProvider::Google => self.exchange_google_code(code).await,
             ConnectedOAuthProvider::Microsoft => self.exchange_microsoft_code(code).await,
-            ConnectedOAuthProvider::Slack => self.exchange_slack_code(code).await,
+            ConnectedOAuthProvider::Slack => {
+                let auth = self.exchange_slack_code(code).await?;
+                Ok(auth)
+            }
             ConnectedOAuthProvider::Asana => self.exchange_asana_code(code).await,
         }
     }

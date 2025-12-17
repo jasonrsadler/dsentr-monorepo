@@ -783,6 +783,10 @@ mod tests {
             account_email: "owner@example.com".into(),
             created_at: now,
             updated_at: now,
+            metadata: serde_json::Value::Null,
+            slack_team_id: None,
+            bot_user_id: None,
+            incoming_webhook_url: None,
         };
         let connection_repo = Arc::new(WorkspaceConnectionRepo {
             listing: listing.clone(),

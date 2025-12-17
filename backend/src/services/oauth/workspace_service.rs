@@ -43,6 +43,10 @@ pub struct DecryptedWorkspaceConnection {
     pub account_email: String,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    pub metadata: Option<serde_json::Value>,
+    pub slack_team_id: Option<String>,
+    pub bot_user_id: Option<String>,
+    pub incoming_webhook_url: Option<String>,
 }
 
 #[derive(Error, Debug)]
@@ -115,8 +119,10 @@ impl WorkspaceOAuthService {
     ) -> Result<WorkspaceConnection, WorkspaceOAuthError> {
         self.ensure_membership(actor_id, workspace_id).await?;
 
+        // Load existing personal token (OAuth already completed earlier)
         let token = self.load_token(actor_id, provider).await?;
 
+        // Create workspace connection by COPYING encrypted fields
         let connection = self
             .workspace_connections
             .insert_connection(NewWorkspaceConnection {
@@ -129,14 +135,23 @@ impl WorkspaceOAuthService {
                 refresh_token: token.refresh_token.clone(),
                 expires_at: token.expires_at,
                 account_email: token.account_email.clone(),
+
+                // Slack-specific fields are copied, not exchanged
+                // If you later persist them on UserOAuthToken, read them here
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
+                metadata: serde_json::json!({}),
             })
             .await?;
 
+        // Mark personal token as shared
         let _ = self
             .user_tokens
             .mark_shared(actor_id, provider, true)
             .await?;
 
+        // Record audit event
         let metadata = json!({
             "provider": provider,
             "account_email": token.account_email,
@@ -482,6 +497,10 @@ impl WorkspaceOAuthService {
             account_email: record.account_email,
             created_at: record.created_at,
             updated_at: record.updated_at,
+            metadata: Some(record.metadata),
+            slack_team_id: record.slack_team_id,
+            bot_user_id: record.bot_user_id,
+            incoming_webhook_url: record.incoming_webhook_url,
         })
     }
 
@@ -1121,6 +1140,10 @@ mod tests {
                 account_email: new_connection.account_email,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             };
             let mut guard = self.connection.lock().unwrap();
             *guard = Some(record.clone());
@@ -1550,6 +1573,10 @@ mod tests {
                 account_email: new_connection.account_email,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             };
 
             self.connections.lock().unwrap().push(record.clone());
@@ -1721,6 +1748,10 @@ mod tests {
             account_email: "shared@example.com".into(),
             created_at: now,
             updated_at: now,
+            metadata: serde_json::json!({}),
+            slack_team_id: None,
+            bot_user_id: None,
+            incoming_webhook_url: None,
         }
     }
 
@@ -1864,6 +1895,10 @@ mod tests {
                 account_email: "owner-a@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             },
         ]));
 
@@ -1950,6 +1985,10 @@ mod tests {
                 account_email: "user@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2012,6 +2051,10 @@ mod tests {
                 account_email: "user@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             },
         ]));
 
@@ -2078,6 +2121,10 @@ mod tests {
                 account_email: "user@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2177,6 +2224,10 @@ mod tests {
                 account_email: "owner@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2246,6 +2297,10 @@ mod tests {
                 account_email: "user@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2299,6 +2354,10 @@ mod tests {
                 account_email: "user@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2354,6 +2413,10 @@ mod tests {
             account_email: "owner-a@example.com".into(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::json!({}),
+            slack_team_id: None,
+            bot_user_id: None,
+            incoming_webhook_url: None,
         };
         let connection_b = WorkspaceConnection {
             id: Uuid::new_v4(),
@@ -2368,6 +2431,10 @@ mod tests {
             account_email: "owner-b@example.com".into(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::json!({}),
+            slack_team_id: None,
+            bot_user_id: None,
+            incoming_webhook_url: None,
         };
         let repo = Arc::new(RecordingWorkspaceRepo::with_connections(vec![
             connection_a.clone(),
@@ -2424,6 +2491,10 @@ mod tests {
                 account_email: "owner@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             },
         ]));
 
@@ -2472,6 +2543,10 @@ mod tests {
                 account_email: "user@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2525,6 +2600,10 @@ mod tests {
                 account_email: "user@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2582,6 +2661,10 @@ mod tests {
                 account_email: "workspace@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2647,6 +2730,10 @@ mod tests {
                 account_email: "slack@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2733,6 +2820,10 @@ mod tests {
                 account_email: "workspace@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2806,6 +2897,10 @@ mod tests {
                 account_email: "workspace@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 
@@ -2877,6 +2972,10 @@ mod tests {
                 account_email: "slack@example.com".into(),
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             });
         }
 

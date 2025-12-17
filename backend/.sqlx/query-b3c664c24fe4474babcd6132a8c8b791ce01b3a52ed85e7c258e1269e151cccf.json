@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at\n            FROM workspace_connections\n            WHERE workspace_id = $1\n              AND provider = $2::oauth_connection_provider\n            ORDER BY created_at ASC\n            ",
+  "query": "\n            INSERT INTO workspace_connections (\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id,\n                provider,\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                updated_at,\n                bot_user_id,\n                slack_team_id,\n                incoming_webhook_url,\n                metadata\n            )\n            VALUES ($1, $2, $3, $4, $5::oauth_connection_provider, $6, $7, $8, $9, now(), $10, $11, $12, $13)\n            RETURNING\n                id,\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at,\n                bot_user_id,\n                slack_team_id,\n                incoming_webhook_url,\n                metadata\n            ",
   "describe": {
     "columns": [
       {
@@ -74,10 +74,33 @@
         "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "bot_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "slack_team_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "incoming_webhook_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "metadata",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
         "Uuid",
         {
           "Custom": {
@@ -91,7 +114,15 @@
               ]
             }
           }
-        }
+        },
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -106,8 +137,12 @@
       false,
       false,
       false,
+      false,
+      true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "25a9cba4b4418fdd0cff49cced419b5cebd4c96c13d83a95048caf7fd1fae558"
+  "hash": "b3c664c24fe4474babcd6132a8c8b791ce01b3a52ed85e7c258e1269e151cccf"
 }

@@ -2399,6 +2399,10 @@ mod tests {
                 account_email: new_connection.account_email,
                 created_at: OffsetDateTime::now_utc(),
                 updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::Value::Null,
+                bot_user_id: None,
+                incoming_webhook_url: None,
+                slack_team_id: None,
             };
 
             self.connections.lock().unwrap().push(record.clone());
@@ -3760,6 +3764,10 @@ mod tests {
             account_email: "shared@example.com".into(),
             created_at: now,
             updated_at: now,
+            metadata: serde_json::json!({}),
+            slack_team_id: None,
+            bot_user_id: None,
+            incoming_webhook_url: None,
         }
     }
 
@@ -4061,6 +4069,10 @@ mod tests {
                 refresh_token: encrypted_refresh.clone(),
                 expires_at: now + time::Duration::hours(1),
                 account_email: "owner@example.com".into(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             })
             .await
             .expect("insert connection");
@@ -4176,6 +4188,10 @@ mod tests {
                 refresh_token: encrypted_refresh.clone(),
                 expires_at: now + time::Duration::hours(1),
                 account_email: "creator@example.com".into(),
+                metadata: serde_json::json!({}),
+                slack_team_id: None,
+                bot_user_id: None,
+                incoming_webhook_url: None,
             })
             .await
             .expect("insert connection");
