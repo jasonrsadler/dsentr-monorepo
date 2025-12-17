@@ -155,6 +155,7 @@ enum SlackConnectionContext {
         workspace_id: Uuid,
         connection_id: Uuid,
         created_by: Uuid,
+        personal_token_id: Uuid,
     },
 }
 
@@ -223,7 +224,7 @@ async fn send_slack(
                 output_connection_id = Some(connection.id);
 
                 if post_as_user {
-                    let token = ensure_slack_access_token(state, run.user_id)
+                    let token = ensure_slack_access_token(state, run.user_id, None)
                         .await
                         .map_err(|msg| {
                             format!(
@@ -310,19 +311,21 @@ async fn send_slack(
                             workspace_id,
                             connection_id: connection.id,
                             created_by: connection.owner_user_id,
+                            personal_token_id: connection.user_oauth_token_id,
                         }),
                     )
                 }
             }
             NodeConnectionUsage::User(info) => {
-                let token = ensure_slack_access_token(state, run.user_id).await?;
-
                 let connection_hint = info
                     .connection_id
                     .as_deref()
                     .map(|value| value.trim())
                     .filter(|value| !value.is_empty())
                     .and_then(|value| Uuid::parse_str(value).ok());
+
+                let token =
+                    ensure_slack_access_token(state, run.user_id, connection_hint).await?;
 
                 if let Some(expected_id) = connection_hint {
                     if expected_id != token.id {
@@ -393,10 +396,17 @@ async fn send_slack(
         if let Some(context) = &connection_context {
             if is_revocation_signal(Some(status), &body_text) {
                 match context {
-                    SlackConnectionContext::Personal { user_id, .. } => {
+                    SlackConnectionContext::Personal {
+                        user_id,
+                        connection_id,
+                    } => {
                         if let Err(err) = state
                             .oauth_accounts
-                            .handle_revoked_token(*user_id, ConnectedOAuthProvider::Slack)
+                            .handle_revoked_token(
+                                *user_id,
+                                ConnectedOAuthProvider::Slack,
+                                *connection_id,
+                            )
                             .await
                         {
                             warn!(
@@ -410,6 +420,7 @@ async fn send_slack(
                         workspace_id,
                         connection_id,
                         created_by,
+                        personal_token_id,
                     } => {
                         if let Err(err) = state
                             .workspace_oauth
@@ -426,7 +437,11 @@ async fn send_slack(
 
                         if let Err(err) = state
                             .oauth_accounts
-                            .handle_revoked_token(*created_by, ConnectedOAuthProvider::Slack)
+                            .handle_revoked_token(
+                                *created_by,
+                                ConnectedOAuthProvider::Slack,
+                                *personal_token_id,
+                            )
                             .await
                         {
                             warn!(
@@ -1188,10 +1203,15 @@ fn graph_error_message(parsed: Option<&Value>, raw: &str) -> String {
 async fn ensure_microsoft_access_token(
     state: &AppState,
     user_id: Uuid,
+    connection_id: Option<Uuid>,
 ) -> Result<StoredOAuthToken, String> {
     state
         .oauth_accounts
-        .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Microsoft)
+        .ensure_valid_access_token(
+            user_id,
+            ConnectedOAuthProvider::Microsoft,
+            connection_id,
+        )
         .await
         .map_err(|err| match err {
             OAuthAccountError::NotFound => {
@@ -1208,10 +1228,11 @@ async fn ensure_microsoft_access_token(
 async fn ensure_slack_access_token(
     state: &AppState,
     user_id: Uuid,
+    connection_id: Option<Uuid>,
 ) -> Result<StoredOAuthToken, String> {
     state
         .oauth_accounts
-        .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Slack)
+        .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Slack, connection_id)
         .await
         .map_err(|err| match err {
             OAuthAccountError::NotFound => {
@@ -1416,6 +1437,7 @@ async fn send_teams_delegated_oauth(
             workspace_id: Uuid,
             connection_id: Uuid,
             created_by: Uuid,
+            personal_token_id: Uuid,
             account_email: Option<String>,
         },
     }
@@ -1450,6 +1472,7 @@ async fn send_teams_delegated_oauth(
                     workspace_id,
                     connection_id: connection.id,
                     created_by: connection.owner_user_id,
+                    personal_token_id: connection.user_oauth_token_id,
                     account_email: Some(connection.account_email.clone()),
                 },
             )
@@ -1462,7 +1485,8 @@ async fn send_teams_delegated_oauth(
                 .filter(|value| !value.is_empty())
                 .and_then(|value| Uuid::parse_str(value).ok());
 
-            let token = ensure_microsoft_access_token(state, run.user_id).await?;
+            let token =
+                ensure_microsoft_access_token(state, run.user_id, connection_hint).await?;
 
             if let Some(expected_id) = connection_hint {
                 if expected_id != token.id {
@@ -1544,11 +1568,15 @@ async fn send_teams_delegated_oauth(
                 ConnectionContext::Personal {
                     user_id,
                     account_email,
-                    ..
+                    connection_id,
                 } => {
                     if let Err(err) = state
                         .oauth_accounts
-                        .handle_revoked_token(*user_id, ConnectedOAuthProvider::Microsoft)
+                        .handle_revoked_token(
+                            *user_id,
+                            ConnectedOAuthProvider::Microsoft,
+                            *connection_id,
+                        )
                         .await
                     {
                         warn!(
@@ -1567,6 +1595,7 @@ async fn send_teams_delegated_oauth(
                     workspace_id,
                     connection_id,
                     created_by,
+                    personal_token_id,
                     account_email,
                 } => {
                     if let Err(err) = state
@@ -1584,7 +1613,11 @@ async fn send_teams_delegated_oauth(
 
                     if let Err(err) = state
                         .oauth_accounts
-                        .handle_revoked_token(*created_by, ConnectedOAuthProvider::Microsoft)
+                        .handle_revoked_token(
+                            *created_by,
+                            ConnectedOAuthProvider::Microsoft,
+                            *personal_token_id,
+                        )
                         .await
                     {
                         warn!(
@@ -1838,6 +1871,10 @@ mod tests {
             Err(SqlxError::RowNotFound)
         }
 
+        async fn find_by_id(&self, _token_id: Uuid) -> Result<Option<UserOAuthToken>, SqlxError> {
+            Ok(None)
+        }
+
         async fn find_by_user_and_provider(
             &self,
             _user_id: Uuid,
@@ -1849,7 +1886,7 @@ mod tests {
         async fn delete_token(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
         ) -> Result<(), SqlxError> {
             Ok(())
         }
@@ -1864,7 +1901,7 @@ mod tests {
         async fn mark_shared(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
             _is_shared: bool,
         ) -> Result<UserOAuthToken, SqlxError> {
             Err(SqlxError::RowNotFound)
@@ -1949,7 +1986,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn update_tokens_for_creator(
+        async fn update_tokens_for_token(
             &self,
             _creator_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -1995,7 +2032,7 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_by_owner_and_provider(
+        async fn delete_by_owner_and_token(
             &self,
             _workspace_id: Uuid,
             _owner_user_id: Uuid,
@@ -2004,7 +2041,7 @@ mod tests {
             Ok(())
         }
 
-        async fn has_connections_for_owner_provider(
+        async fn has_connections_for_token(
             &self,
             _owner_user_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -2012,7 +2049,7 @@ mod tests {
             Ok(false)
         }
 
-        async fn mark_connections_stale_for_creator(
+        async fn mark_connections_stale_for_token(
             &self,
             _creator_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -2264,6 +2301,17 @@ mod tests {
             Ok(self.record.clone())
         }
 
+        async fn find_by_id(
+            &self,
+            token_id: Uuid,
+        ) -> Result<Option<UserOAuthToken>, SqlxError> {
+            if token_id == self.record.id {
+                Ok(Some(self.record.clone()))
+            } else {
+                Ok(None)
+            }
+        }
+
         async fn find_by_user_and_provider(
             &self,
             user_id: Uuid,
@@ -2279,7 +2327,7 @@ mod tests {
         async fn delete_token(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
         ) -> Result<(), SqlxError> {
             Ok(())
         }
@@ -2298,7 +2346,7 @@ mod tests {
         async fn mark_shared(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
             _is_shared: bool,
         ) -> Result<UserOAuthToken, SqlxError> {
             Ok(self.record.clone())

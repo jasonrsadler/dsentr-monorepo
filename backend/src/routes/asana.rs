@@ -256,7 +256,7 @@ struct StoryRecord {
 
 #[derive(Debug, PartialEq, Eq)]
 enum RequestedScope {
-    Personal,
+    Personal(Option<Uuid>),
     Workspace(Uuid),
 }
 
@@ -607,7 +607,7 @@ fn determine_scope(query: &ConnectionQuery) -> Result<RequestedScope, Response> 
         }
 
         if scope.eq_ignore_ascii_case("personal") {
-            return Ok(RequestedScope::Personal);
+            return Ok(RequestedScope::Personal(query.connection_id));
         }
 
         return Err(JsonResponse::bad_request("Unsupported connection scope").into_response());
@@ -617,7 +617,7 @@ fn determine_scope(query: &ConnectionQuery) -> Result<RequestedScope, Response> 
         return Ok(RequestedScope::Workspace(connection_id));
     }
 
-    Ok(RequestedScope::Personal)
+    Ok(RequestedScope::Personal(query.connection_id))
 }
 
 async fn ensure_asana_token(
@@ -631,11 +631,15 @@ async fn ensure_asana_token(
                 .await
                 .map(|token| (token, Some(connection_id)))
         }
-        RequestedScope::Personal => state
+        RequestedScope::Personal(connection_id) => state
             .oauth_accounts
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Asana)
+            .ensure_valid_access_token(
+                user_id,
+                ConnectedOAuthProvider::Asana,
+                connection_id,
+            )
             .await
-            .map(|token| (token.access_token, None))
+            .map(|token| (token.access_token, connection_id))
             .map_err(map_oauth_error),
     }
 }

@@ -49,10 +49,17 @@ pub struct ListConnectionsQuery {
     pub workspace: Uuid,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ConnectionScopedQuery {
+    #[serde(alias = "connectionId")]
+    pub connection_id: Option<Uuid>,
+}
+
 pub async fn refresh_connection(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(provider): Path<String>,
+    Query(params): Query<ConnectionScopedQuery>,
 ) -> Response {
     let provider = match parse_provider(&provider) {
         Some(p) => p,
@@ -66,9 +73,19 @@ pub async fn refresh_connection(
         Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
     };
 
+    let connection_id = match params.connection_id {
+        Some(id) => id,
+        None => {
+            return JsonResponse::bad_request(
+                "connection_id is required to refresh this OAuth connection",
+            )
+            .into_response()
+        }
+    };
+
     match state
         .oauth_accounts
-        .ensure_valid_access_token(user_id, provider)
+        .ensure_valid_access_token(user_id, provider, Some(connection_id))
         .await
     {
         Ok(token) => Json(RefreshResponse {
@@ -102,6 +119,7 @@ pub async fn disconnect_connection(
     State(state): State<AppState>,
     AuthSession(claims): AuthSession,
     Path(provider): Path<String>,
+    Query(params): Query<ConnectionScopedQuery>,
 ) -> Response {
     let provider = match parse_provider(&provider) {
         Some(p) => p,
@@ -114,7 +132,21 @@ pub async fn disconnect_connection(
         Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
     };
 
-    match state.oauth_accounts.delete_tokens(user_id, provider).await {
+    let connection_id = match params.connection_id {
+        Some(id) => id,
+        None => {
+            return JsonResponse::bad_request(
+                "connection_id is required to disconnect this OAuth connection",
+            )
+            .into_response()
+        }
+    };
+
+    match state
+        .oauth_accounts
+        .delete_tokens(user_id, provider, connection_id)
+        .await
+    {
         Ok(()) => JsonResponse::success("Disconnected").into_response(),
         Err(err) => map_oauth_error(err),
     }

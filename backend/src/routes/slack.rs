@@ -82,7 +82,7 @@ pub async fn list_channels(
         Err(resp) => return resp,
     };
 
-    if scope == RequestedScope::Personal {
+    if matches!(scope, RequestedScope::Personal(_)) {
         if let Err(resp) = ensure_workspace_plan_membership(&state, user_id).await {
             return resp;
         }
@@ -95,9 +95,13 @@ pub async fn list_channels(
                 Err(resp) => return resp,
             }
         }
-        RequestedScope::Personal => match state
+        RequestedScope::Personal(connection_id) => match state
             .oauth_accounts
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Slack)
+            .ensure_valid_access_token(
+                user_id,
+                ConnectedOAuthProvider::Slack,
+                connection_id,
+            )
             .await
         {
             Ok(token) => (token.access_token, None),
@@ -140,7 +144,7 @@ fn parse_user_id(claims: &Claims) -> Result<Uuid, Response> {
 
 #[derive(Debug, PartialEq, Eq)]
 enum RequestedScope {
-    Personal,
+    Personal(Option<Uuid>),
     Workspace(Uuid),
 }
 
@@ -158,7 +162,7 @@ fn determine_scope(query: &ConnectionQuery) -> Result<RequestedScope, Response> 
         }
 
         if scope.eq_ignore_ascii_case("personal") {
-            return Ok(RequestedScope::Personal);
+            return Ok(RequestedScope::Personal(query.connection_id));
         }
 
         return Err(JsonResponse::bad_request("Unsupported connection scope").into_response());
@@ -168,7 +172,7 @@ fn determine_scope(query: &ConnectionQuery) -> Result<RequestedScope, Response> 
         return Ok(RequestedScope::Workspace(connection_id));
     }
 
-    Ok(RequestedScope::Personal)
+    Ok(RequestedScope::Personal(query.connection_id))
 }
 
 async fn ensure_workspace_token(
@@ -427,6 +431,13 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
+        async fn find_by_id(
+            &self,
+            token_id: Uuid,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            Ok(self.token.clone().filter(|token| token.id == token_id))
+        }
+
         async fn find_by_user_and_provider(
             &self,
             user_id: Uuid,
@@ -445,7 +456,7 @@ mod tests {
         async fn delete_token(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }
@@ -460,7 +471,7 @@ mod tests {
         async fn mark_shared(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
             _is_shared: bool,
         ) -> Result<UserOAuthToken, sqlx::Error> {
             Err(sqlx::Error::RowNotFound)
@@ -539,7 +550,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn update_tokens_for_creator(
+        async fn update_tokens_for_token(
             &self,
             _creator_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -575,7 +586,7 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_by_owner_and_provider(
+        async fn delete_by_owner_and_token(
             &self,
             _workspace_id: Uuid,
             _owner_user_id: Uuid,
@@ -584,7 +595,7 @@ mod tests {
             Ok(())
         }
 
-        async fn has_connections_for_owner_provider(
+        async fn has_connections_for_token(
             &self,
             _owner_user_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -592,7 +603,7 @@ mod tests {
             Ok(true)
         }
 
-        async fn mark_connections_stale_for_creator(
+        async fn mark_connections_stale_for_token(
             &self,
             _creator_id: Uuid,
             _provider: ConnectedOAuthProvider,

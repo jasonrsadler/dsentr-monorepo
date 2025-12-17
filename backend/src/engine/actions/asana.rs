@@ -156,11 +156,26 @@ pub(crate) async fn execute_asana(
                 .as_deref()
                 .and_then(|value| Uuid::parse_str(value).ok());
 
-            let token = state
-                .oauth_accounts
-                .ensure_valid_access_token(run.user_id, ConnectedOAuthProvider::Asana)
-                .await
-                .map_err(map_oauth_error)?;
+            let token = match connection_hint {
+                Some(connection_id) => state
+                    .oauth_accounts
+                    .ensure_valid_access_token(
+                        run.user_id,
+                        ConnectedOAuthProvider::Asana,
+                        Some(connection_id),
+                    )
+                    .await
+                    .map_err(map_oauth_error)?,
+                None => state
+                    .oauth_accounts
+                    .ensure_valid_access_token(
+                        run.user_id,
+                        ConnectedOAuthProvider::Asana,
+                        None,
+                    )
+                    .await
+                    .map_err(map_oauth_error)?,
+            };
 
             if let Some(expected_id) = connection_hint {
                 if expected_id != token.id {

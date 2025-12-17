@@ -6,6 +6,7 @@ use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
 
 #[derive(Debug, Clone)]
 pub struct NewUserOAuthToken {
+    pub id: Option<Uuid>,
     pub user_id: Uuid,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
@@ -33,6 +34,8 @@ pub trait UserOAuthTokenRepository: Send + Sync {
         new_token: NewUserOAuthToken,
     ) -> Result<UserOAuthToken, sqlx::Error>;
 
+    async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error>;
+
     async fn find_by_user_and_provider(
         &self,
         user_id: Uuid,
@@ -42,7 +45,7 @@ pub trait UserOAuthTokenRepository: Send + Sync {
     async fn delete_token(
         &self,
         user_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        token_id: Uuid,
     ) -> Result<(), sqlx::Error>;
 
     async fn list_tokens_for_user(&self, user_id: Uuid)
@@ -51,7 +54,7 @@ pub trait UserOAuthTokenRepository: Send + Sync {
     async fn mark_shared(
         &self,
         user_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        token_id: Uuid,
         is_shared: bool,
     ) -> Result<UserOAuthToken, sqlx::Error>;
 }

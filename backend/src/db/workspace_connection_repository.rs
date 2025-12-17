@@ -91,10 +91,9 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         creator_id: Uuid,
     ) -> Result<Vec<WorkspaceConnection>, sqlx::Error>;
 
-    async fn update_tokens_for_creator(
+    async fn update_tokens_for_token(
         &self,
-        creator_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        user_oauth_token_id: Uuid,
         access_token: String,
         refresh_token: String,
         expires_at: time::OffsetDateTime,
@@ -119,23 +118,23 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
 
     async fn delete_by_id(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
 
-    async fn delete_by_owner_and_provider(
+    async fn delete_by_owner_and_token(
         &self,
         workspace_id: Uuid,
         owner_user_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        user_oauth_token_id: Uuid,
     ) -> Result<(), sqlx::Error>;
 
-    async fn has_connections_for_owner_provider(
+    async fn has_connections_for_token(
         &self,
         owner_user_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        user_oauth_token_id: Uuid,
     ) -> Result<bool, sqlx::Error>;
 
-    async fn mark_connections_stale_for_creator(
+    async fn mark_connections_stale_for_token(
         &self,
         creator_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        user_oauth_token_id: Uuid,
     ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error>;
 
     async fn record_audit_event(
@@ -194,10 +193,9 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Ok(Vec::new())
     }
 
-    async fn update_tokens_for_creator(
+    async fn update_tokens_for_token(
         &self,
-        _creator_id: Uuid,
-        _provider: ConnectedOAuthProvider,
+        _user_oauth_token_id: Uuid,
         _access_token: String,
         _refresh_token: String,
         _expires_at: time::OffsetDateTime,
@@ -230,27 +228,27 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         Ok(())
     }
 
-    async fn delete_by_owner_and_provider(
+    async fn delete_by_owner_and_token(
         &self,
         _workspace_id: Uuid,
         _owner_user_id: Uuid,
-        _provider: ConnectedOAuthProvider,
+        _user_oauth_token_id: Uuid,
     ) -> Result<(), sqlx::Error> {
         Ok(())
     }
 
-    async fn has_connections_for_owner_provider(
+    async fn has_connections_for_token(
         &self,
         _owner_user_id: Uuid,
-        _provider: ConnectedOAuthProvider,
+        _user_oauth_token_id: Uuid,
     ) -> Result<bool, sqlx::Error> {
         Ok(false)
     }
 
-    async fn mark_connections_stale_for_creator(
+    async fn mark_connections_stale_for_token(
         &self,
         _creator_id: Uuid,
-        _provider: ConnectedOAuthProvider,
+        _user_oauth_token_id: Uuid,
     ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
         Ok(Vec::new())
     }

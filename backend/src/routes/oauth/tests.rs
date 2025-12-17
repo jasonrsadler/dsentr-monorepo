@@ -409,7 +409,7 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
         Ok(Vec::new())
     }
 
-    async fn update_tokens_for_creator(
+    async fn update_tokens_for_token(
         &self,
         _creator_id: Uuid,
         _provider: ConnectedOAuthProvider,
@@ -445,7 +445,7 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
         Ok(())
     }
 
-    async fn delete_by_owner_and_provider(
+    async fn delete_by_owner_and_token(
         &self,
         _workspace_id: Uuid,
         _owner_user_id: Uuid,
@@ -454,7 +454,7 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
         Ok(())
     }
 
-    async fn has_connections_for_owner_provider(
+    async fn has_connections_for_token(
         &self,
         _owner_user_id: Uuid,
         _provider: ConnectedOAuthProvider,
@@ -462,7 +462,7 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
         Ok(false)
     }
 
-    async fn mark_connections_stale_for_creator(
+    async fn mark_connections_stale_for_token(
         &self,
         _creator_id: Uuid,
         _provider: ConnectedOAuthProvider,

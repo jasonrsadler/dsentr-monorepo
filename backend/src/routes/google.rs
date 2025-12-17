@@ -347,7 +347,11 @@ async fn determine_scope_and_token(
         }
         _ => match state
             .oauth_accounts
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Google)
+            .ensure_valid_access_token(
+                user_id,
+                ConnectedOAuthProvider::Google,
+                query.connection_id,
+            )
             .await
         {
             Ok(tok) => Ok(StoredOAuthTokenProxy {

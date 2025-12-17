@@ -2293,6 +2293,14 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
+        async fn find_by_id(
+            &self,
+            token_id: Uuid,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            let guard = self.tokens.lock().unwrap();
+            Ok(guard.values().cloned().find(|token| token.id == token_id))
+        }
+
         async fn find_by_user_and_provider(
             &self,
             user_id: Uuid,
@@ -2308,7 +2316,7 @@ mod tests {
         async fn delete_token(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }
@@ -2328,20 +2336,20 @@ mod tests {
         async fn mark_shared(
             &self,
             user_id: Uuid,
-            provider: ConnectedOAuthProvider,
+            token_id: Uuid,
             is_shared: bool,
         ) -> Result<UserOAuthToken, sqlx::Error> {
-            self.marks
-                .lock()
-                .unwrap()
-                .push((user_id, provider, is_shared));
-
             let mut guard = self.tokens.lock().unwrap();
-            if let Some(token) = guard.get_mut(&provider) {
-                if token.user_id == user_id {
-                    token.is_shared = is_shared;
-                    return Ok(token.clone());
-                }
+            if let Some((provider, token)) = guard
+                .iter_mut()
+                .find(|(_, token)| token.id == token_id && token.user_id == user_id)
+            {
+                token.is_shared = is_shared;
+                self.marks
+                    .lock()
+                    .unwrap()
+                    .push((user_id, *provider, is_shared));
+                return Ok(token.clone());
             }
 
             Err(sqlx::Error::RowNotFound)
@@ -2500,10 +2508,9 @@ mod tests {
                 .collect())
         }
 
-        async fn update_tokens_for_creator(
+        async fn update_tokens_for_token(
             &self,
-            creator_id: Uuid,
-            provider: ConnectedOAuthProvider,
+            user_oauth_token_id: Uuid,
             access_token: String,
             refresh_token: String,
             expires_at: OffsetDateTime,
@@ -2514,7 +2521,7 @@ mod tests {
         ) -> Result<(), sqlx::Error> {
             let mut guard = self.connections.lock().unwrap();
             for record in guard.iter_mut() {
-                if record.owner_user_id == creator_id && record.provider == provider {
+                if record.user_oauth_token_id == user_oauth_token_id {
                     record.access_token = access_token.clone();
                     record.refresh_token = refresh_token.clone();
                     record.expires_at = expires_at;
@@ -2579,18 +2586,18 @@ mod tests {
             self.delete_connection(connection_id).await
         }
 
-        async fn delete_by_owner_and_provider(
+        async fn delete_by_owner_and_token(
             &self,
             workspace_id: Uuid,
             owner_user_id: Uuid,
-            provider: ConnectedOAuthProvider,
+            user_oauth_token_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             let mut guard = self.connections.lock().unwrap();
             let mut deleted_ids = Vec::new();
             guard.retain(|record| {
                 let should_remove = record.workspace_id == workspace_id
                     && record.owner_user_id == owner_user_id
-                    && record.provider == provider;
+                    && record.user_oauth_token_id == user_oauth_token_id;
                 if should_remove {
                     deleted_ids.push(record.id);
                 }
@@ -2602,26 +2609,31 @@ mod tests {
             Ok(())
         }
 
-        async fn has_connections_for_owner_provider(
+        async fn has_connections_for_token(
             &self,
             owner_user_id: Uuid,
-            provider: ConnectedOAuthProvider,
+            user_oauth_token_id: Uuid,
         ) -> Result<bool, sqlx::Error> {
             let guard = self.connections.lock().unwrap();
             Ok(guard
                 .iter()
-                .any(|record| record.owner_user_id == owner_user_id && record.provider == provider))
+                .any(|record| {
+                    record.owner_user_id == owner_user_id
+                        && record.user_oauth_token_id == user_oauth_token_id
+                }))
         }
 
-        async fn mark_connections_stale_for_creator(
+        async fn mark_connections_stale_for_token(
             &self,
             creator_id: Uuid,
-            provider: ConnectedOAuthProvider,
+            user_oauth_token_id: Uuid,
         ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
             let mut guard = self.connections.lock().unwrap();
             let mut affected = Vec::new();
             for record in guard.iter_mut() {
-                if record.owner_user_id == creator_id && record.provider == provider {
+                if record.owner_user_id == creator_id
+                    && record.user_oauth_token_id == user_oauth_token_id
+                {
                     record.expires_at = OffsetDateTime::now_utc() - time::Duration::minutes(5);
                     record.updated_at = OffsetDateTime::now_utc();
                     affected.push(StaleWorkspaceConnection {

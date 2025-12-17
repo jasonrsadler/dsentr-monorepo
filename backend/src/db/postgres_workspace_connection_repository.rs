@@ -248,10 +248,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         .await
     }
 
-    async fn update_tokens_for_creator(
+    async fn update_tokens_for_token(
         &self,
-        creator_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        user_oauth_token_id: Uuid,
         access_token: String,
         refresh_token: String,
         expires_at: OffsetDateTime,
@@ -272,12 +271,10 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 bot_user_id = COALESCE($7, bot_user_id),
                 slack_team_id = COALESCE($8, slack_team_id),
                 incoming_webhook_url = COALESCE($9, incoming_webhook_url)
-            WHERE owner_user_id = $1
-              AND provider = $2::oauth_connection_provider
+            WHERE user_oauth_token_id = $1
             "#,
         )
-        .bind(creator_id)
-        .bind(provider)
+        .bind(user_oauth_token_id)
         .bind(access_token)
         .bind(refresh_token)
         .bind(expires_at)
@@ -361,22 +358,22 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         Ok(())
     }
 
-    async fn delete_by_owner_and_provider(
+    async fn delete_by_owner_and_token(
         &self,
         workspace_id: Uuid,
         owner_user_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        user_oauth_token_id: Uuid,
     ) -> Result<(), sqlx::Error> {
         sqlx::query!(
             r#"
             DELETE FROM workspace_connections
             WHERE workspace_id = $1
               AND owner_user_id = $2
-              AND provider = $3::oauth_connection_provider
+              AND user_oauth_token_id = $3
             "#,
             workspace_id,
             owner_user_id,
-            provider as ConnectedOAuthProvider,
+            user_oauth_token_id,
         )
         .execute(&self.pool)
         .await?;
@@ -384,10 +381,10 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         Ok(())
     }
 
-    async fn has_connections_for_owner_provider(
+    async fn has_connections_for_token(
         &self,
         owner_user_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        user_oauth_token_id: Uuid,
     ) -> Result<bool, sqlx::Error> {
         let exists = sqlx::query_scalar!(
             r#"
@@ -395,11 +392,11 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 SELECT 1
                 FROM workspace_connections
                 WHERE owner_user_id = $1
-                  AND provider = $2::oauth_connection_provider
+                  AND user_oauth_token_id = $2
             )
             "#,
             owner_user_id,
-            provider as ConnectedOAuthProvider,
+            user_oauth_token_id,
         )
         .fetch_one(&self.pool)
         .await?;
@@ -407,10 +404,10 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         Ok(exists.unwrap_or(false))
     }
 
-    async fn mark_connections_stale_for_creator(
+    async fn mark_connections_stale_for_token(
         &self,
         creator_id: Uuid,
-        provider: ConnectedOAuthProvider,
+        user_oauth_token_id: Uuid,
     ) -> Result<Vec<StaleWorkspaceConnection>, sqlx::Error> {
         let rows = sqlx::query(
             r#"
@@ -419,12 +416,12 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 expires_at = now() - INTERVAL '5 minutes',
                 updated_at = now()
             WHERE owner_user_id = $1
-              AND provider = $2
+              AND user_oauth_token_id = $2
             RETURNING id, workspace_id
             "#,
         )
         .bind(creator_id)
-        .bind(provider)
+        .bind(user_oauth_token_id)
         .fetch_all(&self.pool)
         .await?;
 

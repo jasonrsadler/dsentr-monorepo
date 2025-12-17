@@ -118,6 +118,7 @@ pub(crate) async fn execute_sheets(
             workspace_id: Uuid,
             connection_id: Uuid,
             created_by: Uuid,
+            personal_token_id: Uuid,
             account_email: Option<String>,
         },
     }
@@ -152,6 +153,7 @@ pub(crate) async fn execute_sheets(
                     workspace_id,
                     connection_id: connection.id,
                     created_by: connection.owner_user_id,
+                    personal_token_id: connection.user_oauth_token_id,
                     account_email: Some(connection.account_email.clone()),
                 },
             )
@@ -164,11 +166,26 @@ pub(crate) async fn execute_sheets(
                 .filter(|value| !value.is_empty())
                 .and_then(|value| Uuid::parse_str(value).ok());
 
-            let token = state
-                .oauth_accounts
-                .ensure_valid_access_token(run.user_id, ConnectedOAuthProvider::Google)
-                .await
-                .map_err(map_oauth_error)?;
+            let token = match connection_hint {
+                Some(token_id) => state
+                    .oauth_accounts
+                    .ensure_valid_access_token(
+                        run.user_id,
+                        ConnectedOAuthProvider::Google,
+                        Some(token_id),
+                    )
+                    .await
+                    .map_err(map_oauth_error)?,
+                None => state
+                    .oauth_accounts
+                    .ensure_valid_access_token(
+                        run.user_id,
+                        ConnectedOAuthProvider::Google,
+                        None,
+                    )
+                    .await
+                    .map_err(map_oauth_error)?,
+            };
 
             if let Some(expected_id) = connection_hint {
                 if expected_id != token.id {
@@ -245,11 +262,15 @@ pub(crate) async fn execute_sheets(
                 ConnectionContext::Personal {
                     user_id,
                     account_email,
-                    ..
+                    connection_id,
                 } => {
                     if let Err(err) = state
                         .oauth_accounts
-                        .handle_revoked_token(*user_id, ConnectedOAuthProvider::Google)
+                        .handle_revoked_token(
+                            *user_id,
+                            ConnectedOAuthProvider::Google,
+                            *connection_id,
+                        )
                         .await
                     {
                         warn!(
@@ -268,6 +289,7 @@ pub(crate) async fn execute_sheets(
                     workspace_id,
                     connection_id,
                     created_by,
+                    personal_token_id,
                     account_email,
                 } => {
                     if let Err(err) = state
@@ -285,7 +307,11 @@ pub(crate) async fn execute_sheets(
 
                     if let Err(err) = state
                         .oauth_accounts
-                        .handle_revoked_token(*created_by, ConnectedOAuthProvider::Google)
+                        .handle_revoked_token(
+                            *created_by,
+                            ConnectedOAuthProvider::Google,
+                            *personal_token_id,
+                        )
                         .await
                     {
                         warn!(
@@ -597,6 +623,10 @@ mod tests {
             Err(SqlxError::RowNotFound)
         }
 
+        async fn find_by_id(&self, _token_id: Uuid) -> Result<Option<UserOAuthToken>, SqlxError> {
+            Ok(None)
+        }
+
         async fn find_by_user_and_provider(
             &self,
             _user_id: Uuid,
@@ -608,7 +638,7 @@ mod tests {
         async fn delete_token(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
         ) -> Result<(), SqlxError> {
             Ok(())
         }
@@ -623,7 +653,7 @@ mod tests {
         async fn mark_shared(
             &self,
             _user_id: Uuid,
-            _provider: ConnectedOAuthProvider,
+            _token_id: Uuid,
             _is_shared: bool,
         ) -> Result<UserOAuthToken, SqlxError> {
             Err(SqlxError::RowNotFound)
@@ -708,7 +738,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn update_tokens_for_creator(
+        async fn update_tokens_for_token(
             &self,
             _creator_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -754,7 +784,7 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_by_owner_and_provider(
+        async fn delete_by_owner_and_token(
             &self,
             _workspace_id: Uuid,
             _owner_user_id: Uuid,
@@ -763,7 +793,7 @@ mod tests {
             Ok(())
         }
 
-        async fn has_connections_for_owner_provider(
+        async fn has_connections_for_token(
             &self,
             _owner_user_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -771,7 +801,7 @@ mod tests {
             Ok(false)
         }
 
-        async fn mark_connections_stale_for_creator(
+        async fn mark_connections_stale_for_token(
             &self,
             _creator_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -921,6 +951,17 @@ mod tests {
                 Ok(self.record.clone())
             }
 
+            async fn find_by_id(
+                &self,
+                token_id: Uuid,
+            ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+                if self.record.id == token_id {
+                    Ok(Some(self.record.clone()))
+                } else {
+                    Ok(None)
+                }
+            }
+
             async fn find_by_user_and_provider(
                 &self,
                 user_id: Uuid,
@@ -936,7 +977,7 @@ mod tests {
             async fn delete_token(
                 &self,
                 _user_id: Uuid,
-                _provider: ConnectedOAuthProvider,
+                _token_id: Uuid,
             ) -> Result<(), sqlx::Error> {
                 Ok(())
             }
@@ -955,7 +996,7 @@ mod tests {
             async fn mark_shared(
                 &self,
                 _user_id: Uuid,
-                _provider: ConnectedOAuthProvider,
+                _token_id: Uuid,
                 _is_shared: bool,
             ) -> Result<UserOAuthToken, sqlx::Error> {
                 Ok(self.record.clone())
