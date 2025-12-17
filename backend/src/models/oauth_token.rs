@@ -27,6 +27,7 @@ pub struct UserOAuthToken {
     pub refresh_token: String,
     pub expires_at: OffsetDateTime,
     pub account_email: String,
+    pub metadata: serde_json::Value,
     pub is_shared: bool,
     #[allow(dead_code)]
     pub created_at: OffsetDateTime,

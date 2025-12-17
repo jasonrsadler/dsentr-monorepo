@@ -33,3 +33,4 @@
 - Added `IssueReportMessage` plus status/updated_at fields on `IssueReport` to power admin issue threading without leaking secrets.
 - Issue messages now carry `read_by_user_at`/`read_by_admin_at` timestamps so unread badges in user/admin inboxes stay in sync with database state.
 - Connected OAuth provider enum now includes Asana so Asana tokens and workspace connections can be stored and resolved like other providers.
+- `UserOAuthToken` now includes an encrypted `metadata` JSON payload (used to hold Slack webhook details) so persisted rows stay aligned with the new database column.

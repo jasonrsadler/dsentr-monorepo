@@ -12,6 +12,7 @@ pub struct NewUserOAuthToken {
     pub refresh_token: String,
     pub expires_at: OffsetDateTime,
     pub account_email: String,
+    pub metadata: serde_json::Value,
 }
 
 // Helpers for ownership checks and personal token assertions

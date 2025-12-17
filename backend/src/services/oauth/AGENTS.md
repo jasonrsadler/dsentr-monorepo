@@ -25,3 +25,4 @@
 - Workspace OAuth service tests implement the new overage subscription item accessors on workspace repositories so billing schema changes compile without affecting OAuth behavior.
  - Added Asana OAuth provider configuration and token handling so Asana connections can be exchanged, refreshed, revoked, and promoted like other providers.
  - Slack OAuth handling now encrypts and stores team, bot, and incoming webhook metadata on workspace connections only, keeping webhook URLs out of API responses while enabling webhook posting.
+- Slack webhook metadata from the initial OAuth exchange is now encrypted into personal token metadata immediately, reused during workspace promotion (without relying on refresh responses), and cleared from the personal record after promotion to avoid retaining webhook secrets longer than needed.

@@ -979,6 +979,7 @@ mod tests {
             refresh_token: encrypted_refresh,
             expires_at: now + TimeDuration::hours(2),
             account_email: email.to_string(),
+            metadata: serde_json::json!({}),
             is_shared: false,
             created_at: now,
             updated_at: now,

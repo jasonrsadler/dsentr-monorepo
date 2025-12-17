@@ -25,15 +25,17 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 refresh_token,
                 expires_at,
                 account_email,
+                metadata,
                 updated_at
             )
-            VALUES ($1, NULL, $2::oauth_connection_provider, $3, $4, $5, $6, now())
+            VALUES ($1, NULL, $2::oauth_connection_provider, $3, $4, $5, $6, $7, now())
             ON CONFLICT (user_id, provider)
             DO UPDATE SET
                 access_token = EXCLUDED.access_token,
                 refresh_token = EXCLUDED.refresh_token,
                 expires_at = EXCLUDED.expires_at,
                 account_email = EXCLUDED.account_email,
+                metadata = EXCLUDED.metadata,
                 updated_at = now()
             RETURNING
                 id,
@@ -44,6 +46,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 refresh_token,
                 expires_at,
                 account_email,
+                metadata,
                 is_shared,
                 created_at,
                 updated_at
@@ -56,6 +59,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
             .bind(new_token.refresh_token)
             .bind(new_token.expires_at)
             .bind(new_token.account_email)
+            .bind(new_token.metadata)
             .fetch_one(&self.pool)
             .await
     }
@@ -75,6 +79,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 refresh_token,
                 expires_at,
                 account_email,
+                metadata,
                 is_shared,
                 created_at,
                 updated_at
@@ -119,6 +124,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 refresh_token,
                 expires_at,
                 account_email,
+                metadata,
                 is_shared,
                 created_at,
                 updated_at
@@ -151,6 +157,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
                 refresh_token,
                 expires_at,
                 account_email,
+                metadata,
                 is_shared,
                 created_at,
                 updated_at
