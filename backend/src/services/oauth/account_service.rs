@@ -744,20 +744,15 @@ impl OAuthAccountService {
         let account_email = self.fetch_slack_email(&access_token, user_id).await?;
 
         let slack_meta = {
-            let team_id = response
-                .team
-                .and_then(|team| team.id)
-                .and_then(|value| {
-                    let trimmed = value.trim();
-                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                });
+            let team_id = response.team.and_then(|team| team.id).and_then(|value| {
+                let trimmed = value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            });
 
-            let bot_user_id = response
-                .bot_user_id
-                .and_then(|value| {
-                    let trimmed = value.trim();
-                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                });
+            let bot_user_id = response.bot_user_id.and_then(|value| {
+                let trimmed = value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            });
 
             let incoming_webhook_url = response
                 .incoming_webhook
@@ -766,6 +761,19 @@ impl OAuthAccountService {
                     let trimmed = value.trim();
                     (!trimmed.is_empty()).then(|| trimmed.to_string())
                 });
+            if incoming_webhook_url.is_some() {
+                tracing::info!(
+                    provider = "slack",
+                    has_incoming_webhook = true,
+                    "Slack OAuth exchange returned incoming webhook"
+                );
+            } else {
+                tracing::info!(
+                    provider = "slack",
+                    has_incoming_webhook = false,
+                    "Slack OAuth exchange did not return incoming webhook"
+                );
+            }
 
             if team_id.is_some() || bot_user_id.is_some() || incoming_webhook_url.is_some() {
                 Some(SlackOAuthMetadata {
@@ -1108,13 +1116,13 @@ impl OAuthAccountService {
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
             });
 
-            let incoming_webhook_url = body
-                .incoming_webhook
-                .and_then(|hook| hook.url)
-                .and_then(|value| {
-                    let trimmed = value.trim();
-                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                });
+            let incoming_webhook_url =
+                body.incoming_webhook
+                    .and_then(|hook| hook.url)
+                    .and_then(|value| {
+                        let trimmed = value.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    });
 
             if team_id.is_some() || bot_user_id.is_some() || incoming_webhook_url.is_some() {
                 Some(SlackOAuthMetadata {

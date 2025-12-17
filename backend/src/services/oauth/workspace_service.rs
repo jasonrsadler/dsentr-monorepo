@@ -1979,11 +1979,13 @@ mod tests {
             refresh_token: "slack-refreshed-refresh".into(),
             expires_at: expires_at + Duration::hours(2),
             account_email: "owner@example.com".into(),
-            slack: Some(crate::services::oauth::account_service::SlackOAuthMetadata {
-                team_id: Some("T123".into()),
-                bot_user_id: Some("B456".into()),
-                incoming_webhook_url: Some("https://hooks.slack.com/services/abc".into()),
-            }),
+            slack: Some(
+                crate::services::oauth::account_service::SlackOAuthMetadata {
+                    team_id: Some("T123".into()),
+                    bot_user_id: Some("B456".into()),
+                    incoming_webhook_url: Some("https://hooks.slack.com/services/abc".into()),
+                },
+            ),
         };
         let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
         let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
@@ -2049,11 +2051,13 @@ mod tests {
             refresh_token: "slack-refreshed-refresh".into(),
             expires_at: expires_at + Duration::hours(2),
             account_email: "slack@example.com".into(),
-            slack: Some(crate::services::oauth::account_service::SlackOAuthMetadata {
-                team_id: Some("T123".into()),
-                bot_user_id: Some("B456".into()),
-                incoming_webhook_url: Some("https://hooks.slack.com/services/abc".into()),
-            }),
+            slack: Some(
+                crate::services::oauth::account_service::SlackOAuthMetadata {
+                    team_id: Some("T123".into()),
+                    bot_user_id: Some("B456".into()),
+                    incoming_webhook_url: Some("https://hooks.slack.com/services/abc".into()),
+                },
+            ),
         };
         let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
         let refresher_handle: Arc<dyn WorkspaceTokenRefresher> = Arc::new(refresher.clone());
@@ -2084,19 +2088,11 @@ mod tests {
 
         let slack_meta = refreshed_tokens.slack.as_ref().unwrap();
         assert_eq!(
-            decrypt_secret(
-                &key,
-                result.slack_team_id.as_ref().expect("team id stored")
-            )
-            .unwrap(),
+            decrypt_secret(&key, result.slack_team_id.as_ref().expect("team id stored")).unwrap(),
             slack_meta.team_id.clone().unwrap()
         );
         assert_eq!(
-            decrypt_secret(
-                &key,
-                result.bot_user_id.as_ref().expect("bot user stored")
-            )
-            .unwrap(),
+            decrypt_secret(&key, result.bot_user_id.as_ref().expect("bot user stored")).unwrap(),
             slack_meta.bot_user_id.clone().unwrap()
         );
         assert_eq!(

@@ -4082,11 +4082,7 @@ mod tests {
             bot_user_id: None,
             slack_team_id: None,
             incoming_webhook_url: Some(
-                encrypt_secret(
-                    &encryption_key,
-                    &format!("http://{addr}/slack-webhook"),
-                )
-                .unwrap(),
+                encrypt_secret(&encryption_key, &format!("http://{addr}/slack-webhook")).unwrap(),
             ),
         };
 
