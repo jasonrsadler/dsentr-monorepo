@@ -427,6 +427,10 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
+        async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            Ok(self.token.clone().filter(|token| token.id == token_id))
+        }
+
         async fn find_by_user_and_provider(
             &self,
             user_id: Uuid,
@@ -454,7 +458,12 @@ mod tests {
             &self,
             _user_id: Uuid,
         ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
-            Ok(Vec::new())
+            Ok(self
+                .token
+                .clone()
+                .filter(|token| token.user_id == _user_id)
+                .into_iter()
+                .collect())
         }
 
         async fn mark_shared(
@@ -464,6 +473,23 @@ mod tests {
             _is_shared: bool,
         ) -> Result<UserOAuthToken, sqlx::Error> {
             Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn list_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            if provider != ConnectedOAuthProvider::Slack {
+                return Ok(vec![]);
+            }
+
+            Ok(self
+                .token
+                .clone()
+                .filter(|token| token.user_id == user_id)
+                .into_iter()
+                .collect())
         }
     }
 
@@ -488,7 +514,31 @@ mod tests {
             Ok((connection_id == self.listing.id).then_some(self.listing.clone()))
         }
 
+        async fn get_by_id(&self, connection_id: Uuid) -> Result<WorkspaceConnection, sqlx::Error> {
+            self.find_by_id(connection_id)
+                .await?
+                .ok_or(sqlx::Error::RowNotFound)
+        }
+
         async fn list_for_workspace_provider(
+            &self,
+            _workspace_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            Ok(Vec::new())
+        }
+
+        async fn find_by_source_token(
+            &self,
+            user_oauth_token_id: Uuid,
+        ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
+            if self.listing.user_oauth_token_id == Some(user_oauth_token_id) {
+                return Ok(vec![self.listing.clone()]);
+            }
+            Ok(Vec::new())
+        }
+
+        async fn list_by_workspace_and_provider(
             &self,
             _workspace_id: Uuid,
             _provider: ConnectedOAuthProvider,
@@ -567,6 +617,20 @@ mod tests {
             Err(sqlx::Error::RowNotFound)
         }
 
+        async fn update_tokens_for_connection(
+            &self,
+            _connection_id: Uuid,
+            _access_token: String,
+            _refresh_token: String,
+            _expires_at: OffsetDateTime,
+            _account_email: String,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
+        ) -> Result<WorkspaceConnection, sqlx::Error> {
+            Err(sqlx::Error::RowNotFound)
+        }
+
         async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
         }
@@ -580,6 +644,16 @@ mod tests {
             _workspace_id: Uuid,
             _owner_user_id: Uuid,
             _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn delete_by_owner_and_provider_and_id(
+            &self,
+            _workspace_id: Uuid,
+            _owner_user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _connection_id: Uuid,
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }
@@ -638,6 +712,7 @@ mod tests {
                     redirect_uri: "http://localhost/asana".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
@@ -782,7 +857,7 @@ mod tests {
             workspace_id,
             created_by: user_id,
             owner_user_id: user_id,
-            user_oauth_token_id: Uuid::new_v4(),
+            user_oauth_token_id: Some(Uuid::new_v4()),
             provider: ConnectedOAuthProvider::Slack,
             access_token: encrypted_access.clone(),
             refresh_token: encrypted_refresh.clone(),

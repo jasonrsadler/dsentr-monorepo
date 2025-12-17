@@ -18,6 +18,8 @@ pub const WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED: &str = "connection_promoted
 pub const WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED: &str = "connection_unshared";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+/// Personal or workspace OAuth token rows; multiple entries per provider are allowed and lookups
+/// are indexed by user/provider and provider/workspace scope.
 pub struct UserOAuthToken {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -36,12 +38,14 @@ pub struct UserOAuthToken {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+/// Workspace-level OAuth connections rely on provider/workspace and owner/provider indexes for
+/// connection-id oriented queries.
 pub struct WorkspaceConnection {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub created_by: Uuid,
     pub owner_user_id: Uuid,
-    pub user_oauth_token_id: Uuid,
+    pub user_oauth_token_id: Option<Uuid>,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,

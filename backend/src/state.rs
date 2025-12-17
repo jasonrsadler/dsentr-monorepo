@@ -595,6 +595,7 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
+                require_connection_id: false,
             },
             stripe: crate::config::StripeSettings {
                 client_id: "stub".into(),

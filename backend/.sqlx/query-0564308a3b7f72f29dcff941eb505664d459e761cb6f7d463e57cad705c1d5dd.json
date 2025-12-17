@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO workspace_connections (\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id,\n                provider,\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                updated_at,\n                bot_user_id,\n                slack_team_id,\n                incoming_webhook_url,\n                metadata\n            )\n            VALUES ($1, $2, $3, $4, $5::oauth_connection_provider, $6, $7, $8, $9, now(), $10, $11, $12, $13)\n            RETURNING\n                id,\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id,\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at,\n                bot_user_id,\n                slack_team_id,\n                incoming_webhook_url,\n                metadata\n            ",
+  "query": "\n            SELECT\n                id,\n                workspace_id,\n                created_by,\n                owner_user_id,\n                user_oauth_token_id as \"user_oauth_token_id?\",\n                provider as \"provider: _\",\n                access_token,\n                refresh_token,\n                expires_at,\n                account_email,\n                created_at,\n                updated_at,\n                bot_user_id,\n                slack_team_id,\n                incoming_webhook_url,\n                metadata\n            FROM workspace_connections\n            WHERE user_oauth_token_id = $1\n            ORDER BY created_at ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -25,7 +25,7 @@
       },
       {
         "ordinal": 4,
-        "name": "user_oauth_token_id",
+        "name": "user_oauth_token_id?",
         "type_info": "Uuid"
       },
       {
@@ -98,31 +98,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        {
-          "Custom": {
-            "name": "oauth_connection_provider",
-            "kind": {
-              "Enum": [
-                "google",
-                "microsoft",
-                "slack",
-                "asana"
-              ]
-            }
-          }
-        },
-        "Text",
-        "Text",
-        "Timestamptz",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Jsonb"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -130,7 +106,7 @@
       false,
       false,
       false,
-      false,
+      true,
       false,
       false,
       false,
@@ -144,5 +120,5 @@
       false
     ]
   },
-  "hash": "b3c664c24fe4474babcd6132a8c8b791ce01b3a52ed85e7c258e1269e151cccf"
+  "hash": "0564308a3b7f72f29dcff941eb505664d459e761cb6f7d463e57cad705c1d5dd"
 }

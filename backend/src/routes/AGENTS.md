@@ -28,6 +28,7 @@
 - Added promotion endpoint tests to cover workspace-level OAuth sharing and authorization checks.
 - OAuth route fixtures and Slack/Microsoft helpers now populate encrypted `user_oauth_tokens.metadata` for Slack installs so webhook URLs persist through promotion without relying on refresh responses.
 - Plan change behavior updated: selecting the Workspace plan now initiates a Stripe Checkout session and returns `{ success, checkout_url }` instead of immediately updating user/workspace plans. The handler persists the Checkout `session_id` and desired plan/workspace name in `users.settings.billing.pending_checkout` and stores a `stripe_customer_id` on the user if needed. The Solo path is unchanged and still returns the prior shape with memberships/workflows.
+- OAuth routes honor a configurable `oauth.require_connection_id` flag that warns on missing IDs and returns 400 for refresh/disconnect/revoke requests when enabled so shared-token calls stay explicit.
 
 - Added `POST /api/billing/stripe/webhook` (legacy) and `POST /api/stripe/webhook` (new) to process Stripe webhooks. We verify signatures via the shared `StripeService`.
 - Success handling (`checkout.session.completed`):
@@ -46,6 +47,7 @@
 
 - Workspace OAuth administration now returns `403 Forbidden` when a workspace admin attempts to remove a shared connection that they did not create. The `/api/workspaces/:id/connections/:connection_id` handler surfaces a clear error so clients can prompt users to ask the original sharer to unshare their credential.
 - Workspace OAuth-related routes/tests now construct `WorkspaceOAuthService` with the workspace repository so membership checks run before decrypting connections (workspaces API helpers, Microsoft route helpers, and Stripe/account tests were updated to the new constructor).
+- Workspace OAuth route fixtures now handle nullable `user_oauth_token_id` values so shared connections stay listable after personal token deletion.
 - Shared the `PlanTier` enum from models and updated workspaces/auth/stripe route tests to rely on the repository-level `get_plan` helper so backend plan gating no longer depends on route-local definitions.
 - Workspace OAuth routes serialize and authorize against the new `owner_user_id`/`user_oauth_token_id` fields so multiple shared connections per provider can coexist without clobbering each other in the repository mocks.
 - Workspace OAuth routes now resolve shared credentials by explicit connection IDs: Microsoft Teams APIs require a connection_id + scope, and handlers double-check the resolved workspace before issuing tokens so selecting a stale ID can’t leak another workspace’s credentials. Test repositories were updated to track multiple connections for these scenarios.

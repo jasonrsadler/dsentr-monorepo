@@ -34,3 +34,5 @@
 - Issue messages now carry `read_by_user_at`/`read_by_admin_at` timestamps so unread badges in user/admin inboxes stay in sync with database state.
 - Connected OAuth provider enum now includes Asana so Asana tokens and workspace connections can be stored and resolved like other providers.
 - `UserOAuthToken` now includes an encrypted `metadata` JSON payload (used to hold Slack webhook details) so persisted rows stay aligned with the new database column.
+- Documented the non-unique OAuth token/provider relationship and workspace connection lookup indexes so the models reflect the new schema expectations.
+- Workspace connection token references are now optional to match the nullable FK that is set to NULL when personal tokens are deleted.

@@ -61,7 +61,7 @@ async function expandProviderSections(
 ) {
   for (const name of ['Google', 'Microsoft', 'Slack', 'Asana']) {
     const toggle = await screen.findByRole('button', {
-      name: new RegExp(`^${name}$`, 'i')
+      name: new RegExp(`${name}`, 'i')
     })
     if (toggle.getAttribute('aria-expanded') === 'false') {
       await user.click(toggle)
@@ -79,7 +79,12 @@ describe('IntegrationsTab', () => {
     })
     unshareWorkspaceConnection.mockResolvedValue(undefined)
     disconnectProvider.mockResolvedValue(undefined)
-    refreshProvider.mockResolvedValue(undefined as any)
+    refreshProvider.mockResolvedValue({
+      connected: true,
+      accountEmail: undefined,
+      expiresAt: undefined,
+      lastRefreshedAt: undefined
+    } as any)
   })
 
   it('promotes a personal connection to the workspace', async () => {
@@ -90,6 +95,7 @@ describe('IntegrationsTab', () => {
             scope: 'personal',
             provider: 'google',
             id: 'google-personal',
+            connectionId: 'google-personal',
             connected: true,
             accountEmail: 'owner@example.com',
             expiresAt: '2025-01-01T00:00:00.000Z',
@@ -106,6 +112,7 @@ describe('IntegrationsTab', () => {
             scope: 'personal',
             provider: 'google',
             id: 'google-personal',
+            connectionId: 'google-personal',
             connected: true,
             accountEmail: 'owner@example.com',
             expiresAt: '2025-01-01T00:00:00.000Z',
@@ -119,6 +126,8 @@ describe('IntegrationsTab', () => {
             scope: 'workspace',
             provider: 'google',
             id: 'google-shared',
+            workspaceConnectionId: 'google-shared',
+            connectionId: 'google-personal',
             connected: true,
             accountEmail: 'owner@example.com',
             expiresAt: '2025-01-01T00:00:00.000Z',
@@ -145,6 +154,9 @@ describe('IntegrationsTab', () => {
 
     const initialLastRefreshed = await screen.findAllByText(/Last refreshed/)
     expect(initialLastRefreshed.length).toBeGreaterThan(0)
+    expect(
+      await screen.findByText(/Connection ID: google-personal/i)
+    ).toBeInTheDocument()
 
     const promoteButton = await screen.findByRole('button', {
       name: /Promote to Workspace/i
@@ -174,12 +186,20 @@ describe('IntegrationsTab', () => {
     )
     const lastWorkspaceEntry = workspaceEntries[workspaceEntries.length - 1]
     expect(lastWorkspaceEntry.id).toBe('workspace-generated-id')
+    expect(lastWorkspaceEntry.connectionId).toBe('google-personal')
 
     expect(
-      await screen.findByText(/Promoted to workspace/i)
+      await screen.findByText(/Shared with workspace/i)
     ).toBeInTheDocument()
     expect(screen.getAllByText('Workspace connections')[0]).toBeInTheDocument()
     expect(screen.getByText('Acme Workspace')).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Workspace connection ID:/i)
+    ).toBeInTheDocument()
+
+    expect(
+      await screen.findByText(/Workspace connection ID:/i)
+    ).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getAllByText(/Last refreshed/)).toHaveLength(2)
     })
@@ -192,6 +212,7 @@ describe('IntegrationsTab', () => {
           scope: 'personal',
           provider: 'google',
           id: 'google-personal',
+          connectionId: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
@@ -248,6 +269,7 @@ describe('IntegrationsTab', () => {
           scope: 'personal',
           provider: 'google',
           id: 'google-personal',
+          connectionId: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
@@ -273,11 +295,13 @@ describe('IntegrationsTab', () => {
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
     const refreshButton = await screen.findByRole('button', {
-      name: /Refresh token/i
+      name: /Refresh/i
     })
     await user.click(refreshButton)
 
-    await waitFor(() => expect(refreshProvider).toHaveBeenCalledWith('google'))
+    await waitFor(() =>
+      expect(refreshProvider).toHaveBeenCalledWith('google', 'google-personal')
+    )
     await waitFor(() => expect(setCachedConnections).toHaveBeenCalled())
 
     const lastCall =
@@ -294,8 +318,8 @@ describe('IntegrationsTab', () => {
     expect(personalGoogle.expiresAt).toBe('2025-01-01T00:00:00.000Z')
     expect(personalGoogle.lastRefreshedAt).toBe('2024-12-31T15:30:00.000Z')
 
-    expect(screen.getByText(/Token expires:/i)).toBeInTheDocument()
-    expect(screen.getByText(/Last refreshed:/i)).toBeInTheDocument()
+    expect(screen.getByText(/Token expires/i)).toBeInTheDocument()
+    expect(screen.getByText(/Last refreshed/i)).toBeInTheDocument()
   })
 
   it('warns about breaking workflows when removing a workspace connection', async () => {
@@ -305,6 +329,7 @@ describe('IntegrationsTab', () => {
           scope: 'personal',
           provider: 'google',
           id: 'google-personal',
+          connectionId: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
@@ -317,6 +342,8 @@ describe('IntegrationsTab', () => {
           scope: 'workspace',
           provider: 'google',
           id: 'google-workspace-1',
+          workspaceConnectionId: 'google-workspace-1',
+          connectionId: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
@@ -355,6 +382,7 @@ describe('IntegrationsTab', () => {
           scope: 'personal',
           provider: 'google',
           id: 'google-personal',
+          connectionId: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
@@ -368,6 +396,8 @@ describe('IntegrationsTab', () => {
           scope: 'workspace',
           provider: 'google',
           id: 'google-workspace-1',
+          workspaceConnectionId: 'google-workspace-1',
+          connectionId: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
@@ -410,14 +440,15 @@ describe('IntegrationsTab', () => {
       )
     )
     await waitFor(() =>
-      expect(disconnectProvider).toHaveBeenCalledWith('google')
+      expect(disconnectProvider).toHaveBeenCalledWith(
+        'google',
+        'google-personal'
+      )
     )
 
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /Connect/i })).toHaveLength(
-        4
-      )
-    })
+    expect(
+      await screen.findByRole('button', { name: /Connect Google/i })
+    ).toBeInTheDocument()
   })
 
   it('displays a reconnect warning when the personal credential is revoked', async () => {
@@ -427,6 +458,7 @@ describe('IntegrationsTab', () => {
           scope: 'personal',
           provider: 'google',
           id: 'google-personal',
+          connectionId: 'google-personal',
           connected: false,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
@@ -446,7 +478,7 @@ describe('IntegrationsTab', () => {
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
     expect(
-      await screen.findByText(/connection was revoked/i)
+      await screen.findByText(/personal connections were revoked/i)
     ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: /connect google/i })
@@ -460,6 +492,7 @@ describe('IntegrationsTab', () => {
           scope: 'personal',
           provider: 'google',
           id: 'google-personal',
+          connectionId: 'google-personal',
           connected: true,
           accountEmail: 'owner@example.com',
           expiresAt: '2025-01-01T00:00:00.000Z',
@@ -484,18 +517,95 @@ describe('IntegrationsTab', () => {
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
     const refreshButton = await screen.findByRole('button', {
-      name: /refresh token/i
+      name: /refresh/i
     })
     await user.click(refreshButton)
 
     await waitFor(() => expect(refreshProvider).toHaveBeenCalledTimes(1))
-    expect(markProviderRevoked).toHaveBeenCalledWith('google')
+    expect(markProviderRevoked).not.toHaveBeenCalled()
 
     expect(
-      await screen.findByText(/reconnect to restore access/i)
+      await screen.findByText(/personal connections were revoked/i)
     ).toBeInTheDocument()
+    const lastCache =
+      setCachedConnections.mock.calls[
+        setCachedConnections.mock.calls.length - 1
+      ]
+    const snapshot = lastCache?.[0] as any
+    expect(lastCache?.[1]).toEqual({ workspaceId: 'ws-1' })
+    expect(snapshot.personal[0].requiresReconnect).toBe(true)
+
     expect(
       screen.getByRole('button', { name: /connect google/i })
     ).toBeEnabled()
+  })
+
+  it('renders multiple connections per provider and filters providers', async () => {
+    fetchConnections.mockResolvedValueOnce({
+      personal: [
+        {
+          scope: 'personal',
+          provider: 'google',
+          id: 'google-1',
+          connectionId: 'google-1',
+          connected: true,
+          accountEmail: 'one@example.com',
+          requiresReconnect: false,
+          isShared: false
+        },
+        {
+          scope: 'personal',
+          provider: 'google',
+          id: 'google-2',
+          connectionId: 'google-2',
+          connected: true,
+          accountEmail: 'two@example.com',
+          requiresReconnect: false,
+          isShared: false
+        }
+      ],
+      workspace: [
+        {
+          scope: 'workspace',
+          provider: 'slack',
+          id: 'slack-workspace-1',
+          workspaceConnectionId: 'slack-workspace-1',
+          connectionId: 'slack-conn-1',
+          connected: true,
+          accountEmail: 'slack@example.com',
+          workspaceId: 'ws-1',
+          workspaceName: 'Acme Workspace',
+          sharedByName: 'Owner Example',
+          sharedByEmail: 'owner@example.com',
+          requiresReconnect: false
+        }
+      ]
+    })
+
+    const user = userEvent.setup()
+    render(<IntegrationsTab />)
+
+    await expandProviderSections(user)
+    expect(
+      await screen.findByText(/Connection ID: google-1/i)
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Connection ID: google-2/i)
+    ).toBeInTheDocument()
+
+    const searchInput = screen.getByRole('searchbox', {
+      name: /search providers/i
+    })
+    await user.clear(searchInput)
+    await user.type(searchInput, 'Slack')
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('button', { name: /Google/i })
+      ).not.toBeInTheDocument()
+    })
+    expect(
+      screen.getByRole('button', { name: /Slack.*workspace/i })
+    ).toBeInTheDocument()
   })
 })

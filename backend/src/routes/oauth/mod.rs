@@ -6,7 +6,10 @@ mod prelude;
 #[cfg(test)]
 mod tests;
 
-pub use accounts::{disconnect_connection, list_connections, refresh_connection};
+pub use accounts::{
+    disconnect_connection, get_connection_by_id, list_connections, list_provider_connections,
+    refresh_connection, revoke_connection,
+};
 pub use connect::{
     asana_connect_callback, asana_connect_start, google_connect_callback, google_connect_start,
     microsoft_connect_callback, microsoft_connect_start, slack_connect_callback,

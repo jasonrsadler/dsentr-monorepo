@@ -47,3 +47,4 @@
 - Added Formatter node plumbing with typed transformations (strings, numbers, JSON, dates, booleans) so logic steps can emit strongly-typed outputs without custom code.
  - Wired Asana OAuth settings into AppState so services can use the new provider alongside existing Google/Microsoft/Slack integrations.
 - Config loading honors `DOTENV_DISABLE_BACKEND=1` to skip the repository `.env`, and config tests set/restore the flag so local environment files do not hide missing-variable failures.
+- OAuth routing now includes provider-scoped connection listings, connection-id lookups, and connection-id aware refresh/revoke/disconnect endpoints wired in `main.rs` so targeted OAuth operations are available alongside legacy routes.

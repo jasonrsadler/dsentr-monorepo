@@ -47,3 +47,5 @@
 - Added `resume_at` to `workflow_runs` (with index) so Delay nodes can pause runs and resume later without holding worker leases.
 - Added an enum migration for the `asana` OAuth provider so Asana connections can be stored alongside Google, Microsoft, and Slack credentials.
 - Added `metadata` to `user_oauth_tokens` so encrypted Slack webhook details can persist between the OAuth callback and workspace promotion.
+- Dropped the per-provider uniqueness on `user_oauth_tokens` and replaced workspace connection uniqueness with provider/workspace/owner lookup indexes to support multiple connections per provider.
+- Workspace connection `user_oauth_token_id` now allows NULL with `ON DELETE SET NULL` FK semantics plus an index to keep shared connections intact when personal tokens are removed.
