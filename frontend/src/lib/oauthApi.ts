@@ -32,6 +32,7 @@ export interface WorkspaceConnectionInfo extends BaseConnectionInfo {
   sharedByName?: string
   sharedByEmail?: string
   ownerUserId?: string
+  hasIncomingWebhook?: boolean
 }
 
 export interface ProviderConnectionSet {
@@ -235,6 +236,7 @@ interface WorkspaceConnectionPayload {
   lastRefreshedAt?: string | null
   requiresReconnect?: boolean | null
   owner?: ConnectionOwnerPayload | null
+  hasIncomingWebhook?: boolean | null
 }
 
 type ProviderConnectionBuckets<T> = Partial<Record<OAuthProvider, T[] | null>>
@@ -377,7 +379,8 @@ export async function fetchConnections(
         sharedByName: ownerName,
         sharedByEmail: ownerEmail,
         requiresReconnect: Boolean(entry.requiresReconnect),
-        ownerUserId: normalizeId(entry.owner?.userId)
+        ownerUserId: normalizeId(entry.owner?.userId),
+        hasIncomingWebhook: Boolean(entry.hasIncomingWebhook)
       }
 
       grouped.workspace.push(workspaceInfo)

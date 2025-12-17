@@ -2454,6 +2454,7 @@ mod tests {
                     shared_by_email: None,
                     updated_at: record.updated_at,
                     requires_reconnect: false,
+                    has_incoming_webhook: record.incoming_webhook_url.is_some(),
                 })
                 .collect())
         }
@@ -2479,6 +2480,7 @@ mod tests {
                     shared_by_email: None,
                     updated_at: record.updated_at,
                     requires_reconnect: false,
+                    has_incoming_webhook: record.incoming_webhook_url.is_some(),
                 })
                 .collect())
         }
@@ -2506,6 +2508,9 @@ mod tests {
             refresh_token: String,
             expires_at: OffsetDateTime,
             account_email: String,
+            bot_user_id: Option<String>,
+            slack_team_id: Option<String>,
+            incoming_webhook_url: Option<String>,
         ) -> Result<(), sqlx::Error> {
             let mut guard = self.connections.lock().unwrap();
             for record in guard.iter_mut() {
@@ -2514,6 +2519,15 @@ mod tests {
                     record.refresh_token = refresh_token.clone();
                     record.expires_at = expires_at;
                     record.account_email = account_email.clone();
+                    if bot_user_id.is_some() {
+                        record.bot_user_id = bot_user_id.clone();
+                    }
+                    if slack_team_id.is_some() {
+                        record.slack_team_id = slack_team_id.clone();
+                    }
+                    if incoming_webhook_url.is_some() {
+                        record.incoming_webhook_url = incoming_webhook_url.clone();
+                    }
                     record.updated_at = OffsetDateTime::now_utc();
                 }
             }
@@ -2527,12 +2541,24 @@ mod tests {
             access_token: String,
             refresh_token: String,
             expires_at: OffsetDateTime,
+            bot_user_id: Option<String>,
+            slack_team_id: Option<String>,
+            incoming_webhook_url: Option<String>,
         ) -> Result<WorkspaceConnection, sqlx::Error> {
             let mut guard = self.connections.lock().unwrap();
             if let Some(existing) = guard.iter_mut().find(|record| record.id == connection_id) {
                 existing.access_token = access_token;
                 existing.refresh_token = refresh_token;
                 existing.expires_at = expires_at;
+                if bot_user_id.is_some() {
+                    existing.bot_user_id = bot_user_id;
+                }
+                if slack_team_id.is_some() {
+                    existing.slack_team_id = slack_team_id;
+                }
+                if incoming_webhook_url.is_some() {
+                    existing.incoming_webhook_url = incoming_webhook_url;
+                }
                 existing.updated_at = OffsetDateTime::now_utc();
                 return Ok(existing.clone());
             }

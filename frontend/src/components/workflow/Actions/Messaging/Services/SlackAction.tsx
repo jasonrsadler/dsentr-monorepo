@@ -35,6 +35,7 @@ export interface SlackActionValues {
   connectionId?: string
   accountEmail?: string
   connection?: SlackConnectionSelection
+  postAsUser?: boolean
 }
 
 interface SlackActionProps {
@@ -139,7 +140,8 @@ const EMPTY_SLACK_PARAMS: SlackActionValues = {
   token: '',
   connectionScope: '',
   connectionId: '',
-  accountEmail: ''
+  accountEmail: '',
+  postAsUser: false
 }
 
 const sanitizeSlackPayload = (params: SlackActionValues): SlackActionValues => {
@@ -152,7 +154,8 @@ const sanitizeSlackPayload = (params: SlackActionValues): SlackActionValues => {
     connectionId:
       typeof params.connectionId === 'string' ? params.connectionId : '',
     accountEmail:
-      typeof params.accountEmail === 'string' ? params.accountEmail : ''
+      typeof params.accountEmail === 'string' ? params.accountEmail : '',
+    postAsUser: params.postAsUser === true
   }
 
   if (params.connection) {
@@ -196,6 +199,9 @@ const extractSlackParams = (source: unknown): SlackActionValues => {
   }
   if (typeof slackRecord.accountEmail === 'string') {
     base.accountEmail = slackRecord.accountEmail
+  }
+  if (typeof slackRecord.postAsUser === 'boolean') {
+    base.postAsUser = slackRecord.postAsUser
   }
 
   const connectionSelection =
@@ -817,6 +823,20 @@ export default function SlackAction({
         <p className="text-xs text-slate-500">
           Posting as {activeConnection.accountEmail} via Slack OAuth.
         </p>
+      )}
+      {usingConnection && (
+        <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            checked={Boolean(slackParams.postAsUser)}
+            onChange={(event) =>
+              applySlackPatch({ postAsUser: event.target.checked })
+            }
+            disabled={!effectiveCanEdit}
+          />
+          <span>Post as connected user</span>
+        </label>
       )}
 
       {!usingConnection && (

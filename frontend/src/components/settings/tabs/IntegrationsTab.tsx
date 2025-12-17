@@ -791,6 +791,22 @@ export default function IntegrationsTab({
                       </dd>
                     </div>
                   </dl>
+                  {provider.key === 'slack' &&
+                  workspaceConnections.length > 0 ? (
+                    <div className="mt-3 rounded-md border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                      <div className="font-semibold text-zinc-800 dark:text-zinc-100">
+                        Slack connected to workspace
+                      </div>
+                      <div className="mt-0.5">
+                        Posting method:{' '}
+                        {workspaceConnections.some(
+                          (entry) => entry.hasIncomingWebhook
+                        )
+                          ? 'Incoming Webhook'
+                          : 'OAuth'}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
                     <div className="font-semibold text-zinc-700 dark:text-zinc-200">
                       Workspace connections
@@ -944,7 +960,8 @@ export default function IntegrationsTab({
                 workspaceName,
                 sharedByName,
                 sharedByEmail,
-                requiresReconnect: false
+                requiresReconnect: false,
+                hasIncomingWebhook: false
               }
 
               next.workspace = [...next.workspace, workspaceEntry]

@@ -24,3 +24,4 @@
 - WorkspaceOAuthService test doubles now stub the new workspace quota/billing methods and membership defaults so the expanded repository trait compiles cleanly across routes, services, and mocks.
 - Workspace OAuth service tests implement the new overage subscription item accessors on workspace repositories so billing schema changes compile without affecting OAuth behavior.
  - Added Asana OAuth provider configuration and token handling so Asana connections can be exchanged, refreshed, revoked, and promoted like other providers.
+ - Slack OAuth handling now encrypts and stores team, bot, and incoming webhook metadata on workspace connections only, keeping webhook URLs out of API responses while enabling webhook posting.

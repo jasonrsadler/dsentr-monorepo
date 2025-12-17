@@ -527,6 +527,7 @@ mod tests {
                 shared_by_email: None,
                 updated_at: self.listing.updated_at,
                 requires_reconnect: false,
+                has_incoming_webhook: self.listing.incoming_webhook_url.is_some(),
             }])
         }
 
@@ -546,6 +547,9 @@ mod tests {
             _refresh_token: String,
             _expires_at: OffsetDateTime,
             _account_email: String,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }
@@ -556,6 +560,9 @@ mod tests {
             _access_token: String,
             _refresh_token: String,
             _expires_at: OffsetDateTime,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<WorkspaceConnection, sqlx::Error> {
             Err(sqlx::Error::RowNotFound)
         }

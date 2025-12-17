@@ -227,6 +227,7 @@ pub async fn list_connections(
                 shared_by_email,
                 last_refreshed_at: connection.updated_at,
                 requires_reconnect: connection.requires_reconnect,
+                has_incoming_webhook: connection.has_incoming_webhook,
                 owner,
             },
         );

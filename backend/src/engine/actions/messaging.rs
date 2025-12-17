@@ -196,6 +196,14 @@ async fn send_slack(
         }
     };
 
+    let post_as_user = params
+        .get("postAsUser")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+
+    let mut output_connection_scope: Option<String> = None;
+    let mut output_connection_id: Option<Uuid> = None;
+
     let (token, token_email, connection_context) = if connection_requested {
         match connection_usage {
             NodeConnectionUsage::Workspace(info) => {
@@ -211,78 +219,100 @@ async fn send_slack(
                     .ensure_valid_workspace_token(info.connection_id)
                     .await
                     .map_err(map_workspace_slack_error)?;
-                // --- WORKSPACE SLACK WEBHOOK SHORT-CIRCUIT ---
-                // Webhook path intentionally bypasses OAuth
-                // Do not remove without updating tests
-                if let Some(webhook_url) = connection
-                    .incoming_webhook_url
-                    .as_deref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                {
-                    let message_raw = extract_required_str(params, "message", "Message")?;
-                    let message = templ_str(message_raw, context);
+                output_connection_scope = Some("workspace".to_string());
+                output_connection_id = Some(connection.id);
 
-                    if message.trim().is_empty() {
-                        return Err("Message is required".to_string());
+                if post_as_user {
+                    let token = ensure_slack_access_token(state, run.user_id)
+                        .await
+                        .map_err(|msg| {
+                            format!(
+                                "Posting as the connected user requires your personal Slack OAuth token. {msg}"
+                            )
+                        })?;
+
+                    (
+                        token.access_token.clone(),
+                        Some(token.account_email.clone()),
+                        Some(SlackConnectionContext::Personal {
+                            user_id: run.user_id,
+                            connection_id: token.id,
+                        }),
+                    )
+                } else {
+                    // --- WORKSPACE SLACK WEBHOOK SHORT-CIRCUIT ---
+                    // Webhook path intentionally bypasses OAuth
+                    // Do not remove without updating tests
+                    if let Some(webhook_url) = connection
+                        .incoming_webhook_url
+                        .as_deref()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                    {
+                        let message_raw = extract_required_str(params, "message", "Message")?;
+                        let message = templ_str(message_raw, context);
+
+                        if message.trim().is_empty() {
+                            return Err("Message is required".to_string());
+                        }
+
+                        let response = state
+                            .http_client
+                            .post(webhook_url)
+                            .json(&json!({ "text": message }))
+                            .send()
+                            .await
+                            .map_err(|e| format!("Slack webhook request failed: {e}"))?;
+
+                        let status = response.status();
+                        let body = response
+                            .text()
+                            .await
+                            .map_err(|e| format!("Slack webhook response read failed: {e}"))?;
+
+                        if !status.is_success() {
+                            let detail = body.trim();
+                            return Err(format!(
+                                "Slack webhook returned status {}{}",
+                                status.as_u16(),
+                                if detail.is_empty() {
+                                    "".to_string()
+                                } else {
+                                    format!(": {}", detail)
+                                }
+                            ));
+                        }
+
+                        let output = json!({
+                            "sent": true,
+                            "service": "Slack",
+                            "platform": "Slack",
+                            "deliveryMethod": "Incoming Webhook",
+                            "status": status.as_u16(),
+                            "connectionScope": "workspace",
+                            "connectionId": connection.id.to_string(),
+                        });
+                        return Ok((output, None));
                     }
 
-                    let response = state
-                        .http_client
-                        .post(webhook_url)
-                        .json(&json!({ "text": message }))
-                        .send()
-                        .await
-                        .map_err(|e| format!("Slack webhook request failed: {e}"))?;
-
-                    let status = response.status();
-                    let body = response
-                        .text()
-                        .await
-                        .map_err(|e| format!("Slack webhook response read failed: {e}"))?;
-
-                    if !status.is_success() {
-                        let detail = body.trim();
-                        return Err(format!(
-                            "Slack webhook returned status {}{}",
-                            status.as_u16(),
-                            if detail.is_empty() {
-                                "".to_string()
-                            } else {
-                                format!(": {}", detail)
-                            }
-                        ));
+                    if connection.workspace_id != workspace_id {
+                        return Err(map_workspace_slack_error(WorkspaceOAuthError::NotFound));
                     }
 
-                    let output = json!({
-                        "sent": true,
-                        "service": "Slack",
-                        "platform": "Slack",
-                        "deliveryMethod": "Incoming Webhook",
-                        "status": status.as_u16(),
-                        "connectionScope": "workspace",
-                        "connectionId": connection.id.to_string(),
-                    });
-                    return Ok((output, None));
-                }
+                    if connection.provider != ConnectedOAuthProvider::Slack {
+                        return Err("Selected connection is not a Slack connection".to_string());
+                    }
 
-                if connection.workspace_id != workspace_id {
-                    return Err(map_workspace_slack_error(WorkspaceOAuthError::NotFound));
+                    (
+                        connection.access_token.clone(),
+                        Some(connection.account_email.clone()),
+                        Some(SlackConnectionContext::Workspace {
+                            workspace_id,
+                            connection_id: connection.id,
+                            created_by: connection.owner_user_id,
+                        }),
+                    )
                 }
-
-                if connection.provider != ConnectedOAuthProvider::Slack {
-                    return Err("Selected connection is not a Slack connection".to_string());
-                }
-
-                (
-                    connection.access_token.clone(),
-                    Some(connection.account_email.clone()),
-                    Some(SlackConnectionContext::Workspace {
-                        workspace_id,
-                        connection_id: connection.id,
-                        created_by: connection.owner_user_id,
-                    }),
-                )
             }
             NodeConnectionUsage::User(info) => {
                 let token = ensure_slack_access_token(state, run.user_id).await?;
@@ -462,17 +492,26 @@ async fn send_slack(
         output["oauthAccountEmail"] = Value::String(email);
     }
 
-    if let Some(context) = connection_context {
-        match context {
-            SlackConnectionContext::Personal { connection_id, .. } => {
-                output["connectionScope"] = Value::String("user".to_string());
-                output["connectionId"] = Value::String(connection_id.to_string());
-            }
-            SlackConnectionContext::Workspace { connection_id, .. } => {
-                output["connectionScope"] = Value::String("workspace".to_string());
-                output["connectionId"] = Value::String(connection_id.to_string());
+    if output_connection_scope.is_none() || output_connection_id.is_none() {
+        if let Some(context) = &connection_context {
+            match context {
+                SlackConnectionContext::Personal { connection_id, .. } => {
+                    output_connection_scope = Some("user".to_string());
+                    output_connection_id = Some(*connection_id);
+                }
+                SlackConnectionContext::Workspace { connection_id, .. } => {
+                    output_connection_scope = Some("workspace".to_string());
+                    output_connection_id = Some(*connection_id);
+                }
             }
         }
+    }
+
+    if let Some(scope) = output_connection_scope {
+        output["connectionScope"] = Value::String(scope);
+    }
+    if let Some(connection_id) = output_connection_id {
+        output["connectionId"] = Value::String(connection_id.to_string());
     }
 
     Ok((output, None))
@@ -1918,6 +1957,9 @@ mod tests {
             _refresh_token: String,
             _expires_at: OffsetDateTime,
             _account_email: String,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<(), SqlxError> {
             Ok(())
         }
@@ -1928,6 +1970,9 @@ mod tests {
             access_token: String,
             refresh_token: String,
             expires_at: OffsetDateTime,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<WorkspaceConnection, SqlxError> {
             let mut guard = self.connection.lock().unwrap();
             if let Some(existing) = guard.as_mut() {
@@ -4036,7 +4081,13 @@ mod tests {
             metadata: serde_json::Value::Null,
             bot_user_id: None,
             slack_team_id: None,
-            incoming_webhook_url: Some(format!("http://{addr}/slack-webhook")),
+            incoming_webhook_url: Some(
+                encrypt_secret(
+                    &encryption_key,
+                    &format!("http://{addr}/slack-webhook"),
+                )
+                .unwrap(),
+            ),
         };
 
         let (workspace_service, repo) =

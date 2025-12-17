@@ -52,10 +52,12 @@ pub struct WorkspaceConnectionListing {
     pub shared_by_email: Option<String>,
     pub updated_at: time::OffsetDateTime,
     pub requires_reconnect: bool,
+    pub has_incoming_webhook: bool,
 }
 
 #[async_trait]
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 pub trait WorkspaceConnectionRepository: Send + Sync {
     async fn insert_connection(
         &self,
@@ -97,6 +99,9 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         refresh_token: String,
         expires_at: time::OffsetDateTime,
         account_email: String,
+        bot_user_id: Option<String>,
+        slack_team_id: Option<String>,
+        incoming_webhook_url: Option<String>,
     ) -> Result<(), sqlx::Error>;
 
     async fn update_tokens(
@@ -105,6 +110,9 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         access_token: String,
         refresh_token: String,
         expires_at: time::OffsetDateTime,
+        bot_user_id: Option<String>,
+        slack_team_id: Option<String>,
+        incoming_webhook_url: Option<String>,
     ) -> Result<WorkspaceConnection, sqlx::Error>;
 
     async fn delete_connection(&self, connection_id: Uuid) -> Result<(), sqlx::Error>;
@@ -194,6 +202,9 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         _refresh_token: String,
         _expires_at: time::OffsetDateTime,
         _account_email: String,
+        _bot_user_id: Option<String>,
+        _slack_team_id: Option<String>,
+        _incoming_webhook_url: Option<String>,
     ) -> Result<(), sqlx::Error> {
         Ok(())
     }
@@ -204,6 +215,9 @@ impl WorkspaceConnectionRepository for NoopWorkspaceConnectionRepository {
         _access_token: String,
         _refresh_token: String,
         _expires_at: time::OffsetDateTime,
+        _bot_user_id: Option<String>,
+        _slack_team_id: Option<String>,
+        _incoming_webhook_url: Option<String>,
     ) -> Result<WorkspaceConnection, sqlx::Error> {
         Err(sqlx::Error::RowNotFound)
     }

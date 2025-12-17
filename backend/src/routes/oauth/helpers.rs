@@ -61,6 +61,8 @@ pub(crate) struct WorkspaceConnectionPayload {
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) last_refreshed_at: OffsetDateTime,
     pub(crate) requires_reconnect: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) has_incoming_webhook: bool,
     pub(crate) owner: ConnectionOwnerPayload,
 }
 

@@ -243,7 +243,8 @@ describe('SlackAction (workflow store integration)', () => {
         token: 'xoxb-token',
         connectionScope: '',
         connectionId: '',
-        accountEmail: ''
+        accountEmail: '',
+        postAsUser: false
       },
       dirty: true,
       hasValidationErrors: false

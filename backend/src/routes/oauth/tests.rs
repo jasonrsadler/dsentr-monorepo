@@ -281,6 +281,7 @@ fn workspace_connection_fixture(
         shared_by_email: Some(shared_by.2.into()),
         updated_at: now - Duration::minutes(5),
         requires_reconnect,
+        has_incoming_webhook: false,
     }
 }
 
@@ -415,6 +416,9 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
         _refresh_token: String,
         _expires_at: OffsetDateTime,
         _account_email: String,
+        _bot_user_id: Option<String>,
+        _slack_team_id: Option<String>,
+        _incoming_webhook_url: Option<String>,
     ) -> Result<(), sqlx::Error> {
         Ok(())
     }
@@ -425,6 +429,9 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
         _access_token: String,
         _refresh_token: String,
         _expires_at: OffsetDateTime,
+        _bot_user_id: Option<String>,
+        _slack_team_id: Option<String>,
+        _incoming_webhook_url: Option<String>,
     ) -> Result<WorkspaceConnection, sqlx::Error> {
         Err(sqlx::Error::RowNotFound)
     }
@@ -518,6 +525,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
         shared_by_email: Some(" alice@example.com ".into()),
         updated_at: workspace_updated_at,
         requires_reconnect: false,
+        has_incoming_webhook: false,
     };
 
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
@@ -1024,6 +1032,7 @@ async fn list_connections_includes_workspace_reconnect_flag() {
         shared_by_email: Some("taylor@example.com".into()),
         updated_at: now - Duration::minutes(5),
         requires_reconnect: true,
+        has_incoming_webhook: false,
     };
 
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =

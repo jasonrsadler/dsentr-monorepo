@@ -716,6 +716,9 @@ mod tests {
             _refresh_token: String,
             _expires_at: OffsetDateTime,
             _account_email: String,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<(), SqlxError> {
             Ok(())
         }
@@ -726,6 +729,9 @@ mod tests {
             access_token: String,
             refresh_token: String,
             expires_at: OffsetDateTime,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<WorkspaceConnection, SqlxError> {
             let mut guard = self.connection.lock().unwrap();
             if let Some(existing) = guard.as_mut() {

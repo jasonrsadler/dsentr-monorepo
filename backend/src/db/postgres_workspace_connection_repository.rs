@@ -165,7 +165,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 owner.last_name AS shared_by_last_name,
                 owner.email AS shared_by_email,
                 wc.updated_at,
-                (owner_token.id IS NULL) AS requires_reconnect
+                (owner_token.id IS NULL) AS requires_reconnect,
+                (wc.incoming_webhook_url IS NOT NULL) AS has_incoming_webhook
             FROM workspace_connections wc
             JOIN workspaces w ON w.id = wc.workspace_id
             LEFT JOIN users owner ON owner.id = wc.owner_user_id
@@ -198,7 +199,8 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 owner.last_name AS shared_by_last_name,
                 owner.email AS shared_by_email,
                 wc.updated_at,
-                (owner_token.id IS NULL) AS requires_reconnect
+                (owner_token.id IS NULL) AS requires_reconnect,
+                (wc.incoming_webhook_url IS NOT NULL) AS has_incoming_webhook
             FROM workspace_connections wc
             JOIN workspace_members wm ON wm.workspace_id = wc.workspace_id
             JOIN workspaces w ON w.id = wc.workspace_id
@@ -254,6 +256,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         refresh_token: String,
         expires_at: OffsetDateTime,
         account_email: String,
+        bot_user_id: Option<String>,
+        slack_team_id: Option<String>,
+        incoming_webhook_url: Option<String>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
@@ -264,11 +269,11 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 expires_at = $5,
                 account_email = $6,
                 updated_at = now(),
-                bot_user_id = NULL,
-                slack_team_id = NULL,
-                incoming_webhook_url = NULL
+                bot_user_id = COALESCE($7, bot_user_id),
+                slack_team_id = COALESCE($8, slack_team_id),
+                incoming_webhook_url = COALESCE($9, incoming_webhook_url)
             WHERE owner_user_id = $1
-              AND provider = $2
+              AND provider = $2::oauth_connection_provider
             "#,
         )
         .bind(creator_id)
@@ -277,6 +282,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         .bind(refresh_token)
         .bind(expires_at)
         .bind(account_email)
+        .bind(bot_user_id)
+        .bind(slack_team_id)
+        .bind(incoming_webhook_url)
         .execute(&self.pool)
         .await?;
 
@@ -289,6 +297,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         access_token: String,
         refresh_token: String,
         expires_at: OffsetDateTime,
+        bot_user_id: Option<String>,
+        slack_team_id: Option<String>,
+        incoming_webhook_url: Option<String>,
     ) -> Result<WorkspaceConnection, sqlx::Error> {
         sqlx::query_as!(
             WorkspaceConnection,
@@ -299,9 +310,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 refresh_token = $3,
                 expires_at = $4,
                 updated_at = now(),
-                bot_user_id = NULL,
-                slack_team_id = NULL,
-                incoming_webhook_url = NULL
+                bot_user_id = COALESCE($5, bot_user_id),
+                slack_team_id = COALESCE($6, slack_team_id),
+                incoming_webhook_url = COALESCE($7, incoming_webhook_url)
             WHERE id = $1
             RETURNING
                 id,
@@ -325,6 +336,9 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             access_token,
             refresh_token,
             expires_at,
+            bot_user_id,
+            slack_team_id,
+            incoming_webhook_url,
         )
         .fetch_one(&self.pool)
         .await

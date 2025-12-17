@@ -47,6 +47,14 @@ pub struct AuthorizationTokens {
     pub refresh_token: String,
     pub expires_at: OffsetDateTime,
     pub account_email: String,
+    pub slack: Option<SlackOAuthMetadata>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SlackOAuthMetadata {
+    pub team_id: Option<String>,
+    pub bot_user_id: Option<String>,
+    pub incoming_webhook_url: Option<String>,
 }
 
 #[derive(Error, Debug)]
@@ -235,6 +243,8 @@ impl OAuthAccountService {
 
         let encrypted_access = encrypt_secret(&self.encryption_key, &tokens.access_token)?;
         let encrypted_refresh = encrypt_secret(&self.encryption_key, &tokens.refresh_token)?;
+        let encrypted_access_clone = encrypted_access.clone();
+        let encrypted_refresh_clone = encrypted_refresh.clone();
 
         let stored = self
             .repo
@@ -247,6 +257,45 @@ impl OAuthAccountService {
                 account_email: tokens.account_email.clone(),
             })
             .await?;
+
+        if stored.is_shared {
+            let (bot_user_id, slack_team_id, incoming_webhook_url) =
+                if let Some(slack) = tokens.slack.as_ref() {
+                    (
+                        slack
+                            .bot_user_id
+                            .as_deref()
+                            .map(|value| encrypt_secret(&self.encryption_key, value))
+                            .transpose()?,
+                        slack
+                            .team_id
+                            .as_deref()
+                            .map(|value| encrypt_secret(&self.encryption_key, value))
+                            .transpose()?,
+                        slack
+                            .incoming_webhook_url
+                            .as_deref()
+                            .map(|value| encrypt_secret(&self.encryption_key, value))
+                            .transpose()?,
+                    )
+                } else {
+                    (None, None, None)
+                };
+
+            self.workspace_connections
+                .update_tokens_for_creator(
+                    user_id,
+                    provider,
+                    encrypted_access_clone,
+                    encrypted_refresh_clone,
+                    tokens.expires_at,
+                    tokens.account_email.clone(),
+                    bot_user_id,
+                    slack_team_id,
+                    incoming_webhook_url,
+                )
+                .await?;
+        }
 
         Ok(StoredOAuthToken {
             id: stored.id,
@@ -330,6 +379,29 @@ impl OAuthAccountService {
             let encrypted_access = encrypt_secret(&self.encryption_key, &refreshed.access_token)?;
             let encrypted_refresh = encrypt_secret(&self.encryption_key, &refreshed.refresh_token)?;
 
+            let (bot_user_id, slack_team_id, incoming_webhook_url) =
+                if let Some(slack) = refreshed.slack.as_ref() {
+                    (
+                        slack
+                            .bot_user_id
+                            .as_deref()
+                            .map(|value| encrypt_secret(&self.encryption_key, value))
+                            .transpose()?,
+                        slack
+                            .team_id
+                            .as_deref()
+                            .map(|value| encrypt_secret(&self.encryption_key, value))
+                            .transpose()?,
+                        slack
+                            .incoming_webhook_url
+                            .as_deref()
+                            .map(|value| encrypt_secret(&self.encryption_key, value))
+                            .transpose()?,
+                    )
+                } else {
+                    (None, None, None)
+                };
+
             let updated = self
                 .repo
                 .upsert_token(NewUserOAuthToken {
@@ -357,6 +429,9 @@ impl OAuthAccountService {
                         encrypted_refresh,
                         refreshed.expires_at,
                         account_email,
+                        bot_user_id,
+                        slack_team_id,
+                        incoming_webhook_url,
                     )
                     .await?;
             }
@@ -504,6 +579,7 @@ impl OAuthAccountService {
             refresh_token,
             expires_at,
             account_email: email,
+            slack: None,
         })
     }
 
@@ -571,6 +647,7 @@ impl OAuthAccountService {
             refresh_token,
             expires_at,
             account_email: email,
+            slack: None,
         })
     }
 
@@ -588,6 +665,16 @@ impl OAuthAccountService {
         }
 
         #[derive(Deserialize)]
+        struct SlackTeam {
+            id: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct SlackIncomingWebhook {
+            url: Option<String>,
+        }
+
+        #[derive(Deserialize)]
         struct SlackTokenResponse {
             ok: bool,
             error: Option<String>,
@@ -595,6 +682,9 @@ impl OAuthAccountService {
             refresh_token: Option<String>,
             expires_in: Option<i64>,
             authed_user: Option<SlackAuthedUser>,
+            team: Option<SlackTeam>,
+            bot_user_id: Option<String>,
+            incoming_webhook: Option<SlackIncomingWebhook>,
         }
 
         let response: SlackTokenResponse = self
@@ -653,11 +743,47 @@ impl OAuthAccountService {
 
         let account_email = self.fetch_slack_email(&access_token, user_id).await?;
 
+        let slack_meta = {
+            let team_id = response
+                .team
+                .and_then(|team| team.id)
+                .and_then(|value| {
+                    let trimmed = value.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                });
+
+            let bot_user_id = response
+                .bot_user_id
+                .and_then(|value| {
+                    let trimmed = value.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                });
+
+            let incoming_webhook_url = response
+                .incoming_webhook
+                .and_then(|hook| hook.url)
+                .and_then(|value| {
+                    let trimmed = value.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                });
+
+            if team_id.is_some() || bot_user_id.is_some() || incoming_webhook_url.is_some() {
+                Some(SlackOAuthMetadata {
+                    team_id,
+                    bot_user_id,
+                    incoming_webhook_url,
+                })
+            } else {
+                None
+            }
+        };
+
         Ok(AuthorizationTokens {
             access_token,
             refresh_token,
             expires_at,
             account_email,
+            slack: slack_meta,
         })
     }
 
@@ -727,6 +853,7 @@ impl OAuthAccountService {
             refresh_token,
             expires_at,
             account_email,
+            slack: None,
         })
     }
 
@@ -805,6 +932,7 @@ impl OAuthAccountService {
             refresh_token: new_refresh,
             expires_at,
             account_email: String::new(),
+            slack: None,
         })
     }
 
@@ -867,6 +995,7 @@ impl OAuthAccountService {
             refresh_token: new_refresh,
             expires_at,
             account_email: String::new(),
+            slack: None,
         })
     }
 
@@ -883,6 +1012,16 @@ impl OAuthAccountService {
         }
 
         #[derive(Deserialize)]
+        struct SlackTeam {
+            id: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct SlackIncomingWebhook {
+            url: Option<String>,
+        }
+
+        #[derive(Deserialize)]
         struct SlackRefreshResponse {
             ok: bool,
             error: Option<String>,
@@ -890,6 +1029,9 @@ impl OAuthAccountService {
             refresh_token: Option<String>,
             expires_in: Option<i64>,
             authed_user: Option<SlackAuthedUser>,
+            team: Option<SlackTeam>,
+            bot_user_id: Option<String>,
+            incoming_webhook: Option<SlackIncomingWebhook>,
         }
 
         let response = self
@@ -955,11 +1097,42 @@ impl OAuthAccountService {
             body.authed_user.as_ref().and_then(|user| user.expiration),
         )?;
 
+        let slack_meta = {
+            let team_id = body.team.and_then(|team| team.id).and_then(|value| {
+                let trimmed = value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            });
+
+            let bot_user_id = body.bot_user_id.and_then(|value| {
+                let trimmed = value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            });
+
+            let incoming_webhook_url = body
+                .incoming_webhook
+                .and_then(|hook| hook.url)
+                .and_then(|value| {
+                    let trimmed = value.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                });
+
+            if team_id.is_some() || bot_user_id.is_some() || incoming_webhook_url.is_some() {
+                Some(SlackOAuthMetadata {
+                    team_id,
+                    bot_user_id,
+                    incoming_webhook_url,
+                })
+            } else {
+                None
+            }
+        };
+
         Ok(AuthorizationTokens {
             access_token,
             refresh_token: new_refresh,
             expires_at,
             account_email: String::new(),
+            slack: slack_meta,
         })
     }
 
@@ -1021,6 +1194,7 @@ impl OAuthAccountService {
             refresh_token: new_refresh,
             expires_at,
             account_email: String::new(),
+            slack: None,
         })
     }
 
@@ -1351,6 +1525,9 @@ impl OAuthAccountService {
                 _refresh_token: String,
                 _expires_at: OffsetDateTime,
                 _account_email: String,
+                _bot_user_id: Option<String>,
+                _slack_team_id: Option<String>,
+                _incoming_webhook_url: Option<String>,
             ) -> Result<(), sqlx::Error> {
                 Ok(())
             }
@@ -1361,6 +1538,9 @@ impl OAuthAccountService {
                 _access_token: String,
                 _refresh_token: String,
                 _expires_at: OffsetDateTime,
+                _bot_user_id: Option<String>,
+                _slack_team_id: Option<String>,
+                _incoming_webhook_url: Option<String>,
             ) -> Result<WorkspaceConnection, sqlx::Error> {
                 Err(sqlx::Error::RowNotFound)
             }
@@ -1660,6 +1840,9 @@ mod tests {
             _refresh_token: String,
             _expires_at: OffsetDateTime,
             _account_email: String,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }
@@ -1670,6 +1853,9 @@ mod tests {
             _access_token: String,
             _refresh_token: String,
             _expires_at: OffsetDateTime,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<WorkspaceConnection, sqlx::Error> {
             Err(Error::RowNotFound)
         }
@@ -2182,6 +2368,9 @@ mod tests {
             _refresh_token: String,
             _expires_at: OffsetDateTime,
             _account_email: String,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<(), sqlx::Error> {
             Ok(())
         }
@@ -2192,6 +2381,9 @@ mod tests {
             _access_token: String,
             _refresh_token: String,
             _expires_at: OffsetDateTime,
+            _bot_user_id: Option<String>,
+            _slack_team_id: Option<String>,
+            _incoming_webhook_url: Option<String>,
         ) -> Result<WorkspaceConnection, sqlx::Error> {
             Err(Error::RowNotFound)
         }
@@ -2497,6 +2689,7 @@ mod tests {
             refresh_token: "new-refresh".into(),
             expires_at: now + Duration::hours(2),
             account_email: "updated@example.com".into(),
+            slack: None,
         };
 
         let stored = service
