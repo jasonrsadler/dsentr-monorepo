@@ -442,7 +442,7 @@ export default function SheetsAction({
         const accountEmail = entry.accountEmail?.trim()
         const label = workspaceName
           ? accountEmail
-            ? `${workspaceName} · ${accountEmail}`
+            ? `${workspaceName} – ${accountEmail}`
             : `${workspaceName} credential`
           : accountEmail || 'Workspace credential'
         return {

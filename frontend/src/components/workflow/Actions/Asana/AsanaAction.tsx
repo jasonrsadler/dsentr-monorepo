@@ -1033,10 +1033,11 @@ export default function AsanaAction({
       options.push({
         label: 'Workspace connections',
         options: workspaceEntries.map((entry) => ({
-          label:
-            entry.workspaceName ||
-            entry.accountEmail ||
-            'Workspace Asana connection',
+          label: entry.workspaceName?.trim()
+            ? entry.accountEmail?.trim()
+              ? `${entry.workspaceName.trim()} – ${entry.accountEmail.trim()}`
+              : `${entry.workspaceName.trim()} credential`
+            : entry.accountEmail?.trim() || 'Workspace credential',
           value: connectionValueKey('workspace', entry.id!),
           disabled: Boolean(entry.requiresReconnect)
         }))
