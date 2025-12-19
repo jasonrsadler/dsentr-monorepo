@@ -7,7 +7,7 @@ pub(crate) use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 pub(crate) use reqwest::Url;
 pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use time::{Duration, OffsetDateTime};
-pub(crate) use tracing::{error, warn};
+pub(crate) use tracing::error;
 pub(crate) use urlencoding::encode;
 pub(crate) use uuid::Uuid;
 

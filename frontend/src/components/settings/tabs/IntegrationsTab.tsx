@@ -1,4 +1,4 @@
-﻿import { JSX, useCallback, useEffect, useMemo, useState } from 'react'
+import { JSX, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 
 import SlackIcon from '@/assets/svg-components/third-party/SlackIcon'
@@ -342,6 +342,10 @@ export default function IntegrationsTab({
     ): Promise<boolean> => {
       const provider = connection.provider
       const connectionKey = resolveConnectionKey(connection)
+      if (!connectionKey) {
+        setError('Select a connection with an ID before disconnecting.')
+        return false
+      }
       setBusyProvider(provider)
       setBusyConnectionId(connectionKey)
       try {
@@ -351,16 +355,13 @@ export default function IntegrationsTab({
           }
           await unshareWorkspaceConnection(entry.workspaceId, entry.id)
         }
-        await disconnectProvider(provider, connectionKey ?? undefined)
+        await disconnectProvider(provider, connectionKey)
         setConnections((prev) => {
           const nextPersonal = (prev?.personal ?? [])
             .filter((p) => {
               if (p.provider !== provider) return true
               const personalKey = resolveConnectionKey(p)
-              if (connectionKey) {
-                return personalKey !== connectionKey
-              }
-              return personalKey !== resolveConnectionKey(connection)
+              return personalKey !== connectionKey
             })
             .map((p) => ({ ...p }))
           const sharedIds = new Set(
@@ -397,16 +398,14 @@ export default function IntegrationsTab({
   const handleDisconnect = useCallback(
     (connection: PersonalConnectionRecord) => {
       const connectionKey = resolveConnectionKey(connection)
+      if (!connectionKey) {
+        setError('Select a connection with an ID before disconnecting.')
+        return
+      }
       const workspaceConnections = (connections?.workspace ?? []).filter(
         (entry) => {
           if (entry.provider !== connection.provider) return false
           const entryKey = resolveConnectionKey(entry)
-          if (connectionKey && entryKey) {
-            return entryKey === connectionKey
-          }
-          if (!connectionKey && !entryKey) {
-            return matchesCurrentUser(entry)
-          }
           return entryKey === connectionKey
         }
       )
@@ -419,7 +418,7 @@ export default function IntegrationsTab({
 
       void performDisconnect(connection, [])
     },
-    [connections, matchesCurrentUser, performDisconnect, resolveConnectionKey]
+    [connections, performDisconnect, resolveConnectionKey]
   )
 
   const handleRefresh = useCallback(
@@ -428,13 +427,14 @@ export default function IntegrationsTab({
       target?: PersonalConnectionRecord | WorkspaceConnectionInfo
     ) => {
       const connectionKey = resolveConnectionKey(target)
+      if (!connectionKey) {
+        setError('Select a connection with an ID before refreshing.')
+        return
+      }
       setBusyProvider(provider)
       setBusyConnectionId(connectionKey)
       try {
-        const updated = await refreshProvider(
-          provider,
-          connectionKey ?? undefined
-        )
+        const updated = await refreshProvider(provider, connectionKey)
         setConnections((prev) => {
           const mapConnection = <
             T extends { provider: OAuthProvider } & {
@@ -496,9 +496,6 @@ export default function IntegrationsTab({
             })
             const nextWorkspace = (prev?.workspace ?? []).filter((w) => {
               if (w.provider !== provider) return true
-              if (!connectionKey) {
-                return false
-              }
               const entryKey = resolveConnectionKey(w)
               return entryKey !== null && entryKey !== connectionKey
             })
@@ -795,8 +792,12 @@ export default function IntegrationsTab({
                         <ul className="space-y-2">
                           {personalSorted.map((entry, index) => {
                             const entryKey = resolveConnectionKey(entry)
+                            const hasValidId = Boolean(entryKey)
                             const actionDisabled =
-                              busy || busyConnectionId === entryKey || promoting
+                              busy ||
+                              busyConnectionId === entryKey ||
+                              promoting ||
+                              !hasValidId
                             const requiresReconnect = entry.requiresReconnect
                             return (
                               <li
@@ -820,6 +821,12 @@ export default function IntegrationsTab({
                                     <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
                                       Connection ID: {entryKey ?? 'Unavailable'}
                                     </div>
+                                    {!hasValidId ? (
+                                      <div className="text-[11px] text-amber-600 dark:text-amber-400">
+                                        Refresh the connection list to manage
+                                        this credential.
+                                      </div>
+                                    ) : null}
                                     {entry.isShared ? (
                                       <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
                                         Shared with workspace
@@ -844,19 +851,29 @@ export default function IntegrationsTab({
                                       Disconnect
                                     </button>
                                     {canPromote && !entry.isShared ? (
-                                      <button
-                                        onClick={() =>
-                                          setPromoteDialogConnection(entry)
-                                        }
-                                        disabled={
-                                          actionDisabled ||
-                                          !workspaceId ||
-                                          requiresReconnect
-                                        }
-                                        className="rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                      >
-                                        Promote to workspace
-                                      </button>
+                                      <>
+                                        <button
+                                          onClick={() => {
+                                            if (!hasValidId) return
+                                            setPromoteDialogConnection(entry)
+                                          }}
+                                          disabled={
+                                            actionDisabled ||
+                                            !workspaceId ||
+                                            requiresReconnect ||
+                                            !hasValidId
+                                          }
+                                          className="rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          Promote to workspace
+                                        </button>
+                                        {!hasValidId && (
+                                          <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                            Select a personal connection to
+                                            promote.
+                                          </div>
+                                        )}
+                                      </>
                                     ) : null}
                                   </div>
                                 </div>

@@ -285,11 +285,10 @@ async fn ensure_microsoft_token(
         RequestedScope::Workspace(connection_id) => {
             ensure_workspace_token(state, user_id, connection_id).await
         }
-        RequestedScope::Personal => state
-            .oauth_accounts
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Microsoft)
-            .await
-            .map_err(map_oauth_error),
+        RequestedScope::Personal => Err(JsonResponse::bad_request(
+            "Personal scope requires an explicit OAuth connection",
+        )
+        .into_response()),
     }
 }
 
@@ -795,7 +794,6 @@ mod tests {
                     redirect_uri: "http://localhost/asana".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
-                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
@@ -864,50 +862,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_microsoft_token_defaults_to_personal_connection() {
+    async fn ensure_microsoft_token_rejects_without_explicit_connection() {
         let config = stub_config();
-        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
         let user_id = Uuid::new_v4();
-        let token_id = Uuid::new_v4();
-        let now = OffsetDateTime::now_utc();
 
-        let encrypted_access = encrypt_secret(&encryption_key, "personal-access").unwrap();
-        let encrypted_refresh = encrypt_secret(&encryption_key, "personal-refresh").unwrap();
+        let state = base_state(config);
 
-        let personal_repo = Arc::new(PersonalTokenRepo::new(Some(UserOAuthToken {
-            id: token_id,
-            user_id,
-            workspace_id: None,
-            provider: ConnectedOAuthProvider::Microsoft,
-            access_token: encrypted_access,
-            refresh_token: encrypted_refresh,
-            expires_at: now + Duration::hours(1),
-            account_email: "alice@example.com".into(),
-            metadata: serde_json::json!({}),
-            is_shared: false,
-            created_at: now,
-            updated_at: now,
-        })));
-
-        let workspace_repo = Arc::new(WorkspaceRepoStub::new(None, None, None));
-        let oauth_accounts = Arc::new(OAuthAccountService::new(
-            personal_repo,
-            workspace_repo.clone(),
-            Arc::clone(&encryption_key),
-            Arc::new(Client::new()),
-            &config.oauth,
-        ));
-
-        let mut state = base_state(config);
-        state.oauth_accounts = oauth_accounts;
-        state.workspace_connection_repo = workspace_repo;
-
-        let token = ensure_microsoft_token(&state, user_id, &ConnectionQuery::default())
+        let err = ensure_microsoft_token(&state, user_id, &ConnectionQuery::default())
             .await
-            .expect("should load personal token");
+            .expect_err("should reject without explicit connection");
 
-        assert_eq!(token.access_token, "personal-access");
-        assert!(!token.is_shared);
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

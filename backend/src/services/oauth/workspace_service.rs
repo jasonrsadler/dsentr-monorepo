@@ -693,17 +693,16 @@ impl WorkspaceOAuthService {
         provider: ConnectedOAuthProvider,
         token_id: Option<Uuid>,
     ) -> Result<UserOAuthToken, WorkspaceOAuthError> {
-        let record = if let Some(token_id) = token_id {
-            self.user_tokens
-                .find_by_id(token_id)
-                .await?
-                .filter(|record| record.provider == provider)
-        } else {
-            self.user_tokens
-                .find_by_user_and_provider(actor_id, provider)
-                .await?
-        }
-        .ok_or(WorkspaceOAuthError::NotFound)?;
+        let Some(token_id) = token_id else {
+            return Err(WorkspaceOAuthError::NotFound);
+        };
+
+        let record = self
+            .user_tokens
+            .find_by_id(token_id)
+            .await?
+            .filter(|record| record.provider == provider)
+            .ok_or(WorkspaceOAuthError::NotFound)?;
 
         // Enforce personal token ownership strictly
         if record.user_id != actor_id || record.workspace_id.is_some() {
@@ -2429,17 +2428,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn promote_connection_copies_encrypted_tokens_and_marks_shared() {
+    async fn promote_connection_with_token_copies_encrypted_tokens_and_marks_shared() {
         let user_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
         let key = Arc::new(vec![7u8; 32]);
         let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
         let encrypted_access = encrypt_secret(&key, "access").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "refresh").unwrap();
+        let token_id = Uuid::new_v4();
 
         let user_repo = Arc::new(InMemoryUserRepo {
             token: Mutex::new(Some(UserOAuthToken {
-                id: Uuid::new_v4(),
+                id: token_id,
                 user_id,
                 workspace_id: None,
                 provider: ConnectedOAuthProvider::Google,
@@ -2481,7 +2481,12 @@ mod tests {
         );
 
         let result = service
-            .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Google)
+            .promote_connection_with_token(
+                workspace_id,
+                user_id,
+                ConnectedOAuthProvider::Google,
+                Some(token_id),
+            )
             .await
             .expect("promotion succeeds");
 
@@ -2502,7 +2507,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn promote_slack_connection_copies_tokens_and_marks_shared() {
+    async fn promote_connection_with_token_copies_slack_tokens_and_marks_shared() {
         let user_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
         let key = Arc::new(vec![9u8; 32]);
@@ -2512,6 +2517,7 @@ mod tests {
         let slack_team = "T123";
         let bot_user = "B456";
         let webhook_url = "https://hooks.slack.com/services/abc";
+        let token_id = Uuid::new_v4();
         let slack_metadata = OAuthTokenMetadata {
             slack: Some(EncryptedSlackOAuthMetadata {
                 team_id: Some(encrypt_secret(&key, slack_team).unwrap()),
@@ -2522,7 +2528,7 @@ mod tests {
 
         let user_repo = Arc::new(InMemoryUserRepo {
             token: Mutex::new(Some(UserOAuthToken {
-                id: Uuid::new_v4(),
+                id: token_id,
                 user_id,
                 workspace_id: None,
                 provider: ConnectedOAuthProvider::Slack,
@@ -2557,7 +2563,12 @@ mod tests {
         );
 
         let result = service
-            .promote_connection(workspace_id, user_id, ConnectedOAuthProvider::Slack)
+            .promote_connection_with_token(
+                workspace_id,
+                user_id,
+                ConnectedOAuthProvider::Slack,
+                Some(token_id),
+            )
             .await
             .expect("promotion succeeds");
 
@@ -2638,12 +2649,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn promote_connection_preserves_other_user_connections() {
+    async fn promote_connection_with_token_preserves_other_user_connections() {
         let workspace_id = Uuid::new_v4();
         let owner_a = Uuid::new_v4();
         let owner_b = Uuid::new_v4();
         let key = Arc::new(vec![5u8; 32]);
         let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
+        let token_id = Uuid::new_v4();
 
         let repo = Arc::new(RecordingWorkspaceRepo::with_connections(vec![
             WorkspaceConnection {
@@ -2668,7 +2680,7 @@ mod tests {
 
         let user_repo = Arc::new(InMemoryUserRepo {
             token: Mutex::new(Some(UserOAuthToken {
-                id: Uuid::new_v4(),
+                id: token_id,
                 user_id: owner_b,
                 workspace_id: None,
                 provider: ConnectedOAuthProvider::Google,
@@ -2693,7 +2705,12 @@ mod tests {
         );
 
         let new_connection = service
-            .promote_connection(workspace_id, owner_b, ConnectedOAuthProvider::Google)
+            .promote_connection_with_token(
+                workspace_id,
+                owner_b,
+                ConnectedOAuthProvider::Google,
+                Some(token_id),
+            )
             .await
             .expect("promotion succeeds for second user");
 
@@ -3981,5 +3998,174 @@ mod tests {
             user_repo.marks(),
             vec![(removed_user_id, ConnectedOAuthProvider::Slack, false)]
         );
+    }
+
+    #[tokio::test]
+    async fn promote_connection_with_token_succeeds_with_explicit_token_id_with_multiple_tokens() {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![31u8; 32]);
+        let now = OffsetDateTime::now_utc();
+
+        let token_a = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&key, "access-a").unwrap(),
+            refresh_token: encrypt_secret(&key, "refresh-a").unwrap(),
+            expires_at: now + Duration::hours(1),
+            account_email: "a@example.com".into(),
+            metadata: serde_json::json!({}),
+            is_shared: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let token_b = UserOAuthToken {
+            id: Uuid::new_v4(),
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&key, "access-b").unwrap(),
+            refresh_token: encrypt_secret(&key, "refresh-b").unwrap(),
+            expires_at: now + Duration::hours(2),
+            account_email: "b@example.com".into(),
+            metadata: serde_json::json!({}),
+            is_shared: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let user_repo = Arc::new(MultiTokenUserRepo::new(vec![
+            token_a.clone(),
+            token_b.clone(),
+        ]));
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
+            key.clone(),
+        );
+
+        let connection = service
+            .promote_connection_with_token(
+                workspace_id,
+                user_id,
+                ConnectedOAuthProvider::Google,
+                Some(token_b.id),
+            )
+            .await
+            .expect("promotion succeeds");
+
+        assert_eq!(connection.user_oauth_token_id, Some(token_b.id));
+        assert_eq!(connection.access_token, token_b.access_token);
+        assert_eq!(connection.refresh_token, token_b.refresh_token);
+
+        let tokens = user_repo.tokens();
+        let shared_for_b = tokens
+            .iter()
+            .find(|token| token.id == token_b.id)
+            .expect("token b present");
+        let shared_for_a = tokens
+            .iter()
+            .find(|token| token.id == token_a.id)
+            .expect("token a present");
+
+        assert!(shared_for_b.is_shared);
+        assert!(!shared_for_a.is_shared);
+    }
+
+    #[tokio::test]
+    async fn promote_connection_with_token_fails_when_no_token_id_supplied() {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![42u8; 32]);
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(Some(UserOAuthToken {
+                id: Uuid::new_v4(),
+                user_id,
+                workspace_id: None,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypt_secret(&key, "access").unwrap(),
+                refresh_token: encrypt_secret(&key, "refresh").unwrap(),
+                expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+                account_email: "user@example.com".into(),
+                metadata: serde_json::json!({}),
+                is_shared: false,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            })),
+            shared_flag: Mutex::new(false),
+        });
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
+            key,
+        );
+
+        let err = service
+            .promote_connection_with_token(
+                workspace_id,
+                user_id,
+                ConnectedOAuthProvider::Google,
+                None,
+            )
+            .await
+            .expect_err("promotion should fail when no token ID supplied");
+
+        assert!(matches!(err, WorkspaceOAuthError::NotFound));
+    }
+
+    #[tokio::test]
+    async fn promote_connection_with_token_fails_on_provider_mismatch() {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let key = Arc::new(vec![99u8; 32]);
+        let token_id = Uuid::new_v4();
+
+        let user_repo = Arc::new(InMemoryUserRepo {
+            token: Mutex::new(Some(UserOAuthToken {
+                id: token_id,
+                user_id,
+                workspace_id: None,
+                provider: ConnectedOAuthProvider::Google,
+                access_token: encrypt_secret(&key, "access").unwrap(),
+                refresh_token: encrypt_secret(&key, "refresh").unwrap(),
+                expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+                account_email: "user@example.com".into(),
+                metadata: serde_json::json!({}),
+                is_shared: false,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+            })),
+            shared_flag: Mutex::new(false),
+        });
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let service = WorkspaceOAuthService::new(
+            user_repo.clone(),
+            noop_membership_repo(),
+            workspace_repo.clone(),
+            OAuthAccountService::test_stub() as Arc<dyn WorkspaceTokenRefresher>,
+            key,
+        );
+
+        let err = service
+            .promote_connection_with_token(
+                workspace_id,
+                user_id,
+                ConnectedOAuthProvider::Slack,
+                Some(token_id),
+            )
+            .await
+            .expect_err("promotion should fail on provider mismatch");
+
+        assert!(matches!(err, WorkspaceOAuthError::NotFound));
     }
 }

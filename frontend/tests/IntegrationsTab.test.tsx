@@ -540,6 +540,123 @@ describe('IntegrationsTab', () => {
     ).toBeEnabled()
   })
 
+  it('disables refresh and disconnect when no connection ID is available', async () => {
+    fetchConnections.mockResolvedValueOnce({
+      personal: [
+        {
+          scope: 'personal',
+          provider: 'google',
+          id: null,
+          connectionId: null,
+          connected: true,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+          requiresReconnect: false,
+          isShared: false
+        }
+      ],
+      workspace: []
+    })
+
+    const user = userEvent.setup()
+    render(<IntegrationsTab />)
+
+    await expandProviderSections(user)
+    await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+
+    const refreshButton = await screen.findByRole('button', {
+      name: /refresh/i
+    })
+    const disconnectButton = await screen.findByRole('button', {
+      name: /disconnect/i
+    })
+
+    expect(refreshButton).toBeDisabled()
+    expect(disconnectButton).toBeDisabled()
+  })
+
+  it('refreshes and disconnects using explicit connection IDs', async () => {
+    fetchConnections.mockResolvedValueOnce({
+      personal: [
+        {
+          scope: 'personal',
+          provider: 'google',
+          id: 'google-1',
+          connectionId: 'google-1',
+          connected: true,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+          requiresReconnect: false,
+          isShared: false
+        }
+      ],
+      workspace: []
+    })
+
+    const user = userEvent.setup()
+    render(<IntegrationsTab />)
+
+    await expandProviderSections(user)
+    await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
+
+    const refreshButton = await screen.findByRole('button', {
+      name: /refresh/i
+    })
+    await user.click(refreshButton)
+
+    await waitFor(() =>
+      expect(refreshProvider).toHaveBeenCalledWith('google', 'google-1')
+    )
+
+    const disconnectButton = await screen.findByRole('button', {
+      name: /disconnect/i
+    })
+    await user.click(disconnectButton)
+
+    await waitFor(() =>
+      expect(disconnectProvider).toHaveBeenCalledWith('google', 'google-1')
+    )
+  })
+
+  it('surfaces missing connection ID errors from the API', async () => {
+    fetchConnections.mockResolvedValueOnce({
+      personal: [
+        {
+          scope: 'personal',
+          provider: 'google',
+          id: 'google-1',
+          connectionId: 'google-1',
+          connected: true,
+          accountEmail: 'owner@example.com',
+          expiresAt: '2025-01-01T00:00:00.000Z',
+          lastRefreshedAt: '2024-12-31T15:30:00.000Z',
+          requiresReconnect: false,
+          isShared: false
+        }
+      ],
+      workspace: []
+    })
+    refreshProvider.mockRejectedValueOnce(
+      new Error('connectionId is required to refresh provider tokens')
+    )
+
+    const user = userEvent.setup()
+    render(<IntegrationsTab />)
+
+    await expandProviderSections(user)
+    const refreshButton = await screen.findByRole('button', {
+      name: /refresh/i
+    })
+    await user.click(refreshButton)
+
+    await waitFor(() => expect(refreshProvider).toHaveBeenCalledTimes(1))
+    expect(
+      await screen.findByText(/connectionid is required/i)
+    ).toBeInTheDocument()
+  })
+
   it('renders multiple connections per provider and filters providers', async () => {
     fetchConnections.mockResolvedValueOnce({
       personal: [

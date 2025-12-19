@@ -34,7 +34,7 @@ use crate::routes::auth::{
 };
 use crate::services::{
     oauth::{
-        account_service::{AuthorizationTokens, OAuthAccountError, OAuthAccountService},
+        account_service::{OAuthAccountError, OAuthAccountService},
         github::mock_github_oauth::MockGitHubOAuth,
         google::mock_google_oauth::MockGoogleOAuth,
         workspace_service::WorkspaceOAuthService,
@@ -65,10 +65,6 @@ use super::{
 };
 
 fn stub_config() -> Arc<Config> {
-    stub_config_with_flag(false)
-}
-
-fn stub_config_with_flag(require_connection_id: bool) -> Arc<Config> {
     Arc::new(Config {
         database_url: "postgres://localhost".into(),
         frontend_origin: "http://localhost:5173".into(),
@@ -95,7 +91,6 @@ fn stub_config_with_flag(require_connection_id: bool) -> Arc<Config> {
                 redirect_uri: "http://localhost/asana".into(),
             },
             token_encryption_key: vec![0u8; 32],
-            require_connection_id,
         },
         api_secrets_encryption_key: vec![1u8; 32],
         stripe: StripeSettings {
@@ -363,6 +358,112 @@ impl UserOAuthTokenRepository for TokenRepo {
         provider: ConnectedOAuthProvider,
     ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
         Ok(self
+            .tokens
+            .iter()
+            .filter(|token| token.user_id == user_id && token.provider == provider)
+            .cloned()
+            .collect())
+    }
+}
+
+#[derive(Clone)]
+struct SpyTokenRepo {
+    inner: TokenRepo,
+    calls: Arc<std::sync::Mutex<Vec<&'static str>>>,
+}
+
+impl SpyTokenRepo {
+    fn new(tokens: Vec<UserOAuthToken>) -> Self {
+        Self {
+            inner: TokenRepo { tokens },
+            calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    fn calls(&self) -> Vec<&'static str> {
+        self.calls.lock().unwrap().clone()
+    }
+
+    fn record(&self, label: &'static str) {
+        self.calls.lock().unwrap().push(label);
+    }
+}
+
+#[async_trait]
+impl UserOAuthTokenRepository for SpyTokenRepo {
+    async fn upsert_token(
+        &self,
+        _new_token: NewUserOAuthToken,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        self.record("upsert_token");
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+        self.record("find_by_id");
+        Ok(self
+            .inner
+            .tokens
+            .iter()
+            .find(|token| token.id == token_id)
+            .cloned())
+    }
+
+    async fn find_by_user_and_provider(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+        self.record("find_by_user_and_provider");
+        Ok(self
+            .inner
+            .tokens
+            .iter()
+            .find(|token| token.user_id == user_id && token.provider == provider)
+            .cloned())
+    }
+
+    async fn delete_token(
+        &self,
+        _user_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+    ) -> Result<(), sqlx::Error> {
+        self.record("delete_token");
+        Ok(())
+    }
+
+    async fn list_tokens_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+        self.record("list_tokens_for_user");
+        Ok(self
+            .inner
+            .tokens
+            .iter()
+            .filter(|token| token.user_id == user_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn mark_shared(
+        &self,
+        _user_id: Uuid,
+        _provider: ConnectedOAuthProvider,
+        _is_shared: bool,
+    ) -> Result<UserOAuthToken, sqlx::Error> {
+        self.record("mark_shared");
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn list_by_user_and_provider(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+    ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+        self.record("list_by_user_and_provider");
+        Ok(self
+            .inner
             .tokens
             .iter()
             .filter(|token| token.user_id == user_id && token.provider == provider)
@@ -1390,52 +1491,11 @@ async fn get_connection_by_id_returns_personal_connection() {
 }
 
 #[tokio::test]
-async fn refresh_connection_returns_last_refreshed_timestamp() {
+async fn refresh_connection_rejects_without_connection_id() {
     let config = stub_config();
     let user_id = Uuid::new_v4();
-    let now = OffsetDateTime::now_utc();
-    let expires_at = now + Duration::hours(2);
-    let updated_at = now - Duration::minutes(1);
-    let token_id = Uuid::new_v4();
 
-    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
-        .expect("encrypt access token");
-    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
-        .expect("encrypt refresh token");
-
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![UserOAuthToken {
-            id: token_id,
-            user_id,
-            workspace_id: None,
-            provider: ConnectedOAuthProvider::Google,
-            access_token: encrypted_access,
-            refresh_token: encrypted_refresh,
-            expires_at,
-            account_email: "user@example.com".into(),
-            metadata: serde_json::json!({}),
-            is_shared: false,
-            created_at: updated_at - Duration::hours(1),
-            updated_at,
-        }],
-    });
-
-    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
-        Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
-
-    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
-    let oauth_client = Arc::new(reqwest::Client::new());
-    let oauth_service = Arc::new(OAuthAccountService::new(
-        token_repo,
-        workspace_repo.clone(),
-        encryption_key,
-        oauth_client,
-        &config.oauth,
-    ));
-
-    let mut state = stub_state(config.clone());
-    state.oauth_accounts = oauth_service;
-    state.workspace_connection_repo = workspace_repo;
+    let state = stub_state(config.clone());
 
     let claims = Claims {
         id: user_id.to_string(),
@@ -1452,94 +1512,41 @@ async fn refresh_connection_returns_last_refreshed_timestamp() {
         None,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::OK);
 
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    let json: Value = serde_json::from_slice(&body).expect("response json");
-
-    assert_eq!(json["success"].as_bool(), Some(true));
-    assert_eq!(json["requiresReconnect"].as_bool(), Some(false));
-    assert_eq!(json["accountEmail"].as_str(), Some("user@example.com"));
-    let expected_expires = expires_at
-        .format(&Rfc3339)
-        .expect("format expires timestamp");
-    assert_eq!(json["expiresAt"].as_str(), Some(expected_expires.as_str()));
-    let expected_updated = updated_at
-        .format(&Rfc3339)
-        .expect("format updated timestamp");
-    assert_eq!(
-        json["lastRefreshedAt"].as_str(),
-        Some(expected_updated.as_str())
-    );
-    assert_eq!(
-        json["connectionId"].as_str(),
-        Some(token_id.to_string().as_str())
-    );
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
-async fn refresh_connection_returns_conflict_when_revoked() {
+async fn refresh_connection_missing_connection_id_has_no_side_effects() {
     let config = stub_config();
     let user_id = Uuid::new_v4();
-    let now = OffsetDateTime::now_utc();
-    let token_id = Uuid::new_v4();
 
-    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
-        .expect("encrypt access token");
-    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
-        .expect("encrypt refresh token");
-
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![UserOAuthToken {
-            id: token_id,
-            user_id,
-            workspace_id: None,
-            provider: ConnectedOAuthProvider::Google,
-            access_token: encrypted_access,
-            refresh_token: encrypted_refresh,
-            expires_at: now,
-            account_email: "owner@example.com".into(),
-            metadata: serde_json::json!({}),
-            is_shared: false,
-            created_at: now - Duration::hours(1),
-            updated_at: now - Duration::minutes(2),
-        }],
-    });
-
+    let token = personal_token_fixture(
+        &config,
+        user_id,
+        ConnectedOAuthProvider::Google,
+        "owner@example.com",
+        false,
+    );
+    let spy_repo = Arc::new(SpyTokenRepo::new(vec![token]));
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = spy_repo.clone();
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
-
-    let mut oauth_service = OAuthAccountService::new(
+    let oauth_service = Arc::new(OAuthAccountService::new(
         token_repo,
         workspace_repo.clone(),
         Arc::new(config.oauth.token_encryption_key.clone()),
         Arc::new(reqwest::Client::new()),
         &config.oauth,
-    );
+    ));
 
-    fn revoked_override(
-        provider: ConnectedOAuthProvider,
-        _token: &str,
-    ) -> Result<AuthorizationTokens, OAuthAccountError> {
-        Err(OAuthAccountError::TokenRevoked { provider })
-    }
-
-    oauth_service.set_refresh_override(Some(Arc::new(revoked_override)));
-
-    let mut state = stub_state(config.clone());
-    state.oauth_accounts = Arc::new(oauth_service);
+    let mut state = stub_state(config);
+    state.oauth_accounts = oauth_service;
     state.workspace_connection_repo = workspace_repo;
-
-    let claims = Claims {
-        id: user_id.to_string(),
-        ..stub_claims()
-    };
 
     let response = refresh_connection(
         State(state),
-        AuthSession(claims),
+        AuthSession(claims_for(user_id)),
         Path("google".to_string()),
         Query(ConnectionTarget {
             connection_id: None,
@@ -1548,20 +1555,64 @@ async fn refresh_connection_returns_conflict_when_revoked() {
     )
     .await;
 
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(spy_repo.calls().is_empty(), "token repo should not be invoked");
+}
 
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    let json: Value = serde_json::from_slice(&body).expect("response json");
+#[tokio::test]
+async fn refresh_connection_missing_connection_id_does_not_fallback_to_provider() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let now = OffsetDateTime::now_utc();
+    let token_id = Uuid::new_v4();
 
-    assert_eq!(json["success"].as_bool(), Some(false));
-    assert_eq!(json["requiresReconnect"].as_bool(), Some(true));
-    assert_eq!(
-        json["connectionId"].as_str(),
-        Some(token_id.to_string().as_str())
-    );
-    assert!(json["message"].as_str().is_some());
+    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
+        .expect("encrypt access token");
+    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
+        .expect("encrypt refresh token");
+
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
+        tokens: vec![UserOAuthToken {
+            id: token_id,
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access,
+            refresh_token: encrypted_refresh,
+            expires_at: now + Duration::hours(1),
+            account_email: "fallback@example.com".into(),
+            metadata: serde_json::json!({}),
+            is_shared: false,
+            created_at: now - Duration::hours(1),
+            updated_at: now - Duration::minutes(5),
+        }],
+    });
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        workspace_repo.clone(),
+        Arc::new(config.oauth.token_encryption_key.clone()),
+        Arc::new(reqwest::Client::new()),
+        &config.oauth,
+    ));
+
+    let mut state = stub_state(config);
+    state.oauth_accounts = oauth_service;
+    state.workspace_connection_repo = workspace_repo;
+
+    let response = refresh_connection(
+        State(state),
+        AuthSession(claims_for(user_id)),
+        Path("google".to_string()),
+        Query(ConnectionTarget {
+            connection_id: None,
+        }),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -1628,25 +1679,6 @@ async fn refresh_connection_accepts_connection_id_query() {
         Some(token_id.to_string().as_str())
     );
     assert_eq!(json["accountEmail"].as_str(), Some("query@example.com"));
-}
-
-#[tokio::test]
-async fn refresh_connection_requires_connection_id_when_flag_enabled() {
-    let config = stub_config_with_flag(true);
-    let user_id = Uuid::new_v4();
-
-    let response = refresh_connection(
-        State(stub_state(config)),
-        AuthSession(claims_for(user_id)),
-        Path("google".to_string()),
-        Query(ConnectionTarget {
-            connection_id: None,
-        }),
-        None,
-    )
-    .await;
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -1718,12 +1750,92 @@ async fn disconnect_connection_accepts_connection_id_body() {
 }
 
 #[tokio::test]
-async fn disconnect_connection_requires_connection_id_when_flag_enabled() {
-    let config = stub_config_with_flag(true);
+async fn disconnect_connection_missing_connection_id_has_no_side_effects() {
+    let config = stub_config();
     let user_id = Uuid::new_v4();
+    let token = personal_token_fixture(
+        &config,
+        user_id,
+        ConnectedOAuthProvider::Google,
+        "disconnect@example.com",
+        false,
+    );
+
+    let spy_repo = Arc::new(SpyTokenRepo::new(vec![token]));
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = spy_repo.clone();
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        workspace_repo.clone(),
+        Arc::new(config.oauth.token_encryption_key.clone()),
+        Arc::new(reqwest::Client::new()),
+        &config.oauth,
+    ));
+
+    let mut state = stub_state(config);
+    state.oauth_accounts = oauth_service;
+    state.workspace_connection_repo = workspace_repo;
 
     let response = disconnect_connection(
-        State(stub_state(config)),
+        State(state),
+        AuthSession(claims_for(user_id)),
+        Path("google".to_string()),
+        Query(ConnectionTarget {
+            connection_id: None,
+        }),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(spy_repo.calls().is_empty(), "token repo should not be invoked");
+}
+
+#[tokio::test]
+async fn disconnect_connection_missing_connection_id_does_not_fallback_to_provider() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let now = OffsetDateTime::now_utc();
+    let token_id = Uuid::new_v4();
+
+    let encrypted_access = encrypt_secret(&config.oauth.token_encryption_key, "access-token")
+        .expect("encrypt access token");
+    let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
+        .expect("encrypt refresh token");
+
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
+        tokens: vec![UserOAuthToken {
+            id: token_id,
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access,
+            refresh_token: encrypted_refresh,
+            expires_at: now + Duration::hours(1),
+            account_email: "disconnect@example.com".into(),
+            metadata: serde_json::json!({}),
+            is_shared: false,
+            created_at: now - Duration::hours(1),
+            updated_at: now - Duration::minutes(5),
+        }],
+    });
+    let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+        Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
+    let oauth_service = Arc::new(OAuthAccountService::new(
+        token_repo,
+        workspace_repo.clone(),
+        Arc::new(config.oauth.token_encryption_key.clone()),
+        Arc::new(reqwest::Client::new()),
+        &config.oauth,
+    ));
+
+    let mut state = stub_state(config);
+    state.oauth_accounts = oauth_service;
+    state.workspace_connection_repo = workspace_repo;
+
+    let response = disconnect_connection(
+        State(state),
         AuthSession(claims_for(user_id)),
         Path("google".to_string()),
         Query(ConnectionTarget {
@@ -1805,8 +1917,8 @@ async fn revoke_connection_accepts_connection_id_query() {
 }
 
 #[tokio::test]
-async fn revoke_connection_requires_connection_id_when_flag_enabled() {
-    let config = stub_config_with_flag(true);
+async fn revoke_connection_requires_connection_id() {
+    let config = stub_config();
     let user_id = Uuid::new_v4();
 
     let response = revoke_connection(

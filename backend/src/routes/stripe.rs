@@ -1391,7 +1391,6 @@ mod tests {
                     redirect_uri: "https://app.example.com/oauth/asana".into(),
                 },
                 token_encryption_key: vec![0; 32],
-                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1; 32],
             stripe: StripeSettings {

@@ -307,7 +307,9 @@ async fn determine_scope_and_token(
     query: &ConnectionQuery,
 ) -> Result<StoredOAuthTokenProxy, Response> {
     // Determine requested scope
-    let scope = query.scope.as_deref().unwrap_or("personal");
+    let Some(scope) = query.scope.as_deref() else {
+        return Err(JsonResponse::bad_request("scope is required").into_response());
+    };
 
     match scope {
         "workspace" => {
@@ -345,16 +347,7 @@ async fn determine_scope_and_token(
                 .into_response()),
             }
         }
-        _ => match state
-            .oauth_accounts
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Google)
-            .await
-        {
-            Ok(tok) => Ok(StoredOAuthTokenProxy {
-                access_token: tok.access_token.clone(),
-            }),
-            Err(e) => Err(crate::routes::oauth::map_oauth_error(e)),
-        },
+        _ => Err(JsonResponse::bad_request("unsupported scope").into_response()),
     }
 }
 
