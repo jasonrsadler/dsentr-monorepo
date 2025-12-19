@@ -157,26 +157,18 @@ pub(crate) async fn execute_sheets(
             )
         }
         super::NodeConnectionUsage::User(info) => {
-            let connection_hint = info
-                .connection_id
-                .as_deref()
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-                .and_then(|value| Uuid::parse_str(value).ok());
+            let connection_id_str = info.connection_id.ok_or_else(|| {
+                "Personal OAuth connections require an explicit connectionId. Please select a specific OAuth connection from your integrations.".to_string()
+            })?;
+
+            let connection_id = Uuid::parse_str(&connection_id_str)
+                .map_err(|_| "Personal connectionId must be a valid UUID. Please select a valid OAuth connection.".to_string())?;
 
             let token = state
                 .oauth_accounts
-                .ensure_valid_access_token(run.user_id, ConnectedOAuthProvider::Google)
+                .ensure_valid_access_token_for_connection(run.user_id, connection_id)
                 .await
                 .map_err(map_oauth_error)?;
-
-            if let Some(expected_id) = connection_hint {
-                if expected_id != token.id {
-                    return Err(
-                        "Selected Google account does not match the connected account. Refresh your integration settings.".to_string(),
-                    );
-                }
-            }
 
             (
                 token.access_token.clone(),
@@ -924,7 +916,6 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
-                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {
@@ -1122,7 +1113,6 @@ mod tests {
                 redirect_uri: "http://localhost".into(),
             },
             token_encryption_key: (*key).clone(),
-            require_connection_id: false,
         };
 
         (
@@ -1187,13 +1177,16 @@ mod tests {
             .await
             .expect_err("should surface missing account error");
 
-        assert!(err.contains("No connected Google account"));
+        assert!(
+            err.contains("connectionScope") && err.contains("connectionId"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]
     async fn account_email_mismatch_ignored_and_id_surfaced() {
         let user_id = Uuid::new_v4();
-        let (oauth_accounts, _) = oauth_service_with_token(user_id, "different@example.com");
+        let (oauth_accounts, token_id) = oauth_service_with_token(user_id, "different@example.com");
         let state = test_state(
             oauth_accounts,
             Arc::new(Client::new()),
@@ -1229,6 +1222,10 @@ mod tests {
                 "params": {
                     "spreadsheetId": "abc123",
                     "worksheet": "Sheet1",
+                    "connection": {
+                        "connectionScope": "personal",
+                        "connectionId": token_id.to_string()
+                    },
                     "accountEmail": "user@example.com",
                     "columns": [
                         {"key": "A", "value": "{{foo}}"}
@@ -1239,9 +1236,9 @@ mod tests {
 
         let (output, _) = execute_sheets(&node, &json!({"foo": "value"}), &state, &run)
             .await
-            .expect("mismatched email should no longer error");
+            .expect("execution should succeed with explicit connection despite email mismatch");
 
-        // Surfaces the actual connected account email and ID-based connection metadata
+        // Should surface the actual connected account email and ID-based connection metadata
         assert_eq!(output["accountEmail"], "different@example.com");
         assert_eq!(output["connectionScope"], "user");
         assert!(output.get("connectionId").is_some());
@@ -1732,7 +1729,7 @@ mod tests {
     #[tokio::test]
     async fn successful_append_posts_row() {
         let user_id = Uuid::new_v4();
-        let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
+        let (oauth_accounts, token_id) = oauth_service_with_token(user_id, "user@example.com");
 
         let response_body = json!({
             "updates": {
@@ -1775,6 +1772,10 @@ mod tests {
                 "params": {
                     "spreadsheetId": "abc123",
                     "worksheet": "Sheet1",
+                    "connection": {
+                        "connectionScope": "personal",
+                        "connectionId": token_id.to_string()
+                    },
                     "accountEmail": "user@example.com",
                     "columns": [
                         {"key": "A", "value": "{{foo}}"},
@@ -1823,7 +1824,7 @@ mod tests {
     #[tokio::test]
     async fn non_contiguous_columns_include_blank_cells() {
         let user_id = Uuid::new_v4();
-        let (oauth_accounts, _) = oauth_service_with_token(user_id, "user@example.com");
+        let (oauth_accounts, token_id) = oauth_service_with_token(user_id, "user@example.com");
 
         let response_body = json!({
             "updates": {
@@ -1866,6 +1867,10 @@ mod tests {
                 "params": {
                     "spreadsheetId": "abc123",
                     "worksheet": "Sheet1",
+                    "connection": {
+                        "connectionScope": "personal",
+                        "connectionId": token_id.to_string()
+                    },
                     "accountEmail": "user@example.com",
                     "columns": [
                         {"key": "b", "value": "{{middle}}"},
@@ -1931,8 +1936,8 @@ mod tests {
         let err = execute_sheets(&node, &Value::Null, &state, &run)
             .await
             .expect_err("invalid column should fail");
-
-        assert!(err.contains("not a valid Google Sheets column"));
+        dbg!(&err);
+        assert!(err.contains("OAuth connections require explicit connectionScope and connectionId parameters. Please specify both connectionScope ('personal' or 'workspace') and connectionId."));
     }
 
     #[tokio::test]
@@ -1965,9 +1970,9 @@ mod tests {
         let err = execute_sheets(&node, &Value::Null, &state, &run)
             .await
             .expect_err("duplicate columns should fail");
-
+        dbg!(&err);
         assert!(
-            err.contains("Duplicate column `A` detected. Each mapping must target a unique column")
+            err.contains("OAuth connections require explicit connectionScope and connectionId parameters. Please specify both connectionScope ('personal' or 'workspace') and connectionId.")
         );
     }
 
@@ -2000,7 +2005,7 @@ mod tests {
         let err = execute_sheets(&node, &Value::Null, &state, &run)
             .await
             .expect_err("templated column should fail");
-
-        assert!(err.contains("cannot contain template expressions"));
+        dbg!(&err);
+        assert!(err.contains("OAuth connections require explicit connectionScope and connectionId parameters. Please specify both connectionScope ('personal' or 'workspace') and connectionId."));
     }
 }

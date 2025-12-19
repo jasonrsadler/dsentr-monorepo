@@ -378,20 +378,6 @@ impl OAuthAccountService {
         Ok(())
     }
 
-    pub async fn ensure_valid_access_token(
-        &self,
-        user_id: Uuid,
-        provider: ConnectedOAuthProvider,
-    ) -> Result<StoredOAuthToken, OAuthAccountError> {
-        let record = self
-            .repo
-            .find_by_user_and_provider(user_id, provider)
-            .await?
-            .ok_or(OAuthAccountError::NotFound)?;
-
-        self.ensure_valid_access_token_from_record(record).await
-    }
-
     pub async fn ensure_valid_access_token_for_connection(
         &self,
         user_id: Uuid,
@@ -1849,7 +1835,6 @@ impl OAuthAccountService {
                 redirect_uri: "http://localhost".into(),
             },
             token_encryption_key: vec![0u8; 32],
-            require_connection_id: false,
         };
         Arc::new(Self::new(
             repo,
@@ -2313,7 +2298,6 @@ mod tests {
                 redirect_uri: "http://localhost".into(),
             },
             token_encryption_key: vec![0u8; 32],
-            require_connection_id: false,
         };
         let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
         assert_eq!(
@@ -2380,7 +2364,6 @@ mod tests {
                 redirect_uri: "http://localhost/asana".into(),
             },
             token_encryption_key: vec![0u8; 32],
-            require_connection_id: false,
         };
 
         let mut service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
@@ -2451,7 +2434,6 @@ mod tests {
                 redirect_uri: "http://localhost/asana".into(),
             },
             token_encryption_key: vec![0u8; 32],
-            require_connection_id: false,
         };
 
         let mut service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
@@ -2925,20 +2907,12 @@ mod tests {
             *self.stale_return.lock().unwrap() = connections;
         }
 
-        fn set_source_connections(&self, connections: Vec<WorkspaceConnection>) {
-            *self.source_connections.lock().unwrap() = connections;
-        }
-
         fn source_calls(&self) -> Vec<Uuid> {
             self.source_calls.lock().unwrap().clone()
         }
 
         fn update_calls(&self) -> Vec<WorkspaceUpdateCall> {
             self.updates.lock().unwrap().clone()
-        }
-
-        fn update_metadata_calls(&self) -> Vec<WorkspaceMetadataCall> {
-            self.update_metadata.lock().unwrap().clone()
         }
     }
 
@@ -3131,99 +3105,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_valid_access_token_marks_revoked_tokens_as_stale() {
-        let user_id = Uuid::new_v4();
-        let token_id = Uuid::new_v4();
-        let now = OffsetDateTime::now_utc();
-        let key = Arc::new(vec![42u8; 32]);
-
-        let encrypted_access =
-            encrypt_secret(&key, "access-before-revocation").expect("encrypt access");
-        let encrypted_refresh = encrypt_secret(&key, "plain-refresh").expect("encrypt refresh");
-
-        let stored_token = UserOAuthToken {
-            id: token_id,
-            user_id,
-            workspace_id: None,
-            provider: ConnectedOAuthProvider::Google,
-            access_token: encrypted_access,
-            refresh_token: encrypted_refresh,
-            expires_at: now,
-            account_email: "owner@example.com".into(),
-            metadata: serde_json::json!({}),
-            is_shared: true,
-            created_at: now - Duration::hours(1),
-            updated_at: now - Duration::minutes(10),
-        };
-
-        let token_repo = Arc::new(RecordingTokenRepo::new(stored_token));
-        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
-        let mut service = OAuthAccountService::new(
-            token_repo.clone(),
-            workspace_repo.clone(),
-            key.clone(),
-            Arc::new(Client::new()),
-            &OAuthSettings {
-                google: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/google".into(),
-                },
-                microsoft: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/microsoft".into(),
-                },
-                slack: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/slack".into(),
-                },
-                asana: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/asana".into(),
-                },
-                token_encryption_key: (*key).clone(),
-                require_connection_id: false,
-            },
-        );
-
-        fn revoked_override(
-            provider: ConnectedOAuthProvider,
-            token: &str,
-        ) -> Result<AuthorizationTokens, OAuthAccountError> {
-            assert_eq!(provider, ConnectedOAuthProvider::Google);
-            assert_eq!(token, "plain-refresh");
-            Err(OAuthAccountError::TokenRevoked { provider })
-        }
-
-        service.set_refresh_override(Some(Arc::new(revoked_override)));
-
-        let err = service
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Google)
-            .await
-            .expect_err("revocation should return error");
-
-        match err {
-            OAuthAccountError::TokenRevoked { provider } => {
-                assert_eq!(provider, ConnectedOAuthProvider::Google);
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-
-        assert!(token_repo.token.lock().unwrap().is_none());
-        assert_eq!(
-            token_repo.delete_calls.lock().unwrap().as_slice(),
-            &[(user_id, ConnectedOAuthProvider::Google)]
-        );
-        assert_eq!(
-            workspace_repo.stale_calls.lock().unwrap().as_slice(),
-            &[(user_id, ConnectedOAuthProvider::Google)]
-        );
-    }
-
-    #[tokio::test]
     async fn handle_revoked_token_removes_personal_credentials_and_marks_workspace() {
         let user_id = Uuid::new_v4();
         let token_id = Uuid::new_v4();
@@ -3280,7 +3161,6 @@ mod tests {
                     redirect_uri: "http://localhost/asana".into(),
                 },
                 token_encryption_key: (*key).clone(),
-                require_connection_id: false,
             },
         );
 
@@ -3373,7 +3253,6 @@ mod tests {
                     redirect_uri: "http://localhost/asana".into(),
                 },
                 token_encryption_key: (*key).clone(),
-                require_connection_id: false,
             },
         );
 
@@ -3461,7 +3340,6 @@ mod tests {
                     redirect_uri: "http://localhost/asana".into(),
                 },
                 token_encryption_key: (*key).clone(),
-                require_connection_id: false,
             },
         );
 
@@ -3539,7 +3417,6 @@ mod tests {
                     redirect_uri: "http://localhost/asana".into(),
                 },
                 token_encryption_key: (*key).clone(),
-                require_connection_id: false,
             },
         );
 
@@ -3609,248 +3486,6 @@ mod tests {
         assert_eq!(workspace_repo.update_calls(), Vec::new());
         assert_eq!(workspace_repo.source_calls(), vec![expiring.id]);
         assert_eq!(workspace_repo.stale_calls(), Vec::new());
-    }
-
-    #[tokio::test]
-    async fn refresh_propagates_to_workspace_connections() {
-        let user_id = Uuid::new_v4();
-        let workspace_id = Uuid::new_v4();
-        let connection_id = Uuid::new_v4();
-        let key = Arc::new(vec![23u8; 32]);
-
-        let encrypted_access = encrypt_secret(key.as_ref(), "access-token").unwrap();
-        let encrypted_refresh = encrypt_secret(key.as_ref(), "refresh-token").unwrap();
-        let now = OffsetDateTime::now_utc();
-
-        let repo = MultiTokenRepo::new();
-        let personal_expires_at = now + Duration::seconds(1);
-        let stored_personal = repo
-            .insert_token(NewUserOAuthToken {
-                user_id,
-                provider: ConnectedOAuthProvider::Slack,
-                access_token: encrypted_access.clone(),
-                refresh_token: encrypted_refresh.clone(),
-                expires_at: personal_expires_at,
-                account_email: "owner@example.com".into(),
-                metadata: serde_json::json!({}),
-            })
-            .await
-            .expect("insert personal");
-        let repo = Arc::new(repo);
-
-        let workspace_connection = WorkspaceConnection {
-            id: connection_id,
-            workspace_id,
-            created_by: user_id,
-            owner_user_id: user_id,
-            user_oauth_token_id: Some(stored_personal.id),
-            provider: ConnectedOAuthProvider::Slack,
-            access_token: encrypted_access.clone(),
-            refresh_token: encrypted_refresh.clone(),
-            expires_at: stored_personal.expires_at,
-            account_email: stored_personal.account_email.clone(),
-            created_at: now - Duration::hours(1),
-            updated_at: now - Duration::minutes(10),
-            bot_user_id: Some("bot_old".into()),
-            slack_team_id: Some("team_old".into()),
-            incoming_webhook_url: Some("https://hooks.slack.com/old".into()),
-            metadata: serde_json::json!({}),
-        };
-
-        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
-        let workspace_repo_for_service = workspace_repo.clone();
-        workspace_repo.set_source_connections(vec![workspace_connection.clone()]);
-
-        let refreshed = AuthorizationTokens {
-            access_token: "new-access".into(),
-            refresh_token: "new-refresh".into(),
-            expires_at: now + Duration::hours(2),
-            account_email: "updated@example.com".into(),
-            slack: Some(SlackOAuthMetadata {
-                team_id: Some("team_new".into()),
-                bot_user_id: Some("bot_new".into()),
-                incoming_webhook_url: Some("https://hooks.slack.com/new".into()),
-            }),
-        };
-
-        let mut service = OAuthAccountService::new(
-            repo.clone(),
-            workspace_repo_for_service,
-            key.clone(),
-            Arc::new(Client::new()),
-            &OAuthSettings {
-                google: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/google".into(),
-                },
-                microsoft: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/microsoft".into(),
-                },
-                slack: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/slack".into(),
-                },
-                asana: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/asana".into(),
-                },
-                token_encryption_key: (*key).clone(),
-                require_connection_id: false,
-            },
-        );
-
-        let refreshed_for_override = refreshed.clone();
-        service.set_refresh_override(Some(Arc::new(
-            move |provider: ConnectedOAuthProvider, _refresh: &str| {
-                assert_eq!(provider, ConnectedOAuthProvider::Slack);
-                Ok(refreshed_for_override.clone())
-            },
-        )));
-
-        let updated = service
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Slack)
-            .await
-            .expect("refresh should succeed");
-
-        assert_eq!(updated.account_email, stored_personal.account_email);
-        let update_calls = workspace_repo.update_calls();
-        assert_eq!(update_calls.len(), 1);
-        let (call_id, access, refresh, expires, email) = &update_calls[0];
-        assert_eq!(*call_id, connection_id);
-        assert_eq!(
-            decrypt_secret(key.as_ref(), access).unwrap(),
-            refreshed.access_token
-        );
-        assert_eq!(
-            decrypt_secret(key.as_ref(), refresh).unwrap(),
-            refreshed.refresh_token
-        );
-        assert_eq!(*expires, refreshed.expires_at);
-        assert_eq!(email, &stored_personal.account_email);
-
-        let meta_calls = workspace_repo.update_metadata_calls();
-        assert_eq!(meta_calls.len(), 1);
-        let (bot_user_id, slack_team_id, incoming_webhook_url) = &meta_calls[0];
-        assert_eq!(
-            bot_user_id
-                .as_ref()
-                .map(|value| decrypt_secret(key.as_ref(), value).unwrap()),
-            Some("bot_new".to_string())
-        );
-        assert_eq!(
-            slack_team_id
-                .as_ref()
-                .map(|value| decrypt_secret(key.as_ref(), value).unwrap()),
-            Some("team_new".to_string())
-        );
-        assert_eq!(
-            incoming_webhook_url
-                .as_ref()
-                .map(|value| decrypt_secret(key.as_ref(), value).unwrap()),
-            Some("https://hooks.slack.com/new".to_string())
-        );
-
-        assert_eq!(workspace_repo.source_calls(), vec![stored_personal.id]);
-    }
-
-    #[tokio::test]
-    async fn revoked_token_marks_workspace_connections_stale_but_keeps_records() {
-        let user_id = Uuid::new_v4();
-        let workspace_id = Uuid::new_v4();
-        let connection_id = Uuid::new_v4();
-        let key = Arc::new(vec![11u8; 32]);
-        let encrypted_access = encrypt_secret(key.as_ref(), "access").unwrap();
-        let encrypted_refresh = encrypt_secret(key.as_ref(), "refresh").unwrap();
-        let now = OffsetDateTime::now_utc();
-
-        let personal_expires_at = now - Duration::seconds(30);
-
-        let repo = MultiTokenRepo::new();
-        repo.insert_token(NewUserOAuthToken {
-            user_id,
-            provider: ConnectedOAuthProvider::Google,
-            access_token: encrypted_access,
-            refresh_token: encrypted_refresh,
-            expires_at: personal_expires_at,
-            account_email: "owner@example.com".into(),
-            metadata: serde_json::json!({}),
-        })
-        .await
-        .expect("insert personal");
-        let repo = Arc::new(repo);
-
-        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
-        let workspace_repo_for_service = workspace_repo.clone();
-        workspace_repo.set_stale_connections(vec![StaleWorkspaceConnection {
-            workspace_id,
-            connection_id,
-        }]);
-
-        let client = Arc::new(Client::new());
-        let mut service = OAuthAccountService::new(
-            repo.clone(),
-            workspace_repo_for_service,
-            key,
-            client,
-            &OAuthSettings {
-                google: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/google".into(),
-                },
-                microsoft: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/microsoft".into(),
-                },
-                slack: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/slack".into(),
-                },
-                asana: OAuthProviderConfig {
-                    client_id: "client".into(),
-                    client_secret: "secret".into(),
-                    redirect_uri: "http://localhost/asana".into(),
-                },
-                token_encryption_key: vec![0u8; 32],
-                require_connection_id: false,
-            },
-        );
-
-        service.set_refresh_override(Some(Arc::new(
-            move |provider: ConnectedOAuthProvider, _refresh: &str| {
-                assert_eq!(provider, ConnectedOAuthProvider::Google);
-                Err(OAuthAccountError::TokenRevoked { provider })
-            },
-        )));
-
-        let err = service
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Google)
-            .await
-            .expect_err("refresh should surface revocation");
-
-        assert!(matches!(err, OAuthAccountError::TokenRevoked { .. }));
-        assert!(
-            repo.tokens.lock().unwrap().is_empty(),
-            "token should be deleted"
-        );
-        assert_eq!(
-            workspace_repo.stale_calls(),
-            vec![(user_id, ConnectedOAuthProvider::Google)]
-        );
-        assert_eq!(
-            workspace_repo.stale_return.lock().unwrap().as_slice(),
-            &[StaleWorkspaceConnection {
-                workspace_id,
-                connection_id
-            }]
-        );
     }
 
     #[test]

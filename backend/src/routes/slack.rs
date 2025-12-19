@@ -95,14 +95,12 @@ pub async fn list_channels(
                 Err(resp) => return resp,
             }
         }
-        RequestedScope::Personal => match state
-            .oauth_accounts
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Slack)
-            .await
-        {
-            Ok(token) => (token.access_token, None),
-            Err(err) => return map_oauth_error(err),
-        },
+        RequestedScope::Personal => {
+            return JsonResponse::bad_request(
+                "Personal scope requires an explicit OAuth connection",
+            )
+            .into_response();
+        }
     };
 
     if let Some(workspace_id) = workspace_id {
@@ -712,7 +710,6 @@ mod tests {
                     redirect_uri: "http://localhost/asana".into(),
                 },
                 token_encryption_key: vec![0u8; 32],
-                require_connection_id: false,
             },
             api_secrets_encryption_key: vec![1u8; 32],
             stripe: StripeSettings {

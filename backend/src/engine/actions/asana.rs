@@ -151,22 +151,18 @@ pub(crate) async fn execute_asana(
             connection.access_token.clone()
         }
         super::NodeConnectionUsage::User(info) => {
-            let connection_hint = info
-                .connection_id
-                .as_deref()
-                .and_then(|value| Uuid::parse_str(value).ok());
+            let connection_id_str = info.connection_id.ok_or_else(|| {
+                "Personal OAuth connections require an explicit connectionId. Please select a specific OAuth connection from your integrations.".to_string()
+            })?;
+
+            let connection_id = Uuid::parse_str(&connection_id_str)
+                .map_err(|_| "Personal connectionId must be a valid UUID. Please select a valid OAuth connection.".to_string())?;
 
             let token = state
                 .oauth_accounts
-                .ensure_valid_access_token(run.user_id, ConnectedOAuthProvider::Asana)
+                .ensure_valid_access_token_for_connection(run.user_id, connection_id)
                 .await
                 .map_err(map_oauth_error)?;
-
-            if let Some(expected_id) = connection_hint {
-                if expected_id != token.id {
-                    return Err("The selected Asana account no longer matches the saved connection. Reconnect it in Settings -> Integrations.".to_string());
-                }
-            }
 
             token.access_token.clone()
         }

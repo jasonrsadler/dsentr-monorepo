@@ -52,17 +52,6 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
         .and_then(|obj| read_str(obj.get("connectionId")))
         .or_else(|| read_str(params.get("connectionId")));
 
-    let account_email_connection = connection_obj.and_then(|obj| read_str(obj.get("accountEmail")));
-    let account_email_primary = read_str(params.get("accountEmail"));
-    let account_email_oauth = read_str(params.get("oauthAccountEmail"));
-
-    let account_email = || {
-        account_email_connection
-            .clone()
-            .or_else(|| account_email_primary.clone())
-            .or_else(|| account_email_oauth.clone())
-    };
-
     if connection_obj.is_some() || scope.is_some() || connection_id.is_some() {
         let scope_value = scope.clone().ok_or_else(|| {
             "Connection scope is required when specifying a connection".to_string()
@@ -82,9 +71,16 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
                 }));
             }
             "user" | "personal" => {
+                let id_str = connection_id
+                    .clone()
+                    .ok_or_else(|| "Personal OAuth connections require an explicit connectionId. Please select a specific OAuth connection from your integrations.".to_string())?;
+
+                Uuid::parse_str(&id_str)
+                    .map_err(|_| "Personal connectionId must be a valid UUID. Please select a valid OAuth connection.".to_string())?;
+
                 return Ok(NodeConnectionUsage::User(UserConnectionUsage {
-                    connection_id,
-                    account_email: account_email(),
+                    connection_id: Some(id_str),
+                    account_email: None,
                 }));
             }
             other => {
@@ -93,37 +89,7 @@ pub(crate) fn resolve_connection_usage(params: &Value) -> Result<NodeConnectionU
         }
     }
 
-    let legacy_scope = read_str(params.get("oauthConnectionScope"));
-    let legacy_connection_id = read_str(params.get("oauthConnectionId"));
-
-    if let Some(scope_value) = legacy_scope.clone() {
-        match scope_value.to_ascii_lowercase().as_str() {
-            "workspace" => {
-                let id_str = legacy_connection_id
-                    .clone()
-                    .ok_or_else(|| "Workspace connections require a connectionId".to_string())?;
-
-                let parsed_id = Uuid::parse_str(&id_str)
-                    .map_err(|_| "Workspace connectionId must be a valid UUID".to_string())?;
-
-                return Ok(NodeConnectionUsage::Workspace(WorkspaceConnectionUsage {
-                    connection_id: parsed_id,
-                }));
-            }
-            "personal" | "user" => {
-                return Ok(NodeConnectionUsage::User(UserConnectionUsage {
-                    connection_id: legacy_connection_id.clone(),
-                    account_email: account_email(),
-                }));
-            }
-            _ => {}
-        }
-    }
-
-    Ok(NodeConnectionUsage::User(UserConnectionUsage {
-        connection_id: legacy_connection_id,
-        account_email: account_email(),
-    }))
+    Err("OAuth connections require explicit connectionScope and connectionId parameters. Please specify both connectionScope ('personal' or 'workspace') and connectionId.".to_string())
 }
 
 pub(crate) async fn ensure_run_membership(
@@ -490,14 +456,11 @@ mod tests {
             "oauthAccountEmail": "workspace@example.com"
         });
 
-        let usage = resolve_connection_usage(&params).expect("workspace scope should parse");
-
-        match usage {
-            NodeConnectionUsage::Workspace(info) => {
-                assert_eq!(info.connection_id, connection_id);
-            }
-            other => panic!("expected workspace usage, got {:?}", other),
-        }
+        let result = resolve_connection_usage(&params);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("OAuth connections require explicit connectionScope and connectionId"));
     }
 
     #[test]
@@ -508,15 +471,11 @@ mod tests {
             "oauthAccountEmail": "alice@example.com"
         });
 
-        let usage = resolve_connection_usage(&params).expect("personal scope should parse");
-
-        match usage {
-            NodeConnectionUsage::User(info) => {
-                assert_eq!(info.connection_id.as_deref(), Some("microsoft-personal"));
-                assert_eq!(info.account_email.as_deref(), Some("alice@example.com"));
-            }
-            other => panic!("expected personal usage, got {:?}", other),
-        }
+        let result = resolve_connection_usage(&params);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("OAuth connections require explicit connectionScope and connectionId"));
     }
 
     #[test]
@@ -529,14 +488,9 @@ mod tests {
             }
         });
 
-        let usage = resolve_connection_usage(&params).expect("personal scope should parse");
-
-        match usage {
-            NodeConnectionUsage::User(info) => {
-                assert_eq!(info.connection_id.as_deref(), Some("asana-connection"));
-                assert_eq!(info.account_email.as_deref(), Some("jane@example.com"));
-            }
-            other => panic!("expected personal usage, got {:?}", other),
-        }
+        let result = resolve_connection_usage(&params);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("Personal connectionId must be a valid UUID"));
     }
 }

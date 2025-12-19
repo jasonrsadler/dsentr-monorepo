@@ -454,13 +454,16 @@ export async function fetchConnections(
 
 export async function disconnectProvider(
   provider: OAuthProvider,
-  connectionId?: string | null
+  connectionId: string
 ): Promise<void> {
+  const normalizedId =
+    typeof connectionId === 'string' ? connectionId.trim() : ''
+  if (!normalizedId) {
+    throw new Error('connectionId is required to disconnect provider')
+  }
   const csrfToken = await getCsrfToken()
   const url = new URL(buildApiUrl(`/api/oauth/${provider}/disconnect`))
-  if (connectionId) {
-    url.searchParams.set('connection', connectionId)
-  }
+  url.searchParams.set('connection_id', normalizedId)
   const res = await fetch(url.toString(), {
     method: 'DELETE',
     credentials: 'include',
@@ -505,18 +508,21 @@ export async function unshareWorkspaceConnection(
 
 export async function refreshProvider(
   provider: OAuthProvider,
-  connectionId?: string | null
+  connectionId: string
 ): Promise<
   Pick<
     PersonalConnectionInfo,
     'connected' | 'accountEmail' | 'expiresAt' | 'lastRefreshedAt'
   >
 > {
+  const normalizedId =
+    typeof connectionId === 'string' ? connectionId.trim() : ''
+  if (!normalizedId) {
+    throw new Error('connectionId is required to refresh provider tokens')
+  }
   const csrfToken = await getCsrfToken()
   const url = new URL(buildApiUrl(`/api/oauth/${provider}/refresh`))
-  if (connectionId) {
-    url.searchParams.set('connection', connectionId)
-  }
+  url.searchParams.set('connection_id', normalizedId)
   const res = await fetch(url.toString(), {
     method: 'POST',
     credentials: 'include',
@@ -532,7 +538,7 @@ export async function refreshProvider(
   )
 
   if (requiresReconnect) {
-    markProviderRevoked(provider, connectionId)
+    markProviderRevoked(provider, normalizedId)
     const error: Error & { requiresReconnect?: boolean } = new Error(
       data?.message || 'The connection was revoked. Reconnect to continue.'
     )
@@ -659,7 +665,7 @@ export async function promoteConnection({
       },
       body: JSON.stringify({
         provider,
-        connection_id: connectionId
+        user_oauth_token_id: connectionId
       })
     }
   )

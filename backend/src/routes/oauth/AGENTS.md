@@ -29,5 +29,5 @@
 - OAuth route test repositories stub `stripe_overage_item_id` accessors so the expanded workspace repository trait for metered billing compiles in the OAuth harness.
 - Added Asana provider parsing, state-cookie wiring, and start/callback handlers so users can connect Asana accounts through the OAuth flow alongside Google, Microsoft, and Slack.
 - Added provider-scoped connection listings and connection-id lookup endpoints so the frontend can target specific personal or workspace OAuth records and receive connection identifiers in responses.
-- Refresh, revoke, and disconnect handlers now accept optional `connection_id` parameters (query or body) and return the targeted connection id while preserving legacy provider-based behavior for older clients.
+- Refresh and disconnect handlers now require an explicit `connection_id` and return 400 for provider-only requests, removing legacy fallbacks and validating missing-id cases even when matching tokens exist.
 - Refresh responses now serialize field names in `camelCase` (e.g., `requiresReconnect`, `connectionId`) to keep the JSON API stable for existing clients and tests.

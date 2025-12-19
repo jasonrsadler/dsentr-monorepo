@@ -127,14 +127,6 @@ fn collect_from_object(map: &Map<String, Value>, seen: &mut BTreeSet<ConnectionM
     if let Some(metadata) = resolve_connection_metadata(map, None) {
         seen.insert(metadata);
     }
-
-    let legacy_user = map.contains_key("oauthConnectionId")
-        || map.contains_key("oauthAccountEmail")
-        || map.contains_key("accountEmail");
-
-    if legacy_user {
-        seen.insert(ConnectionMetadata::user());
-    }
 }
 
 fn resolve_connection_metadata(

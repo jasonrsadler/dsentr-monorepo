@@ -106,6 +106,11 @@ pub async fn refresh_connection(
     query: Query<ConnectionTarget>,
     body: Option<Json<ConnectionTarget>>,
 ) -> Response {
+    let requested_connection_id = coalesce_connection_id(&query, body);
+    let Some(connection_id) = requested_connection_id else {
+        return JsonResponse::bad_request("connection_id is required").into_response();
+    };
+
     let provider = match parse_provider(&provider) {
         Some(p) => p,
         None => {
@@ -118,85 +123,28 @@ pub async fn refresh_connection(
         Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
     };
 
-    let requested_connection_id = coalesce_connection_id(&query, body);
-    if requested_connection_id.is_none() {
-        warn!(
-            %user_id,
-            ?provider,
-            require_connection_id = state.config.oauth.require_connection_id,
-            "connection_id not supplied for refresh_connection request"
-        );
-        if state.config.oauth.require_connection_id {
-            return JsonResponse::bad_request("connection_id is required").into_response();
-        }
-    }
-
-    let fallback_connection_id = if requested_connection_id.is_some() {
-        requested_connection_id
-    } else {
-        lookup_provider_connection_id(&state, user_id, provider).await
-    };
-
-    if let Some(connection_id) = requested_connection_id {
-        match state
-            .oauth_accounts
-            .ensure_valid_access_token_for_connection(user_id, connection_id)
-            .await
-        {
-            Ok(token) => {
-                if token.provider != provider {
-                    return JsonResponse::bad_request("Connection does not match provider")
-                        .into_response();
-                }
-
-                return Json(RefreshResponse {
-                    success: true,
-                    requires_reconnect: false,
-                    account_email: Some(token.account_email),
-                    expires_at: Some(token.expires_at),
-                    last_refreshed_at: Some(token.updated_at),
-                    connection_id: Some(connection_id),
-                    message: None,
-                })
-                .into_response();
-            }
-            Err(OAuthAccountError::TokenRevoked { .. }) => {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(RefreshResponse {
-                        success: false,
-                        requires_reconnect: true,
-                        account_email: None,
-                        expires_at: None,
-                        last_refreshed_at: None,
-                        connection_id: Some(connection_id),
-                        message: Some(
-                            "The OAuth connection was revoked. Reconnect to restore access."
-                                .to_string(),
-                        ),
-                    }),
-                )
-                    .into_response();
-            }
-            Err(err) => return map_oauth_error(err),
-        }
-    }
-
     match state
         .oauth_accounts
-        .ensure_valid_access_token(user_id, provider)
+        .ensure_valid_access_token_for_connection(user_id, connection_id)
         .await
     {
-        Ok(token) => Json(RefreshResponse {
-            success: true,
-            requires_reconnect: false,
-            account_email: Some(token.account_email),
-            expires_at: Some(token.expires_at),
-            last_refreshed_at: Some(token.updated_at),
-            connection_id: Some(token.id),
-            message: None,
-        })
-        .into_response(),
+        Ok(token) => {
+            if token.provider != provider {
+                return JsonResponse::bad_request("Connection does not match provider")
+                    .into_response();
+            }
+
+            Json(RefreshResponse {
+                success: true,
+                requires_reconnect: false,
+                account_email: Some(token.account_email),
+                expires_at: Some(token.expires_at),
+                last_refreshed_at: Some(token.updated_at),
+                connection_id: Some(connection_id),
+                message: None,
+            })
+            .into_response()
+        }
         Err(OAuthAccountError::TokenRevoked { .. }) => (
             StatusCode::CONFLICT,
             Json(RefreshResponse {
@@ -205,7 +153,7 @@ pub async fn refresh_connection(
                 account_email: None,
                 expires_at: None,
                 last_refreshed_at: None,
-                connection_id: fallback_connection_id,
+                connection_id: Some(connection_id),
                 message: Some(
                     "The OAuth connection was revoked. Reconnect to restore access.".to_string(),
                 ),
@@ -223,6 +171,11 @@ pub async fn disconnect_connection(
     query: Query<ConnectionTarget>,
     body: Option<Json<ConnectionTarget>>,
 ) -> Response {
+    let requested_connection_id = coalesce_connection_id(&query, body);
+    let Some(connection_id) = requested_connection_id else {
+        return JsonResponse::bad_request("connection_id is required").into_response();
+    };
+
     let provider = match parse_provider(&provider) {
         Some(p) => p,
         None => {
@@ -234,57 +187,31 @@ pub async fn disconnect_connection(
         Err(_) => return JsonResponse::server_error("Invalid user identifier").into_response(),
     };
 
-    let requested_connection_id = coalesce_connection_id(&query, body);
-    if requested_connection_id.is_none() {
-        warn!(
-            %user_id,
-            ?provider,
-            require_connection_id = state.config.oauth.require_connection_id,
-            "connection_id not supplied for disconnect_connection request"
-        );
-        if state.config.oauth.require_connection_id {
-            return JsonResponse::bad_request("connection_id is required").into_response();
-        }
+    let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
+        Ok(tokens) => tokens,
+        Err(err) => return map_oauth_error(err),
+    };
+
+    let Some(token) = personal_tokens
+        .into_iter()
+        .find(|token| token.id == connection_id)
+    else {
+        return JsonResponse::not_found("Connection not found").into_response();
+    };
+
+    if token.provider != provider {
+        return JsonResponse::bad_request("Connection does not match provider").into_response();
     }
 
-    if let Some(connection_id) = requested_connection_id {
-        let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
-            Ok(tokens) => tokens,
-            Err(err) => return map_oauth_error(err),
-        };
-
-        let Some(token) = personal_tokens
-            .into_iter()
-            .find(|token| token.id == connection_id)
-        else {
-            return JsonResponse::not_found("Connection not found").into_response();
-        };
-
-        if token.provider != provider {
-            return JsonResponse::bad_request("Connection does not match provider").into_response();
-        }
-
-        return match state
-            .oauth_accounts
-            .delete_token_by_connection(user_id, connection_id)
-            .await
-        {
-            Ok(()) => Json(DisconnectResponse {
-                success: true,
-                message: "Disconnected".to_string(),
-                connection_id: Some(connection_id),
-            })
-            .into_response(),
-            Err(err) => map_oauth_error(err),
-        };
-    }
-
-    let fallback_connection_id = lookup_provider_connection_id(&state, user_id, provider).await;
-    match state.oauth_accounts.delete_tokens(user_id, provider).await {
+    match state
+        .oauth_accounts
+        .delete_token_by_connection(user_id, connection_id)
+        .await
+    {
         Ok(()) => Json(DisconnectResponse {
             success: true,
             message: "Disconnected".to_string(),
-            connection_id: fallback_connection_id,
+            connection_id: Some(connection_id),
         })
         .into_response(),
         Err(err) => map_oauth_error(err),
@@ -539,64 +466,39 @@ pub async fn revoke_connection(
     };
 
     let requested_connection_id = coalesce_connection_id(&query, body);
-    if requested_connection_id.is_none() {
-        warn!(
-            %user_id,
-            ?provider,
-            require_connection_id = state.config.oauth.require_connection_id,
-            "connection_id not supplied for revoke_connection request"
-        );
-        if state.config.oauth.require_connection_id {
-            return JsonResponse::bad_request("connection_id is required").into_response();
-        }
+    let Some(connection_id) = requested_connection_id else {
+        return JsonResponse::bad_request("connection_id is required").into_response();
+    };
+
+    let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
+        Ok(tokens) => tokens,
+        Err(err) => return map_oauth_error(err),
+    };
+
+    let Some(token) = personal_tokens
+        .into_iter()
+        .find(|token| token.id == connection_id)
+    else {
+        return JsonResponse::not_found("Connection not found").into_response();
+    };
+
+    if token.provider != provider {
+        return JsonResponse::bad_request("Connection does not match provider").into_response();
     }
 
-    if let Some(connection_id) = requested_connection_id {
-        let personal_tokens = match state.oauth_accounts.list_tokens(user_id).await {
-            Ok(tokens) => tokens,
-            Err(err) => return map_oauth_error(err),
-        };
-
-        let Some(token) = personal_tokens
-            .into_iter()
-            .find(|token| token.id == connection_id)
-        else {
-            return JsonResponse::not_found("Connection not found").into_response();
-        };
-
-        if token.provider != provider {
-            return JsonResponse::bad_request("Connection does not match provider").into_response();
-        }
-
-        return match state
-            .oauth_accounts
-            .handle_revoked_token_by_connection(user_id, connection_id)
-            .await
-        {
-            Ok(()) => Json(RevokeResponse {
-                success: true,
-                message: "Revocation recorded".to_string(),
-                connection_id: Some(connection_id),
-            })
-            .into_response(),
-            Err(err) => map_oauth_error(err),
-        };
-    }
-
-    let fallback_connection_id = lookup_provider_connection_id(&state, user_id, provider).await;
-    match state
+    return match state
         .oauth_accounts
-        .handle_revoked_token(user_id, provider)
+        .handle_revoked_token_by_connection(user_id, connection_id)
         .await
     {
         Ok(()) => Json(RevokeResponse {
             success: true,
             message: "Revocation recorded".to_string(),
-            connection_id: fallback_connection_id,
+            connection_id: Some(connection_id),
         })
         .into_response(),
         Err(err) => map_oauth_error(err),
-    }
+    };
 }
 
 fn coalesce_connection_id(
@@ -605,21 +507,6 @@ fn coalesce_connection_id(
 ) -> Option<Uuid> {
     let from_body = body.and_then(|Json(payload)| payload.connection_id);
     from_body.or(query.0.connection_id)
-}
-
-async fn lookup_provider_connection_id(
-    state: &AppState,
-    user_id: Uuid,
-    provider: ConnectedOAuthProvider,
-) -> Option<Uuid> {
-    state
-        .oauth_accounts
-        .list_tokens(user_id)
-        .await
-        .ok()?
-        .into_iter()
-        .find(|token| token.provider == provider)
-        .map(|token| token.id)
 }
 
 fn connection_owner_from_claims(user_id: Uuid, claims: &Claims) -> ConnectionOwnerPayload {

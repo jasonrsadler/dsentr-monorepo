@@ -45,7 +45,6 @@ pub struct OAuthSettings {
     pub slack: OAuthProviderConfig,
     pub asana: OAuthProviderConfig,
     pub token_encryption_key: Vec<u8>,
-    pub require_connection_id: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -157,14 +156,6 @@ impl Config {
                 source,
             })?;
 
-        let require_connection_id = env::var("OAUTH_REQUIRE_CONNECTION_ID")
-            .ok()
-            .map(|value| {
-                let normalized = value.to_ascii_lowercase();
-                matches!(normalized.as_str(), "1" | "true" | "yes")
-            })
-            .unwrap_or(false);
-
         let stripe = StripeSettings {
             client_id: require_env("STRIPE_CLIENT_ID")?,
             secret_key: require_env("STRIPE_SECRET_KEY")?,
@@ -203,7 +194,6 @@ impl Config {
                 slack,
                 asana,
                 token_encryption_key,
-                require_connection_id,
             },
             api_secrets_encryption_key,
             stripe,

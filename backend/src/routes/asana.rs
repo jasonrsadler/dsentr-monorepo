@@ -631,12 +631,10 @@ async fn ensure_asana_token(
                 .await
                 .map(|token| (token, Some(connection_id)))
         }
-        RequestedScope::Personal => state
-            .oauth_accounts
-            .ensure_valid_access_token(user_id, ConnectedOAuthProvider::Asana)
-            .await
-            .map(|token| (token.access_token, None))
-            .map_err(map_oauth_error),
+        RequestedScope::Personal => Err(JsonResponse::bad_request(
+            "Personal scope requires an explicit OAuth connection",
+        )
+        .into_response()),
     }
 }
 
