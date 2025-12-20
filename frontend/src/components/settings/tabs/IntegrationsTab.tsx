@@ -603,6 +603,17 @@ export default function IntegrationsTab({
               const workspaceSorted = [...workspaceConnections].sort((a, b) =>
                 (a.workspaceName ?? '').localeCompare(b.workspaceName ?? '')
               )
+              const workspaceConnectionIds = new Set(
+                workspaceConnections
+                  .map((workspaceEntry) => {
+                    if (typeof workspaceEntry.connectionId !== 'string') {
+                      return null
+                    }
+                    const trimmed = workspaceEntry.connectionId.trim()
+                    return trimmed.length > 0 ? trimmed : null
+                  })
+                  .filter((value): value is string => Boolean(value))
+              )
 
               return (
                 <section
@@ -747,6 +758,14 @@ export default function IntegrationsTab({
                           {personalSorted.map((entry, index) => {
                             const entryKey = resolveConnectionKey(entry)
                             const hasValidId = Boolean(entryKey)
+                            const connectionId =
+                              typeof entry.connectionId === 'string'
+                                ? entry.connectionId.trim()
+                                : ''
+                            const hasValidConnectionId = connectionId.length > 0
+                            const isShared = hasValidConnectionId
+                              ? workspaceConnectionIds.has(connectionId)
+                              : false
                             const actionDisabled =
                               busy ||
                               busyConnectionId === entryKey ||
@@ -754,7 +773,7 @@ export default function IntegrationsTab({
                               !hasValidId
                             const requiresReconnect = entry.requiresReconnect
                             const canShowPromote =
-                              canPromote && !entry.isShared && hasValidId
+                              canPromote && !isShared && hasValidConnectionId
                             return (
                               <li
                                 key={
@@ -783,7 +802,7 @@ export default function IntegrationsTab({
                                         this credential.
                                       </div>
                                     ) : null}
-                                    {entry.isShared ? (
+                                    {isShared ? (
                                       <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
                                         Shared with workspace
                                       </div>
@@ -817,7 +836,7 @@ export default function IntegrationsTab({
                                             actionDisabled ||
                                             !workspaceId ||
                                             requiresReconnect ||
-                                            !hasValidId
+                                            !hasValidConnectionId
                                           }
                                           className="rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
@@ -826,8 +845,8 @@ export default function IntegrationsTab({
                                       </>
                                     ) : null}
                                     {canPromote &&
-                                    !entry.isShared &&
-                                    !hasValidId ? (
+                                    !isShared &&
+                                    !hasValidConnectionId ? (
                                       <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
                                         Select a personal connection to promote.
                                       </div>
@@ -1156,11 +1175,14 @@ export default function IntegrationsTab({
 
               const nextPersonal = (prev?.personal ?? []).map((p) => {
                 if (p.provider !== entry.provider) return { ...p }
-                const personalKey = resolveConnectionKey(p)
-                if (!personalKey) {
-                  return { ...p }
+                if (typeof p.connectionId !== 'string') {
+                  return p.isShared ? { ...p, isShared: false } : { ...p }
                 }
-                const shouldBeShared = remainingSharedIds.has(personalKey)
+                const trimmed = p.connectionId.trim()
+                if (!trimmed) {
+                  return p.isShared ? { ...p, isShared: false } : { ...p }
+                }
+                const shouldBeShared = remainingSharedIds.has(trimmed)
                 return p.isShared === shouldBeShared
                   ? { ...p }
                   : { ...p, isShared: shouldBeShared }
