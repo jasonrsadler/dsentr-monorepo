@@ -144,52 +144,6 @@ export default function IntegrationsTab({
   const isViewer = workspaceRole === 'viewer'
   const canPromote = workspaceRole === 'owner' || workspaceRole === 'admin'
 
-  const currentUserEmail = useMemo(() => {
-    const email = currentUser?.email
-    if (typeof email !== 'string') {
-      return null
-    }
-    const trimmed = email.trim()
-    return trimmed.length > 0 ? trimmed.toLowerCase() : null
-  }, [currentUser?.email])
-
-  const currentUserDisplayName = useMemo(() => {
-    const first =
-      typeof currentUser?.first_name === 'string'
-        ? currentUser.first_name.trim()
-        : ''
-    const last =
-      typeof currentUser?.last_name === 'string'
-        ? currentUser.last_name.trim()
-        : ''
-    const fullName = [first, last].filter((part) => part.length > 0).join(' ')
-    if (fullName.length > 0) {
-      return fullName.toLowerCase()
-    }
-    return null
-  }, [currentUser?.first_name, currentUser?.last_name])
-
-  const matchesCurrentUser = useCallback(
-    (entry: WorkspaceConnectionInfo) => {
-      const sharedEmail =
-        typeof entry.sharedByEmail === 'string'
-          ? entry.sharedByEmail.trim().toLowerCase()
-          : null
-      if (sharedEmail && currentUserEmail) {
-        return sharedEmail === currentUserEmail
-      }
-      const sharedName =
-        typeof entry.sharedByName === 'string'
-          ? entry.sharedByName.trim().toLowerCase()
-          : null
-      if (sharedName && currentUserDisplayName) {
-        return sharedName === currentUserDisplayName
-      }
-      return false
-    },
-    [currentUserDisplayName, currentUserEmail]
-  )
-
   const resolveConnectionKey = useCallback(
     (entry?: { connectionId?: string | null; id?: string | null } | null) => {
       if (!entry) return null
@@ -1181,19 +1135,30 @@ export default function IntegrationsTab({
                 .filter((workspaceEntry) => workspaceEntry.id !== entry.id)
                 .map((workspaceEntry) => ({ ...workspaceEntry }))
 
-              const shouldClearSharedFlag =
-                matchesCurrentUser(entry) &&
-                !nextWorkspace.some(
-                  (workspaceEntry) =>
-                    workspaceEntry.provider === entry.provider &&
-                    matchesCurrentUser(workspaceEntry)
-                )
-
-              const nextPersonal = (prev?.personal ?? []).map((p) =>
-                p.provider === entry.provider && shouldClearSharedFlag
-                  ? { ...p, isShared: false }
-                  : { ...p }
+              const entryConnectionKey = resolveConnectionKey(entry)
+              const remainingSharedIds = new Set(
+                nextWorkspace
+                  .filter(
+                    (workspaceEntry) =>
+                      workspaceEntry.provider === entry.provider
+                  )
+                  .map((workspaceEntry) => resolveConnectionKey(workspaceEntry))
+                  .filter((value): value is string => Boolean(value))
               )
+
+              const nextPersonal = (prev?.personal ?? []).map((p) => {
+                if (p.provider !== entry.provider) return { ...p }
+                const personalKey = resolveConnectionKey(p)
+                if (!personalKey) {
+                  return { ...p }
+                }
+                if (!entryConnectionKey || personalKey !== entryConnectionKey) {
+                  return { ...p }
+                }
+                return remainingSharedIds.has(personalKey)
+                  ? { ...p }
+                  : { ...p, isShared: false }
+              })
 
               const next: GroupedConnectionsSnapshot = {
                 personal: nextPersonal,
