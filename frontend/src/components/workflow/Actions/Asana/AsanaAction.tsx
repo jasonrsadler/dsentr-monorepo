@@ -735,16 +735,7 @@ const connectionValueKey = (scope: AsanaConnectionScope, id: string) =>
   `${scope}:${id}`
 
 const emptyProviderState = (): ProviderConnectionSet => ({
-  personal: {
-    scope: 'personal',
-    id: null,
-    connected: false,
-    requiresReconnect: false,
-    isShared: false,
-    accountEmail: undefined,
-    expiresAt: undefined,
-    lastRefreshedAt: undefined
-  },
+  personal: [],
   workspace: []
 })
 
@@ -918,10 +909,15 @@ export default function AsanaAction({
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null): ProviderConnectionSet => {
       if (!connections) return emptyProviderState()
+      const personal = Array.isArray(connections.personal)
+        ? connections.personal.map((entry) => ({
+            ...entry,
+            id: entry.id ?? entry.connectionId ?? null,
+            connectionId: entry.connectionId ?? entry.id ?? undefined
+          }))
+        : []
       return {
-        personal: connections.personal
-          ? { ...connections.personal }
-          : emptyProviderState().personal,
+        personal,
         workspace: Array.isArray(connections.workspace)
           ? connections.workspace.map((entry) => ({ ...entry }))
           : []
@@ -935,20 +931,32 @@ export default function AsanaAction({
       snapshot: GroupedConnectionsSnapshot | null
     ): ProviderConnectionSet | null => {
       if (!snapshot) return null
-      const personal = snapshot.personal.find((p) => p.provider === 'asana')
+      const personal = (snapshot.personal ?? [])
+        .filter((p) => p.provider === 'asana')
+        .map((p) => {
+          const requiresReconnect = Boolean(p.requiresReconnect)
+          const id = p.id ?? p.connectionId ?? null
+          const connectionId = p.connectionId ?? p.id ?? undefined
+          return {
+            scope: 'personal' as const,
+            id,
+            connectionId,
+            connected: Boolean(p.connected && id && !requiresReconnect),
+            accountEmail: p.accountEmail,
+            expiresAt: p.expiresAt,
+            lastRefreshedAt: p.lastRefreshedAt,
+            requiresReconnect,
+            isShared: Boolean(p.isShared)
+          }
+        })
       const workspace = (snapshot.workspace ?? []).filter(
         (entry) => entry.provider === 'asana'
       )
-      if (!personal && workspace.length === 0) {
+      if (personal.length === 0 && workspace.length === 0) {
         return null
       }
       return {
-        personal: personal ?? {
-          ...emptyProviderState().personal,
-          scope: 'personal',
-          connected: false,
-          requiresReconnect: false
-        },
+        personal,
         workspace
       }
     },
@@ -1015,16 +1023,17 @@ export default function AsanaAction({
   >(() => {
     if (!connectionState) return []
     const options: (NodeDropdownOption | NodeDropdownOptionGroup)[] = []
-    const personal = connectionState.personal
-    if (personal && personal.connected && personal.id) {
+    const personalEntries = (connectionState.personal ?? []).filter(
+      (entry) => entry.connected && entry.id
+    )
+    if (personalEntries.length > 0) {
       options.push({
-        label: 'Personal connection',
-        options: [
-          {
-            label: personal.accountEmail || 'Personal Asana account',
-            value: connectionValueKey('personal', personal.id)
-          }
-        ]
+        label: 'Personal connections',
+        options: personalEntries.map((entry) => ({
+          label: entry.accountEmail || 'Personal Asana account',
+          value: connectionValueKey('personal', entry.id!),
+          disabled: Boolean(entry.requiresReconnect)
+        }))
       })
     }
 
@@ -2553,9 +2562,9 @@ export default function AsanaAction({
   }, [activeConnection?.connectionScope, activeConnection?.connectionId])
 
   const hasOAuthConnections =
-    Boolean(
-      connectionState?.personal?.connected && connectionState.personal.id
-    ) || (connectionState?.workspace?.length ?? 0) > 0
+    (connectionState?.personal?.some((entry) => entry.connected && entry.id) ??
+      false) ||
+    (connectionState?.workspace?.length ?? 0) > 0
 
   const handleConnectionChange = useCallback(
     (value: string) => {
@@ -2578,8 +2587,9 @@ export default function AsanaAction({
       const workspaceEntry = connectionState?.workspace.find(
         (entry) => entry.id === id
       )
-      const personalEntry =
-        connectionState?.personal?.id === id ? connectionState.personal : null
+      const personalEntry = connectionState?.personal.find(
+        (entry) => entry.id === id
+      )
       const accountEmail =
         workspaceEntry?.accountEmail ||
         personalEntry?.accountEmail ||

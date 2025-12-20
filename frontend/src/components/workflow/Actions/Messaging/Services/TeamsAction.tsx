@@ -338,7 +338,7 @@ const applyConnectionSelection = (
 
 const connectionInfoToSelection = (
   entry:
-    | ProviderConnectionSet['personal']
+    | ProviderConnectionSet['personal'][number]
     | ProviderConnectionSet['workspace'][number]
 ): TeamsConnectionSelection | null => {
   if (!entry) return null
@@ -894,9 +894,12 @@ const validateTeamsParams = (
         let exists = false
         if (connections) {
           if (scope === 'personal') {
-            const personal = connections.personal
-            exists = Boolean(
-              personal.connected && (id === 'microsoft' || personal.id === id)
+            const personalEntries = connections.personal ?? []
+            exists = personalEntries.some(
+              (entry) =>
+                entry.connected &&
+                entry.id &&
+                (id === 'microsoft' || entry.id === id)
             )
           } else if (scope === 'workspace') {
             exists = connections.workspace.some((entry) => entry.id === id)
@@ -1031,11 +1034,17 @@ export default function TeamsAction({
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null) => {
       if (!connections) return null
-      const personal = { ...connections.personal }
-      if (personal.requiresReconnect) {
-        personal.connected = false
-        personal.id = null
-      }
+      const personal = (connections.personal ?? []).map((entry) => {
+        const requiresReconnect = Boolean(entry.requiresReconnect)
+        const id = entry.id ?? entry.connectionId ?? null
+        return {
+          ...entry,
+          id,
+          connectionId: entry.connectionId ?? entry.id ?? undefined,
+          connected: Boolean(entry.connected && id && !requiresReconnect),
+          requiresReconnect
+        }
+      })
       const workspace = connections.workspace
         .filter((entry) => !entry.requiresReconnect)
         .map((entry) => ({ ...entry }))
@@ -1053,33 +1062,30 @@ export default function TeamsAction({
       provider: OAuthProvider
     ): ProviderConnectionSet | null => {
       if (!snapshot) return null
-      const personalRecord = snapshot.personal.find(
-        (p) => p.provider === provider
-      )
-      const personal = personalRecord
-        ? {
+      const personal = (snapshot.personal ?? [])
+        .filter((p) => p.provider === provider)
+        .map((p) => {
+          const requiresReconnect = Boolean(p.requiresReconnect)
+          const id = p.id ?? p.connectionId ?? null
+          const connectionId = p.connectionId ?? p.id ?? undefined
+          return {
             scope: 'personal' as const,
-            id: personalRecord.id ?? null,
-            connected: Boolean(personalRecord.connected && personalRecord.id),
-            accountEmail: personalRecord.accountEmail,
-            expiresAt: personalRecord.expiresAt,
-            lastRefreshedAt: personalRecord.lastRefreshedAt,
-            requiresReconnect: Boolean(personalRecord.requiresReconnect),
-            isShared: Boolean(personalRecord.isShared)
+            id,
+            connectionId,
+            connected: Boolean(p.connected && id && !requiresReconnect),
+            accountEmail: p.accountEmail,
+            expiresAt: p.expiresAt,
+            lastRefreshedAt: p.lastRefreshedAt,
+            requiresReconnect,
+            isShared: Boolean(p.isShared)
           }
-        : {
-            scope: 'personal' as const,
-            id: null,
-            connected: false,
-            accountEmail: undefined,
-            expiresAt: undefined,
-            lastRefreshedAt: undefined,
-            requiresReconnect: false,
-            isShared: false
-          }
+        })
       const workspace = snapshot.workspace
         .filter((w) => w.provider === provider)
         .map((w) => ({ ...w }))
+      if (personal.length === 0 && workspace.length === 0) {
+        return null
+      }
       return { personal, workspace }
     },
     []
@@ -1123,12 +1129,16 @@ export default function TeamsAction({
     (scope?: ConnectionScope | null, id?: string | null) => {
       if (!microsoftConnections || !scope || !id) return null
       if (scope === 'personal') {
-        const personal = microsoftConnections.personal
-        if (!personal.connected || !personal.id) return null
-        if (id === 'microsoft' || personal.id === id) {
-          return personal
-        }
-        return null
+        const personalEntries = microsoftConnections.personal ?? []
+        const match =
+          id === 'microsoft'
+            ? personalEntries.find(
+                (entry) => entry.connected && Boolean(entry.id)
+              )
+            : personalEntries.find(
+                (entry) => entry.connected && entry.id === id
+              )
+        return match ?? null
       }
 
       return (
@@ -1144,13 +1154,14 @@ export default function TeamsAction({
       const normalized = email?.trim().toLowerCase()
       if (!normalized) return null
 
-      const personal = microsoftConnections.personal
-      if (
-        personal.connected &&
-        personal.accountEmail &&
-        personal.accountEmail.trim().toLowerCase() === normalized
-      ) {
-        return personal
+      const personalMatch = (microsoftConnections.personal ?? []).find(
+        (entry) =>
+          entry.connected &&
+          entry.accountEmail &&
+          entry.accountEmail.trim().toLowerCase() === normalized
+      )
+      if (personalMatch) {
+        return personalMatch
       }
 
       return (
@@ -1167,8 +1178,9 @@ export default function TeamsAction({
   const hasMicrosoftAccount = useMemo(() => {
     if (!microsoftConnections) return false
     const hasPersonal = Boolean(
-      microsoftConnections.personal.connected &&
-        microsoftConnections.personal.id
+      (microsoftConnections.personal ?? []).some(
+        (entry) => entry.connected && entry.id
+      )
     )
     const hasWorkspace = microsoftConnections.workspace.some((e) => !!e.id)
     return hasPersonal || hasWorkspace
@@ -1502,8 +1514,10 @@ export default function TeamsAction({
       return
     }
     if (!selected) {
-      const personal = microsoftConnections.personal
-      if (personal.connected && personal.id) {
+      const personal = (microsoftConnections.personal ?? []).find(
+        (entry) => entry.connected && entry.id
+      )
+      if (personal) {
         selected = personal
       }
     }
@@ -1796,16 +1810,16 @@ export default function TeamsAction({
   const connectionOptionGroups = useMemo<NodeDropdownOptionGroup[]>(() => {
     if (!microsoftConnections) return []
     const groups: NodeDropdownOptionGroup[] = []
-    const personal = microsoftConnections.personal
-    if (personal.connected && personal.id) {
+    const personalOptions = (microsoftConnections.personal ?? [])
+      .filter((entry) => entry.connected && entry.id)
+      .map((entry) => ({
+        value: buildConnectionValue('personal', entry.id as string),
+        label: entry.accountEmail?.trim() || 'Personal Microsoft account'
+      }))
+    if (personalOptions.length > 0) {
       groups.push({
         label: 'Your connections',
-        options: [
-          {
-            value: buildConnectionValue('personal', personal.id),
-            label: personal.accountEmail?.trim() || 'Personal Microsoft account'
-          }
-        ]
+        options: personalOptions
       })
     }
 
@@ -1840,7 +1854,9 @@ export default function TeamsAction({
     const scope = currentParams.oauthConnectionScope
     let id = currentParams.oauthConnectionId
     if (scope === 'personal' && id === 'microsoft') {
-      const personalId = microsoftConnections?.personal.id
+      const personalId = (microsoftConnections?.personal ?? []).find(
+        (entry) => entry.connected && entry.id
+      )?.id
       if (personalId) {
         id = personalId
       }
@@ -1851,7 +1867,7 @@ export default function TeamsAction({
   }, [
     currentParams.oauthConnectionId,
     currentParams.oauthConnectionScope,
-    microsoftConnections?.personal?.id
+    microsoftConnections?.personal
   ])
 
   const handleConnectionChange = useCallback(

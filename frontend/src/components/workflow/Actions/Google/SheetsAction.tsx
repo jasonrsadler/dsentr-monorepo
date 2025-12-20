@@ -155,44 +155,47 @@ export default function SheetsAction({
     provider: OAuthProvider
   ): ProviderConnectionSet | null => {
     if (!snapshot) return null
-    const personalRecord = snapshot.personal.find(
-      (p) => p.provider === provider
-    )
-    const personal = personalRecord
-      ? {
+    const personal = (snapshot.personal ?? [])
+      .filter((p) => p.provider === provider)
+      .map((p) => {
+        const requiresReconnect = Boolean(p.requiresReconnect)
+        const id = p.id ?? p.connectionId ?? null
+        const connectionId = p.connectionId ?? p.id ?? undefined
+        return {
           scope: 'personal' as const,
-          id: personalRecord.id ?? null,
-          connected: Boolean(personalRecord.connected && personalRecord.id),
-          accountEmail: personalRecord.accountEmail,
-          expiresAt: personalRecord.expiresAt,
-          lastRefreshedAt: personalRecord.lastRefreshedAt,
-          requiresReconnect: Boolean(personalRecord.requiresReconnect),
-          isShared: Boolean(personalRecord.isShared)
+          id,
+          connectionId,
+          connected: Boolean(p.connected && id && !requiresReconnect),
+          accountEmail: p.accountEmail,
+          expiresAt: p.expiresAt,
+          lastRefreshedAt: p.lastRefreshedAt,
+          requiresReconnect,
+          isShared: Boolean(p.isShared)
         }
-      : {
-          scope: 'personal' as const,
-          id: null,
-          connected: false,
-          accountEmail: undefined,
-          expiresAt: undefined,
-          lastRefreshedAt: undefined,
-          requiresReconnect: false,
-          isShared: false
-        }
+      })
     const workspace = snapshot.workspace
       .filter((w) => w.provider === provider)
       .map((w) => ({ ...w }))
+    if (personal.length === 0 && workspace.length === 0) {
+      return null
+    }
     return { personal, workspace }
   }
 
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null) => {
       if (!connections) return null
-      const personal = { ...connections.personal }
-      if (personal.requiresReconnect) {
-        personal.connected = false
-        personal.id = null
-      }
+      const personal = (connections.personal ?? []).map((entry) => {
+        const requiresReconnect = Boolean(entry.requiresReconnect)
+        const id = entry.id ?? entry.connectionId ?? null
+        return {
+          ...entry,
+          id,
+          connectionId: entry.connectionId ?? entry.id ?? undefined,
+          connected: Boolean(entry.connected && id && !requiresReconnect),
+          requiresReconnect
+        }
+      })
       const workspace = connections.workspace
         .filter((entry) => !entry.requiresReconnect)
         .map((entry) => ({ ...entry }))
@@ -271,9 +274,10 @@ export default function SheetsAction({
     (scope?: ConnectionScope | null, id?: string | null) => {
       if (!connectionState || !scope || !id) return null
       if (scope === 'personal') {
-        const personal = connectionState.personal
-        if (!personal.connected || !personal.id) return null
-        return personal.id === id ? personal : null
+        const personal = (connectionState.personal ?? []).find(
+          (entry) => entry.connected && entry.id === id
+        )
+        return personal ?? null
       }
 
       return connectionState.workspace.find((entry) => entry.id === id) ?? null
@@ -287,12 +291,13 @@ export default function SheetsAction({
       const normalized = email?.trim().toLowerCase()
       if (!normalized) return null
 
-      const personal = connectionState.personal
-      if (
-        personal.connected &&
-        personal.accountEmail &&
-        personal.accountEmail.trim().toLowerCase() === normalized
-      ) {
+      const personal = (connectionState.personal ?? []).find(
+        (entry) =>
+          entry.connected &&
+          entry.accountEmail &&
+          entry.accountEmail.trim().toLowerCase() === normalized
+      )
+      if (personal) {
         return personal
       }
 
@@ -347,8 +352,10 @@ export default function SheetsAction({
     }
 
     if (!selected) {
-      const personal = connectionState.personal
-      if (personal.connected && personal.id) {
+      const personal = (connectionState.personal ?? []).find(
+        (entry) => entry.connected && entry.id
+      )
+      if (personal) {
         selected = personal
       }
     }
@@ -411,8 +418,8 @@ export default function SheetsAction({
   // Keep personal and workspace references separate; avoid flattening
   const hasAnyGoogleConnection = useMemo(() => {
     if (!connectionState) return false
-    const hasPersonal = Boolean(
-      connectionState.personal.connected && connectionState.personal.id
+    const hasPersonal = (connectionState.personal ?? []).some(
+      (entry) => entry.connected && entry.id
     )
     const hasWorkspace = connectionState.workspace.some((e) => !!e.id)
     return hasPersonal || hasWorkspace
@@ -421,16 +428,16 @@ export default function SheetsAction({
   const connectionOptionGroups = useMemo<NodeDropdownOptionGroup[]>(() => {
     if (!connectionState) return []
     const groups: NodeDropdownOptionGroup[] = []
-    const personal = connectionState.personal
-    if (personal.connected && personal.id) {
+    const personalOptions = (connectionState.personal ?? [])
+      .filter((entry) => entry.connected && entry.id)
+      .map((entry) => ({
+        value: connectionValueKey('personal', entry.id as string),
+        label: entry.accountEmail?.trim() || 'Personal Google account'
+      }))
+    if (personalOptions.length > 0) {
       groups.push({
         label: 'Your connections',
-        options: [
-          {
-            value: connectionValueKey('personal', personal.id),
-            label: personal.accountEmail?.trim() || 'Personal Google account'
-          }
-        ]
+        options: personalOptions
       })
     }
 
@@ -518,8 +525,9 @@ export default function SheetsAction({
         errors.accountEmail = 'Select a connected Google account'
       } else if (connectionState) {
         if (scope === 'personal') {
-          const personal = connectionState.personal
-          const ok = Boolean(personal.connected && personal.id === id)
+          const ok = (connectionState.personal ?? []).some(
+            (entry) => entry.connected && entry.id === id
+          )
           if (!ok) {
             errors.accountEmail =
               'Selected Google connection is no longer available. Refresh your integrations.'

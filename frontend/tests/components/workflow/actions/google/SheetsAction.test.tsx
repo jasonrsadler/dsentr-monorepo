@@ -40,16 +40,18 @@ const googleWorkspacePayload = {
 }
 
 const buildGoogleConnections = (includeWorkspace: boolean) => ({
-  personal: {
-    scope: 'personal' as const,
-    id: 'google-personal',
-    connected: true,
-    accountEmail: 'owner@example.com',
-    expiresAt: '2025-01-01T00:00:00.000Z',
-    lastRefreshedAt: undefined,
-    requiresReconnect: false,
-    isShared: includeWorkspace
-  },
+  personal: [
+    {
+      scope: 'personal' as const,
+      id: 'google-personal',
+      connected: true,
+      accountEmail: 'owner@example.com',
+      expiresAt: '2025-01-01T00:00:00.000Z',
+      lastRefreshedAt: undefined,
+      requiresReconnect: false,
+      isShared: includeWorkspace
+    }
+  ],
   workspace: includeWorkspace
     ? [
         {

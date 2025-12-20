@@ -319,33 +319,30 @@ export default function SlackAction({
       provider: OAuthProvider
     ): ProviderConnectionSet | null => {
       if (!snapshot) return null
-      const personalRecord = snapshot.personal.find(
-        (p) => p.provider === provider
-      )
-      const personal = personalRecord
-        ? {
+      const personal = (snapshot.personal ?? [])
+        .filter((p) => p.provider === provider)
+        .map((p) => {
+          const requiresReconnect = Boolean(p.requiresReconnect)
+          const id = p.id ?? p.connectionId ?? null
+          const connectionId = p.connectionId ?? p.id ?? undefined
+          return {
             scope: 'personal' as const,
-            id: personalRecord.id ?? null,
-            connected: Boolean(personalRecord.connected && personalRecord.id),
-            accountEmail: personalRecord.accountEmail,
-            expiresAt: personalRecord.expiresAt,
-            lastRefreshedAt: personalRecord.lastRefreshedAt,
-            requiresReconnect: Boolean(personalRecord.requiresReconnect),
-            isShared: Boolean(personalRecord.isShared)
+            id,
+            connectionId,
+            connected: Boolean(p.connected && id && !requiresReconnect),
+            accountEmail: p.accountEmail,
+            expiresAt: p.expiresAt,
+            lastRefreshedAt: p.lastRefreshedAt,
+            requiresReconnect,
+            isShared: Boolean(p.isShared)
           }
-        : {
-            scope: 'personal' as const,
-            id: null,
-            connected: false,
-            accountEmail: undefined,
-            expiresAt: undefined,
-            lastRefreshedAt: undefined,
-            requiresReconnect: false,
-            isShared: false
-          }
+        })
       const workspace = snapshot.workspace
         .filter((w) => w.provider === provider)
         .map((w) => ({ ...w }))
+      if (personal.length === 0 && workspace.length === 0) {
+        return null
+      }
       return { personal, workspace }
     },
     []
@@ -354,11 +351,17 @@ export default function SlackAction({
   const sanitizeConnections = useCallback(
     (connections: ProviderConnectionSet | null) => {
       if (!connections) return null
-      const personal = { ...connections.personal }
-      if (personal.requiresReconnect || !personal.connected || !personal.id) {
-        personal.connected = false
-        personal.id = personal.id ?? null
-      }
+      const personal = (connections.personal ?? []).map((entry) => {
+        const requiresReconnect = Boolean(entry.requiresReconnect)
+        const id = entry.id ?? entry.connectionId ?? null
+        return {
+          ...entry,
+          id,
+          connectionId: entry.connectionId ?? entry.id ?? undefined,
+          connected: Boolean(entry.connected && id && !requiresReconnect),
+          requiresReconnect
+        }
+      })
 
       const workspace = connections.workspace
         .filter((entry) => entry.connected && Boolean(entry.id))
@@ -439,11 +442,13 @@ export default function SlackAction({
     (scope: ConnectionScope, id: string): SlackConnectionSelection | null => {
       if (!connectionState) return null
       if (scope === 'personal') {
-        const personal = connectionState.personal
-        if (personal.connected && personal.id === id) {
+        const personal = (connectionState.personal ?? []).find(
+          (entry) => entry.connected && entry.id === id
+        )
+        if (personal) {
           const selection: SlackConnectionSelection = {
             connectionScope: 'user',
-            connectionId: id
+            connectionId: personal.id as string
           }
           if (personal.accountEmail) {
             selection.accountEmail = personal.accountEmail
@@ -487,18 +492,18 @@ export default function SlackAction({
       return groups
     }
 
-    const personal = connectionState.personal
-    if (personal.connected && personal.id) {
+    const personalOptions = (connectionState.personal ?? [])
+      .filter((entry) => entry.connected && entry.id)
+      .map((entry) => ({
+        label: entry.accountEmail
+          ? `Personal – ${entry.accountEmail}`
+          : 'Personal Slack account',
+        value: connectionValueKey('personal', entry.id as string)
+      }))
+    if (personalOptions.length > 0) {
       groups.push({
         label: 'Personal connections',
-        options: [
-          {
-            label: personal.accountEmail
-              ? `Personal – ${personal.accountEmail}`
-              : 'Personal Slack account',
-            value: connectionValueKey('personal', personal.id)
-          }
-        ]
+        options: personalOptions
       })
     }
 
@@ -523,8 +528,9 @@ export default function SlackAction({
 
   const hasOAuthConnections = useMemo(() => {
     if (!connectionState) return false
-    const personal = connectionState.personal
-    const personalAvailable = personal.connected && Boolean(personal.id)
+    const personalAvailable = (connectionState.personal ?? []).some(
+      (entry) => entry.connected && Boolean(entry.id)
+    )
     const workspaceAvailable = connectionState.workspace.some(
       (entry) => entry.connected && Boolean(entry.id)
     )

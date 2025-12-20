@@ -397,17 +397,19 @@ describe('TeamsAction (workflow store integration)', () => {
       }
     ]
 
+    const personalConnection = {
+      scope: 'personal' as const,
+      id: 'personal-123',
+      connected: true,
+      accountEmail: 'delegate@example.com',
+      expiresAt: undefined,
+      lastRefreshedAt: undefined,
+      requiresReconnect: false,
+      isShared: false
+    }
+
     const microsoftConnections: ProviderConnectionSet = {
-      personal: {
-        scope: 'personal',
-        id: 'microsoft',
-        connected: true,
-        accountEmail: 'delegate@example.com',
-        expiresAt: undefined,
-        lastRefreshedAt: undefined,
-        requiresReconnect: false,
-        isShared: false
-      },
+      personal: [personalConnection],
       workspace: [
         {
           scope: 'workspace',
@@ -429,15 +431,8 @@ describe('TeamsAction (workflow store integration)', () => {
     vi.mocked(getCachedConnections).mockReturnValue({
       personal: [
         {
-          scope: 'personal',
-          provider: 'microsoft',
-          id: microsoftConnections.personal.id,
-          connected: microsoftConnections.personal.connected,
-          accountEmail: microsoftConnections.personal.accountEmail,
-          expiresAt: microsoftConnections.personal.expiresAt,
-          lastRefreshedAt: microsoftConnections.personal.lastRefreshedAt,
-          requiresReconnect: microsoftConnections.personal.requiresReconnect,
-          isShared: microsoftConnections.personal.isShared
+          ...personalConnection,
+          provider: 'microsoft'
         }
       ],
       workspace: microsoftConnections.workspace.map((w) => ({

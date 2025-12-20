@@ -38,7 +38,7 @@ export interface WorkspaceConnectionInfo extends BaseConnectionInfo {
 }
 
 export interface ProviderConnectionSet {
-  personal: PersonalConnectionInfo
+  personal: PersonalConnectionInfo[]
   workspace: WorkspaceConnectionInfo[]
 }
 

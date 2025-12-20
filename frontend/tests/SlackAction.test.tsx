@@ -166,15 +166,18 @@ describe('SlackAction (workflow store integration)', () => {
     updateNodeData.mockClear()
     fetchConnections.mockClear()
     fetchConnections.mockResolvedValue({
-      slack: {
-        personal: {
+      personal: [
+        {
+          scope: 'personal',
+          provider: 'slack',
           connected: true,
           id: 'conn-1',
           accountEmail: 'alice@example.com',
-          requiresReconnect: false
-        },
-        workspace: []
-      }
+          requiresReconnect: false,
+          isShared: false
+        }
+      ],
+      workspace: []
     })
   }
 
