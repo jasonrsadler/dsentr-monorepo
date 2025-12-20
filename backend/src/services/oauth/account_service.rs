@@ -10,11 +10,19 @@ use uuid::Uuid;
 
 use crate::config::{OAuthProviderConfig, OAuthSettings};
 use crate::db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository};
+#[cfg(test)]
+use crate::db::postgres_oauth_token_repository::PostgresUserOAuthTokenRepository;
+#[cfg(test)]
+use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
 use crate::db::workspace_connection_repository::WorkspaceConnectionRepository;
 use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
 #[cfg(test)]
 use crate::models::oauth_token::{WorkspaceAuditEvent, WorkspaceConnection};
+#[cfg(test)]
+use crate::state::test_pg_pool;
 use crate::utils::encryption::{decrypt_secret, encrypt_secret, EncryptionError};
+#[cfg(test)]
+use sqlx::{query, Row};
 
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL: &str = "https://openidconnect.googleapis.com/v1/userinfo";
@@ -3379,6 +3387,137 @@ mod tests {
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0].account_email, "first@example.com");
         assert_eq!(tokens[1].account_email, "second@example.com");
+    }
+
+    #[tokio::test]
+    async fn save_authorization_inserts_multiple_personal_tokens_for_same_provider_in_postgres() {
+        let pool = test_pg_pool();
+        let repo = Arc::new(PostgresUserOAuthTokenRepository {
+            pool: (*pool).clone(),
+        });
+
+        let user_row = sqlx::query(
+            r#"
+            INSERT INTO users (
+                email,
+                password_hash,
+                first_name,
+                last_name,
+                oauth_provider,
+                is_verified,
+                role,
+                created_at
+            )
+            VALUES ($1, '', $2, $3, $4::oauth_provider, true, 'user'::user_role, $5)
+            RETURNING id
+            "#,
+        )
+        .bind(format!("multi-oauth-{}@example.com", Uuid::new_v4()))
+        .bind("First")
+        .bind("User")
+        .bind("google")
+        .bind(OffsetDateTime::now_utc())
+        .fetch_one(&repo.pool)
+        .await
+        .expect("insert user");
+        let user_id: Uuid = user_row.get("id");
+
+        // Clear any residual tokens for this user (defensive)
+        query("DELETE FROM user_oauth_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&repo.pool)
+            .await
+            .expect("clear user tokens");
+
+        let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
+            Arc::new(NoopWorkspaceConnectionRepository {});
+        let key = Arc::new(vec![19u8; 32]);
+        let client = Arc::new(Client::new());
+        let service = OAuthAccountService::new(
+            repo.clone(),
+            workspace_repo,
+            key.clone(),
+            client,
+            &OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/slack".into(),
+                },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
+                token_encryption_key: (*key).clone(),
+            },
+        );
+
+        let first = service
+            .save_authorization(
+                user_id,
+                ConnectedOAuthProvider::Google,
+                AuthorizationTokens {
+                    access_token: "first-access".into(),
+                    refresh_token: "first-refresh".into(),
+                    expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+                    account_email: "first@example.com".into(),
+                    slack: None,
+                },
+            )
+            .await
+            .expect("first save succeeds");
+
+        let second = service
+            .save_authorization(
+                user_id,
+                ConnectedOAuthProvider::Google,
+                AuthorizationTokens {
+                    access_token: "second-access".into(),
+                    refresh_token: "second-refresh".into(),
+                    expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
+                    account_email: "second@example.com".into(),
+                    slack: None,
+                },
+            )
+            .await
+            .expect("second save succeeds");
+
+        assert_ne!(first.id, second.id);
+
+        let tokens = repo
+            .list_tokens_for_user(user_id)
+            .await
+            .expect("list tokens");
+        assert_eq!(tokens.len(), 2);
+        assert!(tokens
+            .iter()
+            .all(|token| token.provider == ConnectedOAuthProvider::Google));
+        let emails: Vec<_> = tokens.iter().map(|t| t.account_email.clone()).collect();
+        assert!(emails.contains(&"first@example.com".to_string()));
+        assert!(emails.contains(&"second@example.com".to_string()));
+
+        // Cleanup to keep the test database isolated
+        query("DELETE FROM user_oauth_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&repo.pool)
+            .await
+            .ok();
+        query("DELETE FROM users WHERE id = $1")
+            .bind(user_id)
+            .execute(&repo.pool)
+            .await
+            .ok();
     }
 
     #[tokio::test]

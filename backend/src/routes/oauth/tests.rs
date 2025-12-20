@@ -1556,7 +1556,10 @@ async fn refresh_connection_missing_connection_id_has_no_side_effects() {
     .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert!(spy_repo.calls().is_empty(), "token repo should not be invoked");
+    assert!(
+        spy_repo.calls().is_empty(),
+        "token repo should not be invoked"
+    );
 }
 
 #[tokio::test]
@@ -1789,7 +1792,10 @@ async fn disconnect_connection_missing_connection_id_has_no_side_effects() {
     .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert!(spy_repo.calls().is_empty(), "token repo should not be invoked");
+    assert!(
+        spy_repo.calls().is_empty(),
+        "token repo should not be invoked"
+    );
 }
 
 #[tokio::test]

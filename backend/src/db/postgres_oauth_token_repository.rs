@@ -15,14 +15,7 @@ impl UserOAuthTokenRepository for PostgresUserOAuthTokenRepository {
         &self,
         new_token: NewUserOAuthToken,
     ) -> Result<UserOAuthToken, sqlx::Error> {
-        if let Some(existing) = self
-            .find_by_user_and_provider(new_token.user_id, new_token.provider)
-            .await?
-        {
-            self.update_token(existing.id, new_token).await
-        } else {
-            self.insert_token(new_token).await
-        }
+        self.insert_token(new_token).await
     }
 
     async fn insert_token(
