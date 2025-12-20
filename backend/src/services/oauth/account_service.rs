@@ -3390,6 +3390,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires postgres"]
     async fn save_authorization_inserts_multiple_personal_tokens_for_same_provider_in_postgres() {
         let pool = test_pg_pool();
         let repo = Arc::new(PostgresUserOAuthTokenRepository {
