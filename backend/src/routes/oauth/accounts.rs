@@ -38,7 +38,8 @@ struct ProviderConnectionsResponse {
 #[serde(rename_all = "camelCase")]
 struct ConnectionLookupResponse {
     success: bool,
-    connection_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     personal: Option<PersonalConnectionPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -401,7 +402,7 @@ pub async fn get_connection_by_id(
     {
         return Json(ConnectionLookupResponse {
             success: true,
-            connection_id,
+            connection_id: Some(connection_id),
             personal: Some(personal_payload_from_token(token.clone(), &personal_owner)),
             workspace: None,
         })
@@ -439,7 +440,7 @@ pub async fn get_connection_by_id(
 
     Json(ConnectionLookupResponse {
         success: true,
-        connection_id,
+        connection_id: target.connection_id,
         personal: None,
         workspace: Some(workspace_payload_from_listing(target)),
     })
@@ -553,6 +554,7 @@ fn workspace_payload_from_listing(
 
     WorkspaceConnectionPayload {
         id: connection.id,
+        connection_id: connection.connection_id,
         provider: connection.provider,
         account_email: connection.account_email,
         expires_at: connection.expires_at,

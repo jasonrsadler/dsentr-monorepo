@@ -889,6 +889,7 @@ mod tests {
 
         let listing = WorkspaceConnectionListing {
             id: connection_id,
+            connection_id: Some(connection_id),
             workspace_id,
             owner_user_id: user_id,
             workspace_name: "Workspace".into(),
@@ -905,6 +906,7 @@ mod tests {
 
         let record = WorkspaceConnection {
             id: connection_id,
+            connection_id: Some(connection_id),
             workspace_id,
             created_by: user_id,
             owner_user_id: user_id,

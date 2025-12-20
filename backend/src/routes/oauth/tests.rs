@@ -266,6 +266,7 @@ fn personal_token_fixture(
 fn workspace_connection_fixture(
     workspace_id: Uuid,
     owner_user_id: Uuid,
+    connection_id: Option<Uuid>,
     provider: ConnectedOAuthProvider,
     account_email: &str,
     requires_reconnect: bool,
@@ -274,6 +275,7 @@ fn workspace_connection_fixture(
     let now = OffsetDateTime::now_utc();
     WorkspaceConnectionListing {
         id: Uuid::new_v4(),
+        connection_id,
         workspace_id,
         owner_user_id,
         workspace_name: "Shared Workspace".into(),
@@ -689,6 +691,7 @@ async fn list_connections_returns_personal_and_workspace_entries() {
     let workspace_updated_at = now - Duration::minutes(2);
     let listing = WorkspaceConnectionListing {
         id: workspace_connection_id,
+        connection_id: Some(personal_token_id),
         workspace_id,
         owner_user_id: user_id,
         workspace_name: "Shared Workspace".into(),
@@ -804,6 +807,10 @@ async fn list_connections_returns_personal_and_workspace_entries() {
     assert_eq!(
         workspace_entry["id"].as_str(),
         Some(expected_workspace_id.as_str())
+    );
+    assert_eq!(
+        workspace_entry["connectionId"].as_str(),
+        Some(expected_personal_id.as_str())
     );
     assert_eq!(
         workspace_entry["workspaceId"].as_str(),
@@ -953,6 +960,7 @@ async fn shared_workspace_member_does_not_receive_other_personal_tokens() {
     let shared_listing = workspace_connection_fixture(
         workspace_id,
         owner_id,
+        Some(owner_token.id),
         ConnectedOAuthProvider::Google,
         "shared@example.com",
         false,
@@ -1033,6 +1041,7 @@ async fn promoted_connection_only_appears_in_workspace_list_for_non_owner() {
     let shared_listing = workspace_connection_fixture(
         workspace_id,
         owner_id,
+        Some(owner_token.id),
         ConnectedOAuthProvider::Google,
         "shared@example.com",
         false,
@@ -1108,6 +1117,7 @@ async fn self_promotion_visibility_differs_for_owner_and_member() {
     let shared_listing = workspace_connection_fixture(
         workspace_id,
         owner_id,
+        Some(owner_token.id),
         ConnectedOAuthProvider::Google,
         "shared@example.com",
         false,
@@ -1196,6 +1206,7 @@ async fn list_connections_includes_workspace_reconnect_flag() {
 
     let listing = WorkspaceConnectionListing {
         id: connection_id,
+        connection_id: None,
         workspace_id,
         owner_user_id: user_id,
         workspace_name: "Requires Attention".into(),
@@ -1260,6 +1271,7 @@ async fn list_connections_includes_workspace_reconnect_flag() {
     let entry = &workspace[0];
     assert_eq!(entry["requiresReconnect"].as_bool(), Some(true));
     assert_eq!(entry["workspaceName"].as_str(), Some("Requires Attention"));
+    assert!(entry.get("connectionId").is_none());
 }
 
 #[tokio::test]
@@ -1307,6 +1319,7 @@ async fn list_provider_connections_filters_by_provider() {
     let google_listing = workspace_connection_fixture(
         workspace_id,
         user_id,
+        Some(personal_google.id),
         ConnectedOAuthProvider::Google,
         "shared-google@example.com",
         false,
@@ -1315,6 +1328,7 @@ async fn list_provider_connections_filters_by_provider() {
     let microsoft_listing = workspace_connection_fixture(
         workspace_id,
         user_id,
+        Some(personal_microsoft.id),
         ConnectedOAuthProvider::Microsoft,
         "shared-ms@example.com",
         false,
@@ -1381,10 +1395,12 @@ async fn get_connection_by_id_returns_workspace_connection() {
     let config = stub_config();
     let user_id = Uuid::new_v4();
     let workspace_id = Uuid::new_v4();
+    let connection_id = Uuid::new_v4();
 
     let listing = workspace_connection_fixture(
         workspace_id,
         user_id,
+        Some(connection_id),
         ConnectedOAuthProvider::Slack,
         "slack-shared@example.com",
         true,
@@ -1413,7 +1429,7 @@ async fn get_connection_by_id_returns_workspace_connection() {
 
     assert_eq!(
         json["connectionId"].as_str(),
-        Some(listing.id.to_string().as_str())
+        Some(connection_id.to_string().as_str())
     );
     assert!(json["personal"].is_null());
     assert_eq!(

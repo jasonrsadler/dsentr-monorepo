@@ -19,6 +19,7 @@ pub struct NewWorkspaceConnection {
     pub created_by: Uuid,
     pub owner_user_id: Uuid,
     pub user_oauth_token_id: Option<Uuid>,
+    pub connection_id: Option<Uuid>,
     pub provider: ConnectedOAuthProvider,
     pub access_token: String,
     pub refresh_token: String,
@@ -41,6 +42,7 @@ pub struct NewWorkspaceAuditEvent {
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
 pub struct WorkspaceConnectionListing {
     pub id: Uuid,
+    pub connection_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub owner_user_id: Uuid,
     pub workspace_name: String,

@@ -33,3 +33,4 @@
 - Asana list tasks now omits the workspace parameter when a project or tag is provided to comply with Asana API rules and avoid 400 errors.
 - Asana list tasks now enforces Asana's filter rules (project/tag or assignee + workspace; workspace alone rejected) to prevent invalid requests.
 - Asana add-task-to-project requests now only send the task + project IDs (no section payload) to mirror the updated UI flow and templated GID inputs.
+- Workspace action tests now populate `connection_id` alongside `user_oauth_token_id` so fixtures reflect promoted OAuth identity semantics.

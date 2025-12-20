@@ -53,3 +53,4 @@
 - User OAuth token repositories add insert/update/delete helpers keyed by token id so services can create multiple per-provider connections without provider-level overwrites, and Postgres implementations return the most recent token deterministically when falling back to provider lookups.
 - Workspace connection repositories now allow nullable token references and guard provider/owner/token identity on credential updates so shared connections stay consistent after personal token deletion.
 - Workspace connection repositories expose a `find_by_source_token` helper so shared connection refresh flows can locate and update dependent workspace credentials.
+- Workspace connection repositories now persist and list `connection_id` so workspace OAuth responses can return a stable connection identity.

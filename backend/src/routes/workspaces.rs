@@ -2412,6 +2412,7 @@ mod tests {
         ) -> Result<WorkspaceConnection, sqlx::Error> {
             let record = WorkspaceConnection {
                 id: Uuid::new_v4(),
+                connection_id: new_connection.connection_id,
                 workspace_id: new_connection.workspace_id,
                 created_by: new_connection.created_by,
                 owner_user_id: new_connection.owner_user_id,
@@ -2494,6 +2495,7 @@ mod tests {
                 .filter(|record| record.workspace_id == workspace_id)
                 .map(|record| WorkspaceConnectionListing {
                     id: record.id,
+                    connection_id: record.connection_id,
                     workspace_id: record.workspace_id,
                     owner_user_id: record.owner_user_id,
                     workspace_name: String::new(),
@@ -2520,6 +2522,7 @@ mod tests {
                 .filter(|record| record.owner_user_id == user_id)
                 .map(|record| WorkspaceConnectionListing {
                     id: record.id,
+                    connection_id: record.connection_id,
                     workspace_id: record.workspace_id,
                     owner_user_id: record.owner_user_id,
                     workspace_name: String::new(),
@@ -3884,12 +3887,14 @@ mod tests {
         provider: ConnectedOAuthProvider,
     ) -> WorkspaceConnection {
         let now = OffsetDateTime::now_utc();
+        let token_id = Uuid::new_v4();
         WorkspaceConnection {
             id: Uuid::new_v4(),
+            connection_id: Some(token_id),
             workspace_id,
             created_by: user_id,
             owner_user_id: user_id,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_id),
             provider,
             access_token: "encrypted-access".into(),
             refresh_token: "encrypted-refresh".into(),
@@ -3986,6 +3991,7 @@ mod tests {
         assert_eq!(inserted.len(), 1);
         assert_eq!(inserted[0].workspace_id, workspace_id);
         assert_eq!(inserted[0].created_by, user_id);
+        assert_eq!(inserted[0].connection_id, Some(user_token.id));
         assert_eq!(inserted[0].access_token, encrypted_access);
         assert_eq!(inserted[0].refresh_token, encrypted_refresh);
 
@@ -4365,6 +4371,7 @@ mod tests {
                 created_by: user_id,
                 owner_user_id: user_id,
                 user_oauth_token_id: Some(user_token_id),
+                connection_id: Some(user_token_id),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -4479,12 +4486,14 @@ mod tests {
             Arc::clone(&encryption_key),
         );
 
+        let token_id = Uuid::new_v4();
         let inserted = connection_repo
             .insert_connection(NewWorkspaceConnection {
                 workspace_id,
                 created_by: creator_id,
                 owner_user_id: creator_id,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
+                connection_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),

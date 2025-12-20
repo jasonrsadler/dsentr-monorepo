@@ -564,6 +564,7 @@ mod tests {
             use crate::db::workspace_connection_repository::WorkspaceConnectionListing;
             Ok(vec![WorkspaceConnectionListing {
                 id: self.listing.id,
+                connection_id: self.listing.connection_id,
                 workspace_id: self.listing.workspace_id,
                 owner_user_id: self.listing.owner_user_id,
                 workspace_name: "Workspace".into(),
@@ -851,6 +852,7 @@ mod tests {
 
         let listing = WorkspaceConnection {
             id: connection_id,
+            connection_id: Some(connection_id),
             workspace_id,
             created_by: user_id,
             owner_user_id: user_id,

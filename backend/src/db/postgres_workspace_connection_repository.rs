@@ -35,6 +35,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 created_by,
                 owner_user_id,
                 user_oauth_token_id,
+                connection_id,
                 provider,
                 access_token,
                 refresh_token,
@@ -46,9 +47,10 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 incoming_webhook_url,
                 metadata
             )
-            VALUES ($1, $2, $3, $4, $5::oauth_connection_provider, $6, $7, $8, $9, now(), $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6::oauth_connection_provider, $7, $8, $9, $10, now(), $11, $12, $13, $14)
             RETURNING
                 id,
+                connection_id as "connection_id?",
                 workspace_id,
                 created_by,
                 owner_user_id,
@@ -69,6 +71,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             new_connection.created_by,
             new_connection.owner_user_id,
             new_connection.user_oauth_token_id,
+            new_connection.connection_id,
             new_connection.provider as ConnectedOAuthProvider,
             new_connection.access_token,
             new_connection.refresh_token,
@@ -92,6 +95,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             r#"
             SELECT
                 id,
+                connection_id as "connection_id?",
                 workspace_id,
                 created_by,
                 owner_user_id,
@@ -132,6 +136,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             r#"
             SELECT
                 id,
+                connection_id as "connection_id?",
                 workspace_id,
                 created_by,
                 owner_user_id,
@@ -177,6 +182,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             r#"
             SELECT
                 id,
+                connection_id as "connection_id?",
                 workspace_id,
                 created_by,
                 owner_user_id,
@@ -210,6 +216,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             r#"
             SELECT
                 wc.id,
+                wc.connection_id,
                 wc.workspace_id,
                 wc.owner_user_id,
                 w.name AS workspace_name,
@@ -244,6 +251,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             r#"
             SELECT DISTINCT ON (wc.id)
                 wc.id,
+                wc.connection_id,
                 wc.workspace_id,
                 wc.owner_user_id,
                 w.name AS workspace_name,
@@ -281,6 +289,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             r#"
             SELECT
                 id,
+                connection_id,
                 workspace_id,
                 created_by,
                 owner_user_id,
@@ -291,7 +300,11 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
                 expires_at,
                 account_email,
                 created_at,
-                updated_at
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
             FROM workspace_connections
             WHERE workspace_id = $1
               AND owner_user_id = $2
@@ -396,6 +409,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
               AND user_oauth_token_id IS NOT DISTINCT FROM $11
             RETURNING
                 id,
+                connection_id as "connection_id?",
                 workspace_id,
                 created_by,
                 owner_user_id,
@@ -476,6 +490,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
               AND user_oauth_token_id IS NOT DISTINCT FROM $10
             RETURNING
                 id,
+                connection_id as "connection_id?",
                 workspace_id,
                 created_by,
                 owner_user_id,

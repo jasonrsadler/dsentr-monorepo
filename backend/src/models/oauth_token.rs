@@ -42,6 +42,7 @@ pub struct UserOAuthToken {
 /// connection-id oriented queries.
 pub struct WorkspaceConnection {
     pub id: Uuid,
+    pub connection_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub created_by: Uuid,
     pub owner_user_id: Uuid,

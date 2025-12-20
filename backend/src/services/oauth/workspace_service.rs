@@ -201,6 +201,7 @@ impl WorkspaceOAuthService {
                 created_by: actor_id,
                 owner_user_id: actor_id,
                 user_oauth_token_id: Some(token.id),
+                connection_id: Some(token.id),
                 provider,
                 access_token: access_token.clone(),
                 refresh_token: refresh_token.clone(),
@@ -1414,6 +1415,7 @@ mod tests {
         ) -> Result<WorkspaceConnection, sqlx::Error> {
             let record = WorkspaceConnection {
                 id: Uuid::new_v4(),
+                connection_id: new_connection.connection_id,
                 workspace_id: new_connection.workspace_id,
                 created_by: new_connection.created_by,
                 owner_user_id: new_connection.owner_user_id,
@@ -1495,6 +1497,7 @@ mod tests {
                 .into_iter()
                 .map(|record| WorkspaceConnectionListing {
                     id: record.id,
+                    connection_id: record.connection_id,
                     workspace_id: record.workspace_id,
                     owner_user_id: record.owner_user_id,
                     workspace_name: String::new(),
@@ -1522,6 +1525,7 @@ mod tests {
                 .into_iter()
                 .map(|record| WorkspaceConnectionListing {
                     id: record.id,
+                    connection_id: record.connection_id,
                     workspace_id: record.workspace_id,
                     owner_user_id: record.owner_user_id,
                     workspace_name: String::new(),
@@ -2146,6 +2150,7 @@ mod tests {
         ) -> Result<WorkspaceConnection, sqlx::Error> {
             let record = WorkspaceConnection {
                 id: Uuid::new_v4(),
+                connection_id: new_connection.connection_id,
                 workspace_id: new_connection.workspace_id,
                 created_by: new_connection.created_by,
                 owner_user_id: new_connection.owner_user_id,
@@ -2409,6 +2414,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         WorkspaceConnection {
             id: Uuid::new_v4(),
+            connection_id: user_oauth_token_id,
             workspace_id,
             created_by,
             owner_user_id: created_by,
@@ -2656,14 +2662,16 @@ mod tests {
         let key = Arc::new(vec![5u8; 32]);
         let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
         let token_id = Uuid::new_v4();
+        let owner_a_token_id = Uuid::new_v4();
 
         let repo = Arc::new(RecordingWorkspaceRepo::with_connections(vec![
             WorkspaceConnection {
                 id: Uuid::new_v4(),
+                connection_id: Some(owner_a_token_id),
                 workspace_id,
                 created_by: owner_a,
                 owner_user_id: owner_a,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(owner_a_token_id),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: "owner-a-access".into(),
                 refresh_token: "owner-a-refresh".into(),
@@ -2836,6 +2844,7 @@ mod tests {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
@@ -2909,6 +2918,7 @@ mod tests {
             first_connection,
             WorkspaceConnection {
                 id: remaining_connection,
+                connection_id: Some(token_id),
                 workspace_id: other_workspace,
                 created_by: user_id,
                 owner_user_id: user_id,
@@ -2976,6 +2986,7 @@ mod tests {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: None,
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
@@ -3057,6 +3068,7 @@ mod tests {
         let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
         let encrypted_access = encrypt_secret(&key, "access").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "refresh").unwrap();
+        let token_id = Uuid::new_v4();
 
         let user_repo = Arc::new(InMemoryUserRepo {
             token: Mutex::new(Some(UserOAuthToken {
@@ -3080,10 +3092,11 @@ mod tests {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: creator_id,
                 owner_user_id: creator_id,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -3155,6 +3168,7 @@ mod tests {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
@@ -3206,16 +3220,18 @@ mod tests {
         let expires_at = OffsetDateTime::now_utc();
         let encrypted_access = encrypt_secret(&key, "access-token").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "refresh-token").unwrap();
+        let token_id = Uuid::new_v4();
 
         let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
         {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Microsoft,
                 access_token: encrypted_access.clone(),
                 refresh_token: encrypted_refresh.clone(),
@@ -3268,13 +3284,16 @@ mod tests {
         let encrypted_a_refresh = encrypt_secret(&key, "owner-a-refresh").unwrap();
         let encrypted_b_access = encrypt_secret(&key, "owner-b-access").unwrap();
         let encrypted_b_refresh = encrypt_secret(&key, "owner-b-refresh").unwrap();
+        let token_a_id = Uuid::new_v4();
+        let token_b_id = Uuid::new_v4();
 
         let connection_a = WorkspaceConnection {
             id: Uuid::new_v4(),
+            connection_id: Some(token_a_id),
             workspace_id,
             created_by: owner_a,
             owner_user_id: owner_a,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_a_id),
             provider: ConnectedOAuthProvider::Slack,
             access_token: encrypted_a_access.clone(),
             refresh_token: encrypted_a_refresh.clone(),
@@ -3289,10 +3308,11 @@ mod tests {
         };
         let connection_b = WorkspaceConnection {
             id: Uuid::new_v4(),
+            connection_id: Some(token_b_id),
             workspace_id,
             created_by: owner_b,
             owner_user_id: owner_b,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_b_id),
             provider: ConnectedOAuthProvider::Slack,
             access_token: encrypted_b_access.clone(),
             refresh_token: encrypted_b_refresh.clone(),
@@ -3345,14 +3365,16 @@ mod tests {
         let expires_at = OffsetDateTime::now_utc() + Duration::hours(1);
         let encrypted_access = encrypt_secret(&key, "owner-access").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "owner-refresh").unwrap();
+        let token_id = Uuid::new_v4();
 
         let repo = Arc::new(RecordingWorkspaceRepo::with_connections(vec![
             WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: owner,
                 owner_user_id: owner,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Slack,
                 access_token: encrypted_access,
                 refresh_token: encrypted_refresh,
@@ -3395,16 +3417,18 @@ mod tests {
         let expires_at = OffsetDateTime::now_utc();
         let encrypted_access = encrypt_secret(&key, "blocked-access").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "blocked-refresh").unwrap();
+        let token_id = Uuid::new_v4();
 
         let connections = Arc::new(InMemoryWorkspaceRepo::new());
         {
             let mut guard = connections.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Slack,
                 access_token: encrypted_access,
                 refresh_token: encrypted_refresh,
@@ -3452,16 +3476,18 @@ mod tests {
         let expires_at = OffsetDateTime::now_utc() + Duration::minutes(5);
         let encrypted_access = encrypt_secret(&key, "existing-access").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "existing-refresh").unwrap();
+        let token_id = Uuid::new_v4();
 
         let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
         {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access,
                 refresh_token: encrypted_refresh,
@@ -3513,16 +3539,18 @@ mod tests {
         let expired_at = OffsetDateTime::now_utc() + Duration::seconds(10);
         let encrypted_access = encrypt_secret(&key, "stale-access").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "stale-refresh").unwrap();
+        let token_id = Uuid::new_v4();
 
         let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
         {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access,
                 refresh_token: encrypted_refresh,
@@ -3583,16 +3611,18 @@ mod tests {
         let expired_at = OffsetDateTime::now_utc() - Duration::minutes(5);
         let encrypted_access = encrypt_secret(&key, "slack-old-access").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "slack-old-refresh").unwrap();
+        let token_id = Uuid::new_v4();
 
         let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
         {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Slack,
                 access_token: encrypted_access,
                 refresh_token: encrypted_refresh,
@@ -3674,16 +3704,18 @@ mod tests {
         let expired_at = OffsetDateTime::now_utc() - Duration::minutes(5);
         let encrypted_access = encrypt_secret(&key, "old-access").unwrap();
         let encrypted_refresh = encrypt_secret(&key, "old-refresh").unwrap();
+        let token_id = Uuid::new_v4();
 
         let workspace_repo = Arc::new(InMemoryWorkspaceRepo::new());
         {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
-                user_oauth_token_id: Some(Uuid::new_v4()),
+                user_oauth_token_id: Some(token_id),
                 provider: ConnectedOAuthProvider::Google,
                 access_token: encrypted_access,
                 refresh_token: encrypted_refresh,
@@ -3759,6 +3791,7 @@ mod tests {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,
@@ -3836,6 +3869,7 @@ mod tests {
             let mut guard = workspace_repo.connection.lock().unwrap();
             *guard = Some(WorkspaceConnection {
                 id: connection_id,
+                connection_id: Some(token_id),
                 workspace_id,
                 created_by: user_id,
                 owner_user_id: user_id,

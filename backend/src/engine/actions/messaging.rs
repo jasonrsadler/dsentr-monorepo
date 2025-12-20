@@ -2655,14 +2655,16 @@ mod tests {
         let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
         let workspace_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
         let creator_id = Uuid::new_v4();
 
         let connection = WorkspaceConnection {
             id: connection_id,
+            connection_id: Some(token_id),
             workspace_id,
             created_by: creator_id,
             owner_user_id: creator_id,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_id),
             provider: ConnectedOAuthProvider::Slack,
             access_token: encrypt_secret(&encryption_key, "workspace-slack-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "workspace-slack-refresh").unwrap(),
@@ -2726,15 +2728,17 @@ mod tests {
         let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
         let workspace_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
 
         let creator_id = Uuid::new_v4();
 
         let connection = WorkspaceConnection {
             id: connection_id,
+            connection_id: Some(token_id),
             workspace_id,
             created_by: creator_id,
             owner_user_id: creator_id,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_id),
             provider: ConnectedOAuthProvider::Slack,
             access_token: encrypt_secret(&encryption_key, "workspace-slack-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "workspace-slack-refresh").unwrap(),
@@ -3778,15 +3782,17 @@ mod tests {
         let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
         let workspace_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
 
         let creator_id = Uuid::new_v4();
 
         let connection = WorkspaceConnection {
             id: connection_id,
+            connection_id: Some(token_id),
             workspace_id,
             created_by: creator_id,
             owner_user_id: creator_id,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_id),
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
@@ -3862,15 +3868,17 @@ mod tests {
         let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
         let workspace_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
 
         let creator_id = Uuid::new_v4();
 
         let connection = WorkspaceConnection {
             id: connection_id,
+            connection_id: Some(token_id),
             workspace_id,
             created_by: creator_id,
             owner_user_id: creator_id,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_id),
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
@@ -3939,15 +3947,17 @@ mod tests {
         let workspace_id = Uuid::new_v4();
         let other_workspace = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
 
         let creator_id = Uuid::new_v4();
 
         let connection = WorkspaceConnection {
             id: connection_id,
+            connection_id: Some(token_id),
             workspace_id: other_workspace,
             created_by: creator_id,
             owner_user_id: creator_id,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_id),
             provider: ConnectedOAuthProvider::Microsoft,
             access_token: encrypt_secret(&encryption_key, "workspace-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "workspace-refresh").unwrap(),
@@ -4098,14 +4108,16 @@ mod tests {
         let workspace_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
 
         // Workspace connection that includes an incoming webhook URL
         let connection = WorkspaceConnection {
             id: connection_id,
+            connection_id: Some(token_id),
             workspace_id,
             created_by: user_id,
             owner_user_id: user_id,
-            user_oauth_token_id: Some(Uuid::new_v4()),
+            user_oauth_token_id: Some(token_id),
             provider: ConnectedOAuthProvider::Slack,
             access_token: encrypt_secret(&encryption_key, "unused-access").unwrap(),
             refresh_token: encrypt_secret(&encryption_key, "unused-refresh").unwrap(),

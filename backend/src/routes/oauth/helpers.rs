@@ -50,6 +50,8 @@ pub(crate) struct PersonalConnectionPayload {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkspaceConnectionPayload {
     pub(crate) id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) connection_id: Option<Uuid>,
     pub(crate) provider: ConnectedOAuthProvider,
     pub(crate) account_email: String,
     #[serde(with = "time::serde::rfc3339")]
