@@ -1069,6 +1069,24 @@ export default function IntegrationsTab({
                 : undefined
             const sharedByEmail = currentUser?.email?.trim() || undefined
 
+            const workspaceEntry: WorkspaceConnectionInfo = {
+              scope: 'workspace',
+              id: workspaceConnectionId,
+              workspaceConnectionId,
+              connectionId,
+              connected: true,
+              provider,
+              accountEmail: connection.accountEmail,
+              expiresAt: connection.expiresAt,
+              lastRefreshedAt: connection.lastRefreshedAt,
+              workspaceId,
+              workspaceName,
+              sharedByName,
+              sharedByEmail,
+              requiresReconnect: false,
+              hasIncomingWebhook: false
+            }
+
             setConnections((prev) => {
               const nextWorkspace = (prev?.workspace ?? [])
                 .filter(
@@ -1078,24 +1096,6 @@ export default function IntegrationsTab({
                       entry.workspaceConnectionId !== workspaceConnectionId)
                 )
                 .map((entry) => ({ ...entry }))
-
-              const workspaceEntry: WorkspaceConnectionInfo = {
-                scope: 'workspace',
-                id: workspaceConnectionId,
-                workspaceConnectionId,
-                connectionId,
-                connected: true,
-                provider,
-                accountEmail: connection.accountEmail,
-                expiresAt: connection.expiresAt,
-                lastRefreshedAt: connection.lastRefreshedAt,
-                workspaceId,
-                workspaceName,
-                sharedByName,
-                sharedByEmail,
-                requiresReconnect: false,
-                hasIncomingWebhook: false
-              }
 
               const nextWorkspaceWithPromotion = [
                 ...nextWorkspace,
