@@ -1017,7 +1017,10 @@ export default function IntegrationsTab({
           const connection = promoteDialogConnection
           if (!connection) return
           const provider = connection.provider
-          const connectionId = resolveConnectionKey(connection)
+          const connectionId =
+            typeof connection.connectionId === 'string'
+              ? connection.connectionId.trim()
+              : ''
           if (!workspaceId) {
             setError('No active workspace selected for promotion')
             setPromoteDialogConnection(null)
@@ -1025,6 +1028,22 @@ export default function IntegrationsTab({
           }
           if (!connectionId) {
             setError('Missing connection identifier. Refresh and try again.')
+            setPromoteDialogConnection(null)
+            return
+          }
+          const existingWorkspaceIds = new Set(
+            (connections?.workspace ?? [])
+              .filter((entry) => entry.provider === provider)
+              .map((entry) => {
+                if (typeof entry.connectionId !== 'string') {
+                  return null
+                }
+                const trimmed = entry.connectionId.trim()
+                return trimmed.length > 0 ? trimmed : null
+              })
+              .filter((value): value is string => Boolean(value))
+          )
+          if (existingWorkspaceIds.has(connectionId)) {
             setPromoteDialogConnection(null)
             return
           }
@@ -1051,14 +1070,6 @@ export default function IntegrationsTab({
             const sharedByEmail = currentUser?.email?.trim() || undefined
 
             setConnections((prev) => {
-              const nextPersonal = (prev?.personal ?? []).map((p) => {
-                if (p.provider !== provider) return { ...p }
-                const pKey = resolveConnectionKey(p)
-                if (pKey === connectionId) {
-                  return { ...p, requiresReconnect: false, isShared: true }
-                }
-                return { ...p }
-              })
               const nextWorkspace = (prev?.workspace ?? [])
                 .filter(
                   (entry) =>
@@ -1086,9 +1097,40 @@ export default function IntegrationsTab({
                 hasIncomingWebhook: false
               }
 
+              const nextWorkspaceWithPromotion = [
+                ...nextWorkspace,
+                workspaceEntry
+              ]
+              const nextWorkspaceConnectionIds = new Set(
+                nextWorkspaceWithPromotion
+                  .filter((entry) => entry.provider === provider)
+                  .map((entry) => {
+                    if (typeof entry.connectionId !== 'string') {
+                      return null
+                    }
+                    const trimmed = entry.connectionId.trim()
+                    return trimmed.length > 0 ? trimmed : null
+                  })
+                  .filter((value): value is string => Boolean(value))
+              )
+              const nextPersonal = (prev?.personal ?? []).map((p) => {
+                if (p.provider !== provider) return { ...p }
+                if (typeof p.connectionId !== 'string') {
+                  return p.isShared ? { ...p, isShared: false } : { ...p }
+                }
+                const trimmed = p.connectionId.trim()
+                if (!trimmed) {
+                  return p.isShared ? { ...p, isShared: false } : { ...p }
+                }
+                const shouldBeShared = nextWorkspaceConnectionIds.has(trimmed)
+                return p.isShared === shouldBeShared
+                  ? { ...p }
+                  : { ...p, isShared: shouldBeShared }
+              })
+
               const next: GroupedConnectionsSnapshot = {
                 personal: nextPersonal,
-                workspace: [...nextWorkspace, workspaceEntry]
+                workspace: nextWorkspaceWithPromotion
               }
               setCachedConnections(next, { workspaceId })
               return next
