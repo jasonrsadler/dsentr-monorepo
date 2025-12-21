@@ -33,3 +33,4 @@
 - Refresh responses now serialize field names in `camelCase` (e.g., `requiresReconnect`, `connectionId`) to keep the JSON API stable for existing clients and tests.
 - Workspace connection listings now include `connectionId` sourced from the promoted personal token so frontend identity matching stays stable after reloads.
 - Connection lookup responses now surface workspace `connectionId` from the stored connection record and omit it when unavailable, avoiding any fallback to the workspace row id.
+- OAuth callbacks now delegate persistence to the dedup-aware account service entry point so reconnects update existing personal connections by identity.

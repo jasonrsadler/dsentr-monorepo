@@ -176,7 +176,7 @@ pub(crate) async fn handle_callback(
 
     if let Err(err) = state
         .oauth_accounts
-        .save_authorization(user_id, provider, tokens)
+        .save_authorization_deduped(user_id, provider, tokens)
         .await
     {
         error!("Saving OAuth authorization failed: {err}");

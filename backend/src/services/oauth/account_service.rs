@@ -56,6 +56,7 @@ pub struct AuthorizationTokens {
     pub refresh_token: String,
     pub expires_at: OffsetDateTime,
     pub account_email: String,
+    pub provider_user_id: Option<String>,
     pub slack: Option<SlackOAuthMetadata>,
 }
 
@@ -77,6 +78,8 @@ pub struct EncryptedSlackOAuthMetadata {
 pub struct OAuthTokenMetadata {
     #[serde(default)]
     pub slack: Option<EncryptedSlackOAuthMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_user_id: Option<String>,
 }
 
 #[derive(Error, Debug)]
@@ -258,6 +261,39 @@ impl OAuthAccountService {
             .await
     }
 
+    pub async fn save_authorization_deduped(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        tokens: AuthorizationTokens,
+    ) -> Result<StoredOAuthToken, OAuthAccountError> {
+        let matches = self
+            .find_matching_personal_tokens(user_id, provider, &tokens)
+            .await?;
+
+        if matches.is_empty() {
+            return self.save_authorization(user_id, provider, tokens).await;
+        }
+
+        if matches.len() > 1 {
+            let matching_ids: Vec<Uuid> = matches.iter().map(|record| record.id).collect();
+            warn!(
+                %user_id,
+                ?provider,
+                matching_ids = ?matching_ids,
+                "multiple personal oauth tokens matched the same identity"
+            );
+        }
+
+        let selected = matches
+            .iter()
+            .max_by_key(|record| record.updated_at)
+            .expect("matches is non-empty");
+
+        self.save_authorization_for_connection(user_id, provider, selected.id, tokens)
+            .await
+    }
+
     pub async fn save_authorization_for_connection(
         &self,
         user_id: Uuid,
@@ -287,6 +323,7 @@ impl OAuthAccountService {
         existing: Option<UserOAuthToken>,
         tokens: AuthorizationTokens,
     ) -> Result<StoredOAuthToken, OAuthAccountError> {
+        let existing_id = existing.as_ref().map(|record| record.id);
         if let Some(existing) = existing.as_ref() {
             let stored = self.decrypt_record(existing.clone())?;
             self.revoke_existing_credentials(provider, &stored).await;
@@ -294,6 +331,10 @@ impl OAuthAccountService {
 
         let encrypted_access = encrypt_secret(&self.encryption_key, &tokens.access_token)?;
         let encrypted_refresh = encrypt_secret(&self.encryption_key, &tokens.refresh_token)?;
+        let provider_user_id = tokens
+            .provider_user_id
+            .as_deref()
+            .and_then(normalize_provider_user_id);
 
         let encrypted_slack = tokens
             .slack
@@ -310,9 +351,10 @@ impl OAuthAccountService {
             );
         }
 
-        let (_, metadata_value) = merge_metadata_value(
+        let (merged_metadata, metadata_value) = merge_metadata_value(
             existing.as_ref().map(|record| &record.metadata),
             encrypted_slack.clone(),
+            provider_user_id,
         );
 
         let stored = if let Some(existing) = existing {
@@ -322,8 +364,8 @@ impl OAuthAccountService {
                     NewUserOAuthToken {
                         user_id,
                         provider,
-                        access_token: encrypted_access,
-                        refresh_token: encrypted_refresh,
+                        access_token: encrypted_access.clone(),
+                        refresh_token: encrypted_refresh.clone(),
                         expires_at: tokens.expires_at,
                         account_email: tokens.account_email.clone(),
                         metadata: metadata_value,
@@ -335,14 +377,27 @@ impl OAuthAccountService {
                 .insert_token(NewUserOAuthToken {
                     user_id,
                     provider,
-                    access_token: encrypted_access,
-                    refresh_token: encrypted_refresh,
+                    access_token: encrypted_access.clone(),
+                    refresh_token: encrypted_refresh.clone(),
                     expires_at: tokens.expires_at,
                     account_email: tokens.account_email.clone(),
                     metadata: metadata_value,
                 })
                 .await?
         };
+
+        if let Some(token_id) = existing_id {
+            self.propagate_workspace_token_update(
+                token_id,
+                provider,
+                encrypted_access,
+                encrypted_refresh,
+                tokens.expires_at,
+                tokens.account_email.clone(),
+                &merged_metadata,
+            )
+            .await;
+        }
 
         Ok(StoredOAuthToken {
             id: stored.id,
@@ -354,6 +409,122 @@ impl OAuthAccountService {
             is_shared: stored.is_shared,
             updated_at: stored.updated_at,
         })
+    }
+
+    async fn find_matching_personal_tokens(
+        &self,
+        user_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        tokens: &AuthorizationTokens,
+    ) -> Result<Vec<UserOAuthToken>, OAuthAccountError> {
+        let provider_user_id = tokens
+            .provider_user_id
+            .as_deref()
+            .and_then(normalize_provider_user_id);
+        let normalized_email = normalize_account_email(&tokens.account_email);
+        let candidates = self
+            .repo
+            .list_by_user_and_provider(user_id, provider)
+            .await?;
+
+        let matches = if let Some(provider_user_id) = provider_user_id.as_ref() {
+            candidates
+                .into_iter()
+                .filter(|record| {
+                    record.workspace_id.is_none()
+                        && parse_token_metadata(&record.metadata)
+                            .provider_user_id
+                            .as_deref()
+                            .and_then(normalize_provider_user_id)
+                            .as_deref()
+                            == Some(provider_user_id.as_str())
+                })
+                .collect()
+        } else if let Some(normalized_email) = normalized_email.as_ref() {
+            candidates
+                .into_iter()
+                .filter(|record| {
+                    record.workspace_id.is_none()
+                        && normalize_account_email(&record.account_email).as_deref()
+                            == Some(normalized_email.as_str())
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        Ok(matches)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn propagate_workspace_token_update(
+        &self,
+        token_id: Uuid,
+        provider: ConnectedOAuthProvider,
+        encrypted_access: String,
+        encrypted_refresh: String,
+        expires_at: OffsetDateTime,
+        account_email: String,
+        metadata: &OAuthTokenMetadata,
+    ) {
+        let connections = match self
+            .workspace_connections
+            .find_by_source_token(token_id)
+            .await
+        {
+            Ok(connections) => connections,
+            Err(err) => {
+                warn!(
+                    ?err,
+                    ?provider,
+                    token_id = %token_id,
+                    "failed to load workspace connections for oauth reconnect update"
+                );
+                return;
+            }
+        };
+
+        if connections.is_empty() {
+            return;
+        }
+
+        let bot_user_id = metadata
+            .slack
+            .as_ref()
+            .and_then(|meta| meta.bot_user_id.clone());
+        let slack_team_id = metadata
+            .slack
+            .as_ref()
+            .and_then(|meta| meta.team_id.clone());
+        let incoming_webhook_url = metadata
+            .slack
+            .as_ref()
+            .and_then(|meta| meta.incoming_webhook_url.clone());
+
+        for connection in connections {
+            if let Err(err) = self
+                .workspace_connections
+                .update_tokens_for_connection(
+                    connection.id,
+                    encrypted_access.clone(),
+                    encrypted_refresh.clone(),
+                    expires_at,
+                    account_email.clone(),
+                    bot_user_id.clone(),
+                    slack_team_id.clone(),
+                    incoming_webhook_url.clone(),
+                )
+                .await
+            {
+                warn!(
+                    ?err,
+                    ?provider,
+                    workspace_id = %connection.workspace_id,
+                    connection_id = %connection.id,
+                    "failed to propagate oauth reconnect tokens to workspace connection"
+                );
+            }
+        }
     }
 
     pub async fn list_tokens(
@@ -440,7 +611,7 @@ impl OAuthAccountService {
                 .flatten();
 
             let (merged_metadata, metadata_value) =
-                merge_metadata_value(Some(&record.metadata), encrypted_slack.clone());
+                merge_metadata_value(Some(&record.metadata), encrypted_slack.clone(), None);
 
             let updated = self
                 .repo
@@ -678,6 +849,8 @@ impl OAuthAccountService {
             email: Option<String>,
             #[serde(default)]
             email_verified: Option<bool>,
+            #[serde(default)]
+            sub: Option<String>,
         }
 
         let response: TokenResponse = self
@@ -729,6 +902,10 @@ impl OAuthAccountService {
             refresh_token,
             expires_at,
             account_email: email,
+            provider_user_id: user_info
+                .sub
+                .as_deref()
+                .and_then(normalize_provider_user_id),
             slack: None,
         })
     }
@@ -751,6 +928,8 @@ impl OAuthAccountService {
             mail: Option<String>,
             #[serde(rename = "userPrincipalName")]
             user_principal_name: Option<String>,
+            #[serde(default)]
+            id: Option<String>,
         }
 
         let response: TokenResponse = self
@@ -797,6 +976,7 @@ impl OAuthAccountService {
             refresh_token,
             expires_at,
             account_email: email,
+            provider_user_id: user_info.id.as_deref().and_then(normalize_provider_user_id),
             slack: None,
         })
     }
@@ -941,6 +1121,7 @@ impl OAuthAccountService {
             refresh_token,
             expires_at,
             account_email,
+            provider_user_id: normalize_provider_user_id(user_id),
             slack: slack_meta,
         })
     }
@@ -960,6 +1141,7 @@ impl OAuthAccountService {
         #[derive(Deserialize)]
         struct AsanaUser {
             email: Option<String>,
+            gid: Option<String>,
         }
 
         #[derive(Deserialize)]
@@ -1003,14 +1185,21 @@ impl OAuthAccountService {
 
         let account_email = user_info
             .data
-            .and_then(|data| data.email)
+            .as_ref()
+            .and_then(|data| data.email.clone())
             .ok_or_else(|| OAuthAccountError::InvalidResponse("Missing account email".into()))?;
+        let provider_user_id = user_info
+            .data
+            .and_then(|data| data.gid)
+            .as_deref()
+            .and_then(normalize_provider_user_id);
 
         Ok(AuthorizationTokens {
             access_token: response.access_token,
             refresh_token,
             expires_at,
             account_email,
+            provider_user_id,
             slack: None,
         })
     }
@@ -1090,6 +1279,7 @@ impl OAuthAccountService {
             refresh_token: new_refresh,
             expires_at,
             account_email: String::new(),
+            provider_user_id: None,
             slack: None,
         })
     }
@@ -1153,6 +1343,7 @@ impl OAuthAccountService {
             refresh_token: new_refresh,
             expires_at,
             account_email: String::new(),
+            provider_user_id: None,
             slack: None,
         })
     }
@@ -1290,6 +1481,7 @@ impl OAuthAccountService {
             refresh_token: new_refresh,
             expires_at,
             account_email: String::new(),
+            provider_user_id: None,
             slack: slack_meta,
         })
     }
@@ -1352,6 +1544,7 @@ impl OAuthAccountService {
             refresh_token: new_refresh,
             expires_at,
             account_email: String::new(),
+            provider_user_id: None,
             slack: None,
         })
     }
@@ -1937,13 +2130,41 @@ pub(crate) fn merge_slack_metadata(
     has_slack_fields(&merged).then_some(merged)
 }
 
+fn normalize_provider_user_id(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_account_email(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_ascii_lowercase())
+    }
+}
+
+fn merge_provider_user_id(existing: Option<String>, incoming: Option<String>) -> Option<String> {
+    incoming
+        .as_deref()
+        .and_then(normalize_provider_user_id)
+        .or_else(|| existing.as_deref().and_then(normalize_provider_user_id))
+}
+
 fn merge_metadata_value(
     existing: Option<&Value>,
     slack: Option<EncryptedSlackOAuthMetadata>,
+    provider_user_id: Option<String>,
 ) -> (OAuthTokenMetadata, Value) {
     let mut metadata = existing.map(parse_token_metadata).unwrap_or_default();
 
     metadata.slack = merge_slack_metadata(metadata.slack.clone(), slack);
+    metadata.provider_user_id =
+        merge_provider_user_id(metadata.provider_user_id.clone(), provider_user_id);
 
     let value = serialize_token_metadata(metadata.clone());
     (metadata, value)
@@ -3281,6 +3502,7 @@ mod tests {
             refresh_token: "new-refresh".into(),
             expires_at: now + Duration::hours(2),
             account_email: "updated@example.com".into(),
+            provider_user_id: None,
             slack: None,
         };
 
@@ -3360,6 +3582,7 @@ mod tests {
                     refresh_token: "first-refresh".into(),
                     expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
                     account_email: "first@example.com".into(),
+                    provider_user_id: None,
                     slack: None,
                 },
             )
@@ -3375,6 +3598,7 @@ mod tests {
                     refresh_token: "second-refresh".into(),
                     expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
                     account_email: "second@example.com".into(),
+                    provider_user_id: None,
                     slack: None,
                 },
             )
@@ -3387,6 +3611,203 @@ mod tests {
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0].account_email, "first@example.com");
         assert_eq!(tokens[1].account_email, "second@example.com");
+    }
+
+    #[tokio::test]
+    async fn save_authorization_deduped_updates_existing_and_preserves_connection_id() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let existing_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+        let key = Arc::new(vec![21u8; 32]);
+
+        let encrypted_access = encrypt_secret(&key, "old-access").expect("encrypt access");
+        let encrypted_refresh = encrypt_secret(&key, "old-refresh").expect("encrypt refresh");
+        let metadata = serialize_token_metadata(OAuthTokenMetadata {
+            slack: None,
+            provider_user_id: Some("google-123".into()),
+        });
+
+        let repo = Arc::new(MultiTokenRepo::new());
+        repo.tokens.lock().unwrap().push(UserOAuthToken {
+            id: existing_id,
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypted_access,
+            refresh_token: encrypted_refresh,
+            expires_at: now + Duration::hours(1),
+            account_email: "owner@example.com".into(),
+            metadata,
+            is_shared: false,
+            created_at: now - Duration::hours(2),
+            updated_at: now - Duration::minutes(5),
+        });
+
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let workspace_connection_id = Uuid::new_v4();
+        workspace_repo
+            .source_connections
+            .lock()
+            .unwrap()
+            .push(WorkspaceConnection {
+                id: workspace_connection_id,
+                connection_id: Some(existing_id),
+                workspace_id,
+                created_by: user_id,
+                owner_user_id: user_id,
+                user_oauth_token_id: Some(existing_id),
+                provider: ConnectedOAuthProvider::Google,
+                access_token: "enc-access".into(),
+                refresh_token: "enc-refresh".into(),
+                expires_at: now,
+                account_email: "owner@example.com".into(),
+                created_at: now,
+                updated_at: now,
+                bot_user_id: None,
+                slack_team_id: None,
+                incoming_webhook_url: None,
+                metadata: serde_json::json!({}),
+            });
+
+        let mut service = OAuthAccountService::new(
+            repo.clone(),
+            workspace_repo.clone(),
+            key.clone(),
+            Arc::new(Client::new()),
+            &OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/slack".into(),
+                },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
+                token_encryption_key: (*key).clone(),
+            },
+        );
+        fn noop_revocation(
+            _provider: ConnectedOAuthProvider,
+            _token: &str,
+        ) -> Result<(), OAuthAccountError> {
+            Ok(())
+        }
+        service.set_revocation_override(Some(Arc::new(noop_revocation)));
+
+        let tokens = AuthorizationTokens {
+            access_token: "new-access".into(),
+            refresh_token: "new-refresh".into(),
+            expires_at: now + Duration::hours(2),
+            account_email: "new@example.com".into(),
+            provider_user_id: Some("google-123".into()),
+            slack: None,
+        };
+
+        let stored = service
+            .save_authorization_deduped(user_id, ConnectedOAuthProvider::Google, tokens)
+            .await
+            .expect("deduped save succeeds");
+
+        assert_eq!(stored.id, existing_id);
+        assert_eq!(repo.tokens.lock().unwrap().len(), 1);
+
+        assert_eq!(workspace_repo.source_calls(), vec![existing_id]);
+        let update_calls = workspace_repo.update_calls();
+        assert_eq!(update_calls.len(), 1);
+        assert_eq!(update_calls[0].0, workspace_connection_id);
+        assert_eq!(update_calls[0].4, "new@example.com");
+    }
+
+    #[tokio::test]
+    async fn save_authorization_deduped_inserts_new_after_removal() {
+        let user_id = Uuid::new_v4();
+        let removed_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+        let key = Arc::new(vec![22u8; 32]);
+
+        let repo = Arc::new(MultiTokenRepo::new());
+        repo.tokens.lock().unwrap().push(UserOAuthToken {
+            id: removed_id,
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&key, "old-access").expect("encrypt access"),
+            refresh_token: encrypt_secret(&key, "old-refresh").expect("encrypt refresh"),
+            expires_at: now,
+            account_email: "old@example.com".into(),
+            metadata: serialize_token_metadata(OAuthTokenMetadata {
+                slack: None,
+                provider_user_id: Some("google-456".into()),
+            }),
+            is_shared: false,
+            created_at: now - Duration::hours(1),
+            updated_at: now - Duration::minutes(10),
+        });
+        repo.delete_token_by_id(removed_id)
+            .await
+            .expect("remove token");
+        let workspace_repo = Arc::new(RecordingWorkspaceRepo::default());
+        let service = OAuthAccountService::new(
+            repo.clone(),
+            workspace_repo.clone(),
+            key.clone(),
+            Arc::new(Client::new()),
+            &OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/slack".into(),
+                },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
+                token_encryption_key: (*key).clone(),
+            },
+        );
+
+        let tokens = AuthorizationTokens {
+            access_token: "fresh-access".into(),
+            refresh_token: "fresh-refresh".into(),
+            expires_at: now + Duration::hours(1),
+            account_email: "new@example.com".into(),
+            provider_user_id: Some("google-456".into()),
+            slack: None,
+        };
+
+        let stored = service
+            .save_authorization_deduped(user_id, ConnectedOAuthProvider::Google, tokens)
+            .await
+            .expect("deduped insert succeeds");
+
+        assert_ne!(stored.id, removed_id);
+        assert_eq!(repo.tokens.lock().unwrap().len(), 1);
+        assert!(workspace_repo.source_calls().is_empty());
+        assert!(workspace_repo.update_calls().is_empty());
     }
 
     #[tokio::test]
@@ -3473,6 +3894,7 @@ mod tests {
                     refresh_token: "first-refresh".into(),
                     expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
                     account_email: "first@example.com".into(),
+                    provider_user_id: None,
                     slack: None,
                 },
             )
@@ -3488,6 +3910,7 @@ mod tests {
                     refresh_token: "second-refresh".into(),
                     expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
                     account_email: "second@example.com".into(),
+                    provider_user_id: None,
                     slack: None,
                 },
             )
@@ -3569,6 +3992,7 @@ mod tests {
                     refresh_token: "refresh-target".into(),
                     expires_at: OffsetDateTime::now_utc() + Duration::seconds(10),
                     account_email: "expiring@example.com".into(),
+                    provider_user_id: None,
                     slack: None,
                 },
             )
@@ -3584,6 +4008,7 @@ mod tests {
                     refresh_token: "refresh-other".into(),
                     expires_at: OffsetDateTime::now_utc() + Duration::hours(4),
                     account_email: "stable@example.com".into(),
+                    provider_user_id: None,
                     slack: None,
                 },
             )
@@ -3599,6 +4024,7 @@ mod tests {
                     refresh_token: "refreshed-refresh".into(),
                     expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
                     account_email: "expiring@example.com".into(),
+                    provider_user_id: None,
                     slack: None,
                 })
             },

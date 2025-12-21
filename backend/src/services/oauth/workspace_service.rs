@@ -24,9 +24,9 @@ use crate::models::oauth_token::{
     WORKSPACE_AUDIT_EVENT_CONNECTION_PROMOTED, WORKSPACE_AUDIT_EVENT_CONNECTION_UNSHARED,
 };
 use crate::services::oauth::account_service::{
-    clear_webhook, encrypt_slack_metadata_with_key, merge_slack_metadata, serialize_token_metadata,
-    slack_metadata_from_value, AuthorizationTokens, EncryptedSlackOAuthMetadata, OAuthAccountError,
-    OAuthAccountService, OAuthTokenMetadata,
+    clear_webhook, encrypt_slack_metadata_with_key, merge_slack_metadata, parse_token_metadata,
+    serialize_token_metadata, slack_metadata_from_value, AuthorizationTokens,
+    EncryptedSlackOAuthMetadata, OAuthAccountError, OAuthAccountService, OAuthTokenMetadata,
 };
 use crate::utils::encryption::{decrypt_secret, encrypt_secret, EncryptionError};
 
@@ -141,6 +141,7 @@ impl WorkspaceOAuthService {
         let mut account_email = token.account_email.clone();
         let mut slack_meta: Option<EncryptedSlackOAuthMetadata> =
             slack_metadata_from_value(&token.metadata);
+        let existing_provider_user_id = parse_token_metadata(&token.metadata).provider_user_id;
 
         if provider == ConnectedOAuthProvider::Slack {
             let refresh_plain = decrypt_secret(&self.encryption_key, &token.refresh_token)?;
@@ -165,6 +166,7 @@ impl WorkspaceOAuthService {
 
             let personal_metadata = serialize_token_metadata(OAuthTokenMetadata {
                 slack: slack_meta.clone(),
+                provider_user_id: existing_provider_user_id.clone(),
             });
 
             let _ = self
@@ -223,6 +225,7 @@ impl WorkspaceOAuthService {
         {
             let cleared_metadata = serialize_token_metadata(OAuthTokenMetadata {
                 slack: clear_webhook(slack_meta.clone()),
+                provider_user_id: existing_provider_user_id.clone(),
             });
 
             let _ = self
@@ -2467,6 +2470,7 @@ mod tests {
             refresh_token: "slack-refreshed-refresh".into(),
             expires_at: expires_at + Duration::hours(2),
             account_email: "owner@example.com".into(),
+            provider_user_id: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: Some("T123".into()),
@@ -2530,6 +2534,7 @@ mod tests {
                 bot_user_id: Some(encrypt_secret(&key, bot_user).unwrap()),
                 incoming_webhook_url: Some(encrypt_secret(&key, webhook_url).unwrap()),
             }),
+            provider_user_id: None,
         };
 
         let user_repo = Arc::new(InMemoryUserRepo {
@@ -2556,6 +2561,7 @@ mod tests {
             refresh_token: "slack-refreshed-refresh".into(),
             expires_at: expires_at + Duration::hours(2),
             account_email: "slack@example.com".into(),
+            provider_user_id: None,
             slack: None,
         };
         let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
@@ -3575,6 +3581,7 @@ mod tests {
             refresh_token: "refreshed-refresh".into(),
             expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
             account_email: "workspace@example.com".into(),
+            provider_user_id: None,
             slack: None,
         };
         let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
@@ -3647,6 +3654,7 @@ mod tests {
             refresh_token: "slack-new-refresh".into(),
             expires_at: OffsetDateTime::now_utc() + Duration::hours(4),
             account_email: "slack@example.com".into(),
+            provider_user_id: None,
             slack: None,
         };
         let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
@@ -3740,6 +3748,7 @@ mod tests {
             refresh_token: "next-refresh".into(),
             expires_at: OffsetDateTime::now_utc() + Duration::hours(3),
             account_email: "workspace@example.com".into(),
+            provider_user_id: None,
             slack: None,
         };
         let refresher = RecordingTokenRefresher::new(refreshed_tokens.clone());

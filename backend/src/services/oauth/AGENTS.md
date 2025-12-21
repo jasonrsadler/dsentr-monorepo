@@ -30,3 +30,4 @@
 - Workspace token unshare checks now ignore stale workspace connection rows with `user_oauth_token_id = NULL` by using `WorkspaceConnectionRepository::find_by_source_token(token_id)` when a token id is available.
 - OAuth service test doubles were refactored to satisfy `cargo clippy -D warnings` by avoiding over-eager iterator cloning and introducing small type aliases for recorded call tuples.
 - Workspace OAuth promotion now stamps workspace connections with the source personal `connection_id` so API listings can return stable identities.
+- OAuth reconnect saves now dedupe by provider user id (email fallback only), preserve connection ids on updates, and propagate refreshed tokens to workspace connections without touching insert flows.
