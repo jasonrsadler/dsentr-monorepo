@@ -1,138 +1,22 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react'
-import { vi } from 'vitest'
+import { describe, it, beforeEach, vi, expect } from 'vitest'
 
 import SlackAction from '../src/components/workflow/Actions/Messaging/Services/SlackAction'
-import { renderWithSecrets } from '@/test-utils/renderWithSecrets'
-import { useAuth } from '@/stores/auth'
+import { renderWithSecrets } from '../src/test-utils/renderWithSecrets'
 
-vi.mock('@/components/ui/InputFields/NodeInputField', () => ({
-  __esModule: true,
-  default: ({ value, onChange, placeholder }: any) => (
-    <input
-      placeholder={placeholder}
-      value={value ?? ''}
-      onChange={(event) => onChange(event.target.value)}
-    />
-  )
+/* ============================
+   API mocks
+============================ */
+
+const paramsStore = vi.hoisted(() => ({
+  paramsRef: { current: {} as any },
+  listeners: new Set<() => void>()
 }))
 
-vi.mock('@/components/ui/InputFields/NodeDropdownField', () => ({
-  __esModule: true,
-  default: ({ value, onChange, options, placeholder }: any) => {
-    const flatOptions = (options as any[]).flatMap((entry) => {
-      if (entry && typeof entry === 'object' && 'options' in entry) {
-        return (entry.options as any[]) ?? []
-      }
-      return [entry]
-    })
-
-    return (
-      <select
-        aria-label={placeholder ?? 'dropdown'}
-        value={value ?? ''}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {flatOptions.map((option) => {
-          const normalized =
-            typeof option === 'string'
-              ? { label: option, value: option }
-              : option
-          return (
-            <option key={normalized.value} value={normalized.value}>
-              {normalized.label}
-            </option>
-          )
-        })}
-      </select>
-    )
-  }
-}))
-
-vi.mock('@/components/ui/InputFields/NodeSecretDropdown', () => ({
-  __esModule: true,
-  default: ({ value, onChange }: any) => (
-    <select
-      value={value ?? ''}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="">Manual entry</option>
-      <option value="primary">primary</option>
-    </select>
-  )
-}))
-
-const createBaseParams = () => ({
-  channel: '#alerts',
-  message: 'Hello team',
-  token: 'xoxb-token',
-  connectionScope: '',
-  connectionId: '',
-  accountEmail: ''
-})
-
-const mockParamsRef = { current: createBaseParams() }
-const updateNodeData = vi.fn((id: string, patch: any) => {
-  const node = workflowState.nodes.find((entry) => entry.id === id)
-  if (!node) return
-  if (!patch || typeof patch !== 'object') return
-  const data =
-    node.data && typeof node.data === 'object' && !Array.isArray(node.data)
-      ? { ...(node.data as Record<string, unknown>) }
-      : {}
-  if (patch.params && typeof patch.params === 'object') {
-    data.params = patch.params
-  }
-  node.data = data
-})
-const workflowState = {
-  canEdit: true,
-  updateNodeData,
-  nodes: [
-    {
-      id: 'slack-node',
-      data: { params: mockParamsRef.current }
-    }
-  ],
-  edges: []
-}
-
-const fetchConnections = vi.fn().mockResolvedValue({
-  personal: [
-    {
-      scope: 'personal',
-      provider: 'slack',
-      connected: true,
-      id: 'conn-1',
-      accountEmail: 'alice@example.com',
-      requiresReconnect: false,
-      isShared: false
-    }
-  ],
-  workspace: []
-})
-const getCachedConnections = vi.fn().mockReturnValue(null)
-const subscribeToConnectionUpdates = vi.fn().mockReturnValue(() => {})
-
-vi.mock('@/stores/workflowSelectors', () => ({
-  useActionParams: () => mockParamsRef.current
-}))
-
-vi.mock('@/stores/workflowStore', () => {
-  const useWorkflowStore = (selector: (state: typeof workflowState) => any) =>
-    selector(workflowState)
-
-  useWorkflowStore.setState = (partial: any) => {
-    if (typeof partial === 'function') {
-      Object.assign(workflowState, partial(workflowState))
-    } else {
-      Object.assign(workflowState, partial)
-    }
-  }
-
-  useWorkflowStore.getState = () => workflowState
-
-  return { useWorkflowStore }
-})
+const fetchConnections = vi.fn()
+const getCachedConnections = vi.fn()
+const subscribeToConnectionUpdates = vi.fn()
+const fetchSlackChannels = vi.fn()
 
 vi.mock('@/lib/oauthApi', () => ({
   fetchConnections: (...args: any[]) => fetchConnections(...args),
@@ -141,183 +25,378 @@ vi.mock('@/lib/oauthApi', () => ({
     subscribeToConnectionUpdates(...args)
 }))
 
-describe('SlackAction (workflow store integration)', () => {
-  const nodeId = 'slack-node'
-  const secrets = {
-    messaging: {
-      slack: {
-        primary: 'xoxb-token'
+vi.mock('@/lib/slackApi', () => ({
+  fetchSlackChannels: (...args: any[]) => fetchSlackChannels(...args)
+}))
+
+/* ============================
+   UI field mocks
+============================ */
+
+vi.mock('@/components/ui/InputFields/NodeInputField', () => ({
+  __esModule: true,
+  default: ({ value, onChange, placeholder }: any) => (
+    <input
+      placeholder={placeholder}
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  )
+}))
+
+vi.mock('@/components/ui/InputFields/NodeDropdownField', () => ({
+  __esModule: true,
+  default: ({ value, onChange, options }: any) => {
+    const flat = (options ?? []).flatMap((o: any) =>
+      o?.options ? o.options : [o]
+    )
+    return (
+      <select
+        aria-label="dropdown"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="" />
+        {flat.map((o: any) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    )
+  }
+}))
+
+/* ============================
+   Store mocks (ONCE)
+============================ */
+
+const notifyParams = () => {
+  paramsStore.listeners.forEach((listener) => listener())
+}
+
+const updateNodeData = vi.fn((nodeId: string, data: any) => {
+  // Actually update the params so the component re-renders with new data
+  if (data.params) {
+    paramsStore.paramsRef.current = {
+      ...paramsStore.paramsRef.current,
+      ...data.params
+    }
+    notifyParams()
+  }
+})
+
+const workflowState = {
+  canEdit: true,
+  updateNodeData,
+  nodes: [] as any[],
+  edges: [] as any[]
+}
+
+vi.mock('@/stores/workflowStore', () => {
+  const useWorkflowStore = (selector: any) => selector(workflowState)
+  useWorkflowStore.getState = () => workflowState
+  useWorkflowStore.setState = (partial: any) => {
+    Object.assign(
+      workflowState,
+      typeof partial === 'function' ? partial(workflowState) : partial
+    )
+  }
+  return { useWorkflowStore }
+})
+
+vi.mock('@/stores/workflowSelectors', async () => {
+  const { useSyncExternalStore } = await import('react')
+  return {
+    useActionParams: () => {
+      const subscribe = (listener: () => void) => {
+        paramsStore.listeners.add(listener)
+        return () => {
+          paramsStore.listeners.delete(listener)
+        }
       }
+      const getSnapshot = () => paramsStore.paramsRef.current
+      return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
     }
   }
+})
 
-  const initialAuthState = useAuth.getState()
+vi.mock('@/stores/auth', () => ({
+  useAuth: (selector: any) =>
+    selector({ currentWorkspace: { workspace: { id: 'ws-1' } } }),
+  selectCurrentWorkspace: (s: any) => s.currentWorkspace
+}))
 
-  const resetState = () => {
-    mockParamsRef.current = createBaseParams()
-    workflowState.nodes = [
-      {
-        id: nodeId,
-        data: { params: mockParamsRef.current }
-      }
-    ]
-    workflowState.edges = []
-    workflowState.canEdit = true
-    updateNodeData.mockClear()
-    fetchConnections.mockClear()
+/* ============================
+   Helpers
+============================ */
+
+const nodeId = 'node-1'
+const secrets = {}
+
+const baseParams = () => ({
+  channel: '',
+  message: '',
+  identity: undefined,
+  workspace_connection_id: undefined,
+  personal_connection_id: undefined
+})
+
+const reset = () => {
+  paramsStore.paramsRef.current = baseParams()
+  workflowState.nodes = [
+    { id: nodeId, data: { params: paramsStore.paramsRef.current } }
+  ]
+  updateNodeData.mockClear()
+  fetchConnections.mockReset()
+  getCachedConnections.mockReset()
+  subscribeToConnectionUpdates.mockReset()
+  fetchSlackChannels.mockReset()
+
+  // Set default return values
+  getCachedConnections.mockReturnValue(null)
+  subscribeToConnectionUpdates.mockReturnValue(() => {}) // unsubscribe function
+}
+
+/* ============================
+   Tests
+============================ */
+
+describe('SlackAction identity enforcement and backend contract', () => {
+  beforeEach(reset)
+
+  /* ---------- identity required ---------- */
+
+  it('does not execute without identity', async () => {
+    fetchConnections.mockResolvedValue({ workspace: [], personal: [] })
+
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
+
+    fireEvent.change(await screen.findByPlaceholderText('Message'), {
+      target: { value: 'hi' }
+    })
+
+    expect(updateNodeData).toHaveBeenCalled()
+    const [, payload] = updateNodeData.mock.calls.at(-1)!
+    expect(payload.hasValidationErrors).toBe(true)
+    expect(payload.params.identity).toBeUndefined()
+    expect(payload.params.workspace_connection_id).toBeUndefined()
+    expect(payload.params.personal_connection_id).toBeUndefined()
+    expect(fetchSlackChannels).not.toHaveBeenCalled()
+  })
+
+  /* ---------- workspace bot ---------- */
+
+  it('workspace_bot requires workspace connection', async () => {
+    paramsStore.paramsRef.current = {
+      ...baseParams(),
+      identity: 'workspace_bot'
+    }
+
+    fetchConnections.mockResolvedValue({ workspace: [], personal: [] })
+
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
+
+    expect(updateNodeData).not.toHaveBeenCalled()
+    expect(fetchSlackChannels).not.toHaveBeenCalled()
+  })
+
+  /* ---------- personal user ---------- */
+
+  it('personal_user requires BOTH connections', async () => {
+    paramsStore.paramsRef.current = {
+      ...baseParams(),
+      identity: 'personal_user'
+    }
+
     fetchConnections.mockResolvedValue({
+      workspace: [],
       personal: [
         {
           scope: 'personal',
           provider: 'slack',
+          id: 'user-conn',
           connected: true,
-          id: 'conn-1',
-          accountEmail: 'alice@example.com',
           requiresReconnect: false,
           isShared: false
         }
-      ],
-      workspace: []
+      ]
     })
-  }
 
-  beforeEach(() => {
-    resetState()
-    useAuth.setState(initialAuthState, true)
-  })
-
-  it('writes to the workflow store when the Slack channel changes', async () => {
     renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
 
-    const channelInput = await screen.findByPlaceholderText(
-      'Channel (e.g. #general)'
-    )
-    fireEvent.change(channelInput, { target: { value: '#ops' } })
-
-    await waitFor(() => {
-      expect(updateNodeData).toHaveBeenCalled()
-    })
-
-    const lastCall = updateNodeData.mock.calls.at(-1)
-    expect(lastCall?.[0]).toBe(nodeId)
-    expect(lastCall?.[1]).toMatchObject({
-      dirty: true,
-      hasValidationErrors: false
-    })
+    expect(updateNodeData).not.toHaveBeenCalled()
+    expect(fetchSlackChannels).not.toHaveBeenCalled()
   })
 
-  it('propagates validation errors when the message is cleared', async () => {
-    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
+  /* ---------- regressions ---------- */
 
-    const messageInput = await screen.findByPlaceholderText('Message')
-    fireEvent.change(messageInput, { target: { value: '' } })
-
-    await waitFor(() => {
-      expect(updateNodeData).toHaveBeenCalled()
-    })
-
-    const lastCall = updateNodeData.mock.calls.at(-1)
-    expect(lastCall?.[0]).toBe(nodeId)
-    expect(lastCall?.[1]).toMatchObject({
-      dirty: true,
-      hasValidationErrors: true
-    })
-  })
-
-  it('emits updated Slack payloads without dropping existing fields', async () => {
-    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
-
-    const channelInput = await screen.findByPlaceholderText(
-      'Channel (e.g. #general)'
-    )
-    fireEvent.change(channelInput, { target: { value: '#ops' } })
-
-    await waitFor(() => {
-      expect(updateNodeData).toHaveBeenCalled()
-    })
-
-    const patchCall = updateNodeData.mock.calls.find(
-      ([, payload]) => payload.params
-    )
-    expect(patchCall?.[1]).toEqual({
-      params: {
-        channel: '#ops',
-        message: 'Hello team',
-        token: 'xoxb-token',
-        connectionScope: '',
-        connectionId: '',
-        accountEmail: '',
-        postAsUser: false
-      },
-      dirty: true,
-      hasValidationErrors: false
-    })
-  })
-
-  it('merges connection updates into the full Slack payload', async () => {
+  it('does not infer identity from connections', async () => {
     fetchConnections.mockResolvedValue({
+      workspace: [
+        { scope: 'workspace', provider: 'slack', id: 'ws', connected: true }
+      ],
+      personal: [
+        { scope: 'personal', provider: 'slack', id: 'user', connected: true }
+      ]
+    })
+
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
+
+    expect(updateNodeData).not.toHaveBeenCalled()
+    expect(fetchSlackChannels).not.toHaveBeenCalled()
+  })
+
+  it('never emits token or legacy auth fields', async () => {
+    paramsStore.paramsRef.current = {
+      ...baseParams(),
+      token: 'xoxb-legacy',
+      connectionScope: 'manual'
+    }
+
+    fetchConnections.mockResolvedValue({ workspace: [], personal: [] })
+
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
+
+    expect(updateNodeData).not.toHaveBeenCalled()
+  })
+
+  it('workspace_bot emits ONLY workspace_connection_id', async () => {
+    const mockConnections = {
+      personal: [],
+      workspace: [
+        {
+          scope: 'workspace',
+          provider: 'slack',
+          id: 'ws-conn',
+          connected: true,
+          accountEmail: 'team@example.com',
+          requiresReconnect: false,
+          isShared: true
+        }
+      ]
+    }
+
+    getCachedConnections.mockReturnValue(mockConnections)
+    fetchConnections.mockResolvedValue(mockConnections)
+    subscribeToConnectionUpdates.mockReturnValue(() => {})
+
+    fetchSlackChannels.mockResolvedValue([
+      { id: 'C123', name: 'general', isPrivate: false }
+    ])
+
+    renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
+
+    // identity
+    fireEvent.change(screen.getAllByRole('combobox')[0], {
+      target: { value: 'workspace_bot' }
+    })
+
+    // workspace connection dropdown appears after identity
+    // wait for workspace option to appear
+    await waitFor(() => {
+      expect(
+        screen.getByRole('option', {
+          name: /team@example.com/i
+        })
+      ).toBeInTheDocument()
+    })
+
+    const workspaceSelect = screen.getAllByRole('combobox')[2]
+
+    fireEvent.change(workspaceSelect, {
+      target: { value: 'workspace:ws-conn' }
+    })
+
+    await waitFor(() =>
+      expect(fetchSlackChannels).toHaveBeenCalledWith({
+        workspaceConnectionId: 'ws-conn',
+        personalConnectionId: undefined
+      })
+    )
+
+    const last = updateNodeData.mock.calls.at(-1)![1].params
+
+    expect(last.workspace_connection_id).toBe('ws-conn')
+    expect(last.personal_connection_id).toBeUndefined()
+  })
+
+  it('personal_user emits BOTH ids and fetches channels with both', async () => {
+    const mockConnections = {
       personal: [
         {
           scope: 'personal',
           provider: 'slack',
+          id: 'user-conn',
           connected: true,
-          id: 'conn-2',
-          accountEmail: 'carol@example.com',
+          accountEmail: 'me@example.com',
           requiresReconnect: false,
           isShared: false
         }
       ],
-      workspace: []
-    })
-
-    mockParamsRef.current = {
-      channel: '#alerts',
-      message: 'Hello team',
-      token: '',
-      connectionScope: '',
-      connectionId: '',
-      accountEmail: ''
+      workspace: [
+        {
+          scope: 'workspace',
+          provider: 'slack',
+          id: 'ws-conn',
+          connected: true,
+          accountEmail: 'team@example.com',
+          requiresReconnect: false,
+          isShared: true
+        }
+      ]
     }
 
-    workflowState.nodes = [
-      {
-        id: nodeId,
-        data: { params: mockParamsRef.current }
-      }
-    ]
+    getCachedConnections.mockReturnValue(mockConnections)
+    fetchConnections.mockResolvedValue(mockConnections)
+    subscribeToConnectionUpdates.mockReturnValue(() => {})
+
+    fetchSlackChannels.mockResolvedValue([
+      { id: 'C123', name: 'general', isPrivate: false }
+    ])
 
     renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
 
-    await waitFor(() => {
-      expect(fetchConnections).toHaveBeenCalled()
+    // identity
+    fireEvent.change(screen.getAllByRole('combobox')[0], {
+      target: { value: 'personal_user' }
     })
 
-    const dropdown = screen.getByLabelText('Select Slack connection')
-    fireEvent.change(dropdown, { target: { value: 'personal:conn-2' } })
-
     await waitFor(() => {
-      expect(updateNodeData).toHaveBeenCalled()
+      expect(
+        screen.getByRole('option', { name: /team@example.com/i })
+      ).toBeInTheDocument()
     })
 
-    const patchCall = updateNodeData.mock.calls.find(
-      ([, payload]) => payload.params
+    const dropdowns = screen.getAllByRole('combobox')
+
+    const workspaceSelect = dropdowns[2]
+    fireEvent.change(workspaceSelect, {
+      target: { value: 'workspace:ws-conn' }
+    })
+
+    // personal dropdown appears after workspace selection
+    await waitFor(() => {
+      expect(
+        screen.getByRole('option', { name: /me@example.com/i })
+      ).toBeInTheDocument()
+    })
+
+    const personalSelect = screen.getAllByRole('combobox')[3]
+    fireEvent.change(personalSelect, {
+      target: { value: 'personal:user-conn' }
+    })
+
+    await waitFor(() =>
+      expect(fetchSlackChannels).toHaveBeenCalledWith({
+        workspaceConnectionId: 'ws-conn',
+        personalConnectionId: 'user-conn'
+      })
     )
-    expect(patchCall?.[1]).toMatchObject({
-      params: {
-        channel: '#alerts',
-        message: 'Hello team',
-        token: '',
-        connectionScope: 'user',
-        connectionId: 'conn-2',
-        accountEmail: 'carol@example.com',
-        connection: {
-          connectionScope: 'user',
-          connectionId: 'conn-2',
-          accountEmail: 'carol@example.com'
-        }
-      },
-      dirty: true,
-      hasValidationErrors: false
-    })
+
+    const last = updateNodeData.mock.calls.at(-1)![1].params
+
+    expect(last.workspace_connection_id).toBe('ws-conn')
+    expect(last.personal_connection_id).toBe('user-conn')
   })
 })

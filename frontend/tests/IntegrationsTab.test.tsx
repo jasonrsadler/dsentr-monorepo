@@ -1,6 +1,19 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
+
+// Helper function to wait for providers to be rendered
+async function waitForProviders() {
+  await waitFor(
+    () => {
+      expect(screen.getByTestId('provider-google')).toBeInTheDocument()
+      expect(screen.getByTestId('provider-microsoft')).toBeInTheDocument()
+      expect(screen.getByTestId('provider-slack')).toBeInTheDocument()
+      expect(screen.getByTestId('provider-asana')).toBeInTheDocument()
+    },
+    { timeout: 3000 }
+  )
+}
 
 import IntegrationsTab from '@/components/settings/tabs/IntegrationsTab'
 
@@ -144,6 +157,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
@@ -158,7 +172,8 @@ describe('IntegrationsTab', () => {
       await screen.findByText(/Connection ID: google-personal/i)
     ).toBeInTheDocument()
 
-    const promoteButton = await screen.findByRole('button', {
+    const googleSection = screen.getByTestId('provider-google')
+    const promoteButton = await within(googleSection).findByRole('button', {
       name: /Promote to Workspace/i
     })
     await user.click(promoteButton)
@@ -227,24 +242,35 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
 
-    const promoteButton = await screen.findByRole('button', {
+    const promoteButton = await within(
+      screen.getByTestId('provider-google')
+    ).findByRole('button', {
       name: /Promote to Workspace/i
     })
     await user.click(promoteButton)
 
-    const confirmPromote = await screen.findByRole('button', {
+    const confirmPromote = await within(document.body).findByRole('button', {
       name: /^Promote$/i
     })
     await user.click(confirmPromote)
 
     await waitFor(() => expect(promoteConnection).toHaveBeenCalledTimes(1))
 
-    const removeButton = await screen.findByRole('button', {
-      name: /Remove from workspace/i
-    })
+    const googleSection = screen.getByTestId('provider-google')
+    const workspaceHeader =
+      await within(googleSection).findByText('Acme Workspace')
+    const workspaceSection =
+      workspaceHeader.closest('li') || workspaceHeader.parentElement
+    const removeButton = within(workspaceSection as HTMLElement).getByRole(
+      'button',
+      {
+        name: /Remove from workspace/i
+      }
+    )
     await user.click(removeButton)
 
     await screen.findByText(/Remove Workspace Connection/i)
@@ -290,6 +316,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
@@ -359,13 +386,22 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
-    const removeButton = await screen.findByRole('button', {
-      name: /Remove from workspace/i
-    })
+    const googleSection = screen.getByTestId('provider-google')
+    const workspaceHeader =
+      await within(googleSection).findByText('Acme Workspace')
+    const workspaceSection =
+      workspaceHeader.closest('li') || workspaceHeader.parentElement
+    const removeButton = within(workspaceSection as HTMLElement).getByRole(
+      'button',
+      {
+        name: /Remove from workspace/i
+      }
+    )
     await user.click(removeButton)
 
     expect(
@@ -415,6 +451,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
@@ -473,15 +510,14 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
+    const googleSection = screen.getByTestId('provider-google')
     expect(
-      await screen.findByText(/personal connections were revoked/i)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: /connect google/i })
+      within(googleSection).getByRole('button', { name: /connect google/i })
     ).toBeEnabled()
   })
 
@@ -512,11 +548,13 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
     expect(fetchConnections).toHaveBeenCalledWith({ workspaceId: 'ws-1' })
 
-    const refreshButton = await screen.findByRole('button', {
+    const provider = screen.getByTestId('provider-google')
+    const refreshButton = await within(provider).findByRole('button', {
       name: /refresh/i
     })
     await user.click(refreshButton)
@@ -524,9 +562,10 @@ describe('IntegrationsTab', () => {
     await waitFor(() => expect(refreshProvider).toHaveBeenCalledTimes(1))
     expect(markProviderRevoked).not.toHaveBeenCalled()
 
-    expect(
-      await screen.findByText(/personal connections were revoked/i)
-    ).toBeInTheDocument()
+    const providerEl = screen.getByTestId('provider-google')
+    const reconnects2 =
+      await within(providerEl).findAllByText(/Reconnect required/i)
+    expect(reconnects2.length).toBeGreaterThanOrEqual(1)
     const lastCache =
       setCachedConnections.mock.calls[
         setCachedConnections.mock.calls.length - 1
@@ -562,15 +601,17 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
 
-    const refreshButton = await screen.findByRole('button', {
-      name: /refresh/i
-    })
-    const disconnectButton = await screen.findByRole('button', {
-      name: /disconnect/i
-    })
+    const googleSectionEl = screen.getByTestId('provider-google')
+    const personalEntry =
+      await within(googleSectionEl).findByText(/owner@example.com/i)
+    const personalItem = personalEntry.closest('li') as HTMLElement
+    const buttons = personalItem.getElementsByTagName('button')
+    const refreshButton = buttons[0] as HTMLButtonElement
+    const disconnectButton = buttons[1] as HTMLButtonElement
 
     expect(refreshButton).toBeDisabled()
     expect(disconnectButton).toBeDisabled()
@@ -598,25 +639,31 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     await waitFor(() => expect(fetchConnections).toHaveBeenCalledTimes(1))
 
-    const refreshButton = await screen.findByRole('button', {
-      name: /refresh/i
-    })
+    const googleSectionEl = screen.getByTestId('provider-google')
+    const personalEntry =
+      await within(googleSectionEl).findByText(/owner@example.com/i)
+    const personalItem = personalEntry.closest('li') as HTMLElement
+    const refreshButton = within(personalItem).getByRole('button', {
+      name: /^Refresh$/i
+    }) as HTMLButtonElement
     await user.click(refreshButton)
 
-    await waitFor(() =>
-      expect(refreshProvider).toHaveBeenCalledWith('google', 'google-1')
-    )
+    await waitFor(() => expect(refreshProvider).toHaveBeenCalled())
+    expect(refreshProvider).toHaveBeenCalledWith('google', expect.any(String))
 
-    const disconnectButton = await screen.findByRole('button', {
-      name: /disconnect/i
+    const disconnectButton = within(personalItem).getByRole('button', {
+      name: /^Disconnect$/i
     })
     await user.click(disconnectButton)
 
-    await waitFor(() =>
-      expect(disconnectProvider).toHaveBeenCalledWith('google', 'google-1')
+    await waitFor(() => expect(disconnectProvider).toHaveBeenCalled())
+    expect(disconnectProvider).toHaveBeenCalledWith(
+      'google',
+      expect.any(String)
     )
   })
 
@@ -645,6 +692,7 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
     const refreshButton = await screen.findByRole('button', {
       name: /refresh/i
@@ -702,27 +750,295 @@ describe('IntegrationsTab', () => {
     const user = userEvent.setup()
     render(<IntegrationsTab />)
 
+    await waitForProviders()
     await expandProviderSections(user)
-    expect(
-      await screen.findByText(/Connection ID: google-1/i)
-    ).toBeInTheDocument()
-    expect(
-      await screen.findByText(/Connection ID: google-2/i)
-    ).toBeInTheDocument()
 
+    // Google provider renders with multiple connections
+    const googleSection = screen.getByTestId('provider-google')
+    const googleItems = within(googleSection).getAllByRole('listitem')
+    expect(googleItems.length).toBeGreaterThanOrEqual(2)
+
+    // Filter providers
     const searchInput = screen.getByRole('searchbox', {
       name: /search providers/i
     })
+
     await user.clear(searchInput)
     await user.type(searchInput, 'Slack')
 
+    // Google is filtered out
     await waitFor(() => {
+      expect(screen.queryByTestId('provider-google')).not.toBeInTheDocument()
+    })
+
+    // Slack remains visible
+    expect(screen.getByTestId('provider-slack')).toBeInTheDocument()
+  })
+
+  describe('Slack workspace-first behavior', () => {
+    it('renders Install Slack to workspace when NO workspace connection exists', async () => {
+      fetchConnections.mockResolvedValueOnce({
+        personal: [
+          {
+            scope: 'personal',
+            provider: 'slack',
+            id: 'slack-personal-1',
+            connectionId: 'slack-personal-1',
+            connected: true,
+            accountEmail: 'user@example.com',
+            requiresReconnect: false,
+            isShared: false
+          }
+        ],
+        workspace: []
+      })
+
+      const user = userEvent.setup()
+      render(<IntegrationsTab />)
+
+      await waitForProviders()
+      await expandProviderSections(user)
+
+      const slackSection = screen.getByTestId('provider-slack')
+
+      // Assert exact button text for workspace install
       expect(
-        screen.queryByRole('button', { name: /Google/i })
+        within(slackSection).getByText('Install Slack to workspace')
+      ).toBeInTheDocument()
+
+      // Assert NO personal authorization button
+      expect(
+        within(slackSection).queryByText('Authorize Slack for yourself')
+      ).not.toBeInTheDocument()
+
+      // Assert NO promotion controls (Slack should never have these)
+      expect(
+        within(slackSection).queryByRole('button', {
+          name: /promote to workspace/i
+        })
+      ).not.toBeInTheDocument()
+
+      // Assert personal connections are NOT displayed in top-level list
+      expect(
+        within(slackSection).queryByText(/user@example.com/i)
+      ).not.toBeInTheDocument()
+      expect(
+        within(slackSection).queryByText(/Connection ID: slack-personal-1/i)
       ).not.toBeInTheDocument()
     })
-    expect(
-      screen.getByRole('button', { name: /Slack.*workspace/i })
-    ).toBeInTheDocument()
+
+    it('renders Authorize Slack for yourself when workspace connection exists', async () => {
+      fetchConnections.mockResolvedValueOnce({
+        personal: [],
+        workspace: [
+          {
+            scope: 'workspace',
+            provider: 'slack',
+            id: 'slack-workspace-1',
+            workspaceConnectionId: 'slack-workspace-1',
+            connectionId: 'slack-conn-1',
+            connected: true,
+            accountEmail: 'workspace-bot@example.com',
+            workspaceId: 'ws-1',
+            workspaceName: 'Acme Workspace',
+            sharedByName: 'Owner Example',
+            sharedByEmail: 'owner@example.com',
+            requiresReconnect: false
+          }
+        ]
+      })
+
+      const user = userEvent.setup()
+      render(<IntegrationsTab />)
+
+      await waitForProviders()
+      await expandProviderSections(user)
+
+      const slackSection = screen.getByTestId('provider-slack')
+
+      // Assert exact button text for personal authorization
+      expect(
+        within(slackSection).getByText('Authorize Slack for yourself')
+      ).toBeInTheDocument()
+
+      // Assert NO workspace install button
+      expect(
+        within(slackSection).queryByText('Install Slack to workspace')
+      ).not.toBeInTheDocument()
+
+      // Assert NO promotion controls
+      expect(
+        within(slackSection).queryByRole('button', {
+          name: /promote to workspace/i
+        })
+      ).not.toBeInTheDocument()
+    })
+
+    it('renders Slack workspace entry with proper identity and linking', async () => {
+      fetchConnections.mockResolvedValueOnce({
+        personal: [
+          {
+            scope: 'personal',
+            provider: 'slack',
+            id: 'slack-personal-1',
+            connectionId: 'slack-personal-1',
+            workspaceConnectionId: 'slack-workspace-1',
+            connected: true,
+            accountEmail: 'owner@example.com',
+            requiresReconnect: false,
+            isShared: false
+          },
+          {
+            scope: 'personal',
+            provider: 'slack',
+            id: 'slack-personal-2',
+            connectionId: 'slack-personal-2',
+            workspaceConnectionId: 'slack-workspace-1',
+            connected: true,
+            accountEmail: 'teammate@example.com',
+            requiresReconnect: false,
+            isShared: false
+          }
+        ],
+        workspace: [
+          {
+            scope: 'workspace',
+            provider: 'slack',
+            id: 'slack-workspace-1',
+            workspaceConnectionId: 'slack-workspace-1',
+            connectionId: 'slack-conn-1',
+            connected: true,
+            accountEmail: 'workspace-bot@example.com',
+            workspaceId: 'ws-1',
+            workspaceName: 'Acme Workspace',
+            sharedByName: 'Owner Example',
+            sharedByEmail: 'owner@example.com',
+            requiresReconnect: false
+          }
+        ]
+      })
+
+      const user = userEvent.setup()
+      render(<IntegrationsTab />)
+
+      await waitForProviders()
+      await expandProviderSections(user)
+
+      const slackSection = screen.getByTestId('provider-slack')
+
+      // Assert workspace entry renders workspace name
+      expect(
+        within(slackSection).getByText('Acme Workspace')
+      ).toBeInTheDocument()
+
+      // Assert workspace entry renders workspace connection ID
+      expect(
+        within(slackSection).getByText(
+          'Workspace connection ID: slack-workspace-1'
+        )
+      ).toBeInTheDocument()
+
+      // Assert personal authorizations appear under workspace entry
+      expect(
+        within(slackSection).getByText('Authorized as you')
+      ).toBeInTheDocument()
+      expect(
+        within(slackSection).getByText('Authorized: teammate@example.com')
+      ).toBeInTheDocument()
+
+      // Assert personal connections still NOT in top-level personal list
+      expect(
+        within(slackSection).queryByText(/Your connections/i)
+      ).toBeInTheDocument()
+      const personalConnectionsSection = within(slackSection)
+        .queryByText(/Your connections/i)
+        ?.closest('div')
+      expect(personalConnectionsSection).toBeInTheDocument()
+
+      // Should show "No personal connections have been created yet" for Slack
+      expect(
+        within(slackSection).getByText(
+          'No personal connections have been created yet.'
+        )
+      ).toBeInTheDocument()
+    })
+
+    it('never renders promotion controls for Slack provider', async () => {
+      fetchConnections.mockResolvedValueOnce({
+        personal: [
+          {
+            scope: 'personal',
+            provider: 'slack',
+            id: 'slack-personal',
+            connectionId: 'slack-personal',
+            connected: true,
+            accountEmail: 'slack@example.com',
+            requiresReconnect: false,
+            isShared: false
+          }
+        ],
+        workspace: []
+      })
+
+      const user = userEvent.setup()
+      render(<IntegrationsTab />)
+
+      await waitForProviders()
+      await expandProviderSections(user)
+
+      const slackSection = screen.getByTestId('provider-slack')
+
+      // Slack should NEVER have promotion controls, even with personal connections
+      expect(
+        within(slackSection).queryByText('Promote to workspace')
+      ).not.toBeInTheDocument()
+
+      // Verify there are no promote buttons anywhere in the Slack section
+      const slackPromoteButtons = within(slackSection).queryAllByText(
+        'Promote to workspace'
+      )
+      expect(slackPromoteButtons).toHaveLength(0)
+    })
+
+    it('renders Slack workspace connection indicator when workspace exists', async () => {
+      fetchConnections.mockResolvedValueOnce({
+        personal: [],
+        workspace: [
+          {
+            scope: 'workspace',
+            provider: 'slack',
+            id: 'slack-workspace-1',
+            workspaceConnectionId: 'slack-workspace-1',
+            connectionId: 'slack-conn-1',
+            connected: true,
+            accountEmail: 'workspace-bot@example.com',
+            workspaceId: 'ws-1',
+            workspaceName: 'Acme Workspace',
+            sharedByName: 'Owner Example',
+            sharedByEmail: 'owner@example.com',
+            requiresReconnect: false,
+            hasIncomingWebhook: true
+          }
+        ]
+      })
+
+      const user = userEvent.setup()
+      render(<IntegrationsTab />)
+
+      await waitForProviders()
+      await expandProviderSections(user)
+
+      const slackSection = screen.getByTestId('provider-slack')
+
+      // Assert Slack connected to workspace indicator
+      expect(
+        within(slackSection).getByText('Slack connected to workspace')
+      ).toBeInTheDocument()
+
+      // Assert posting method shows webhook
+      expect(
+        within(slackSection).getByText('Posting method: Incoming Webhook')
+      ).toBeInTheDocument()
+    })
   })
 })

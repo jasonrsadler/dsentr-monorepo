@@ -4,7 +4,6 @@ import NodeDropdownField, {
   type NodeDropdownOptionGroup
 } from '@/components/ui/InputFields/NodeDropdownField'
 import NodeInputField from '@/components/ui/InputFields/NodeInputField'
-import NodeSecretDropdown from '@/components/ui/InputFields/NodeSecretDropdown'
 import {
   fetchConnections,
   getCachedConnections,
@@ -30,12 +29,14 @@ export interface SlackConnectionSelection {
 export interface SlackActionValues {
   channel?: string
   message?: string
-  token?: string
   connectionScope?: string
   connectionId?: string
   accountEmail?: string
   connection?: SlackConnectionSelection
-  postAsUser?: boolean
+  identity?: 'workspace_bot' | 'personal_user'
+  // NEW explicit backend parameters
+  workspace_connection_id?: string
+  personal_connection_id?: string
 }
 
 interface SlackActionProps {
@@ -137,25 +138,38 @@ const cloneSelection = (
 const EMPTY_SLACK_PARAMS: SlackActionValues = {
   channel: '',
   message: '',
-  token: '',
   connectionScope: '',
   connectionId: '',
   accountEmail: '',
-  postAsUser: false
+  identity: undefined,
+  workspace_connection_id: undefined,
+  personal_connection_id: undefined
 }
 
-const sanitizeSlackPayload = (params: SlackActionValues): SlackActionValues => {
+const sanitizeSlackPayload = (params: any): SlackActionValues => {
+  // Legacy payloads may include postAsUser; intentionally ignored.
   const sanitized: SlackActionValues = {
     channel: typeof params.channel === 'string' ? params.channel : '',
     message: typeof params.message === 'string' ? params.message : '',
-    token: typeof params.token === 'string' ? params.token : '',
     connectionScope:
       typeof params.connectionScope === 'string' ? params.connectionScope : '',
     connectionId:
       typeof params.connectionId === 'string' ? params.connectionId : '',
     accountEmail:
       typeof params.accountEmail === 'string' ? params.accountEmail : '',
-    postAsUser: params.postAsUser === true
+    identity:
+      params.identity === 'workspace_bot' || params.identity === 'personal_user'
+        ? params.identity
+        : undefined,
+    // NEW explicit backend parameters
+    workspace_connection_id:
+      typeof params.workspace_connection_id === 'string'
+        ? params.workspace_connection_id
+        : undefined,
+    personal_connection_id:
+      typeof params.personal_connection_id === 'string'
+        ? params.personal_connection_id
+        : undefined
   }
 
   if (params.connection) {
@@ -188,9 +202,6 @@ const extractSlackParams = (source: unknown): SlackActionValues => {
   if (typeof slackRecord.message === 'string') {
     base.message = slackRecord.message
   }
-  if (typeof slackRecord.token === 'string') {
-    base.token = slackRecord.token
-  }
   if (typeof slackRecord.connectionScope === 'string') {
     base.connectionScope = slackRecord.connectionScope
   }
@@ -200,10 +211,19 @@ const extractSlackParams = (source: unknown): SlackActionValues => {
   if (typeof slackRecord.accountEmail === 'string') {
     base.accountEmail = slackRecord.accountEmail
   }
-  if (typeof slackRecord.postAsUser === 'boolean') {
-    base.postAsUser = slackRecord.postAsUser
+  if (
+    slackRecord.identity === 'workspace_bot' ||
+    slackRecord.identity === 'personal_user'
+  ) {
+    base.identity = slackRecord.identity
   }
-
+  // NEW explicit backend parameters extraction
+  if (typeof slackRecord.workspace_connection_id === 'string') {
+    base.workspace_connection_id = slackRecord.workspace_connection_id
+  }
+  if (typeof slackRecord.personal_connection_id === 'string') {
+    base.personal_connection_id = slackRecord.personal_connection_id
+  }
   const connectionSelection =
     buildSelectionFromValue(slackRecord.connection) ??
     buildSelectionFromParts(
@@ -241,22 +261,49 @@ const buildActiveConnection = (
 
 const validateSlackParams = (params: SlackActionValues) => {
   const activeConnection = buildActiveConnection(params)
-  const usingConnection = Boolean(activeConnection)
 
   const errors: Record<string, string> = {}
-  if (!params.channel?.trim()) errors.channel = 'Channel is required'
-  if (!params.message?.trim()) errors.message = 'Message cannot be empty'
-  if (!usingConnection && !params.token?.trim()) {
-    errors.token = 'Slack token is required'
+
+  // Validate identity first - it's the primary determinant of behavior
+  if (
+    params.identity !== 'workspace_bot' &&
+    params.identity !== 'personal_user'
+  ) {
+    errors.identity =
+      'Choose how this message should be sent. Select the workspace bot or post as yourself.'
+    return {
+      errors,
+      activeConnection,
+      hasValidationErrors: true
+    }
   }
-  if (usingConnection && !activeConnection?.connectionId) {
-    errors.connection = 'Slack connection is required'
+
+  // Only validate connection requirements after identity is valid
+  if (params.identity === 'workspace_bot') {
+    const workspaceConn =
+      activeConnection?.connectionScope === 'workspace'
+        ? activeConnection
+        : null
+    if (!workspaceConn?.connectionId) {
+      errors.connection =
+        'Select a workspace Slack connection to post as the workspace bot.'
+    }
+  } else if (params.identity === 'personal_user') {
+    const personalConn =
+      activeConnection?.connectionScope === 'user' ? activeConnection : null
+    if (!personalConn?.connectionId) {
+      errors.connection =
+        'Authorize your personal Slack account to post as yourself.'
+    }
   }
+
+  if (!params.channel?.trim())
+    errors.channel = 'Select a Slack channel to send this message.'
+  if (!params.message?.trim()) errors.message = 'Enter a message to send.'
 
   return {
     errors,
     activeConnection,
-    usingConnection,
     hasValidationErrors: Object.keys(errors).length > 0
   }
 }
@@ -289,14 +336,7 @@ export default function SlackAction({
     () => validateSlackParams(slackParams),
     [slackParams]
   )
-  const {
-    errors: validationErrors,
-    activeConnection,
-    usingConnection
-  } = validation
-  const activeConnectionId = activeConnection?.connectionId?.trim() ?? ''
-  const activeConnectionScope: ConnectionScope =
-    activeConnection?.connectionScope === 'workspace' ? 'workspace' : 'personal'
+  const { errors: validationErrors, activeConnection } = validation
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
@@ -312,6 +352,7 @@ export default function SlackAction({
   const [channelsLoading, setChannelsLoading] = useState(false)
   const [channelsError, setChannelsError] = useState<string | null>(null)
   const channelRequestIdRef = useRef(0)
+  const [uiWorkspaceSelection, setUiWorkspaceSelection] = useState('')
 
   const pickProviderConnections = useCallback(
     (
@@ -401,7 +442,7 @@ export default function SlackAction({
       setConnectionsError(
         err instanceof Error
           ? err.message
-          : "We couldn't load your Slack connections. Try again."
+          : 'Slack connections could not be loaded. Try again.'
       )
     } finally {
       if (!isStale()) {
@@ -475,39 +516,9 @@ export default function SlackAction({
     [connectionState]
   )
 
-  const connectionOptions = useMemo<NodeDropdownOptionGroup[]>(() => {
-    const groups: NodeDropdownOptionGroup[] = [
-      {
-        label: 'Authentication',
-        options: [
-          {
-            label: 'Use manual Slack token',
-            value: 'manual'
-          }
-        ]
-      }
-    ]
-
-    if (!connectionState) {
-      return groups
-    }
-
-    const personalOptions = (connectionState.personal ?? [])
-      .filter((entry) => entry.connected && entry.id)
-      .map((entry) => ({
-        label: entry.accountEmail
-          ? `Personal – ${entry.accountEmail}`
-          : 'Personal Slack account',
-        value: connectionValueKey('personal', entry.id as string)
-      }))
-    if (personalOptions.length > 0) {
-      groups.push({
-        label: 'Personal connections',
-        options: personalOptions
-      })
-    }
-
-    const workspaceOptions = connectionState.workspace
+  const workspaceConnectionOptions = useMemo(() => {
+    if (!connectionState) return []
+    return connectionState.workspace
       .filter((entry) => entry.connected && entry.id)
       .map((entry) => ({
         label: entry.accountEmail
@@ -515,15 +526,18 @@ export default function SlackAction({
           : (entry.workspaceName ?? 'Workspace connection'),
         value: connectionValueKey('workspace', entry.id!)
       }))
+  }, [connectionState])
 
-    if (workspaceOptions.length > 0) {
-      groups.push({
-        label: 'Workspace connections',
-        options: workspaceOptions
-      })
-    }
-
-    return groups
+  const personalConnectionOptions = useMemo(() => {
+    if (!connectionState) return []
+    return (connectionState.personal ?? [])
+      .filter((entry) => entry.connected && entry.id)
+      .map((entry) => ({
+        label: entry.accountEmail
+          ? `Personal – ${entry.accountEmail}`
+          : 'Personal Slack account',
+        value: connectionValueKey('personal', entry.id as string)
+      }))
   }, [connectionState])
 
   const hasOAuthConnections = useMemo(() => {
@@ -594,16 +608,22 @@ export default function SlackAction({
     []
   )
 
-  const selectedConnectionValue = useMemo(() => {
-    if (!usingConnection || !activeConnection) return 'manual'
-    const id = activeConnection.connectionId?.trim()
-    if (!id) return 'manual'
-    const scope =
+  const storedConnectionValue = useMemo(() => {
+    if (!activeConnection || !activeConnection.connectionId) return ''
+    if (
+      slackParams.identity === 'workspace_bot' &&
       activeConnection.connectionScope === 'workspace'
-        ? 'workspace'
-        : 'personal'
-    return connectionValueKey(scope, id)
-  }, [activeConnection, usingConnection])
+    ) {
+      return connectionValueKey('workspace', activeConnection.connectionId)
+    }
+    if (
+      slackParams.identity === 'personal_user' &&
+      activeConnection.connectionScope === 'user'
+    ) {
+      return connectionValueKey('personal', activeConnection.connectionId)
+    }
+    return ''
+  }, [activeConnection, slackParams.identity])
 
   const applySlackPatch = useCallback(
     (patch: Partial<SlackActionValues>) => {
@@ -628,22 +648,41 @@ export default function SlackAction({
     [effectiveCanEdit, nodeId, slackParams, updateNodeData]
   )
 
-  const handleConnectionChange = useCallback(
+  const handleIdentityChange = useCallback(
+    (identity: 'workspace_bot' | 'personal_user' | '') => {
+      // Clear all connection state and validation errors when identity changes
+      applySlackPatch({
+        identity: identity || undefined,
+        connectionScope: '',
+        connectionId: '',
+        accountEmail: '',
+        connection: undefined,
+        channel: '', // Clear channel to force re-selection with new identity
+        workspace_connection_id: undefined,
+        personal_connection_id: undefined
+      })
+      // Clear UI workspace selection state
+      setUiWorkspaceSelection('')
+    },
+    [applySlackPatch]
+  )
+
+  const handleStoredConnectionChange = useCallback(
     (value: string) => {
-      if (value === 'manual') {
+      if (!value) {
         applySlackPatch({
           connectionScope: '',
           connectionId: '',
           accountEmail: '',
-          connection: undefined
+          connection: undefined,
+          workspace_connection_id: undefined,
+          personal_connection_id: undefined
         })
         return
       }
 
       const parsed = parseConnectionValue(value)
-      if (!parsed) {
-        return
-      }
+      if (!parsed) return
 
       const selection = findConnectionByValue(parsed.scope, parsed.id)
       if (!selection) {
@@ -651,9 +690,30 @@ export default function SlackAction({
           connectionScope: '',
           connectionId: '',
           accountEmail: '',
-          connection: undefined
+          connection: undefined,
+          workspace_connection_id: undefined,
+          personal_connection_id: undefined
         })
         return
+      }
+
+      // Inline explicit backend parameter wiring
+      const explicitParams: Partial<SlackActionValues> = {}
+
+      if (slackParams.identity === 'workspace_bot') {
+        // workspace_bot + workspace selection → set workspace_connection_id
+        if (
+          selection.connectionScope === 'workspace' &&
+          selection.connectionId
+        ) {
+          explicitParams.workspace_connection_id = selection.connectionId
+        }
+      } else if (slackParams.identity === 'personal_user') {
+        // personal_user + personal selection → set personal_connection_id
+        if (selection.connectionScope === 'user' && selection.connectionId) {
+          explicitParams.personal_connection_id = selection.connectionId
+        }
+        // Do not compute workspace ID here for personal_user
       }
 
       applySlackPatch({
@@ -661,10 +721,31 @@ export default function SlackAction({
         connectionId: selection.connectionId ?? '',
         accountEmail: selection.accountEmail ?? '',
         connection: selection,
-        token: ''
+        ...explicitParams // Add explicit backend parameters
       })
     },
-    [applySlackPatch, findConnectionByValue]
+    [applySlackPatch, findConnectionByValue, slackParams.identity]
+  )
+
+  const handleWorkspaceUiChange = useCallback(
+    (value: string) => {
+      setUiWorkspaceSelection(value)
+
+      // Inline explicit backend parameter wiring for personal_user only
+      if (slackParams.identity === 'personal_user') {
+        const explicitParams: Partial<SlackActionValues> = {}
+
+        // Parse UI workspace selection and set workspace_connection_id
+        const parsed = value ? parseConnectionValue(value) : null
+        if (parsed?.scope === 'workspace' && parsed.id) {
+          explicitParams.workspace_connection_id = parsed.id
+        }
+
+        applySlackPatch(explicitParams)
+      }
+      // Do nothing for workspace_bot
+    },
+    [applySlackPatch, slackParams.identity]
   )
 
   const handleChannelChange = useCallback(
@@ -681,15 +762,36 @@ export default function SlackAction({
     [applySlackPatch]
   )
 
-  const handleTokenChange = useCallback(
-    (value: string) => {
-      applySlackPatch({ token: value })
-    },
-    [applySlackPatch]
-  )
+  const workspaceConnectionIdForChannels = useMemo(() => {
+    if (slackParams.identity === 'workspace_bot') {
+      return activeConnection?.connectionScope === 'workspace'
+        ? activeConnection.connectionId
+        : ''
+    }
+    if (slackParams.identity === 'personal_user') {
+      const parsed = uiWorkspaceSelection
+        ? parseConnectionValue(uiWorkspaceSelection)
+        : null
+      return parsed?.scope === 'workspace' ? parsed.id : ''
+    }
+    return ''
+  }, [slackParams.identity, activeConnection, uiWorkspaceSelection])
+
+  // NEW explicit personal connection ID for channels
+  const personalConnectionIdForChannels = useMemo(() => {
+    if (slackParams.identity === 'personal_user') {
+      return activeConnection?.connectionScope === 'user'
+        ? activeConnection.connectionId
+        : undefined
+    }
+    return undefined
+  }, [slackParams.identity, activeConnection])
 
   const refreshChannels = useCallback(async () => {
-    if (!usingConnection || !activeConnectionId) {
+    const workspaceConnectionId = workspaceConnectionIdForChannels
+    const personalConnectionId = personalConnectionIdForChannels
+
+    if (!workspaceConnectionId) {
       return
     }
 
@@ -703,8 +805,8 @@ export default function SlackAction({
 
     try {
       const channels = await fetchSlackChannels({
-        scope: activeConnectionScope,
-        connectionId: activeConnectionId
+        workspaceConnectionId,
+        personalConnectionId // Now passes explicit personal connection ID for personal_user
       })
       if (isStale()) {
         return
@@ -725,7 +827,7 @@ export default function SlackAction({
       setChannelsError(
         error instanceof Error
           ? error.message
-          : "We couldn't load Slack channels. Try again."
+          : 'Slack channels could not be loaded. Try again.'
       )
     } finally {
       if (!isStale()) {
@@ -733,16 +835,16 @@ export default function SlackAction({
       }
     }
   }, [
-    activeConnectionId,
-    activeConnectionScope,
+    workspaceConnectionIdForChannels,
+    personalConnectionIdForChannels, // Add to dependencies
     applySlackPatch,
     buildChannelOptions,
-    slackParams.channel,
-    usingConnection
+    slackParams.channel
   ])
 
   useEffect(() => {
-    if (!usingConnection || !activeConnectionId) {
+    const workspaceConnectionId = workspaceConnectionIdForChannels
+    if (!workspaceConnectionId) {
       setChannelOptions([])
       setChannelsError(null)
       setChannelsLoading(false)
@@ -750,62 +852,112 @@ export default function SlackAction({
     }
 
     refreshChannels()
-  }, [activeConnectionId, refreshChannels, usingConnection])
+  }, [
+    workspaceConnectionIdForChannels,
+    personalConnectionIdForChannels,
+    refreshChannels
+  ])
 
   const errorClass = 'text-xs text-red-500'
 
   return (
     <div className="flex flex-col gap-2">
-      {usingConnection ? (
-        <>
-          <NodeDropdownField
-            options={channelOptions}
-            value={slackParams.channel || ''}
-            onChange={handleChannelChange}
-            placeholder="Select Slack channel"
-            loading={channelsLoading}
-            disabled={!activeConnectionId}
-            emptyMessage="No Slack channels available"
-          />
-          {validationErrors.channel && (
-            <p className={errorClass}>{validationErrors.channel}</p>
-          )}
-          {channelsError && (
-            <div className="flex items-center justify-between gap-2 text-xs text-red-500">
-              <span className="flex-1">{channelsError}</span>
-              <button
-                type="button"
-                className="whitespace-nowrap text-blue-600 hover:underline"
-                onClick={refreshChannels}
-              >
-                Retry
-              </button>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <NodeInputField
-            placeholder="Channel (e.g. #general)"
-            value={slackParams.channel || ''}
-            onChange={handleChannelChange}
-          />
-          {validationErrors.channel && (
-            <p className={errorClass}>{validationErrors.channel}</p>
-          )}
-        </>
+      {/* Identity Selector - First field */}
+      <NodeDropdownField
+        options={[
+          {
+            label: 'Identity',
+            options: [
+              {
+                label: 'Post as workspace bot',
+                value: 'workspace_bot'
+              },
+              {
+                label: 'Post as you',
+                value: 'personal_user'
+              }
+            ]
+          }
+        ]}
+        value={slackParams.identity || ''}
+        onChange={(value) =>
+          handleIdentityChange(value as 'workspace_bot' | 'personal_user' | '')
+        }
+        placeholder="Select how to send Slack messages"
+        disabled={!effectiveCanEdit}
+      />
+      {validationErrors.identity && (
+        <p className={errorClass}>{validationErrors.identity}</p>
       )}
 
       <NodeDropdownField
-        options={connectionOptions}
-        value={selectedConnectionValue}
-        onChange={handleConnectionChange}
-        placeholder="Select Slack connection"
-        loading={connectionsLoading}
-        emptyMessage="No Slack connections available"
+        options={channelOptions}
+        value={slackParams.channel || ''}
+        onChange={handleChannelChange}
+        placeholder="Select Slack channel"
+        loading={channelsLoading}
+        disabled={!workspaceConnectionIdForChannels}
+        emptyMessage="No channels are available for selected identity"
       />
-      {validationErrors.connection && (
-        <p className={errorClass}>{validationErrors.connection}</p>
+      {validationErrors.channel && (
+        <p className={errorClass}>{validationErrors.channel}</p>
+      )}
+      {channelsError && (
+        <div className="flex items-center justify-between gap-2 text-xs text-red-500">
+          <span className="flex-1">{channelsError}</span>
+          <button
+            type="button"
+            className="whitespace-nowrap text-blue-600 hover:underline"
+            onClick={refreshChannels}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {slackParams.identity && (
+        <>
+          {/* Workspace Connection - Required for both identities */}
+          <NodeDropdownField
+            options={workspaceConnectionOptions}
+            value={
+              slackParams.identity === 'workspace_bot'
+                ? storedConnectionValue
+                : uiWorkspaceSelection
+            }
+            onChange={
+              slackParams.identity === 'workspace_bot'
+                ? handleStoredConnectionChange
+                : handleWorkspaceUiChange
+            }
+            placeholder="Select workspace Slack connection"
+            loading={connectionsLoading}
+            emptyMessage="No workspace Slack connections are available"
+            disabled={!slackParams.identity}
+          />
+
+          {/* Personal Connection - Required only for personal_user identity */}
+          {slackParams.identity === 'personal_user' && (
+            <NodeDropdownField
+              options={personalConnectionOptions}
+              value={storedConnectionValue}
+              onChange={handleStoredConnectionChange}
+              placeholder="Select personal Slack connection"
+              loading={connectionsLoading}
+              emptyMessage="No personal Slack authorizations are available"
+              disabled={!slackParams.identity}
+            />
+          )}
+
+          {/* Validation errors */}
+          {validationErrors.connection && (
+            <p className={errorClass}>{validationErrors.connection}</p>
+          )}
+          {slackParams.identity === 'personal_user' &&
+            validationErrors.connection && (
+              <p className={errorClass}>{validationErrors.connection}</p>
+            )}
+        </>
       )}
       {connectionsError && (
         <div className="flex items-center justify-between gap-2 text-xs text-red-500">
@@ -821,43 +973,11 @@ export default function SlackAction({
       )}
       {!connectionsLoading && !connectionsError && !hasOAuthConnections && (
         <p className="text-xs text-slate-500">
-          Connect Slack in Settings → Integrations to reuse OAuth credentials{' '}
-          instead of managing bot tokens manually.
+          Each Dsentr workspace has a single Slack workspace installation. "Post
+          as workspace bot" sends messages using that installation. "Post as
+          you" requires personal Slack authorization. Channel lists reflect what
+          the selected identity can access.
         </p>
-      )}
-      {usingConnection && activeConnection?.accountEmail && (
-        <p className="text-xs text-slate-500">
-          Posting as {activeConnection.accountEmail} via Slack OAuth.
-        </p>
-      )}
-      {usingConnection && (
-        <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-            checked={Boolean(slackParams.postAsUser)}
-            onChange={(event) =>
-              applySlackPatch({ postAsUser: event.target.checked })
-            }
-            disabled={!effectiveCanEdit}
-          />
-          <span>Post as connected user</span>
-        </label>
-      )}
-
-      {!usingConnection && (
-        <>
-          <NodeSecretDropdown
-            group="messaging"
-            service="slack"
-            value={slackParams.token || ''}
-            onChange={handleTokenChange}
-            placeholder="Select Slack token"
-          />
-          {validationErrors.token && (
-            <p className={errorClass}>{validationErrors.token}</p>
-          )}
-        </>
       )}
 
       <NodeInputField
@@ -868,14 +988,6 @@ export default function SlackAction({
       {validationErrors.message && (
         <p className={errorClass}>{validationErrors.message}</p>
       )}
-
-      <p className="text-xs text-slate-500">
-        Slack OAuth connections require the following scopes:{' '}
-        <code>chat:write</code>, <code>channels:read</code>,{' '}
-        <code>groups:read</code>, <code>users:read</code>, and{' '}
-        <code>users:read.email</code>. Messages are sent as the connected Slack
-        user and must target channels they can access.
-      </p>
     </div>
   )
 }

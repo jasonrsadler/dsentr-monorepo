@@ -1,4 +1,5 @@
 use super::prelude::*;
+use crate::services::oauth::account_service::AuthorizationTokens;
 
 pub(crate) const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub(crate) const MICROSOFT_AUTH_URL: &str =
@@ -12,6 +13,9 @@ pub(crate) const ASANA_STATE_COOKIE: &str = "oauth_asana_state";
 pub(crate) const STATE_COOKIE_MAX_MINUTES: i64 = 10;
 pub(crate) const OAUTH_PLAN_RESTRICTION_MESSAGE: &str =
     "OAuth integrations are available on workspace plans and above. Upgrade to connect accounts.";
+pub(crate) const SLACK_WORKSPACE_REQUIRED_MESSAGE: &str =
+    "Slack connections require an explicit workspace.";
+const SLACK_STATE_SEPARATOR: char = ':';
 
 #[derive(Deserialize)]
 pub struct CallbackQuery {
@@ -188,6 +192,29 @@ pub(crate) async fn handle_callback(
     (jar, redirect_success(&state.config, provider)).into_response()
 }
 
+pub(crate) fn build_slack_state(workspace_id: Uuid) -> String {
+    format!(
+        "{}{}{}",
+        generate_csrf_token(),
+        SLACK_STATE_SEPARATOR,
+        workspace_id
+    )
+}
+
+pub(crate) fn parse_slack_state(value: &str) -> Option<Uuid> {
+    let (token, workspace) = value.split_once(SLACK_STATE_SEPARATOR)?;
+    if token.trim().is_empty() {
+        return None;
+    }
+    Uuid::parse_str(workspace).ok()
+}
+
+pub(crate) fn strip_slack_webhook(tokens: &mut AuthorizationTokens) {
+    if let Some(slack) = tokens.slack.as_mut() {
+        slack.incoming_webhook_url = None;
+    }
+}
+
 pub(crate) fn build_state_cookie(name: &str, value: &str) -> Cookie<'static> {
     Cookie::build((name.to_owned(), value.to_owned()))
         .http_only(true)
@@ -229,12 +256,7 @@ pub(crate) fn provider_to_key(provider: ConnectedOAuthProvider) -> &'static str 
 }
 
 fn redirect_success(config: &Config, provider: ConnectedOAuthProvider) -> Redirect {
-    let url = format!(
-        "{}/dashboard?connected=true&provider={}",
-        config.frontend_origin,
-        provider_to_key(provider)
-    );
-    Redirect::to(&url)
+    redirect_success_with_workspace_optional(config, provider, None)
 }
 
 pub(crate) fn redirect_with_error(
@@ -242,13 +264,73 @@ pub(crate) fn redirect_with_error(
     provider: ConnectedOAuthProvider,
     message: &str,
 ) -> Response {
+    redirect_with_error_optional(config, provider, message, None)
+}
+
+pub(crate) fn redirect_success_with_workspace(
+    config: &Config,
+    provider: ConnectedOAuthProvider,
+    workspace_id: Uuid,
+) -> Redirect {
+    redirect_success_with_workspace_optional(config, provider, Some(workspace_id))
+}
+
+pub(crate) fn redirect_with_error_with_workspace(
+    config: &Config,
+    provider: ConnectedOAuthProvider,
+    message: &str,
+    workspace_id: Option<Uuid>,
+) -> Response {
+    redirect_with_error_optional(config, provider, message, workspace_id)
+}
+
+pub(crate) fn redirect_with_error_for_provider(
+    config: &Config,
+    provider: ConnectedOAuthProvider,
+    message: &str,
+    workspace_id: Option<Uuid>,
+) -> Response {
+    match provider {
+        ConnectedOAuthProvider::Slack => {
+            redirect_with_error_optional(config, provider, message, workspace_id)
+        }
+        _ => redirect_with_error(config, provider, message),
+    }
+}
+
+fn redirect_success_with_workspace_optional(
+    config: &Config,
+    provider: ConnectedOAuthProvider,
+    workspace_id: Option<Uuid>,
+) -> Redirect {
+    let url = format!(
+        "{}/dashboard?connected=true&provider={}",
+        config.frontend_origin,
+        provider_to_key(provider)
+    );
+    Redirect::to(&append_workspace_param(url, workspace_id))
+}
+
+fn redirect_with_error_optional(
+    config: &Config,
+    provider: ConnectedOAuthProvider,
+    message: &str,
+    workspace_id: Option<Uuid>,
+) -> Response {
     let url = format!(
         "{}/dashboard?connected=false&provider={}&error={}",
         config.frontend_origin,
         provider_to_key(provider),
         encode(message)
     );
-    Redirect::to(&url).into_response()
+    Redirect::to(&append_workspace_param(url, workspace_id)).into_response()
+}
+
+fn append_workspace_param(url: String, workspace_id: Option<Uuid>) -> String {
+    let Some(workspace_id) = workspace_id else {
+        return url;
+    };
+    format!("{url}&workspace={workspace_id}")
 }
 
 pub fn map_oauth_error(err: OAuthAccountError) -> Response {

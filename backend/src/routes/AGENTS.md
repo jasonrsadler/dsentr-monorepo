@@ -84,3 +84,5 @@
 - Added Asana task and comment metadata endpoints (workspace-plan only) to back new dropdowns while keeping Solo users blocked server-side.
 - Added a Slack channels route that pulls channel lists via personal or workspace OAuth tokens, applies plan/membership checks, and paginates Slack API responses for the Slack action dropdown.
 - Workspace OAuth endpoints now surface stable `connectionId` values for shared connections so frontend promotion visibility persists across reloads.
+- Workspace promotion now rejects Slack with an explicit workspace-install requirement, and route helpers map the new Slack install error consistently.
+- Route fixtures now populate `slack_team_id` on Slack workspace connections so Slack connection invariants hold in tests and workspace token lookups.

@@ -701,3 +701,46 @@ export async function promoteConnection({
     createdBy
   }
 }
+
+// Slack OAuth is workspace-first and must be initiated explicitly.
+// Slack is intentionally excluded from generic OAuth helpers.
+
+export function startSlackWorkspaceInstall(workspaceId: string): void {
+  if (!workspaceId || workspaceId.trim() === '') {
+    throw new Error('workspaceId is required for Slack workspace installation')
+  }
+
+  const url = new URL(buildApiUrl('/api/oauth/slack/start'))
+  url.searchParams.set('workspace', workspaceId.trim())
+  window.location.href = url.toString()
+}
+
+export function startSlackPersonalAuthorization(
+  workspaceId: string,
+  workspaceConnectionId: string
+): void {
+  if (!workspaceId || workspaceId.trim() === '') {
+    throw new Error('workspaceId is required for Slack personal authorization')
+  }
+  if (!workspaceConnectionId || workspaceConnectionId.trim() === '') {
+    throw new Error(
+      'workspaceConnectionId is required for Slack personal authorization'
+    )
+  }
+
+  const url = new URL(buildApiUrl('/api/oauth/slack/start'))
+  url.searchParams.set('workspace', workspaceId.trim())
+  url.searchParams.set('workspaceConnectionId', workspaceConnectionId.trim())
+  window.location.href = url.toString()
+}
+
+export function assertProviderNotSlack(
+  provider: OAuthProvider,
+  context: string
+): void {
+  if (provider === 'slack') {
+    throw new Error(
+      `Slack OAuth must use explicit helpers. Generic OAuth is forbidden. Context: ${context}`
+    )
+  }
+}

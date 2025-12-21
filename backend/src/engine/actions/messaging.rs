@@ -152,7 +152,6 @@ enum SlackConnectionContext {
     Workspace {
         workspace_id: Uuid,
         connection_id: Uuid,
-        created_by: Uuid,
     },
 }
 
@@ -162,209 +161,242 @@ async fn send_slack(
     state: &AppState,
     run: &WorkflowRun,
 ) -> Result<(Value, Option<String>), String> {
-    let connection_usage = resolve_connection_usage(params)?;
-    let connection_requested = match &connection_usage {
-        NodeConnectionUsage::Workspace(_) => true,
-        NodeConnectionUsage::User(info) => {
-            info.connection_id
-                .as_deref()
-                .map(|value| !value.trim().is_empty())
-                .unwrap_or(false)
-                || info
-                    .account_email
-                    .as_deref()
-                    .map(|value| !value.trim().is_empty())
-                    .unwrap_or(false)
-                || params
-                    .get("connection")
-                    .and_then(|value| value.as_object())
-                    .map(|object| {
-                        object
-                            .get("connectionId")
-                            .and_then(|v| v.as_str())
-                            .map(|s| !s.trim().is_empty())
-                            .unwrap_or(false)
-                            || object
-                                .get("accountEmail")
-                                .and_then(|v| v.as_str())
-                                .map(|s| !s.trim().is_empty())
-                                .unwrap_or(false)
-                    })
-                    .unwrap_or(false)
-        }
-    };
-
+    // Enforce explicit identity selection: exactly one of workspace (bot) or personal (post-as-user)
     let post_as_user = params
         .get("postAsUser")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
 
+    // allow connection info to be provided either as a `connection` object or top-level
+    // (they may be duplicated by the sanitizer). Do not treat this as specifying two identities.
+
+    // Resolve explicit connection usage. If none present, do NOT attempt any
+    // workspace-scoped inference — engine must require an explicit identity.
+    let connection_usage = match resolve_connection_usage(params) {
+        Ok(u) => u,
+        Err(_) => {
+            // If caller attempted to request workspace scope but omitted connectionId,
+            // fail immediately and explicitly. Do not probe repositories or refresh tokens.
+            let connection_obj = params.get("connection").and_then(|v| v.as_object());
+            let scope_opt = connection_obj
+                .and_then(|o| o.get("connectionScope"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_ascii_lowercase())
+                .or_else(|| {
+                    params
+                        .get("connectionScope")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_ascii_lowercase())
+                });
+
+            let id_opt = connection_obj
+                .and_then(|o| o.get("connectionId"))
+                .and_then(|v| v.as_str())
+                .or_else(|| params.get("connectionId").and_then(|v| v.as_str()));
+
+            if scope_opt.as_deref() == Some("workspace") && id_opt.is_none() {
+                return Err("workspace_bot error: workspace Slack execution requires an explicit connectionId".to_string());
+            }
+
+            return Err("identity selection error: no explicit identity provided. Provide exactly one: a workspace-scoped connection (connectionScope='workspace' + connectionId) for workspace_bot, or a personal connection (connectionScope='user' + connectionId) for personal_user".to_string());
+        }
+    };
+
     let mut output_connection_scope: Option<String> = None;
     let mut output_connection_id: Option<Uuid> = None;
 
-    let (token, token_email, connection_context) = if connection_requested {
-        match connection_usage {
-            NodeConnectionUsage::Workspace(info) => {
-                let workspace_id = run.workspace_id.ok_or_else(|| {
+    let (token, token_email, connection_context) = match connection_usage {
+        NodeConnectionUsage::Workspace(info) => {
+            if post_as_user {
+                return Err("personal_user error: 'postAsUser' is true but a workspace-scoped connection was provided. To post as a user, supply a personal connection (connectionScope='user').".to_string());
+            }
+            let workspace_id = run.workspace_id.ok_or_else(|| {
                     "This workflow run is not associated with a workspace. Promote the Slack connection to the workspace or switch the action back to a personal connection.".to_string()
                 })?;
 
-                ensure_run_membership(state, workspace_id, run.user_id).await?;
-                ensure_workspace_plan(state, workspace_id).await?;
+            ensure_run_membership(state, workspace_id, run.user_id).await?;
+            ensure_workspace_plan(state, workspace_id).await?;
 
-                let connection = state
-                    .workspace_oauth
-                    .ensure_valid_workspace_token(info.connection_id)
-                    .await
-                    .map_err(map_workspace_slack_error)?;
-                output_connection_scope = Some("workspace".to_string());
-                output_connection_id = Some(connection.id);
+            let connection = state
+                .workspace_oauth
+                .ensure_valid_workspace_token(info.connection_id)
+                .await
+                .map_err(|e| format!("workspace_bot: {}", map_workspace_slack_error(e)))?;
 
-                if post_as_user {
-                    let connection_usage = resolve_connection_usage(params)?;
-                    let connection_id_str = match connection_usage {
-                        NodeConnectionUsage::User(info) => {
-                            info.connection_id.ok_or_else(|| {
-                                "Posting as user requires an explicit connectionId. Please select a specific OAuth connection from your integrations.".to_string()
-                            })?
+            // Reject webhook-only connections: presence of an incoming_webhook_url must not enable execution
+            if connection
+                .incoming_webhook_url
+                .as_deref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+                && connection.access_token.trim().is_empty()
+            {
+                return Err("workspace_bot error: selected workspace connection is webhook-only; incoming webhooks are not permitted for execution. Provide a workspace-scoped OAuth connection with a bot token.".to_string());
+            }
+
+            if connection.workspace_id != workspace_id {
+                return Err("workspace_bot error: selected workspace connection does not belong to this workspace".to_string());
+            }
+
+            if connection.provider != ConnectedOAuthProvider::Slack {
+                return Err(
+                    "workspace_bot error: selected connection is not a Slack connection"
+                        .to_string(),
+                );
+            }
+
+            // Ensure the workspace connection has a Slack team id
+            let conn_team = connection
+                .slack_team_id
+                .as_deref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+
+            let conn_team = match conn_team {
+                Some(t) => t,
+                None => {
+                    return Err(
+                        "workspace_bot error: selected workspace connection missing Slack team id"
+                            .to_string(),
+                    );
+                }
+            };
+
+            // Detect multiple configured Slack teams for this workspace (mixing teams is forbidden)
+            match state
+                .workspace_connection_repo
+                .list_by_workspace_and_provider(workspace_id, ConnectedOAuthProvider::Slack)
+                .await
+            {
+                Ok(listings) => {
+                    let mut teams: HashSet<String> = HashSet::new();
+                    for l in listings.into_iter() {
+                        if let Some(t) = l.slack_team_id.as_deref() {
+                            let t = t.trim().to_string();
+                            if !t.is_empty() {
+                                teams.insert(t);
+                            }
                         }
-                        NodeConnectionUsage::Workspace(_) => {
-                            return Err("Posting as user requires a personal connection, not a workspace connection. Please select a personal OAuth connection.".to_string());
-                        }
-                    };
-
-                    let connection_id = Uuid::parse_str(&connection_id_str)
-                        .map_err(|_| "ConnectionId must be a valid UUID. Please select a valid OAuth connection.".to_string())?;
-
-                    let token = state
-                        .oauth_accounts
-                        .ensure_valid_access_token_for_connection(run.user_id, connection_id)
-                        .await
-                        .map_err(|msg| {
-                            format!(
-                                "Posting as the connected user requires your personal Slack OAuth token. {msg}"
-                            )
-                        })?;
-
-                    (
-                        token.access_token.clone(),
-                        Some(token.account_email.clone()),
-                        Some(SlackConnectionContext::Personal {
-                            user_id: run.user_id,
-                            connection_id: token.id,
-                        }),
-                    )
-                } else {
-                    // --- WORKSPACE SLACK WEBHOOK SHORT-CIRCUIT ---
-                    // Webhook path intentionally bypasses OAuth
-                    // Do not remove without updating tests
-                    if let Some(webhook_url) = connection
-                        .incoming_webhook_url
-                        .as_deref()
-                        .map(|s| s.trim())
-                        .filter(|s| !s.is_empty())
-                    {
-                        let message_raw = extract_required_str(params, "message", "Message")?;
-                        let message = templ_str(message_raw, context);
-
-                        if message.trim().is_empty() {
-                            return Err("Message is required".to_string());
-                        }
-
-                        let response = state
-                            .http_client
-                            .post(webhook_url)
-                            .json(&json!({ "text": message }))
-                            .send()
-                            .await
-                            .map_err(|e| format!("Slack webhook request failed: {e}"))?;
-
-                        let status = response.status();
-                        let body = response
-                            .text()
-                            .await
-                            .map_err(|e| format!("Slack webhook response read failed: {e}"))?;
-
-                        if !status.is_success() {
-                            let detail = body.trim();
-                            return Err(format!(
-                                "Slack webhook returned status {}{}",
-                                status.as_u16(),
-                                if detail.is_empty() {
-                                    "".to_string()
-                                } else {
-                                    format!(": {}", detail)
-                                }
-                            ));
-                        }
-
-                        let output = json!({
-                            "sent": true,
-                            "service": "Slack",
-                            "platform": "Slack",
-                            "deliveryMethod": "Incoming Webhook",
-                            "status": status.as_u16(),
-                            "connectionScope": "workspace",
-                            "connectionId": connection.id.to_string(),
-                        });
-                        return Ok((output, None));
                     }
-
-                    if connection.workspace_id != workspace_id {
-                        return Err(map_workspace_slack_error(WorkspaceOAuthError::NotFound));
+                    if teams.len() > 1 {
+                        return Err("workspace_bot error: multiple Slack teams configured for this workspace; mixing Slack teams within a workspace is forbidden".to_string());
                     }
-
-                    if connection.provider != ConnectedOAuthProvider::Slack {
-                        return Err("Selected connection is not a Slack connection".to_string());
+                    // Ensure selected connection's team is consistent with workspace (if workspace has a single team)
+                    if teams.len() == 1 && !teams.contains(&conn_team) {
+                        return Err("workspace_bot error: selected workspace connection's Slack team does not match the workspace".to_string());
                     }
-
-                    (
-                        connection.access_token.clone(),
-                        Some(connection.account_email.clone()),
-                        Some(SlackConnectionContext::Workspace {
-                            workspace_id,
-                            connection_id: connection.id,
-                            created_by: connection.owner_user_id,
-                        }),
-                    )
+                }
+                Err(_) => {
+                    return Err(
+                        "workspace_bot error: failed to verify workspace Slack connections"
+                            .to_string(),
+                    );
                 }
             }
-            NodeConnectionUsage::User(info) => {
-                let connection_id_str = info.connection_id.ok_or_else(|| {
-                    "Personal OAuth connections require an explicit connectionId. Please select a specific OAuth connection from your integrations.".to_string()
+
+            output_connection_scope = Some("workspace".to_string());
+            output_connection_id = Some(connection.id);
+
+            (
+                connection.access_token.clone(),
+                Some(connection.account_email.clone()),
+                Some(SlackConnectionContext::Workspace {
+                    workspace_id,
+                    connection_id: connection.id,
+                }),
+            )
+        }
+        NodeConnectionUsage::User(info) => {
+            if !post_as_user {
+                return Err("workspace_bot error: a personal connection was provided but 'postAsUser' is false. To post as a user set postAsUser=true and supply a personal connection (connectionScope='user').".to_string());
+            }
+
+            let connection_id_str = info.connection_id.ok_or_else(|| {
+                    "personal_user error: Personal OAuth connections require an explicit connectionId. Please select a specific OAuth connection from your integrations.".to_string()
                 })?;
 
-                let connection_id = Uuid::parse_str(&connection_id_str)
-                    .map_err(|_| "Personal connectionId must be a valid UUID. Please select a valid OAuth connection.".to_string())?;
+            let connection_id = Uuid::parse_str(&connection_id_str)
+                    .map_err(|_| "personal_user error: connectionId must be a valid UUID. Please select a valid OAuth connection.".to_string())?;
 
-                let token = state
+            let token = state
                     .oauth_accounts
                     .ensure_valid_access_token_for_connection(run.user_id, connection_id)
                     .await
                     .map_err(|err| match err {
                         OAuthAccountError::NotFound => {
-                            "Connect Slack integration before selecting an OAuth connection"
-                                .to_string()
+                            "personal_user error: connect Slack integration before selecting an OAuth connection".to_string()
                         }
                         OAuthAccountError::TokenRevoked { .. } => {
-                            "The connected Slack account was revoked. Reconnect it from Settings → Integrations.".to_string()
+                            "personal_user error: the connected Slack account was revoked. Reconnect it from Settings → Integrations.".to_string()
                         }
-                        other => format!("Failed to refresh Slack OAuth token: {other}"),
+                        other => format!("personal_user error: failed to refresh Slack OAuth token: {other}"),
                     })?;
 
-                (
-                    token.access_token.clone(),
-                    Some(token.account_email.clone()),
-                    Some(SlackConnectionContext::Personal {
-                        user_id: run.user_id,
-                        connection_id: token.id,
-                    }),
-                )
+            // Load personal token metadata and extract Slack team id
+            let metadata = state
+                .oauth_accounts
+                .load_personal_token_metadata(run.user_id, token.id)
+                .await
+                .map_err(|_| {
+                    "personal_user error: Failed to load personal token metadata".to_string()
+                })?;
+
+            let personal_team = metadata
+                .slack
+                .and_then(|s| s.team_id)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    "personal_user error: personal Slack token missing team id in metadata. Reconnect Slack.".to_string()
+                })?;
+
+            // If this run is associated with a workspace, verify workspace connections do not mix teams
+            if let Some(workspace_id) = run.workspace_id {
+                match state
+                    .workspace_connection_repo
+                    .list_by_workspace_and_provider(workspace_id, ConnectedOAuthProvider::Slack)
+                    .await
+                {
+                    Ok(listings) => {
+                        let mut teams: HashSet<String> = HashSet::new();
+                        for l in listings.into_iter() {
+                            if let Some(t) = l.slack_team_id.as_deref() {
+                                let t = t.trim().to_string();
+                                if !t.is_empty() {
+                                    teams.insert(t);
+                                }
+                            }
+                        }
+
+                        if teams.len() > 1 {
+                            return Err("personal_user error: multiple Slack teams configured for this workspace; mixing Slack teams within a workspace is forbidden".to_string());
+                        }
+
+                        if teams.len() == 1 {
+                            let ws_team = teams.into_iter().next().unwrap();
+                            if personal_team != ws_team {
+                                return Err(format!("personal_user error: Slack team mismatch between personal token ({}) and workspace Slack connection ({})", personal_team, ws_team));
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        return Err(
+                            "personal_user error: failed to verify workspace Slack connections"
+                                .to_string(),
+                        );
+                    }
+                }
             }
+
+            (
+                token.access_token.clone(),
+                Some(token.account_email.clone()),
+                Some(SlackConnectionContext::Personal {
+                    user_id: run.user_id,
+                    connection_id: token.id,
+                }),
+            )
         }
-    } else {
-        let token = extract_required_str(params, "token", "Slack token")?;
-        (token.to_string(), None, None)
     };
 
     let channel_raw = extract_required_str(params, "channel", "Slack channel")?;
@@ -413,10 +445,13 @@ async fn send_slack(
         if let Some(context) = &connection_context {
             if is_revocation_signal(Some(status), &body_text) {
                 match context {
-                    SlackConnectionContext::Personal { user_id, .. } => {
+                    SlackConnectionContext::Personal {
+                        user_id,
+                        connection_id,
+                    } => {
                         if let Err(err) = state
                             .oauth_accounts
-                            .handle_revoked_token(*user_id, ConnectedOAuthProvider::Slack)
+                            .handle_revoked_token_by_connection(*user_id, *connection_id)
                             .await
                         {
                             warn!(
@@ -425,11 +460,12 @@ async fn send_slack(
                                 "failed to purge revoked personal slack token"
                             );
                         }
+
+                        return Err("personal_user error: Slack revoked the connected account. Reconnect it from Settings → Integrations.".to_string());
                     }
                     SlackConnectionContext::Workspace {
                         workspace_id,
                         connection_id,
-                        created_by,
                     } => {
                         if let Err(err) = state
                             .workspace_oauth
@@ -444,23 +480,9 @@ async fn send_slack(
                             );
                         }
 
-                        if let Err(err) = state
-                            .oauth_accounts
-                            .handle_revoked_token(*created_by, ConnectedOAuthProvider::Slack)
-                            .await
-                        {
-                            warn!(
-                                created_by = %created_by,
-                                error = %err,
-                                "failed to purge creator slack token after workspace revocation"
-                            );
-                        }
+                        return Err("workspace_bot error: Slack revoked the connected account. Reconnect it from Settings → Integrations.".to_string());
                     }
                 }
-
-                return Err(
-                    "Slack revoked the connected account. Reconnect it from Settings → Integrations.".to_string(),
-                );
             }
         }
 
@@ -478,6 +500,19 @@ async fn send_slack(
                 }
             })
             .unwrap_or_else(|| "Unknown Slack API error".to_string());
+        if let Some(context) = &connection_context {
+            let prefix = match context {
+                SlackConnectionContext::Personal { .. } => "personal_user error: ",
+                SlackConnectionContext::Workspace { .. } => "workspace_bot error: ",
+            };
+            return Err(format!(
+                "{}Slack API error (status {}): {}",
+                prefix,
+                status.as_u16(),
+                detail
+            ));
+        }
+
         return Err(format!(
             "Slack API error (status {}): {}",
             status.as_u16(),
@@ -1208,10 +1243,13 @@ fn graph_error_message(parsed: Option<&Value>, raw: &str) -> String {
 fn map_workspace_microsoft_error(err: WorkspaceOAuthError) -> String {
     match err {
         WorkspaceOAuthError::NotFound => {
-            "Microsoft workspace connection not found or does not belong to this workspace. Promote the connection again from Settings → Integrations.".to_string()
+            "Microsoft workspace connection not found or does not belong to this workspace. Promote the connection again from Settings -> Integrations.".to_string()
         }
         WorkspaceOAuthError::OAuth(OAuthAccountError::TokenRevoked { .. }) => {
-            "The shared Microsoft credential was revoked by its owner. Ask them to reconnect it in Settings → Integrations.".to_string()
+            "The shared Microsoft credential was revoked by its owner. Ask them to reconnect it in Settings -> Integrations.".to_string()
+        }
+        WorkspaceOAuthError::SlackInstallRequired => {
+            "Slack connections must be installed at workspace scope.".to_string()
         }
         other => format!("Failed to obtain Microsoft workspace connection: {other}"),
     }
@@ -1220,10 +1258,13 @@ fn map_workspace_microsoft_error(err: WorkspaceOAuthError) -> String {
 fn map_workspace_slack_error(err: WorkspaceOAuthError) -> String {
     match err {
         WorkspaceOAuthError::NotFound => {
-            "Slack workspace connection not found or does not belong to this workspace. Promote the connection again from Settings → Integrations.".to_string()
+            "Slack workspace connection not found or does not belong to this workspace. Promote the connection again from Settings -> Integrations.".to_string()
         }
         WorkspaceOAuthError::OAuth(OAuthAccountError::TokenRevoked { .. }) => {
-            "The shared Slack credential was revoked by its owner. Ask them to reconnect it in Settings → Integrations.".to_string()
+            "The shared Slack credential was revoked by its owner. Ask them to reconnect it in Settings -> Integrations.".to_string()
+        }
+        WorkspaceOAuthError::SlackInstallRequired => {
+            "Slack connections must be installed at workspace scope.".to_string()
         }
         other => format!("Failed to obtain Slack workspace connection: {other}"),
     }
@@ -2430,7 +2471,7 @@ mod tests {
             .await
             .expect_err("slack message should require explicit connection");
 
-        assert!(err.contains("OAuth connections require explicit connectionScope and connectionId"));
+        assert!(err.contains("identity selection error"));
     }
 
     #[tokio::test]
@@ -2461,9 +2502,9 @@ mod tests {
 
         let err = execute_default(&node, &Value::Null)
             .await
-            .expect_err("OAuth connections require explicit connectionScope and connectionId parameters. Please specify both connectionScope ('personal' or 'workspace') and connectionId.");
+            .expect_err("missing identity should fail");
         handle.abort();
-        assert!(err.contains("OAuth connections require explicit connectionScope and connectionId parameters. Please specify both connectionScope ('personal' or 'workspace') and connectionId."));
+        assert!(err.contains("identity selection error"));
     }
 
     #[tokio::test]
@@ -2483,7 +2524,7 @@ mod tests {
         let err = execute_default(&node, &Value::Null)
             .await
             .expect_err("missing token should fail");
-        assert!(err.contains("OAuth connections require explicit"));
+        assert!(err.contains("identity selection error"));
     }
 
     #[test]
@@ -2617,6 +2658,7 @@ mod tests {
                     "platform": "Slack",
                     "channel": "#alerts",
                     "message": "Hello personal",
+                    "postAsUser": true,
                     "connectionScope": "user",
                     "connectionId": token_id,
                     "accountEmail": "alice@example.com",
@@ -2629,13 +2671,10 @@ mod tests {
             }),
         };
 
-        let (output, _) = execute_messaging(&node, &Value::Null, &state, &run)
-            .await
-            .expect("slack personal oauth should succeed");
-
-        assert_eq!(output["service"], "Slack");
-        assert_eq!(output["oauthAccountEmail"], "alice@example.com");
-        assert_eq!(output["connectionScope"], "user");
+        let res = execute_messaging(&node, &Value::Null, &state, &run).await;
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains("personal_user error: personal Slack token missing team id in metadata. Reconnect Slack."));
     }
 
     #[tokio::test]
@@ -2675,7 +2714,7 @@ mod tests {
             metadata: serde_json::Value::Null,
             bot_user_id: None,
             incoming_webhook_url: None,
-            slack_team_id: None,
+            slack_team_id: Some("T123".into()),
         };
 
         let (workspace_service, _) =
@@ -2749,7 +2788,7 @@ mod tests {
             metadata: serde_json::Value::Null,
             bot_user_id: None,
             incoming_webhook_url: None,
-            slack_team_id: None,
+            slack_team_id: Some("T123".into()),
         };
 
         let (workspace_service, repo) =
@@ -2797,50 +2836,703 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn teams_webhook_succeeds() {
-        let (addr, mut rx, handle) = spawn_stub_server(|| {
+    async fn slack_personal_user_team_mismatch_fails_execution() {
+        let (addr, _, _) = spawn_stub_server(|| {
             Response::builder()
                 .status(StatusCode::OK)
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"ok":true,"ts":"456.789","channel":"C456"}"#))
                 .unwrap()
         })
         .await;
 
+        let _guard = EnvGuard::set("SLACK_API_BASE", format!("http://{}/api", addr));
+
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+
+        let access_token = "slack-personal-access";
+        let refresh_token = "slack-personal-refresh";
+        let encrypted_access = encrypt_secret(&encryption_key, access_token).unwrap();
+        let encrypted_refresh = encrypt_secret(&encryption_key, refresh_token).unwrap();
+
+        let token_id = Uuid::new_v4();
+        let record = UserOAuthToken {
+            id: token_id,
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypted_access.clone(),
+            refresh_token: encrypted_refresh.clone(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "alice@example.com".into(),
+            metadata: serde_json::json!({ "slack": { "team_id": "T123" } }),
+            is_shared: false,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        };
+
+        // workspace connection has a different team
+        let connection_id = Uuid::new_v4();
+        let token_id_ws = Uuid::new_v4();
+        let creator_id = Uuid::new_v4();
+        let connection = WorkspaceConnection {
+            id: connection_id,
+            connection_id: Some(token_id_ws),
+            workspace_id,
+            created_by: creator_id,
+            owner_user_id: creator_id,
+            user_oauth_token_id: Some(token_id_ws),
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypt_secret(&encryption_key, "workspace-slack-access").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "workspace-slack-refresh").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "workspace@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: Some("T999".into()),
+        };
+
+        let (workspace_service, repo) =
+            workspace_oauth_with_connection(connection.clone(), Arc::clone(&encryption_key));
+
+        let repo = repo as Arc<dyn WorkspaceConnectionRepository>;
+
+        let repo_list: Arc<dyn UserOAuthTokenRepository> = Arc::new(StaticTokenRepo { record });
+        let oauth_accounts = Arc::new(OAuthAccountService::new(
+            repo_list,
+            repo.clone(),
+            Arc::clone(&encryption_key),
+            Arc::new(Client::new()),
+            &config.oauth,
+        ));
+
+        let mut state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
+        );
+        state.workspace_connection_repo = repo.clone();
+
+        let mut run = test_run();
+        run.user_id = user_id;
+        run.workspace_id = Some(workspace_id);
+
         let node = Node {
-            id: "action-4".into(),
+            id: "slack-personal-oauth".into(),
             kind: "action".into(),
             data: json!({
                 "params": {
-                    "platform": "Teams",
-                    "deliveryMethod": "Incoming Webhook",
-                    "webhookType": "Connector",
-                    "webhookUrl": format!("http://{addr}/teams"),
-                    "message": "Alert: {{ incident.id }}",
-                    "title": "Incident {{ incident.id }}",
-                    "summary": "Summary for {{ incident.id }}",
-                    "themeColor": "#00ff99"
+                    "platform": "Slack",
+                    "channel": "#alerts",
+                    "message": "Hello personal",
+                    "postAsUser": true,
+                    "connectionScope": "user",
+                    "connectionId": token_id,
+                    "accountEmail": "alice@example.com",
+                    "connection": {
+                        "connectionScope": "user",
+                        "connectionId": token_id,
+                        "accountEmail": "alice@example.com"
+                    }
                 }
             }),
         };
 
-        let context = json!({ "incident": { "id": "INC-1" } });
+        let res = execute_messaging(&node, &Value::Null, &state, &run).await;
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains("personal_user error: Slack team mismatch between personal token (T123) and workspace Slack connection (T999)"));
+    }
 
-        let (output, _) = execute_default(&node, &context)
-            .await
-            .expect("teams call succeeds");
+    #[tokio::test]
+    async fn slack_workspace_mixed_teams_rejected() {
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let workspace_id = Uuid::new_v4();
 
-        assert_eq!(output["sent"], true);
-        assert_eq!(output["service"], "Teams");
-        assert_eq!(output["status"], 200);
+        // Two different workspace connections with different teams
+        let connection_a = WorkspaceConnection {
+            id: Uuid::new_v4(),
+            connection_id: Some(Uuid::new_v4()),
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            owner_user_id: Uuid::new_v4(),
+            user_oauth_token_id: None,
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypt_secret(&encryption_key, "a").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "a").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "a@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: Some("TAAA".into()),
+        };
 
-        let req = rx.recv().await.expect("recorded request");
-        handle.abort();
-        let body: Value = serde_json::from_slice(&req.body).expect("json body");
-        assert_eq!(body["@type"], "MessageCard");
-        assert_eq!(body["text"], "Alert: INC-1");
-        assert_eq!(body["title"], "Incident INC-1");
-        assert_eq!(body["summary"], "Summary for INC-1");
-        assert_eq!(body["themeColor"], "00FF99");
+        let connection_b = WorkspaceConnection {
+            id: Uuid::new_v4(),
+            connection_id: Some(Uuid::new_v4()),
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            owner_user_id: Uuid::new_v4(),
+            user_oauth_token_id: None,
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypt_secret(&encryption_key, "b").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "b").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "b@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: Some("TBBB".into()),
+        };
+
+        struct TwoConns(WorkspaceConnection, WorkspaceConnection);
+        #[async_trait]
+        impl WorkspaceConnectionRepository for TwoConns {
+            async fn insert_connection(
+                &self,
+                _new_connection: crate::db::workspace_connection_repository::NewWorkspaceConnection,
+            ) -> Result<WorkspaceConnection, SqlxError> {
+                Err(SqlxError::RowNotFound)
+            }
+            async fn find_by_id(
+                &self,
+                connection_id: Uuid,
+            ) -> Result<Option<WorkspaceConnection>, SqlxError> {
+                if connection_id == self.0.id {
+                    return Ok(Some(self.0.clone()));
+                }
+                if connection_id == self.1.id {
+                    return Ok(Some(self.1.clone()));
+                }
+                Ok(None)
+            }
+            async fn get_by_id(
+                &self,
+                connection_id: Uuid,
+            ) -> Result<WorkspaceConnection, SqlxError> {
+                self.find_by_id(connection_id)
+                    .await?
+                    .ok_or(SqlxError::RowNotFound)
+            }
+            async fn list_for_workspace_provider(
+                &self,
+                _workspace_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+                Ok(vec![self.0.clone(), self.1.clone()])
+            }
+            async fn find_by_source_token(
+                &self,
+                _user_oauth_token_id: Uuid,
+            ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+                Ok(Vec::new())
+            }
+            async fn list_by_workspace_and_provider(
+                &self,
+                _workspace_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+                Ok(vec![self.0.clone(), self.1.clone()])
+            }
+            async fn list_for_workspace(
+                &self,
+                _workspace_id: Uuid,
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+                SqlxError,
+            > {
+                Ok(Vec::new())
+            }
+            async fn list_for_user_memberships(
+                &self,
+                _user_id: Uuid,
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+                SqlxError,
+            > {
+                Ok(Vec::new())
+            }
+            async fn list_by_workspace_creator(
+                &self,
+                _workspace_id: Uuid,
+                _creator_id: Uuid,
+            ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+                Ok(Vec::new())
+            }
+            async fn update_tokens_for_creator(
+                &self,
+                _creator_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+                _account_email: String,
+                _bot_user_id: Option<String>,
+                _slack_team_id: Option<String>,
+                _incoming_webhook_url: Option<String>,
+            ) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn update_tokens_for_connection(
+                &self,
+                _connection_id: Uuid,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+                _account_email: String,
+                _bot_user_id: Option<String>,
+                _slack_team_id: Option<String>,
+                _incoming_webhook_url: Option<String>,
+            ) -> Result<WorkspaceConnection, SqlxError> {
+                Err(SqlxError::RowNotFound)
+            }
+            async fn update_tokens(
+                &self,
+                _connection_id: Uuid,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+                _bot_user_id: Option<String>,
+                _slack_team_id: Option<String>,
+                _incoming_webhook_url: Option<String>,
+            ) -> Result<WorkspaceConnection, SqlxError> {
+                Err(SqlxError::RowNotFound)
+            }
+            async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn delete_by_owner_and_provider(
+                &self,
+                _workspace_id: Uuid,
+                _owner_user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn delete_by_owner_and_provider_and_id(
+                &self,
+                _workspace_id: Uuid,
+                _owner_user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _connection_id: Uuid,
+            ) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn has_connections_for_owner_provider(
+                &self,
+                _owner_user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<bool, SqlxError> {
+                Ok(false)
+            }
+            async fn mark_connections_stale_for_creator(
+                &self,
+                _creator_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::StaleWorkspaceConnection>,
+                SqlxError,
+            > {
+                Ok(Vec::new())
+            }
+            async fn record_audit_event(
+                &self,
+                _event: crate::db::workspace_connection_repository::NewWorkspaceAuditEvent,
+            ) -> Result<crate::models::oauth_token::WorkspaceAuditEvent, SqlxError> {
+                Err(SqlxError::RowNotFound)
+            }
+        }
+
+        let two_repo = Arc::new(TwoConns(connection_a.clone(), connection_b.clone()));
+
+        let oauth_accounts = OAuthAccountService::test_stub();
+        // Ensure the workspace_oauth service can resolve the selected connection
+        let (workspace_service, _recording_repo) =
+            workspace_oauth_with_connection(connection_a.clone(), Arc::clone(&encryption_key));
+        let state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
+        );
+
+        let mut state = state;
+        state.workspace_connection_repo = two_repo;
+
+        let mut run = test_run();
+        run.workspace_id = Some(workspace_id);
+
+        let node = Node {
+            id: "slack-workspace-oauth".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Slack",
+                    "channel": "#team",
+                    "message": "Hello workspace",
+                    "connection": {
+                        "connectionScope": "workspace",
+                        "connectionId": connection_a.id,
+                        "accountEmail": "a@example.com"
+                    }
+                }
+            }),
+        };
+
+        let res = execute_messaging(&node, &Value::Null, &state, &run).await;
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        println!("ERR: {}", err);
+        assert!(
+            err.contains("workspace_bot error: multiple Slack teams configured for this workspace")
+        );
+    }
+
+    #[tokio::test]
+    async fn slack_workspace_execution_fails_when_multiple_connections_and_no_connection_id() {
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let workspace_id = Uuid::new_v4();
+
+        let connection_a = WorkspaceConnection {
+            id: Uuid::new_v4(),
+            connection_id: Some(Uuid::new_v4()),
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            owner_user_id: Uuid::new_v4(),
+            user_oauth_token_id: None,
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypt_secret(&encryption_key, "a").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "a").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "a@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: Some("T1".into()),
+        };
+
+        let connection_b = WorkspaceConnection {
+            id: Uuid::new_v4(),
+            connection_id: Some(Uuid::new_v4()),
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            owner_user_id: Uuid::new_v4(),
+            user_oauth_token_id: None,
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypt_secret(&encryption_key, "b").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "b").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "b@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: Some("T1".into()),
+        };
+
+        struct TwoConnsLocal(WorkspaceConnection, WorkspaceConnection);
+        #[async_trait]
+        impl WorkspaceConnectionRepository for TwoConnsLocal {
+            async fn insert_connection(
+                &self,
+                _new_connection: crate::db::workspace_connection_repository::NewWorkspaceConnection,
+            ) -> Result<WorkspaceConnection, SqlxError> {
+                Err(SqlxError::RowNotFound)
+            }
+            async fn find_by_id(
+                &self,
+                connection_id: Uuid,
+            ) -> Result<Option<WorkspaceConnection>, SqlxError> {
+                if connection_id == self.0.id {
+                    return Ok(Some(self.0.clone()));
+                }
+                if connection_id == self.1.id {
+                    return Ok(Some(self.1.clone()));
+                }
+                Ok(None)
+            }
+            async fn get_by_id(
+                &self,
+                connection_id: Uuid,
+            ) -> Result<WorkspaceConnection, SqlxError> {
+                self.find_by_id(connection_id)
+                    .await?
+                    .ok_or(SqlxError::RowNotFound)
+            }
+            async fn list_for_workspace_provider(
+                &self,
+                _workspace_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+                Ok(vec![self.0.clone(), self.1.clone()])
+            }
+            async fn find_by_source_token(
+                &self,
+                _user_oauth_token_id: Uuid,
+            ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+                Ok(Vec::new())
+            }
+            async fn list_by_workspace_and_provider(
+                &self,
+                _workspace_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+                Ok(vec![self.0.clone(), self.1.clone()])
+            }
+            async fn list_for_workspace(
+                &self,
+                _workspace_id: Uuid,
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+                SqlxError,
+            > {
+                Ok(Vec::new())
+            }
+            async fn list_for_user_memberships(
+                &self,
+                _user_id: Uuid,
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::WorkspaceConnectionListing>,
+                SqlxError,
+            > {
+                Ok(Vec::new())
+            }
+            async fn list_by_workspace_creator(
+                &self,
+                _workspace_id: Uuid,
+                _creator_id: Uuid,
+            ) -> Result<Vec<WorkspaceConnection>, SqlxError> {
+                Ok(Vec::new())
+            }
+            async fn update_tokens_for_creator(
+                &self,
+                _creator_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+                _account_email: String,
+                _bot_user_id: Option<String>,
+                _slack_team_id: Option<String>,
+                _incoming_webhook_url: Option<String>,
+            ) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn update_tokens_for_connection(
+                &self,
+                _connection_id: Uuid,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+                _account_email: String,
+                _bot_user_id: Option<String>,
+                _slack_team_id: Option<String>,
+                _incoming_webhook_url: Option<String>,
+            ) -> Result<WorkspaceConnection, SqlxError> {
+                Err(SqlxError::RowNotFound)
+            }
+            async fn update_tokens(
+                &self,
+                _connection_id: Uuid,
+                _access_token: String,
+                _refresh_token: String,
+                _expires_at: OffsetDateTime,
+                _bot_user_id: Option<String>,
+                _slack_team_id: Option<String>,
+                _incoming_webhook_url: Option<String>,
+            ) -> Result<WorkspaceConnection, SqlxError> {
+                Err(SqlxError::RowNotFound)
+            }
+            async fn delete_connection(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn delete_by_id(&self, _connection_id: Uuid) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn delete_by_owner_and_provider(
+                &self,
+                _workspace_id: Uuid,
+                _owner_user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn delete_by_owner_and_provider_and_id(
+                &self,
+                _workspace_id: Uuid,
+                _owner_user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+                _connection_id: Uuid,
+            ) -> Result<(), SqlxError> {
+                Ok(())
+            }
+            async fn has_connections_for_owner_provider(
+                &self,
+                _owner_user_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<bool, SqlxError> {
+                Ok(false)
+            }
+            async fn mark_connections_stale_for_creator(
+                &self,
+                _creator_id: Uuid,
+                _provider: ConnectedOAuthProvider,
+            ) -> Result<
+                Vec<crate::db::workspace_connection_repository::StaleWorkspaceConnection>,
+                SqlxError,
+            > {
+                Ok(Vec::new())
+            }
+            async fn record_audit_event(
+                &self,
+                _event: crate::db::workspace_connection_repository::NewWorkspaceAuditEvent,
+            ) -> Result<crate::models::oauth_token::WorkspaceAuditEvent, SqlxError> {
+                Err(SqlxError::RowNotFound)
+            }
+        }
+
+        let repo = Arc::new(TwoConnsLocal(connection_a.clone(), connection_b.clone()));
+
+        // Build OAuthAccountService and WorkspaceOAuthService backed by the
+        // TwoConnsLocal repository so both connections are considered usable.
+        let user_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(NoopUserTokenRepo);
+        let connection_repo_trait: Arc<dyn WorkspaceConnectionRepository> = repo.clone();
+
+        let oauth_accounts = Arc::new(OAuthAccountService::new(
+            user_repo.clone(),
+            connection_repo_trait.clone(),
+            Arc::clone(&encryption_key),
+            Arc::new(Client::new()),
+            &config.oauth,
+        ));
+
+        let workspace_token_refresher: Arc<dyn WorkspaceTokenRefresher> =
+            oauth_accounts.clone() as Arc<dyn WorkspaceTokenRefresher>;
+        let workspace_service = Arc::new(WorkspaceOAuthService::new(
+            user_repo,
+            Arc::new(NoopWorkspaceRepository),
+            connection_repo_trait.clone(),
+            workspace_token_refresher,
+            Arc::clone(&encryption_key),
+        ));
+
+        let mut state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
+        );
+        state.workspace_connection_repo = repo;
+
+        let mut run = test_run();
+        run.workspace_id = Some(workspace_id);
+
+        let node = Node {
+            id: "slack-workspace-no-id".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Slack",
+                    "channel": "#team",
+                    "message": "Hello",
+                    "connection": { "connectionScope": "workspace" }
+                }
+            }),
+        };
+
+        let res = execute_messaging(&node, &Value::Null, &state, &run).await;
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains(
+            "workspace_bot error: workspace Slack execution requires an explicit connectionId"
+        ));
+    }
+
+    #[tokio::test]
+    async fn slack_workspace_execution_fails_when_single_connection_and_no_connection_id() {
+        let config = test_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let workspace_id = Uuid::new_v4();
+
+        let connection = WorkspaceConnection {
+            id: Uuid::new_v4(),
+            connection_id: Some(Uuid::new_v4()),
+            workspace_id,
+            created_by: Uuid::new_v4(),
+            owner_user_id: Uuid::new_v4(),
+            user_oauth_token_id: None,
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: encrypt_secret(&encryption_key, "token").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "refresh").unwrap(),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+            account_email: "owner@example.com".into(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            metadata: serde_json::Value::Null,
+            bot_user_id: None,
+            incoming_webhook_url: None,
+            slack_team_id: Some("T1".into()),
+        };
+
+        let repo = Arc::new(RecordingWorkspaceConnections::with_connection(
+            connection.clone(),
+        ));
+
+        // Provide a workspace OAuth service as usual, but engine must not infer identity.
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let (workspace_service, _recording_repo) =
+            workspace_oauth_with_connection(connection.clone(), Arc::clone(&encryption_key));
+
+        let mut state = build_state_with_oauth(
+            oauth_accounts,
+            workspace_service,
+            Arc::clone(&config),
+            Arc::new(NoopWorkspaceRepository),
+        );
+        state.workspace_connection_repo = repo;
+
+        let mut run = test_run();
+        run.workspace_id = Some(workspace_id);
+
+        let node = Node {
+            id: "slack-workspace-single-no-id".into(),
+            kind: "action".into(),
+            data: json!({
+                "params": {
+                    "platform": "Slack",
+                    "channel": "#team",
+                    "message": "Hello",
+                    "connection": { "connectionScope": "workspace" }
+                }
+            }),
+        };
+
+        let res = execute_messaging(&node, &Value::Null, &state, &run).await;
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains(
+            "workspace_bot error: workspace Slack execution requires an explicit connectionId"
+        ));
     }
 
     #[tokio::test]
@@ -3803,7 +4495,7 @@ mod tests {
             metadata: serde_json::Value::Null,
             bot_user_id: None,
             incoming_webhook_url: None,
-            slack_team_id: None,
+            slack_team_id: Some("T123".into()),
         };
 
         let (workspace_service, repo) =
@@ -3889,7 +4581,7 @@ mod tests {
             metadata: serde_json::Value::Null,
             bot_user_id: None,
             incoming_webhook_url: None,
-            slack_team_id: None,
+            slack_team_id: Some("T123".into()),
         };
 
         let (workspace_service, repo) =
@@ -3968,7 +4660,7 @@ mod tests {
             metadata: serde_json::Value::Null,
             bot_user_id: None,
             incoming_webhook_url: None,
-            slack_team_id: None,
+            slack_team_id: Some("T123".into()),
         };
 
         let (workspace_service, repo) =
@@ -4092,16 +4784,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slack_workspace_webhook_short_circuits_oauth() {
-        // Stub server that will receive the webhook POST
-        let (addr, mut rx, handle) = spawn_stub_server(|| {
-            Response::builder()
-                .status(StatusCode::OK)
-                .body(Body::from("ok"))
-                .unwrap()
-        })
-        .await;
-
+    async fn slack_workspace_webhook_only_connection_is_rejected() {
         let config = test_config();
         let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
 
@@ -4110,26 +4793,25 @@ mod tests {
         let connection_id = Uuid::new_v4();
         let token_id = Uuid::new_v4();
 
-        // Workspace connection that includes an incoming webhook URL
         let connection = WorkspaceConnection {
             id: connection_id,
             connection_id: Some(token_id),
             workspace_id,
             created_by: user_id,
             owner_user_id: user_id,
-            user_oauth_token_id: Some(token_id),
+            user_oauth_token_id: None, // webhook-only
             provider: ConnectedOAuthProvider::Slack,
-            access_token: encrypt_secret(&encryption_key, "unused-access").unwrap(),
-            refresh_token: encrypt_secret(&encryption_key, "unused-refresh").unwrap(),
+            access_token: encrypt_secret(&encryption_key, "").unwrap(),
+            refresh_token: encrypt_secret(&encryption_key, "").unwrap(),
             expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
             account_email: "workspace@example.com".into(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
             metadata: serde_json::Value::Null,
             bot_user_id: None,
-            slack_team_id: None,
+            slack_team_id: Some("T123".into()),
             incoming_webhook_url: Some(
-                encrypt_secret(&encryption_key, &format!("http://{addr}/slack-webhook")).unwrap(),
+                encrypt_secret(&encryption_key, "http://example.com/webhook").unwrap(),
             ),
         };
 
@@ -4147,7 +4829,6 @@ mod tests {
         run.workspace_id = Some(workspace_id);
         run.user_id = user_id;
 
-        // IMPORTANT: request the workspace connection, otherwise it falls back to "token is required"
         let node = Node {
             id: "slack-webhook".into(),
             kind: "action".into(),
@@ -4155,6 +4836,7 @@ mod tests {
                 "params": {
                     "platform": "Slack",
                     "deliveryMethod": "Incoming Webhook",
+                    "channel": "#alerts",
                     "message": "hello webhook",
                     "connection": {
                         "connectionScope": "workspace",
@@ -4165,26 +4847,13 @@ mod tests {
             }),
         };
 
-        let (output, next) = execute_messaging(&node, &json!({}), &state, &run)
+        let err = execute_messaging(&node, &json!({}), &state, &run)
             .await
-            .expect("webhook-based Slack should succeed");
+            .expect_err("webhook-only workspace connection must be rejected");
 
-        assert!(next.is_none());
-        assert_eq!(output["deliveryMethod"], "Incoming Webhook");
-        assert_eq!(output["connectionScope"], "workspace");
-        assert_eq!(output["connectionId"], connection_id.to_string());
+        assert!(err.contains("workspace_bot error"));
+        assert!(err.contains("webhook-only"));
 
-        // Verify we actually POSTed to the webhook
-        let req = rx.recv().await.expect("webhook request recorded");
-        handle.abort();
-
-        assert_eq!(req.method, "POST");
-        assert!(req.uri.ends_with("/slack-webhook"));
-
-        let body: Value = serde_json::from_slice(&req.body).expect("json body");
-        assert_eq!(body["text"], "hello webhook");
-
-        // It still has to look up the workspace connection to find the webhook URL
         assert_eq!(repo.find_calls(), vec![connection_id]);
     }
 }

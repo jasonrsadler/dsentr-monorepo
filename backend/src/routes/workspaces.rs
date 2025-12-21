@@ -2053,6 +2053,10 @@ pub async fn promote_workspace_connection(
             "created_by": connection.created_by,
         }))
         .into_response(),
+        Err(WorkspaceOAuthError::SlackInstallRequired) => {
+            JsonResponse::bad_request("Slack connections must be installed at workspace scope")
+                .into_response()
+        }
         Err(WorkspaceOAuthError::Forbidden) => {
             JsonResponse::forbidden("OAuth token is not owned by the current user").into_response()
         }
@@ -2427,7 +2431,7 @@ mod tests {
                 metadata: serde_json::Value::Null,
                 bot_user_id: None,
                 incoming_webhook_url: None,
-                slack_team_id: None,
+                slack_team_id: new_connection.slack_team_id,
             };
 
             self.connections.lock().unwrap().push(record.clone());
@@ -3888,6 +3892,11 @@ mod tests {
     ) -> WorkspaceConnection {
         let now = OffsetDateTime::now_utc();
         let token_id = Uuid::new_v4();
+        let slack_team_id = if provider == ConnectedOAuthProvider::Slack {
+            Some("T123".to_string())
+        } else {
+            None
+        };
         WorkspaceConnection {
             id: Uuid::new_v4(),
             connection_id: Some(token_id),
@@ -3903,7 +3912,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             metadata: serde_json::json!({}),
-            slack_team_id: None,
+            slack_team_id,
             bot_user_id: None,
             incoming_webhook_url: None,
         }
@@ -4301,6 +4310,62 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert!(user_repo.marks().is_empty());
         assert!(connection_repo.connections().is_empty());
+    }
+
+    #[tokio::test]
+    async fn promote_workspace_connection_rejects_slack_provider() {
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let workspace = Workspace {
+            id: workspace_id,
+            name: "Team".into(),
+            created_by: user_id,
+            owner_id: user_id,
+            plan: PlanTier::Workspace.as_str().to_string(),
+            stripe_overage_item_id: None,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        let member = WorkspaceMember {
+            workspace_id,
+            user_id,
+            role: WorkspaceRole::Admin,
+            joined_at: now,
+            email: "admin@example.com".into(),
+            first_name: "Admin".into(),
+            last_name: "User".into(),
+        };
+        let workspace_repo: Arc<dyn WorkspaceRepository> = Arc::new(
+            RecordingWorkspaceRepo::seeded(workspace.clone(), vec![member.clone()]),
+        );
+
+        let state = promotion_state(
+            workspace_repo,
+            Arc::new(StubUserTokenRepo::without_tokens()),
+            Arc::new(CapturingWorkspaceConnectionRepo::new()),
+            test_config(),
+            Arc::new(vec![0; 32]),
+        );
+
+        let response = promote_workspace_connection(
+            State(state),
+            AuthSession(claims_fixture(user_id, "admin@example.com")),
+            Path(workspace_id),
+            Json(PromoteWorkspaceConnectionPayload {
+                user_oauth_token_id: Uuid::new_v4(),
+                provider: ConnectedOAuthProvider::Slack,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        let response_str = json.to_string();
+        assert!(response_str.contains("Slack connections must be installed at workspace scope"));
     }
 
     #[tokio::test]

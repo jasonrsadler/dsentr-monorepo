@@ -40,6 +40,11 @@ interface ProviderMeta {
   scopes: string
 }
 
+type SlackPersonalConnection = PersonalConnectionRecord & {
+  provider: 'slack'
+  workspaceConnectionId?: string
+}
+
 const PROVIDER_ICONS: Partial<
   Record<OAuthProvider, (props: React.SVGProps<SVGSVGElement>) => JSX.Element>
 > = {
@@ -250,7 +255,7 @@ export default function IntegrationsTab({
   }, [workflowIsDirty])
 
   const handleConnect = useCallback(
-    async (provider: OAuthProvider) => {
+    async (provider: OAuthProvider, opts?: { slackPersonal?: boolean }) => {
       if (isSoloPlan || isViewer || connectingProvider) {
         return
       }
@@ -264,7 +269,10 @@ export default function IntegrationsTab({
           return
         }
         const url = new URL(`${API_BASE_URL}/api/oauth/${provider}/start`)
-        if (workspaceId) {
+        // For Slack we support workspace-first installs. Pass workspace param
+        // only when performing workspace install. For explicit personal Slack
+        // authorizations (opts?.slackPersonal), do NOT include workspace.
+        if (workspaceId && !(provider === 'slack' && opts?.slackPersonal)) {
           url.searchParams.set('workspace', workspaceId)
         }
         window.location.href = url.toString()
@@ -567,9 +575,17 @@ export default function IntegrationsTab({
             </div>
           ) : (
             sortedProviders.map((provider) => {
-              const personalConnections = (connections?.personal ?? []).filter(
+              let personalConnections = (connections?.personal ?? []).filter(
                 (entry) => entry.provider === provider.key
               )
+              // Slack personal authorizations are not listed in the top-level
+              // personal section. They are displayed under their workspace
+              // entries only when the backend provides an explicit linkage
+              // (workspaceConnectionId or slackTeamId). Hide the personal
+              // list for Slack to avoid any promotion/inference logic.
+              if (provider.key === 'slack') {
+                personalConnections = []
+              }
               const workspaceConnections = (
                 connections?.workspace ?? []
               ).filter((entry) => entry.provider === provider.key)
@@ -587,7 +603,13 @@ export default function IntegrationsTab({
               const promoting = promoteBusyProvider === provider.key
               const isExpanded = expandedProviders[provider.key] ?? true
               const connectLabel =
-                personalConnections.length > 0 ? 'Add connection' : 'Connect'
+                provider.key === 'slack'
+                  ? workspaceConnections.length > 0
+                    ? 'Authorize Slack for yourself'
+                    : 'Install Slack to workspace'
+                  : personalConnections.length > 0
+                    ? 'Add connection'
+                    : 'Connect'
               const personalCount = personalConnections.length
               const workspaceCount = workspaceConnections.length
               const personalSorted = [...personalConnections].sort((a, b) => {
@@ -617,6 +639,8 @@ export default function IntegrationsTab({
 
               return (
                 <section
+                  data-provider={provider.key}
+                  data-testid={`provider-${provider.key}`}
                   key={provider.key}
                   className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
                 >
@@ -681,8 +705,20 @@ export default function IntegrationsTab({
                         </p>
                       </div>
                       <button
-                        aria-label={`Connect ${provider.name}`}
-                        onClick={() => handleConnect(provider.key)}
+                        aria-label={
+                          provider.key === 'slack' &&
+                          workspaceConnections.length > 0
+                            ? `Authorize ${provider.name} for yourself`
+                            : `Connect ${provider.name}`
+                        }
+                        onClick={() =>
+                          provider.key === 'slack' &&
+                          workspaceConnections.length > 0
+                            ? handleConnect(provider.key, {
+                                slackPersonal: true
+                              })
+                            : handleConnect(provider.key)
+                        }
                         disabled={isSoloPlan || isViewer || connecting}
                         className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
@@ -738,7 +774,13 @@ export default function IntegrationsTab({
                         </div>
                         <button
                           aria-label={`Add ${provider.name} connection`}
-                          onClick={() => handleConnect(provider.key)}
+                          onClick={() =>
+                            provider.key === 'slack'
+                              ? handleConnect(provider.key, {
+                                  slackPersonal: true
+                                })
+                              : handleConnect(provider.key)
+                          }
                           disabled={
                             isSoloPlan ||
                             isViewer ||
@@ -773,7 +815,10 @@ export default function IntegrationsTab({
                               !hasValidId
                             const requiresReconnect = entry.requiresReconnect
                             const canShowPromote =
-                              canPromote && !isShared && hasValidConnectionId
+                              provider.key !== 'slack' &&
+                              canPromote &&
+                              !isShared &&
+                              hasValidConnectionId
                             return (
                               <li
                                 key={
@@ -921,6 +966,29 @@ export default function IntegrationsTab({
                             const entryKey = resolveConnectionKey(entry)
                             const workspaceKey =
                               entry.workspaceConnectionId ?? entry.id
+                            // Compute a canonical linkage id for this workspace
+                            // entry: prefer workspaceConnectionId, otherwise any
+                            // team identifier the backend provides.
+                            const linkageId =
+                              entry.workspaceConnectionId ?? null
+                            // For Slack, group personal authorizations that carry
+                            // an explicit linkage id (workspaceConnectionId or
+                            // slackTeamId) matching this workspace entry. Ignore
+                            // personal Slack auths that lack an explicit linkage.
+                            const personalAuthorizations =
+                              provider.key === 'slack'
+                                ? (connections?.personal ?? [])
+                                    .filter(
+                                      (p): p is SlackPersonalConnection =>
+                                        p.provider === 'slack'
+                                    )
+                                    .filter((p) => {
+                                      return (
+                                        linkageId !== null &&
+                                        p.workspaceConnectionId === linkageId
+                                      )
+                                    })
+                                : []
                             return (
                               <li
                                 key={
@@ -940,9 +1008,38 @@ export default function IntegrationsTab({
                                       {entry.workspaceName}
                                     </div>
                                     <div className="text-zinc-600 dark:text-zinc-300">
-                                      {entry.accountEmail ||
-                                        'Delegated account'}
+                                      {provider.key === 'slack' ? (
+                                        <span>
+                                          <span className="font-semibold">
+                                            Workspace bot:
+                                          </span>{' '}
+                                          {entry.accountEmail ||
+                                            'Delegated account'}
+                                        </span>
+                                      ) : (
+                                        entry.accountEmail ||
+                                        'Delegated account'
+                                      )}
                                     </div>
+                                    {provider.key === 'slack' &&
+                                    personalAuthorizations.length > 0 ? (
+                                      <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                        {personalAuthorizations.map((pa) => (
+                                          <div
+                                            key={
+                                              pa.id ?? pa.workspaceConnectionId!
+                                            }
+                                          >
+                                            {pa.accountEmail ===
+                                            currentUser?.email
+                                              ? 'Authorized as you'
+                                              : pa.accountEmail
+                                                ? `Authorized: ${pa.accountEmail}`
+                                                : 'Authorized'}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : null}
                                     <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
                                       Workspace connection ID:{' '}
                                       {workspaceKey ?? 'Unknown'}

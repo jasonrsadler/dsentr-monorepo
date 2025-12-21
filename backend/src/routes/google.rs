@@ -357,6 +357,10 @@ fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> Response {
             JsonResponse::forbidden("Connection not found").into_response()
         }
         WorkspaceOAuthError::Forbidden => JsonResponse::forbidden("Forbidden").into_response(),
+        WorkspaceOAuthError::SlackInstallRequired => {
+            JsonResponse::bad_request("Slack connections must be installed at workspace scope")
+                .into_response()
+        }
         WorkspaceOAuthError::Database(e) => {
             JsonResponse::server_error(&format!("Workspace OAuth database error: {}", e))
                 .into_response()

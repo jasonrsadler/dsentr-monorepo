@@ -34,3 +34,7 @@
 - Asana list tasks now enforces Asana's filter rules (project/tag or assignee + workspace; workspace alone rejected) to prevent invalid requests.
 - Asana add-task-to-project requests now only send the task + project IDs (no section payload) to mirror the updated UI flow and templated GID inputs.
 - Workspace action tests now populate `connection_id` alongside `user_oauth_token_id` so fixtures reflect promoted OAuth identity semantics.
+- Slack revoke handling now uses personal connection IDs for personal tokens and skips revoking personal tokens when a workspace Slack connection is revoked, keeping Slack scopes isolated.
+- Removed the unused Slack workspace `created_by` context field after revocation handling stopped relying on it to avoid dead-code warnings.
+- Workspace action error mapping now recognizes the Slack workspace-install requirement so Slack promotion failures surface clear messages in actions.
+- Slack action fixtures now include `slack_team_id` for workspace connections so Slack token lookups satisfy team-id invariants.

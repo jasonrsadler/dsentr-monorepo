@@ -463,7 +463,10 @@ fn map_oauth_error(err: OAuthAccountError) -> String {
 fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> String {
     match err {
         WorkspaceOAuthError::NotFound => {
-            "Google workspace connection not found or does not belong to this workspace. Promote the connection again from Settings → Integrations.".to_string()
+            "Google workspace connection not found or does not belong to this workspace. Promote the connection again from Settings -> Integrations.".to_string()
+        }
+        WorkspaceOAuthError::SlackInstallRequired => {
+            "Slack connections must be installed at workspace scope.".to_string()
         }
         other => format!("Failed to obtain Google workspace connection: {other}"),
     }

@@ -54,3 +54,4 @@
 - Workspace connection repositories now allow nullable token references and guard provider/owner/token identity on credential updates so shared connections stay consistent after personal token deletion.
 - Workspace connection repositories expose a `find_by_source_token` helper so shared connection refresh flows can locate and update dependent workspace credentials.
 - Workspace connection repositories now persist and list `connection_id` so workspace OAuth responses can return a stable connection identity.
+- Workspace connection repositories now provide a Slack team lookup and enforce Slack team-id invariants, with Postgres-backed queries using the new workspace/team index.

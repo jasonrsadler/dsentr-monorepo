@@ -21,12 +21,57 @@ struct WorkspaceConnectionIdentity {
     user_oauth_token_id: Option<Uuid>,
 }
 
+fn require_slack_team_id(
+    provider: ConnectedOAuthProvider,
+    slack_team_id: &Option<String>,
+) -> Result<(), sqlx::Error> {
+    if matches!(provider, ConnectedOAuthProvider::Slack) {
+        let team_id = slack_team_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if team_id.is_none() {
+            return Err(sqlx::Error::Protocol(
+                "Slack workspace connection requires slack_team_id".to_string(),
+            ));
+        }
+        if team_id.unwrap().len() > 32 {
+            return Err(sqlx::Error::Protocol(
+                "Slack workspace team id is too long".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_slack_team_id_value(
+    provider: ConnectedOAuthProvider,
+    slack_team_id: &Option<String>,
+) -> Result<(), sqlx::Error> {
+    if matches!(provider, ConnectedOAuthProvider::Slack) {
+        if let Some(team_id) = slack_team_id.as_deref() {
+            if team_id.trim().is_empty() {
+                return Err(sqlx::Error::Protocol(
+                    "Slack workspace team id cannot be empty".to_string(),
+                ));
+            }
+            if team_id.trim().len() > 32 {
+                return Err(sqlx::Error::Protocol(
+                    "Slack workspace team id is too long".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
     async fn insert_connection(
         &self,
         new_connection: NewWorkspaceConnection,
     ) -> Result<WorkspaceConnection, sqlx::Error> {
+        require_slack_team_id(new_connection.provider, &new_connection.slack_team_id)?;
         sqlx::query_as!(
             WorkspaceConnection,
             r#"
@@ -171,6 +216,56 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
     ) -> Result<Vec<WorkspaceConnection>, sqlx::Error> {
         self.list_for_workspace_provider(workspace_id, provider)
             .await
+    }
+
+    async fn find_slack_by_workspace_and_team(
+        &self,
+        workspace_id: Uuid,
+        slack_team_id: &str,
+    ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+        let team_id = slack_team_id.trim();
+        if team_id.is_empty() {
+            return Err(sqlx::Error::Protocol(
+                "Slack workspace team id cannot be empty".to_string(),
+            ));
+        }
+        if team_id.len() > 32 {
+            return Err(sqlx::Error::Protocol(
+                "Slack workspace team id is too long".to_string(),
+            ));
+        }
+
+        sqlx::query_as!(
+            WorkspaceConnection,
+            r#"
+            SELECT
+                id,
+                connection_id as "connection_id?",
+                workspace_id,
+                created_by,
+                owner_user_id,
+                user_oauth_token_id as "user_oauth_token_id?",
+                provider as "provider: _",
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email,
+                created_at,
+                updated_at,
+                bot_user_id,
+                slack_team_id,
+                incoming_webhook_url,
+                metadata
+            FROM workspace_connections
+            WHERE workspace_id = $1
+              AND provider = 'slack'::oauth_connection_provider
+              AND slack_team_id = $2
+            "#,
+            workspace_id,
+            team_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
     }
 
     async fn find_by_source_token(
@@ -328,6 +423,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         slack_team_id: Option<String>,
         incoming_webhook_url: Option<String>,
     ) -> Result<(), sqlx::Error> {
+        validate_slack_team_id_value(provider, &slack_team_id)?;
         sqlx::query(
             r#"
             UPDATE workspace_connections
@@ -390,6 +486,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             return Err(sqlx::Error::RowNotFound);
         }
 
+        validate_slack_team_id_value(identity.provider, &slack_team_id)?;
         sqlx::query_as!(
             WorkspaceConnection,
             r#"
@@ -472,6 +569,7 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
             return Err(sqlx::Error::RowNotFound);
         }
 
+        validate_slack_team_id_value(identity.provider, &slack_team_id)?;
         sqlx::query_as!(
             WorkspaceConnection,
             r#"
@@ -671,5 +769,185 @@ impl WorkspaceConnectionRepository for PostgresWorkspaceConnectionRepository {
         )
         .fetch_one(&self.pool)
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::oauth_token::ConnectedOAuthProvider;
+    use crate::state::test_pg_pool;
+    use sqlx::Row;
+    use time::OffsetDateTime;
+
+    async fn insert_user(pool: &PgPool) -> Uuid {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO users (
+                email,
+                password_hash,
+                first_name,
+                last_name,
+                oauth_provider,
+                is_verified,
+                role,
+                created_at
+            )
+            VALUES ($1, '', $2, $3, $4::oauth_provider, true, 'user'::user_role, $5)
+            RETURNING id
+            "#,
+        )
+        .bind(format!("slack-team-{}@example.com", Uuid::new_v4()))
+        .bind("Slack")
+        .bind("Tester")
+        .bind("google")
+        .bind(OffsetDateTime::now_utc())
+        .fetch_one(pool)
+        .await
+        .expect("insert user");
+
+        row.get("id")
+    }
+
+    async fn insert_workspace(pool: &PgPool, owner_id: Uuid) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let row = sqlx::query(
+            r#"
+            INSERT INTO workspaces (
+                name,
+                created_by,
+                owner_id,
+                plan,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, 'workspace', $4, $4)
+            RETURNING id
+            "#,
+        )
+        .bind(format!("Slack Workspace {}", Uuid::new_v4()))
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(now)
+        .fetch_one(pool)
+        .await
+        .expect("insert workspace");
+
+        row.get("id")
+    }
+
+    #[tokio::test]
+    async fn slack_team_id_required_for_workspace_connections() {
+        let pool = test_pg_pool();
+        let user_id = insert_user(&pool).await;
+        let workspace_id = insert_workspace(&pool, user_id).await;
+
+        let result = sqlx::query(
+            r#"
+            INSERT INTO workspace_connections (
+                workspace_id,
+                created_by,
+                owner_user_id,
+                provider,
+                access_token,
+                refresh_token,
+                expires_at,
+                account_email
+            )
+            VALUES ($1, $2, $2, 'slack'::oauth_connection_provider, 'access', 'refresh', $3, $4)
+            "#,
+        )
+        .bind(workspace_id)
+        .bind(user_id)
+        .bind(OffsetDateTime::now_utc())
+        .bind("slack@example.com")
+        .execute(&*pool)
+        .await;
+
+        assert!(result.is_err(), "Slack row without team id should fail");
+    }
+
+    #[tokio::test]
+    async fn slack_team_id_unique_per_workspace() {
+        let pool = test_pg_pool();
+        let user_id = insert_user(&pool).await;
+        let workspace_id = insert_workspace(&pool, user_id).await;
+
+        let repo = PostgresWorkspaceConnectionRepository {
+            pool: (*pool).clone(),
+        };
+
+        let base = NewWorkspaceConnection {
+            workspace_id,
+            created_by: user_id,
+            owner_user_id: user_id,
+            user_oauth_token_id: None,
+            connection_id: None,
+            provider: ConnectedOAuthProvider::Slack,
+            access_token: "access".into(),
+            refresh_token: "refresh".into(),
+            expires_at: OffsetDateTime::now_utc(),
+            account_email: "slack@example.com".into(),
+            bot_user_id: None,
+            slack_team_id: Some("T123".into()),
+            incoming_webhook_url: None,
+            metadata: serde_json::json!({}),
+        };
+
+        repo.insert_connection(base.clone())
+            .await
+            .expect("first insert succeeds");
+
+        let err = repo
+            .insert_connection(base)
+            .await
+            .expect_err("duplicate Slack team should fail");
+
+        assert!(matches!(err, sqlx::Error::Database(_)));
+    }
+
+    #[tokio::test]
+    async fn find_slack_by_workspace_and_team_returns_single_match() {
+        let pool = test_pg_pool();
+        let user_id = insert_user(&pool).await;
+        let workspace_id = insert_workspace(&pool, user_id).await;
+
+        let repo = PostgresWorkspaceConnectionRepository {
+            pool: (*pool).clone(),
+        };
+
+        let inserted = repo
+            .insert_connection(NewWorkspaceConnection {
+                workspace_id,
+                created_by: user_id,
+                owner_user_id: user_id,
+                user_oauth_token_id: None,
+                connection_id: None,
+                provider: ConnectedOAuthProvider::Slack,
+                access_token: "access".into(),
+                refresh_token: "refresh".into(),
+                expires_at: OffsetDateTime::now_utc(),
+                account_email: "slack@example.com".into(),
+                bot_user_id: None,
+                slack_team_id: Some("T456".into()),
+                incoming_webhook_url: None,
+                metadata: serde_json::json!({}),
+            })
+            .await
+            .expect("insert succeeds");
+
+        let found = repo
+            .find_slack_by_workspace_and_team(workspace_id, "T456")
+            .await
+            .expect("lookup succeeds")
+            .expect("row returned");
+
+        assert_eq!(found.id, inserted.id);
+
+        let missing = repo
+            .find_slack_by_workspace_and_team(workspace_id, "T999")
+            .await
+            .expect("lookup succeeds");
+        assert!(missing.is_none());
     }
 }

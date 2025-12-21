@@ -50,3 +50,4 @@
 - Dropped the per-provider uniqueness on `user_oauth_tokens` and replaced workspace connection uniqueness with provider/workspace/owner lookup indexes to support multiple connections per provider.
 - Workspace connection `user_oauth_token_id` now allows NULL with `ON DELETE SET NULL` FK semantics plus an index to keep shared connections intact when personal tokens are removed.
 - Added `connection_id` to `workspace_connections` with a backfill from `user_oauth_token_id` and a unique index per workspace so OAuth promotions retain stable identity.
+- Enforced Slack workspace connection team-id requirements with non-null/length checks and a per-workspace uniqueness index on `(workspace_id, slack_team_id)`.

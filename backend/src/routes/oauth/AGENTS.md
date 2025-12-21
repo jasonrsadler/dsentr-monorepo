@@ -34,3 +34,5 @@
 - Workspace connection listings now include `connectionId` sourced from the promoted personal token so frontend identity matching stays stable after reloads.
 - Connection lookup responses now surface workspace `connectionId` from the stored connection record and omit it when unavailable, avoiding any fallback to the workspace row id.
 - OAuth callbacks now delegate persistence to the dedup-aware account service entry point so reconnects update existing personal connections by identity.
+- Slack OAuth start/callback now require an explicit workspace context, include workspace-aware redirects, and strip incoming webhooks so workspace-scoped flows have no fallback semantics.
+- Slack OAuth callback now installs workspace Slack connections via the Slack-specific install helper while storing personal tokens separately for workspace-first isolation.

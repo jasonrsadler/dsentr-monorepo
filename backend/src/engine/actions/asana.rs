@@ -100,6 +100,9 @@ fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> String {
             "You no longer have access to this workspace connection.".to_string()
         }
         WorkspaceOAuthError::NotFound => "Asana workspace connection not found.".to_string(),
+        WorkspaceOAuthError::SlackInstallRequired => {
+            "Slack connections must be installed at workspace scope.".to_string()
+        }
         WorkspaceOAuthError::OAuth(inner) => map_oauth_error(inner),
         WorkspaceOAuthError::Database(err) => format!("Failed to load workspace connection: {err}"),
         WorkspaceOAuthError::Encryption(err) => {

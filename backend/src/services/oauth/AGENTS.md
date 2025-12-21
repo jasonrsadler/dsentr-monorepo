@@ -30,4 +30,12 @@
 - Workspace token unshare checks now ignore stale workspace connection rows with `user_oauth_token_id = NULL` by using `WorkspaceConnectionRepository::find_by_source_token(token_id)` when a token id is available.
 - OAuth service test doubles were refactored to satisfy `cargo clippy -D warnings` by avoiding over-eager iterator cloning and introducing small type aliases for recorded call tuples.
 - Workspace OAuth promotion now stamps workspace connections with the source personal `connection_id` so API listings can return stable identities.
-- OAuth reconnect saves now dedupe by provider user id (email fallback only), preserve connection ids on updates, and propagate refreshed tokens to workspace connections without touching insert flows.
+- OAuth reconnect saves now dedupe by provider user id only, preserve connection ids on updates, and propagate refreshed tokens to workspace connections without touching insert flows.
+- Slack OAuth exchanges/refreshes now require team + user identifiers, dedupe by provider user id only, and persist Slack metadata (team, bot, webhook, user id) consistently across personal and workspace updates.
+- Slack personal OAuth refresh/revoke paths no longer propagate updates to workspace connections, and workspace Slack revocations no longer flip personal shared state so scope boundaries stay isolated.
+- Provider-level Slack revocation now rejects missing connection IDs so only personal connection IDs can revoke personal Slack tokens.
+- Workspace Slack revocation/refresh tests now keep personal shared state unchanged to match Slack scope isolation behavior.
+- Workspace revocation tests now assert shared-flag behavior for Slack vs non-Slack providers correctly.
+- Added Slack workspace install handling with workspace/team scoping, blocked Slack promotion paths, and tightened Slack personal dedupe to include team ids.
+- Updated Slack promotion tests to expect explicit Slack install-required errors.
+- Slack workspace installs now key connections by team id, persist the workspace team id for Slack connections, and error on missing/invalid team ids.

@@ -436,6 +436,10 @@ fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> Response {
             "Selected workspace Microsoft connection is no longer available",
         )
         .into_response(),
+        WorkspaceOAuthError::SlackInstallRequired => {
+            JsonResponse::bad_request("Slack connections must be installed at workspace scope")
+                .into_response()
+        }
         WorkspaceOAuthError::Database(error) => {
             error!(?error, "Workspace connection database error");
             JsonResponse::server_error("Failed to load workspace connection").into_response()

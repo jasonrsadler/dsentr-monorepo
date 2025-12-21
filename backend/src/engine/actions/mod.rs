@@ -23,6 +23,7 @@ pub(crate) enum NodeConnectionUsage {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct UserConnectionUsage {
     pub connection_id: Option<String>,
     pub account_email: Option<String>,

@@ -60,6 +60,7 @@ use super::{
     helpers::{
         build_state_cookie, error_message_for_redirect, handle_callback, parse_provider,
         CallbackQuery, GOOGLE_STATE_COOKIE, OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_STATE_COOKIE,
+        SLACK_WORKSPACE_REQUIRED_MESSAGE,
     },
     prelude::ConnectedOAuthProvider,
 };
@@ -2364,11 +2365,11 @@ async fn workspace_plan_google_start_sets_state_cookie() {
 }
 
 #[tokio::test]
-async fn solo_plan_slack_start_redirects_with_upgrade_message() {
+async fn slack_start_without_workspace_redirects_with_workspace_required_message() {
     let config = stub_config();
     let state = stub_state(config.clone());
     let claims = Claims {
-        plan: Some("solo".into()),
+        plan: Some("workspace".into()),
         ..stub_claims()
     };
 
@@ -2389,13 +2390,62 @@ async fn solo_plan_slack_start_redirects_with_upgrade_message() {
         .unwrap();
     assert!(location.contains("connected=false"));
     assert!(location.contains("provider=slack"));
+    let expected = encode(SLACK_WORKSPACE_REQUIRED_MESSAGE);
+    assert!(location.contains(expected.as_ref()));
+}
+
+#[tokio::test]
+async fn solo_plan_slack_start_redirects_with_upgrade_message() {
+    let config = stub_config();
+    let workspace_id = Uuid::new_v4();
+    let user_id = Uuid::new_v4();
+    let membership = workspace_membership(workspace_id, WorkspaceRole::Admin, WORKSPACE_PLAN_SOLO);
+    let state = stub_state_with_workspace_repo(
+        config.clone(),
+        Arc::new(MembershipWorkspaceRepo::new(vec![(user_id, membership)])),
+    );
+    let claims = Claims {
+        id: user_id.to_string(),
+        plan: Some("solo".into()),
+        ..stub_claims()
+    };
+
+    let response = slack_connect_start(
+        State(state),
+        AuthSession(claims),
+        Query(ConnectQuery {
+            workspace: Some(workspace_id),
+        }),
+        CookieJar::new(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("location header present")
+        .to_str()
+        .unwrap();
+    assert!(location.contains("connected=false"));
+    assert!(location.contains("provider=slack"));
+    assert!(location.contains(&format!("workspace={workspace_id}")));
+    let expected = encode(OAUTH_PLAN_RESTRICTION_MESSAGE);
+    assert!(location.contains(expected.as_ref()));
 }
 
 #[tokio::test]
 async fn workspace_plan_slack_start_sets_state_cookie() {
     let config = stub_config();
-    let state = stub_state(config.clone());
+    let workspace_id = Uuid::new_v4();
+    let user_id = Uuid::new_v4();
+    let membership = workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace");
+    let state = stub_state_with_workspace_repo(
+        config.clone(),
+        Arc::new(MembershipWorkspaceRepo::new(vec![(user_id, membership)])),
+    );
     let claims = Claims {
+        id: user_id.to_string(),
         plan: Some("workspace".into()),
         ..stub_claims()
     };
@@ -2403,7 +2453,9 @@ async fn workspace_plan_slack_start_sets_state_cookie() {
     let response = slack_connect_start(
         State(state),
         AuthSession(claims),
-        Query(ConnectQuery::default()),
+        Query(ConnectQuery {
+            workspace: Some(workspace_id),
+        }),
         CookieJar::new(),
     )
     .await;
@@ -2415,9 +2467,10 @@ async fn workspace_plan_slack_start_sets_state_cookie() {
         .iter()
         .map(|value| value.to_str().unwrap())
         .collect::<Vec<_>>();
-    assert!(cookies
-        .iter()
-        .any(|cookie| cookie.contains(SLACK_STATE_COOKIE)));
+    let workspace_id_str = workspace_id.to_string();
+    assert!(cookies.iter().any(|cookie| {
+        cookie.contains(SLACK_STATE_COOKIE) && cookie.contains(&workspace_id_str)
+    }));
 }
 
 #[tokio::test]

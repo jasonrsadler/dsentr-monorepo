@@ -90,6 +90,53 @@ pub trait WorkspaceConnectionRepository: Send + Sync {
         provider: ConnectedOAuthProvider,
     ) -> Result<Vec<WorkspaceConnection>, sqlx::Error>;
 
+    async fn find_slack_by_workspace_and_team(
+        &self,
+        workspace_id: Uuid,
+        slack_team_id: &str,
+    ) -> Result<Option<WorkspaceConnection>, sqlx::Error> {
+        let expected_team_id = slack_team_id.trim();
+        if expected_team_id.is_empty() {
+            return Err(sqlx::Error::Protocol(
+                "Slack workspace team id cannot be empty".to_string(),
+            ));
+        }
+        if expected_team_id.len() > 32 {
+            return Err(sqlx::Error::Protocol(
+                "Slack workspace team id is too long".to_string(),
+            ));
+        }
+
+        let connections = self
+            .list_by_workspace_and_provider(workspace_id, ConnectedOAuthProvider::Slack)
+            .await?;
+
+        let mut matches = Vec::new();
+        for connection in connections {
+            let team_id = connection
+                .slack_team_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    sqlx::Error::Protocol(
+                        "Slack workspace connection missing slack_team_id".to_string(),
+                    )
+                })?;
+            if team_id == expected_team_id {
+                matches.push(connection);
+            }
+        }
+
+        if matches.len() > 1 {
+            return Err(sqlx::Error::Protocol(
+                "multiple Slack workspace connections found for the same team".to_string(),
+            ));
+        }
+
+        Ok(matches.pop())
+    }
+
     async fn list_for_workspace(
         &self,
         workspace_id: Uuid,
