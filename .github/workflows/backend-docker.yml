@@ -29,7 +29,7 @@ jobs:
         working-directory: backend
 
       - name: Tests
-        run: cargo test --locked --all --test-threads=1
+        run: cargo test --locked --all -- --test-threads=1
         working-directory: backend
 
       - name: Log in to Docker registry
