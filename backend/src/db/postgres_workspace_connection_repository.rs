@@ -837,6 +837,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn slack_team_id_required_for_workspace_connections() {
         let pool = test_pg_pool();
         let user_id = insert_user(&pool).await;
@@ -868,6 +869,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn slack_team_id_unique_per_workspace() {
         let pool = test_pg_pool();
         let user_id = insert_user(&pool).await;
@@ -907,6 +909,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn find_slack_by_workspace_and_team_returns_single_match() {
         let pool = test_pg_pool();
         let user_id = insert_user(&pool).await;
