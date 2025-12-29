@@ -96,6 +96,8 @@ struct SlackChannelsApiResponse {
     ok: bool,
     channels: Option<Vec<SlackChannelRecord>>,
     error: Option<String>,
+    needed: Option<String>,
+    provided: Option<String>,
     response_metadata: Option<SlackResponseMetadata>,
 }
 
@@ -118,6 +120,10 @@ struct SlackChannelRecord {
 enum SlackChannelError {
     TokenExpired,
     Unauthorized,
+    MissingScopes {
+        needed: Option<String>,
+        provided: Option<String>,
+    },
     ServerError(String),
 }
 
@@ -311,7 +317,7 @@ async fn fetch_slack_channels(
             .get(&list_url)
             .bearer_auth(access_token)
             .query(&[
-                ("types", "public_channel,private_channel"),
+                ("types", "public_channel,private_channel,im,mpim"),
                 ("limit", "200"),
             ]);
 
@@ -355,6 +361,10 @@ async fn fetch_slack_channels(
                 "invalid_auth" | "not_authed" | "token_revoked" | "account_inactive" => {
                     SlackChannelError::Unauthorized
                 }
+                "missing_scope" => SlackChannelError::MissingScopes {
+                    needed: parsed.needed,
+                    provided: parsed.provided,
+                },
                 other => SlackChannelError::ServerError(other.to_string()),
             });
         }
@@ -427,6 +437,13 @@ fn map_slack_channel_error(err: SlackChannelError) -> Response {
             "The Slack connection no longer has permission. Reconnect in Settings.",
         )
         .into_response(),
+        SlackChannelError::MissingScopes { needed, provided } => {
+            error!(?needed, ?provided, "Slack connection missing required scopes");
+            JsonResponse::unauthorized(
+                "Slack connection is missing required scopes. Reinstall Slack to continue.",
+            )
+            .into_response()
+        }
         SlackChannelError::ServerError(message) => {
             JsonResponse::server_error(&message).into_response()
         }

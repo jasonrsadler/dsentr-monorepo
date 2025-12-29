@@ -36,3 +36,4 @@
 - OAuth callbacks now delegate persistence to the dedup-aware account service entry point so reconnects update existing personal connections by identity.
 - Slack OAuth start/callback now require an explicit workspace context, include workspace-aware redirects, and strip incoming webhooks so workspace-scoped flows have no fallback semantics.
 - Slack OAuth callback now installs workspace Slack connections via the Slack-specific install helper while storing personal tokens separately for workspace-first isolation.
+- Slack OAuth installs now log requested scopes and validate bot token scopes via `auth.test` before persisting workspace connections.

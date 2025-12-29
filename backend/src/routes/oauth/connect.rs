@@ -11,6 +11,7 @@ use super::{
 };
 use crate::models::workspace::WorkspaceRole;
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
+use tracing::{info, warn};
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ConnectQuery {
@@ -273,13 +274,23 @@ pub async fn slack_connect_start(
     let cookie = build_state_cookie(SLACK_STATE_COOKIE, &state_token);
     let jar = jar.add(cookie);
 
+    let bot_scopes = state.oauth_accounts.slack_bot_scopes();
+    let user_scopes = state.oauth_accounts.slack_scopes();
+    info!(
+        provider = "slack",
+        workspace_id = %workspace_id,
+        bot_scopes,
+        user_scopes,
+        "Starting Slack OAuth install with requested scopes"
+    );
+
     let mut url = Url::parse(SLACK_AUTH_URL).expect("valid slack auth url");
     url.query_pairs_mut()
         .append_pair("client_id", &state.config.oauth.slack.client_id)
         .append_pair("redirect_uri", &state.config.oauth.slack.redirect_uri)
         .append_pair("response_type", "code")
-        .append_pair("scope", state.oauth_accounts.slack_bot_scopes())
-        .append_pair("user_scope", state.oauth_accounts.slack_scopes())
+        .append_pair("scope", bot_scopes)
+        .append_pair("user_scope", user_scopes)
         .append_pair("state", &state_token);
 
     (jar, Redirect::to(url.as_str())).into_response()
@@ -402,6 +413,14 @@ pub async fn slack_connect_callback(
         }
     };
 
+    if let Err(message) =
+        validate_slack_bot_scopes(&state, &workspace_tokens.access_token).await
+    {
+        let response =
+            redirect_with_error_with_workspace(&state.config, provider, &message, Some(workspace_id));
+        return (jar, response).into_response();
+    }
+
     strip_slack_webhook(&mut personal_tokens);
 
     let stored_personal = match state
@@ -455,6 +474,148 @@ pub async fn slack_connect_callback(
         redirect_success_with_workspace(&state.config, provider, workspace_id),
     )
         .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct SlackAuthTestResponse {
+    ok: bool,
+    team_id: Option<String>,
+    error: Option<String>,
+    response_metadata: Option<SlackAuthTestMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct SlackAuthTestMetadata {
+    scopes: Option<Vec<String>>,
+    scope: Option<String>,
+}
+
+struct SlackAuthTestResult {
+    team_id: Option<String>,
+    scopes: Vec<String>,
+}
+
+async fn validate_slack_bot_scopes(
+    state: &AppState,
+    access_token: &str,
+) -> Result<(), String> {
+    let auth_test = slack_auth_test(state, access_token).await?;
+    let required = split_scopes(state.oauth_accounts.slack_bot_scopes());
+    let missing: Vec<String> = required
+        .iter()
+        .filter(|scope| !auth_test.scopes.iter().any(|s| s == *scope))
+        .cloned()
+        .collect();
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    warn!(
+        provider = "slack",
+        team_id = ?auth_test.team_id,
+        missing = ?missing,
+        "Slack bot token missing required scopes"
+    );
+
+    Err(format!(
+        "Slack install missing required bot scopes ({}). Reinstall Slack to continue.",
+        missing.join(", ")
+    ))
+}
+
+async fn slack_auth_test(state: &AppState, access_token: &str) -> Result<SlackAuthTestResult, String> {
+    let base = std::env::var("SLACK_API_BASE_URL")
+        .ok()
+        .or_else(|| std::env::var("SLACK_API_BASE").ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "https://slack.com/api".to_string());
+    let url = format!("{}/auth.test", base.trim_end_matches('/'));
+
+    let response = state
+        .http_client
+        .post(&url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|err| {
+            error!(?err, "Slack auth.test request failed");
+            "Slack auth.test request failed".to_string()
+        })?;
+
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        error!(%status, body, "Slack auth.test returned HTTP error");
+        return Err("Slack auth.test failed".to_string());
+    }
+
+    let parsed: SlackAuthTestResponse = serde_json::from_str(&body).map_err(|err| {
+        error!(?err, body, "Slack auth.test response parse failed");
+        "Slack auth.test returned an unexpected response".to_string()
+    })?;
+
+    if !parsed.ok {
+        let message = parsed
+            .error
+            .unwrap_or_else(|| "Slack auth.test failed".to_string());
+        error!(error = %message, "Slack auth.test returned error");
+        return Err(message);
+    }
+
+    let mut scopes = headers
+        .get("x-oauth-scopes")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(split_scopes)
+        .unwrap_or_default();
+
+    if scopes.is_empty() {
+        if let Some(metadata) = parsed.response_metadata.as_ref() {
+            if let Some(list) = metadata.scopes.as_ref() {
+                scopes = list
+                    .iter()
+                    .map(|scope| scope.trim())
+                    .filter(|scope| !scope.is_empty())
+                    .map(|scope| scope.to_string())
+                    .collect();
+            } else if let Some(scope) = metadata.scope.as_deref() {
+                scopes = split_scopes(scope);
+            }
+        }
+    }
+
+    if scopes.is_empty() {
+        return Err("Slack auth.test response missing scopes".to_string());
+    }
+
+    let token_prefix: String = access_token.chars().take(12).collect();
+    info!(
+        provider = "slack",
+        token_prefix = %token_prefix,
+        team_id = ?parsed.team_id,
+        scopes = %scopes.join(","),
+        "Slack bot token validated via auth.test"
+    );
+
+    Ok(SlackAuthTestResult {
+        team_id: parsed.team_id,
+        scopes,
+    })
+}
+
+fn split_scopes(scopes: &str) -> Vec<String> {
+    scopes
+        .split(',')
+        .map(|scope| scope.trim())
+        .filter(|scope| !scope.is_empty())
+        .map(|scope| scope.to_string())
+        .collect()
 }
 
 pub async fn asana_connect_start(
