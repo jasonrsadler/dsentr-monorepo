@@ -3,6 +3,8 @@ import { API_BASE_URL } from './config'
 type SlackChannelsApiResponse = {
   success?: boolean
   message?: string
+  type?: string
+  connectionId?: string
   channels?: { id?: string; name?: string | null; isPrivate?: boolean }[]
 }
 
@@ -14,7 +16,6 @@ export interface SlackChannel {
 
 export interface SlackChannelFetchOptions {
   workspaceConnectionId: string
-  personalConnectionId?: string
 }
 
 function appendConnectionQuery(
@@ -30,11 +31,6 @@ function appendConnectionQuery(
     )
   }
   params.set('workspace_connection_id', trimmedWorkspaceId)
-
-  const trimmedPersonalId = options.personalConnectionId?.trim()
-  if (trimmedPersonalId) {
-    params.set('personal_connection_id', trimmedPersonalId)
-  }
 
   const query = params.toString()
   return `${path}?${query}`
@@ -66,6 +62,12 @@ export async function fetchSlackChannels(
   if (!success) {
     const message = payload?.message || ''
 
+    if (payload?.type === 'auth_expired') {
+      throw new Error(
+        'The selected Slack connection expired. Reconnect Slack in Settings and try again.'
+      )
+    }
+
     // Map backend errors to explicit Slack-specific messages
     if (message.includes('No workspace Slack connection found')) {
       throw new Error(
@@ -91,26 +93,6 @@ export async function fetchSlackChannels(
         'The selected workspace Slack connection only provides an incoming webhook. A workspace OAuth token is required to fetch channels.'
       )
     }
-    if (
-      message.includes(
-        'Provide exactly one of workspace_connection_id or personal_connection_id'
-      )
-    ) {
-      throw new Error(
-        'Cannot provide both workspace and personal connection IDs. Use workspace connection for channel fetching.'
-      )
-    }
-    if (message.includes('Personal token missing Slack team id')) {
-      throw new Error(
-        'Personal Slack authorization is missing team information. Please reconnect your personal Slack account.'
-      )
-    }
-    if (message.includes('Failed to load personal token metadata')) {
-      throw new Error(
-        'Personal Slack authorization is required for this action. Please connect your personal Slack account.'
-      )
-    }
-
     // Default error for other cases
     throw new Error(
       message ||

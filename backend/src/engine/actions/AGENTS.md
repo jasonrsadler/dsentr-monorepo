@@ -38,3 +38,5 @@
 - Removed the unused Slack workspace `created_by` context field after revocation handling stopped relying on it to avoid dead-code warnings.
 - Workspace action error mapping now recognizes the Slack workspace-install requirement so Slack promotion failures surface clear messages in actions.
 - Slack action fixtures now include `slack_team_id` for workspace connections so Slack token lookups satisfy team-id invariants.
+- Slack messaging actions now require a workspace_connection_id for personal-user posting, refresh Slack tokens on token_expired with a single retry, and surface auth_expired errors only when refresh fails.
+- Slack messaging action tests now use refresh overrides and a synchronous token repo update path to satisfy Send bounds and clippy in mocked refresh flows.

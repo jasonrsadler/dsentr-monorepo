@@ -656,6 +656,81 @@ impl WorkspaceOAuthService {
         Ok(decrypted)
     }
 
+    pub async fn refresh_slack_workspace_token(
+        &self,
+        connection_id: Uuid,
+    ) -> Result<DecryptedWorkspaceConnection, WorkspaceOAuthError> {
+        let lock = self
+            .connection_locks
+            .entry(connection_id)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        let _guard = lock.lock().await;
+
+        let record = self
+            .workspace_connections
+            .find_by_id(connection_id)
+            .await?
+            .ok_or(WorkspaceOAuthError::NotFound)?;
+
+        let mut decrypted = self.decrypt_connection(record.clone())?;
+        if decrypted.provider != ConnectedOAuthProvider::Slack {
+            return Err(WorkspaceOAuthError::OAuth(OAuthAccountError::InvalidResponse(
+                "Slack workspace refresh requires a Slack connection".into(),
+            )));
+        }
+
+        let refreshed = self
+            .oauth_accounts
+            .refresh_access_token(ConnectedOAuthProvider::Slack, &decrypted.refresh_token)
+            .await?;
+
+        let encrypted_access = encrypt_secret(&self.encryption_key, &refreshed.access_token)?;
+        let encrypted_refresh = encrypt_secret(&self.encryption_key, &refreshed.refresh_token)?;
+
+        let bot_user_id = refreshed
+            .slack
+            .as_ref()
+            .and_then(|meta| meta.bot_user_id.clone());
+        let slack_team_id = refreshed
+            .slack
+            .as_ref()
+            .and_then(|meta| meta.team_id.clone());
+        let incoming_webhook_url = refreshed
+            .slack
+            .as_ref()
+            .and_then(|meta| meta.incoming_webhook_url.clone());
+
+        self.workspace_connections
+            .update_tokens(
+                connection_id,
+                encrypted_access,
+                encrypted_refresh,
+                refreshed.expires_at,
+                bot_user_id.clone(),
+                slack_team_id.clone(),
+                incoming_webhook_url.clone(),
+            )
+            .await?;
+
+        decrypted.access_token = refreshed.access_token;
+        decrypted.refresh_token = refreshed.refresh_token;
+        decrypted.expires_at = refreshed.expires_at;
+        if let Some(slack) = refreshed.slack {
+            if let Some(team_id) = slack.team_id {
+                decrypted.slack_team_id = Some(team_id);
+            }
+            if let Some(bot_user_id) = slack.bot_user_id {
+                decrypted.bot_user_id = Some(bot_user_id);
+            }
+            if let Some(webhook_url) = slack.incoming_webhook_url {
+                decrypted.incoming_webhook_url = Some(webhook_url);
+            }
+        }
+
+        Ok(decrypted)
+    }
+
     pub async fn handle_revoked_connection(
         &self,
         workspace_id: Uuid,

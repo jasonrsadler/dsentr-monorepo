@@ -39,3 +39,5 @@
 - Added Slack workspace install handling with workspace/team scoping, blocked Slack promotion paths, and tightened Slack personal dedupe to include team ids.
 - Updated Slack promotion tests to expect explicit Slack install-required errors.
 - Slack workspace installs now key connections by team id, persist the workspace team id for Slack connections, and error on missing/invalid team ids.
+- Added explicit Slack refresh helpers for personal connections and workspace connections so token_expired handling can refresh and persist tokens without forcing reconnects.
+- Removed unused mutable locals in OAuth account token validation to satisfy clippy without changing behavior.

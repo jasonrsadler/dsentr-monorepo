@@ -302,7 +302,7 @@ describe('SlackAction identity enforcement and backend contract', () => {
       ).toBeInTheDocument()
     })
 
-    const workspaceSelect = screen.getAllByRole('combobox')[2]
+    const workspaceSelect = screen.getAllByRole('combobox')[1]
 
     fireEvent.change(workspaceSelect, {
       target: { value: 'workspace:ws-conn' }
@@ -310,8 +310,7 @@ describe('SlackAction identity enforcement and backend contract', () => {
 
     await waitFor(() =>
       expect(fetchSlackChannels).toHaveBeenCalledWith({
-        workspaceConnectionId: 'ws-conn',
-        personalConnectionId: undefined
+        workspaceConnectionId: 'ws-conn'
       })
     )
 
@@ -321,7 +320,7 @@ describe('SlackAction identity enforcement and backend contract', () => {
     expect(last.personal_connection_id).toBeUndefined()
   })
 
-  it('personal_user emits BOTH ids and fetches channels with both', async () => {
+  it('personal_user emits BOTH ids and fetches channels with workspace only', async () => {
     const mockConnections = {
       personal: [
         {
@@ -370,7 +369,7 @@ describe('SlackAction identity enforcement and backend contract', () => {
 
     const dropdowns = screen.getAllByRole('combobox')
 
-    const workspaceSelect = dropdowns[2]
+    const workspaceSelect = dropdowns[1]
     fireEvent.change(workspaceSelect, {
       target: { value: 'workspace:ws-conn' }
     })
@@ -382,17 +381,20 @@ describe('SlackAction identity enforcement and backend contract', () => {
       ).toBeInTheDocument()
     })
 
+    await waitFor(() =>
+      expect(fetchSlackChannels).toHaveBeenCalledWith({
+        workspaceConnectionId: 'ws-conn'
+      })
+    )
+
+    const channelFetchCalls = fetchSlackChannels.mock.calls.length
+
     const personalSelect = screen.getAllByRole('combobox')[3]
     fireEvent.change(personalSelect, {
       target: { value: 'personal:user-conn' }
     })
 
-    await waitFor(() =>
-      expect(fetchSlackChannels).toHaveBeenCalledWith({
-        workspaceConnectionId: 'ws-conn',
-        personalConnectionId: 'user-conn'
-      })
-    )
+    expect(fetchSlackChannels).toHaveBeenCalledTimes(channelFetchCalls)
 
     const last = updateNodeData.mock.calls.at(-1)![1].params
 

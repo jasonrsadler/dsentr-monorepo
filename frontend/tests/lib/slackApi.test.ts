@@ -91,44 +91,7 @@ describe('slackApi', () => {
       ])
     })
 
-    it('includes personal_connection_id only when provided', async () => {
-      const mockResponse = buildFetchResponse({
-        success: true,
-        channels: []
-      })
-
-      ;(global.fetch as any).mockResolvedValue(mockResponse)
-
-      // Without personal connection ID
-      const options1: SlackChannelFetchOptions = {
-        workspaceConnectionId: 'ws-123'
-      }
-
-      await fetchSlackChannels(options1)
-
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.dsentr.test/api/slack/channels?workspace_connection_id=ws-123',
-        { credentials: 'include' }
-      )
-
-      vi.clearAllMocks()
-
-      // With personal connection ID
-      const options2: SlackChannelFetchOptions = {
-        workspaceConnectionId: 'ws-123',
-        personalConnectionId: 'personal-456'
-      }
-
-      ;(global.fetch as any).mockResolvedValue(mockResponse)
-      await fetchSlackChannels(options2)
-
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.dsentr.test/api/slack/channels?workspace_connection_id=ws-123&personal_connection_id=personal-456',
-        { credentials: 'include' }
-      )
-    })
-
-    it('trims whitespace from connection IDs', async () => {
+    it('trims whitespace from connection ID', async () => {
       const mockResponse = buildFetchResponse({
         success: true,
         channels: []
@@ -137,14 +100,13 @@ describe('slackApi', () => {
       ;(global.fetch as any).mockResolvedValue(mockResponse)
 
       const options: SlackChannelFetchOptions = {
-        workspaceConnectionId: '  ws-123  ',
-        personalConnectionId: '  personal-456  '
+        workspaceConnectionId: '  ws-123  '
       }
 
       await fetchSlackChannels(options)
 
       expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.dsentr.test/api/slack/channels?workspace_connection_id=ws-123&personal_connection_id=personal-456',
+        'https://api.dsentr.test/api/slack/channels?workspace_connection_id=ws-123',
         { credentials: 'include' }
       )
     })
@@ -265,67 +227,24 @@ describe('slackApi', () => {
         )
       })
 
-      it('maps both connection IDs provided error', async () => {
+      it('maps auth_expired error type', async () => {
         const mockResponse = buildFetchResponse(
           {
             success: false,
-            message:
-              'Provide exactly one of workspace_connection_id or personal_connection_id'
+            type: 'auth_expired',
+            connectionId: 'ws-123'
           },
-          { ok: false, status: 400 }
+          { ok: false, status: 401 }
         )
 
         ;(global.fetch as any).mockResolvedValue(mockResponse)
 
         const options: SlackChannelFetchOptions = {
-          workspaceConnectionId: 'ws-123',
-          personalConnectionId: 'personal-456'
+          workspaceConnectionId: 'ws-123'
         }
 
         await expect(fetchSlackChannels(options)).rejects.toThrow(
-          'Cannot provide both workspace and personal connection IDs. Use workspace connection for channel fetching.'
-        )
-      })
-
-      it('maps personal token missing team ID error', async () => {
-        const mockResponse = buildFetchResponse(
-          {
-            success: false,
-            message: 'Personal token missing Slack team id'
-          },
-          { ok: false, status: 400 }
-        )
-
-        ;(global.fetch as any).mockResolvedValue(mockResponse)
-
-        const options: SlackChannelFetchOptions = {
-          workspaceConnectionId: 'ws-123',
-          personalConnectionId: 'personal-456'
-        }
-
-        await expect(fetchSlackChannels(options)).rejects.toThrow(
-          'Personal Slack authorization is missing team information. Please reconnect your personal Slack account.'
-        )
-      })
-
-      it('maps failed to load personal token metadata error', async () => {
-        const mockResponse = buildFetchResponse(
-          {
-            success: false,
-            message: 'Failed to load personal token metadata'
-          },
-          { ok: false, status: 404 }
-        )
-
-        ;(global.fetch as any).mockResolvedValue(mockResponse)
-
-        const options: SlackChannelFetchOptions = {
-          workspaceConnectionId: 'ws-123',
-          personalConnectionId: 'personal-456'
-        }
-
-        await expect(fetchSlackChannels(options)).rejects.toThrow(
-          'Personal Slack authorization is required for this action. Please connect your personal Slack account.'
+          'The selected Slack connection expired. Reconnect Slack in Settings and try again.'
         )
       })
 

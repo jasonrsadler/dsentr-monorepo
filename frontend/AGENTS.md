@@ -276,3 +276,5 @@ OAuth connections grouping (Google Sheets, Microsoft Teams):
 - Added a Formatter (Transform) logic node with grouped operation selection, validation, and palette/flyout integration so users can reshape or convert data between workflow steps without custom code.
 - Slack action now hides the manual channel input when an OAuth connection is selected, fetching channels for that connection via a dropdown populated from the backend list endpoint so users pick from accessible channels.
  - Slack action tests updated to expect the new `postAsUser` flag in emitted payloads so webhook/OAuth selection behavior remains validated.
+- Slack channel fetch helper now requires explicit workspace connection IDs only and maps auth-expired responses to a reconnect prompt so SlackAction stays aligned with backend token refresh behavior.
+- Slack action channel refreshes now trigger only on workspace connection changes so personal identity updates do not refetch channels.

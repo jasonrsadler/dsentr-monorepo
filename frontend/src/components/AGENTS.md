@@ -57,6 +57,8 @@
 - Google Sheets flyout picker now sends client/app IDs, scope, and the fetched OAuth token to Drive Picker and blocks missing-config cases so the picker works in the flyout without console errors.
 - Delay and Formatter nodes now mirror other action nodes: canvas cards are minimal and configuration is handled exclusively in the flyout.
 - Slack action channel selection now hides the manual input when an OAuth connection is chosen and loads channels into a dropdown from the backend Slack channels endpoint.
+- Slack action now fetches channels only from the selected workspace connection, shows the channel dropdown as soon as that selection is made, and defers personal connection validation to execution so identity only affects posting.
+- Slack action channel refresh now runs only when the workspace connection changes so personal connection updates do not trigger redundant fetches.
 - Asana action flyout: dropdowns (operation/workspace/project/task/assignee/section/tag/comment) are searchable when large, project/task/tag/assignee/comment now include manual options with GID inputs that sync selection states, due date/time fields mirror ISO text inputs, and the add-task-to-project flow uses task GID + project selection only (no section picker).
 - Asana action build hygiene: removed unused fetch import, simplified required-field ordering for add-task-to-project, and tightened API normalization to keep TS builds passing alongside the templated GID inputs.
 - Asana action inputs no longer trim user-entered text on change, preserving whitespace while typing; trimming happens later during validation/templating.

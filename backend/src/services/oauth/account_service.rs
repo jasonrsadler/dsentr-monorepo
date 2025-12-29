@@ -620,6 +620,22 @@ impl OAuthAccountService {
         self.ensure_valid_access_token_from_record(record).await
     }
 
+    pub async fn refresh_access_token_for_connection(
+        &self,
+        user_id: Uuid,
+        token_id: Uuid,
+    ) -> Result<StoredOAuthToken, OAuthAccountError> {
+        let record = self
+            .repo
+            .find_by_id(token_id)
+            .await?
+            .filter(|record| record.user_id == user_id && record.workspace_id.is_none())
+            .ok_or(OAuthAccountError::NotFound)?;
+
+        let decrypted = self.decrypt_record(record.clone())?;
+        self.refresh_record_tokens(record, decrypted).await
+    }
+
     /// Load and parse the metadata for a personal token, verifying ownership.
     pub async fn load_personal_token_metadata(
         &self,
@@ -640,132 +656,142 @@ impl OAuthAccountService {
         &self,
         record: UserOAuthToken,
     ) -> Result<StoredOAuthToken, OAuthAccountError> {
-        let mut decrypted = self.decrypt_record(record.clone())?;
+        let decrypted = self.decrypt_record(record.clone())?;
         let refresh_deadline = OffsetDateTime::now_utc() + Duration::seconds(60);
 
         if decrypted.expires_at <= refresh_deadline {
-            let refreshed = match self
-                .refresh_access_token(record.provider, &decrypted.refresh_token)
+            return self.refresh_record_tokens(record, decrypted).await;
+        }
+
+        Ok(decrypted)
+    }
+
+    async fn refresh_record_tokens(
+        &self,
+        record: UserOAuthToken,
+        mut decrypted: StoredOAuthToken,
+    ) -> Result<StoredOAuthToken, OAuthAccountError> {
+        let refreshed = match self
+            .refresh_access_token(record.provider, &decrypted.refresh_token)
+            .await
+        {
+            Ok(tokens) => tokens,
+            Err(err) => {
+                if matches!(err, OAuthAccountError::TokenRevoked { .. }) {
+                    self.repo.delete_token_by_id(record.id).await?;
+                    self.workspace_connections
+                        .mark_connections_stale_for_creator(record.user_id, record.provider)
+                        .await?;
+                }
+                return Err(err);
+            }
+        };
+
+        decrypted.access_token = refreshed.access_token.clone();
+        decrypted.refresh_token = refreshed.refresh_token.clone();
+        decrypted.expires_at = refreshed.expires_at;
+
+        let encrypted_access = encrypt_secret(&self.encryption_key, &refreshed.access_token)?;
+        let encrypted_refresh = encrypt_secret(&self.encryption_key, &refreshed.refresh_token)?;
+
+        let encrypted_slack = refreshed
+            .slack
+            .as_ref()
+            .map(|slack| self.encrypt_slack_metadata(slack))
+            .transpose()?
+            .flatten();
+
+        let (merged_metadata, metadata_value) = merge_metadata_value(
+            Some(&record.metadata),
+            encrypted_slack.clone(),
+            refreshed.provider_user_id.clone(),
+        );
+
+        let updated = self
+            .repo
+            .update_token(
+                record.id,
+                NewUserOAuthToken {
+                    user_id: record.user_id,
+                    provider: record.provider,
+                    access_token: encrypted_access.clone(),
+                    refresh_token: encrypted_refresh.clone(),
+                    expires_at: refreshed.expires_at,
+                    account_email: record.account_email.clone(),
+                    metadata: metadata_value,
+                },
+            )
+            .await?;
+
+        decrypted.id = updated.id;
+        decrypted.expires_at = updated.expires_at;
+        decrypted.account_email = updated.account_email.clone();
+        decrypted.is_shared = updated.is_shared;
+        decrypted.updated_at = updated.updated_at;
+
+        // Ensure Slack metadata updates are preserved alongside the refreshed tokens
+        if merged_metadata.slack.is_some() && refreshed.slack.is_some() {
+            tracing::debug!(
+                provider = ?record.provider,
+                token_id = %record.id,
+                "refreshed Slack token with updated metadata for connection-scoped token"
+            );
+        }
+
+        if !matches!(record.provider, ConnectedOAuthProvider::Slack) {
+            match self
+                .workspace_connections
+                .find_by_source_token(record.id)
                 .await
             {
-                Ok(tokens) => tokens,
-                Err(err) => {
-                    if matches!(err, OAuthAccountError::TokenRevoked { .. }) {
-                        self.repo.delete_token_by_id(record.id).await?;
-                        self.workspace_connections
-                            .mark_connections_stale_for_creator(record.user_id, record.provider)
-                            .await?;
-                    }
-                    return Err(err);
-                }
-            };
+                Ok(connections) => {
+                    if !connections.is_empty() {
+                        let bot_user_id = merged_metadata
+                            .slack
+                            .as_ref()
+                            .and_then(|meta| meta.bot_user_id.clone());
+                        let slack_team_id = merged_metadata
+                            .slack
+                            .as_ref()
+                            .and_then(|meta| meta.team_id.clone());
+                        let incoming_webhook_url = merged_metadata
+                            .slack
+                            .as_ref()
+                            .and_then(|meta| meta.incoming_webhook_url.clone());
 
-            decrypted.access_token = refreshed.access_token.clone();
-            decrypted.refresh_token = refreshed.refresh_token.clone();
-            decrypted.expires_at = refreshed.expires_at;
-
-            let encrypted_access = encrypt_secret(&self.encryption_key, &refreshed.access_token)?;
-            let encrypted_refresh = encrypt_secret(&self.encryption_key, &refreshed.refresh_token)?;
-
-            let encrypted_slack = refreshed
-                .slack
-                .as_ref()
-                .map(|slack| self.encrypt_slack_metadata(slack))
-                .transpose()?
-                .flatten();
-
-            let (merged_metadata, metadata_value) = merge_metadata_value(
-                Some(&record.metadata),
-                encrypted_slack.clone(),
-                refreshed.provider_user_id.clone(),
-            );
-
-            let updated = self
-                .repo
-                .update_token(
-                    record.id,
-                    NewUserOAuthToken {
-                        user_id: record.user_id,
-                        provider: record.provider,
-                        access_token: encrypted_access.clone(),
-                        refresh_token: encrypted_refresh.clone(),
-                        expires_at: refreshed.expires_at,
-                        account_email: record.account_email.clone(),
-                        metadata: metadata_value,
-                    },
-                )
-                .await?;
-
-            decrypted.id = updated.id;
-            decrypted.expires_at = updated.expires_at;
-            decrypted.account_email = updated.account_email.clone();
-            decrypted.is_shared = updated.is_shared;
-            decrypted.updated_at = updated.updated_at;
-
-            // Ensure Slack metadata updates are preserved alongside the refreshed tokens
-            if merged_metadata.slack.is_some() && refreshed.slack.is_some() {
-                tracing::debug!(
-                    provider = ?record.provider,
-                    token_id = %record.id,
-                    "refreshed Slack token with updated metadata for connection-scoped token"
-                );
-            }
-
-            if !matches!(record.provider, ConnectedOAuthProvider::Slack) {
-                match self
-                    .workspace_connections
-                    .find_by_source_token(record.id)
-                    .await
-                {
-                    Ok(connections) => {
-                        if !connections.is_empty() {
-                            let bot_user_id = merged_metadata
-                                .slack
-                                .as_ref()
-                                .and_then(|meta| meta.bot_user_id.clone());
-                            let slack_team_id = merged_metadata
-                                .slack
-                                .as_ref()
-                                .and_then(|meta| meta.team_id.clone());
-                            let incoming_webhook_url = merged_metadata
-                                .slack
-                                .as_ref()
-                                .and_then(|meta| meta.incoming_webhook_url.clone());
-
-                            for connection in connections {
-                                if let Err(err) = self
-                                    .workspace_connections
-                                    .update_tokens_for_connection(
-                                        connection.id,
-                                        encrypted_access.clone(),
-                                        encrypted_refresh.clone(),
-                                        refreshed.expires_at,
-                                        record.account_email.clone(),
-                                        bot_user_id.clone(),
-                                        slack_team_id.clone(),
-                                        incoming_webhook_url.clone(),
-                                    )
-                                    .await
-                                {
-                                    warn!(
-                                        ?err,
-                                        provider = ?record.provider,
-                                        workspace_id = %connection.workspace_id,
-                                        connection_id = %connection.id,
-                                        "failed to propagate refreshed personal token to workspace connection"
-                                    );
-                                }
+                        for connection in connections {
+                            if let Err(err) = self
+                                .workspace_connections
+                                .update_tokens_for_connection(
+                                    connection.id,
+                                    encrypted_access.clone(),
+                                    encrypted_refresh.clone(),
+                                    refreshed.expires_at,
+                                    record.account_email.clone(),
+                                    bot_user_id.clone(),
+                                    slack_team_id.clone(),
+                                    incoming_webhook_url.clone(),
+                                )
+                                .await
+                            {
+                                warn!(
+                                    ?err,
+                                    provider = ?record.provider,
+                                    workspace_id = %connection.workspace_id,
+                                    connection_id = %connection.id,
+                                    "failed to propagate refreshed personal token to workspace connection"
+                                );
                             }
                         }
                     }
-                    Err(err) => {
-                        warn!(
-                            ?err,
-                            provider = ?record.provider,
-                            token_id = %record.id,
-                            "failed to load workspace connections for refreshed token"
-                        );
-                    }
+                }
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        provider = ?record.provider,
+                        token_id = %record.id,
+                        "failed to load workspace connections for refreshed token"
+                    );
                 }
             }
         }
