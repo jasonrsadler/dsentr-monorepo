@@ -15,7 +15,8 @@ import {
   unshareWorkspaceConnection,
   setCachedConnections,
   type GroupedConnectionsSnapshot,
-  type PersonalConnectionRecord
+  type PersonalConnectionRecord,
+  startSlackPersonalAuthorization
 } from '@/lib/oauthApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
@@ -289,6 +290,33 @@ export default function IntegrationsTab({
       setError
     ]
   )
+
+  const handleSlackAuthorizeSelf = useCallback(() => {
+    if (isSoloPlan || isViewer || connectingProvider) return
+
+    if (!workspaceId) {
+      setError('Select a workspace before authorizing Slack for yourself.')
+      return
+    }
+
+    const ws = (connections?.workspace ?? []).find(
+      (c) => c.provider === 'slack'
+    )
+
+    if (!ws?.id) {
+      setError('Slack workspace connection not found.')
+      return
+    }
+
+    startSlackPersonalAuthorization(workspaceId, ws.id)
+  }, [
+    isSoloPlan,
+    isViewer,
+    connectingProvider,
+    workspaceId,
+    connections,
+    setError
+  ])
 
   const toggleProvider = useCallback((providerKey: OAuthProvider) => {
     setExpandedProviders((prev) => ({
@@ -714,9 +742,7 @@ export default function IntegrationsTab({
                         onClick={() =>
                           provider.key === 'slack' &&
                           workspaceConnections.length > 0
-                            ? handleConnect(provider.key, {
-                                slackPersonal: true
-                              })
+                            ? handleSlackAuthorizeSelf()
                             : handleConnect(provider.key)
                         }
                         disabled={isSoloPlan || isViewer || connecting}
@@ -776,9 +802,7 @@ export default function IntegrationsTab({
                           aria-label={`Add ${provider.name} connection`}
                           onClick={() =>
                             provider.key === 'slack'
-                              ? handleConnect(provider.key, {
-                                  slackPersonal: true
-                                })
+                              ? handleSlackAuthorizeSelf()
                               : handleConnect(provider.key)
                           }
                           disabled={
