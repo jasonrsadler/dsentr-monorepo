@@ -232,7 +232,7 @@ export default function IntegrationsTab({
     return () => {
       active = false
     }
-  }, [workspaceId, isSoloPlan])
+  }, [workspaceId, isSoloPlan, cloneSlackPersonalAuth])
 
   const noticeText = useMemo(() => {
     if (!notice) return null
@@ -402,7 +402,7 @@ export default function IntegrationsTab({
         setBusyConnectionId(null)
       }
     },
-    [removeBusyId, resolveConnectionKey, workspaceId]
+    [removeBusyId, resolveConnectionKey, workspaceId, cloneSlackPersonalAuth]
   )
 
   const handleDisconnect = useCallback(
@@ -533,7 +533,7 @@ export default function IntegrationsTab({
         setBusyConnectionId(null)
       }
     },
-    [resolveConnectionKey, workspaceId]
+    [resolveConnectionKey, workspaceId, cloneSlackPersonalAuth]
   )
 
   return (
@@ -628,11 +628,11 @@ export default function IntegrationsTab({
               let personalConnections = (connections?.personal ?? []).filter(
                 (entry) => entry.provider === provider.key
               )
-                // Slack personal authorizations are surfaced via the Slack
-                // auth state instead of listing personal tokens here.
-                if (provider.key === 'slack') {
-                  personalConnections = []
-                }
+              // Slack personal authorizations are surfaced via the Slack
+              // auth state instead of listing personal tokens here.
+              if (provider.key === 'slack') {
+                personalConnections = []
+              }
               const workspaceConnections = (
                 connections?.workspace ?? []
               ).filter((entry) => entry.provider === provider.key)
@@ -642,26 +642,26 @@ export default function IntegrationsTab({
               const personalRequiresReconnect = personalConnections.some(
                 (entry) => entry.requiresReconnect
               )
-                const workspaceRequiresReconnect = workspaceConnections.some(
-                  (entry) => entry.requiresReconnect
-                )
-                const connecting = connectingProvider === provider.key
-                const busy = busyProvider === provider.key
-                const promoting = promoteBusyProvider === provider.key
-                const isExpanded = expandedProviders[provider.key] ?? true
-                const slackWorkspaceInstalled =
-                  provider.key === 'slack' && workspaceConnections.length > 0
-                const showSlackPersonalStatus =
-                  slackWorkspaceInstalled && hasSlackPersonalAuth
-                const slackMenuDisabled = isSoloPlan || isViewer || connecting
-                const connectLabel =
-                  provider.key === 'slack'
-                    ? slackWorkspaceInstalled
-                      ? SLACK_PERSONAL_AUTHORIZE_LABEL
-                      : 'Install Slack to workspace'
-                    : personalConnections.length > 0
-                      ? 'Add connection'
-                      : 'Connect'
+              const workspaceRequiresReconnect = workspaceConnections.some(
+                (entry) => entry.requiresReconnect
+              )
+              const connecting = connectingProvider === provider.key
+              const busy = busyProvider === provider.key
+              const promoting = promoteBusyProvider === provider.key
+              const isExpanded = expandedProviders[provider.key] ?? true
+              const slackWorkspaceInstalled =
+                provider.key === 'slack' && workspaceConnections.length > 0
+              const showSlackPersonalStatus =
+                slackWorkspaceInstalled && hasSlackPersonalAuth
+              const slackMenuDisabled = isSoloPlan || isViewer || connecting
+              const connectLabel =
+                provider.key === 'slack'
+                  ? slackWorkspaceInstalled
+                    ? SLACK_PERSONAL_AUTHORIZE_LABEL
+                    : 'Install Slack to workspace'
+                  : personalConnections.length > 0
+                    ? 'Add connection'
+                    : 'Connect'
               const personalCount = personalConnections.length
               const workspaceCount = workspaceConnections.length
               const personalSorted = [...personalConnections].sort((a, b) => {
@@ -747,76 +747,73 @@ export default function IntegrationsTab({
                         : 'max-h-0 border-t border-transparent px-4 pb-0 pt-0 opacity-0 dark:border-transparent'
                     } ${!isExpanded ? '-translate-y-1 pointer-events-none' : 'translate-y-0'}`}
                   >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                            {provider.name}
-                          </h3>
-                          <p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
-                            {provider.description}
-                          </p>
-                        </div>
-                        {showSlackPersonalStatus ? (
-                          <div className="flex items-start gap-2">
-                            <div className="flex flex-col items-end text-right">
-                              <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                                {SLACK_PERSONAL_AUTHORIZED_LABEL}
-                              </span>
-                              <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                                {SLACK_PERSONAL_AUTHORIZED_HINT}
-                              </span>
-                              {slackPersonalConnectedAt ? (
-                                <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                                  Authorized {slackPersonalConnectedAt}
-                                </span>
-                              ) : null}
-                            </div>
-                            <details className="relative">
-                              <summary
-                                aria-label="Slack personal authorization actions"
-                                className={`list-none flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:bg-zinc-100 ${slackMenuDisabled ? 'pointer-events-none opacity-50' : ''} dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800`}
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </summary>
-                              <div className="absolute right-0 z-10 mt-2 w-44 rounded-md border border-zinc-200 bg-white p-1 text-xs text-zinc-700 shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.preventDefault()
-                                    const details =
-                                      event.currentTarget.closest('details')
-                                    if (details) {
-                                      details.removeAttribute('open')
-                                    }
-                                    handleSlackAuthorizeSelf()
-                                  }}
-                                  disabled={slackMenuDisabled}
-                                  className="w-full rounded px-2 py-1 text-left hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-zinc-800"
-                                >
-                                  {SLACK_PERSONAL_REAUTHORIZE_LABEL}
-                                </button>
-                              </div>
-                            </details>
-                          </div>
-                        ) : (
-                          <button
-                            aria-label={
-                              provider.key === 'slack' && slackWorkspaceInstalled
-                                ? SLACK_PERSONAL_AUTHORIZE_LABEL
-                                : `Connect ${provider.name}`
-                            }
-                            onClick={() =>
-                              provider.key === 'slack' && slackWorkspaceInstalled
-                                ? handleSlackAuthorizeSelf()
-                                : handleConnect(provider.key)
-                            }
-                            disabled={isSoloPlan || isViewer || connecting}
-                            className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {connecting ? 'Saving...' : connectLabel}
-                          </button>
-                        )}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                          {provider.name}
+                        </h3>
+                        <p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
+                          {provider.description}
+                        </p>
                       </div>
+                      {showSlackPersonalStatus ? (
+                        <div className="flex items-start gap-2">
+                          <div className="flex flex-col items-end text-right">
+                            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                              {SLACK_PERSONAL_AUTHORIZED_LABEL}
+                            </span>
+                            {slackPersonalConnectedAt ? (
+                              <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                                Authorized {slackPersonalConnectedAt}
+                              </span>
+                            ) : null}
+                          </div>
+                          <details className="relative">
+                            <summary
+                              aria-label="Slack personal authorization actions"
+                              className={`list-none flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:bg-zinc-100 ${slackMenuDisabled ? 'pointer-events-none opacity-50' : ''} dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </summary>
+                            <div className="absolute right-0 z-10 mt-2 w-44 rounded-md border border-zinc-200 bg-white p-1 text-xs text-zinc-700 shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  const details =
+                                    event.currentTarget.closest('details')
+                                  if (details) {
+                                    details.removeAttribute('open')
+                                  }
+                                  handleSlackAuthorizeSelf()
+                                }}
+                                disabled={slackMenuDisabled}
+                                className="w-full rounded px-2 py-1 text-left hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-zinc-800"
+                              >
+                                {SLACK_PERSONAL_REAUTHORIZE_LABEL}
+                              </button>
+                            </div>
+                          </details>
+                        </div>
+                      ) : (
+                        <button
+                          aria-label={
+                            provider.key === 'slack' && slackWorkspaceInstalled
+                              ? SLACK_PERSONAL_AUTHORIZE_LABEL
+                              : `Connect ${provider.name}`
+                          }
+                          onClick={() =>
+                            provider.key === 'slack' && slackWorkspaceInstalled
+                              ? handleSlackAuthorizeSelf()
+                              : handleConnect(provider.key)
+                          }
+                          disabled={isSoloPlan || isViewer || connecting}
+                          className="rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {connecting ? 'Saving...' : connectLabel}
+                        </button>
+                      )}
+                    </div>
 
                     <dl className="mt-4 grid grid-cols-1 gap-2 text-sm text-zinc-600 dark:text-zinc-300 sm:grid-cols-2">
                       <div className="flex items-center gap-2">
@@ -859,48 +856,42 @@ export default function IntegrationsTab({
                       </p>
                     ) : null}
 
-                      <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="font-semibold text-zinc-700 dark:text-zinc-200">
-                            Your connections
-                          </div>
-                          {provider.key !== 'slack' ? (
-                            <button
-                              aria-label={`Add ${provider.name} connection`}
-                              onClick={() => handleConnect(provider.key)}
-                              disabled={
-                                isSoloPlan ||
-                                isViewer ||
-                                connectingProvider === provider.key
-                              }
-                              className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            >
-                              Add connection
-                            </button>
-                          ) : null}
+                    <div className="mt-4 space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-zinc-700 dark:text-zinc-200">
+                          Your connections
                         </div>
-                        {personalSorted.length === 0 ? (
-                          provider.key === 'slack' && slackWorkspaceInstalled ? (
-                            <div className="space-y-1">
-                              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                                {showSlackPersonalStatus
-                                  ? SLACK_PERSONAL_AUTHORIZED_HINT
-                                  : SLACK_PERSONAL_AUTH_REQUIRED}
-                              </p>
-                              {showSlackPersonalStatus &&
-                              slackPersonalConnectedAt ? (
-                                <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                                  Authorized {slackPersonalConnectedAt}
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : (
+                        {provider.key !== 'slack' ? (
+                          <button
+                            aria-label={`Add ${provider.name} connection`}
+                            onClick={() => handleConnect(provider.key)}
+                            disabled={
+                              isSoloPlan ||
+                              isViewer ||
+                              connectingProvider === provider.key
+                            }
+                            className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                          >
+                            Add connection
+                          </button>
+                        ) : null}
+                      </div>
+                      {personalSorted.length === 0 ? (
+                        provider.key === 'slack' && slackWorkspaceInstalled ? (
+                          <div className="space-y-1">
                             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                              No personal connections have been created yet.
+                              {showSlackPersonalStatus
+                                ? SLACK_PERSONAL_AUTHORIZED_HINT
+                                : SLACK_PERSONAL_AUTH_REQUIRED}
                             </p>
-                          )
+                          </div>
                         ) : (
-                          <ul className="space-y-2">
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                            No personal connections have been created yet.
+                          </p>
+                        )
+                      ) : (
+                        <ul className="space-y-2">
                           {personalSorted.map((entry, index) => {
                             const entryKey = resolveConnectionKey(entry)
                             const hasValidId = Boolean(entryKey)
@@ -1066,13 +1057,13 @@ export default function IntegrationsTab({
                         </p>
                       ) : (
                         <ul className="space-y-2">
-                            {workspaceSorted.map((entry, index) => {
-                              const entryKey = resolveConnectionKey(entry)
-                              const workspaceKey =
-                                entry.workspaceConnectionId ?? entry.id
-                              return (
-                                <li
-                                  key={
+                          {workspaceSorted.map((entry, index) => {
+                            const entryKey = resolveConnectionKey(entry)
+                            const workspaceKey =
+                              entry.workspaceConnectionId ?? entry.id
+                            return (
+                              <li
+                                key={
                                   workspaceKey ??
                                   entryKey ??
                                   `${provider.key}-workspace-${index}`
@@ -1290,7 +1281,9 @@ export default function IntegrationsTab({
               const next: GroupedConnectionsSnapshot = {
                 personal: nextPersonal,
                 workspace: nextWorkspaceWithPromotion,
-                slackPersonalAuth: cloneSlackPersonalAuth(prev?.slackPersonalAuth)
+                slackPersonalAuth: cloneSlackPersonalAuth(
+                  prev?.slackPersonalAuth
+                )
               }
               setCachedConnections(next, { workspaceId })
               return next
@@ -1304,7 +1297,9 @@ export default function IntegrationsTab({
               setConnections({
                 personal: data.personal.map((p) => ({ ...p })),
                 workspace: data.workspace.map((w) => ({ ...w })),
-                slackPersonalAuth: cloneSlackPersonalAuth(data.slackPersonalAuth)
+                slackPersonalAuth: cloneSlackPersonalAuth(
+                  data.slackPersonalAuth
+                )
               })
             } catch {
               // ignore refresh failures
@@ -1394,7 +1389,9 @@ export default function IntegrationsTab({
               const next: GroupedConnectionsSnapshot = {
                 personal: nextPersonal,
                 workspace: nextWorkspace,
-                slackPersonalAuth: cloneSlackPersonalAuth(prev?.slackPersonalAuth)
+                slackPersonalAuth: cloneSlackPersonalAuth(
+                  prev?.slackPersonalAuth
+                )
               }
               setCachedConnections(next, { workspaceId })
               return next

@@ -283,7 +283,7 @@ pub async fn list_connections(
             let should_update = slack_personal_auth
                 .personal_auth_connected_at
                 .as_ref()
-                .map_or(true, |current| token.updated_at > *current);
+                .is_none_or(|current| token.updated_at > *current);
             if should_update {
                 slack_personal_auth.personal_auth_connected_at = Some(token.updated_at);
             }

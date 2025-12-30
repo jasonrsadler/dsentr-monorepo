@@ -9,7 +9,8 @@ export type ConnectionScope = 'personal' | 'workspace'
 export const SLACK_PERSONAL_AUTHORIZE_LABEL = 'Authorize Slack for yourself'
 export const SLACK_PERSONAL_REAUTHORIZE_LABEL = 'Reauthorize Slack'
 export const SLACK_PERSONAL_AUTHORIZED_LABEL = 'Personal Slack authorized'
-export const SLACK_PERSONAL_AUTHORIZED_HINT = 'Slack is authorized to post as you'
+export const SLACK_PERSONAL_AUTHORIZED_HINT =
+  'Slack is authorized to post as you'
 export const SLACK_PERSONAL_AUTH_REQUIRED =
   'Authorize Slack for yourself to post as you.'
 

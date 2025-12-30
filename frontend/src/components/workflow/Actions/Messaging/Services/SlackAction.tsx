@@ -374,6 +374,13 @@ export default function SlackAction({
     [params]
   )
 
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const workspaceId = currentWorkspace?.workspace.id ?? null
+
+  const [slackPersonalAuth, setSlackPersonalAuth] = useState<
+    GroupedConnectionsSnapshot['slackPersonalAuth'] | null
+  >(null)
+  const hasSlackPersonalAuth = Boolean(slackPersonalAuth?.hasPersonalAuth)
   const validation = useMemo(
     () =>
       validateSlackParams(slackParams, {
@@ -382,14 +389,6 @@ export default function SlackAction({
     [slackParams, hasSlackPersonalAuth]
   )
   const { errors: validationErrors } = validation
-
-  const currentWorkspace = useAuth(selectCurrentWorkspace)
-  const workspaceId = currentWorkspace?.workspace.id ?? null
-
-  const [slackPersonalAuth, setSlackPersonalAuth] = useState<
-    GroupedConnectionsSnapshot['slackPersonalAuth'] | null
-  >(null)
-  const hasSlackPersonalAuth = Boolean(slackPersonalAuth?.hasPersonalAuth)
   const [connectionState, setConnectionState] =
     useState<ProviderConnectionSet | null>(null)
   const [connectionsLoading, setConnectionsLoading] = useState(false)
@@ -701,7 +700,13 @@ export default function SlackAction({
         hasValidationErrors
       })
     },
-    [effectiveCanEdit, nodeId, slackParams, updateNodeData, hasSlackPersonalAuth]
+    [
+      effectiveCanEdit,
+      nodeId,
+      slackParams,
+      updateNodeData,
+      hasSlackPersonalAuth
+    ]
   )
 
   const handleIdentityChange = useCallback(

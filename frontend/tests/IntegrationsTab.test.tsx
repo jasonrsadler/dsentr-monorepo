@@ -833,12 +833,12 @@ describe('IntegrationsTab', () => {
       ).not.toBeInTheDocument()
     })
 
-      it('renders Authorize Slack for yourself when workspace connection exists', async () => {
-        fetchConnections.mockResolvedValueOnce({
-          personal: [],
-          workspace: [
-            {
-              scope: 'workspace',
+    it('renders Authorize Slack for yourself when workspace connection exists', async () => {
+      fetchConnections.mockResolvedValueOnce({
+        personal: [],
+        workspace: [
+          {
+            scope: 'workspace',
             provider: 'slack',
             id: 'slack-workspace-1',
             workspaceConnectionId: 'slack-workspace-1',
@@ -847,15 +847,15 @@ describe('IntegrationsTab', () => {
             accountEmail: 'workspace-bot@example.com',
             workspaceId: 'ws-1',
             workspaceName: 'Acme Workspace',
-              sharedByName: 'Owner Example',
-              sharedByEmail: 'owner@example.com',
-              requiresReconnect: false
-            }
-          ],
-          slackPersonalAuth: {
-            hasPersonalAuth: false
+            sharedByName: 'Owner Example',
+            sharedByEmail: 'owner@example.com',
+            requiresReconnect: false
           }
-        })
+        ],
+        slackPersonalAuth: {
+          hasPersonalAuth: false
+        }
+      })
 
       const user = userEvent.setup()
       render(<IntegrationsTab />)
@@ -883,12 +883,12 @@ describe('IntegrationsTab', () => {
       ).not.toBeInTheDocument()
     })
 
-      it('renders Slack workspace entry with proper identity and linking', async () => {
-        fetchConnections.mockResolvedValueOnce({
-          personal: [
-            {
-              scope: 'personal',
-              provider: 'slack',
+    it('renders Slack workspace entry with proper identity and linking', async () => {
+      fetchConnections.mockResolvedValueOnce({
+        personal: [
+          {
+            scope: 'personal',
+            provider: 'slack',
             id: 'slack-personal-1',
             connectionId: 'slack-personal-1',
             workspaceConnectionId: 'slack-workspace-1',
@@ -920,16 +920,16 @@ describe('IntegrationsTab', () => {
             accountEmail: 'workspace-bot@example.com',
             workspaceId: 'ws-1',
             workspaceName: 'Acme Workspace',
-              sharedByName: 'Owner Example',
-              sharedByEmail: 'owner@example.com',
-              requiresReconnect: false
-            }
-          ],
-          slackPersonalAuth: {
-            hasPersonalAuth: true,
-            personalAuthConnectedAt: '2025-01-01T00:00:00.000Z'
+            sharedByName: 'Owner Example',
+            sharedByEmail: 'owner@example.com',
+            requiresReconnect: false
           }
-        })
+        ],
+        slackPersonalAuth: {
+          hasPersonalAuth: true,
+          personalAuthConnectedAt: '2025-01-01T00:00:00.000Z'
+        }
+      })
 
       const user = userEvent.setup()
       render(<IntegrationsTab />)
