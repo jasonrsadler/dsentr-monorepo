@@ -719,6 +719,12 @@ export function startSlackPersonalAuthorization(
   workspaceId: string,
   workspaceConnectionId: string
 ): void {
+  console.error(
+    'startSlackPersonalAuthorization CALLED',
+    workspaceId,
+    workspaceConnectionId
+  )
+
   if (!workspaceId || workspaceId.trim() === '') {
     throw new Error('workspaceId is required for Slack personal authorization')
   }
