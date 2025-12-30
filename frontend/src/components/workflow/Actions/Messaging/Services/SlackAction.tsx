@@ -11,7 +11,8 @@ import {
   type ConnectionScope,
   type ProviderConnectionSet,
   type GroupedConnectionsSnapshot,
-  type OAuthProvider
+  type OAuthProvider,
+  SLACK_PERSONAL_AUTH_REQUIRED
 } from '@/lib/oauthApi'
 import { fetchSlackChannels, type SlackChannel } from '@/lib/slackApi'
 import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
@@ -291,7 +292,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-const validateSlackParams = (params: SlackActionValues) => {
+const validateSlackParams = (
+  params: SlackActionValues,
+  { hasPersonalAuth }: { hasPersonalAuth: boolean }
+) => {
   const errors: Record<string, string> = {}
   const identity = params.identity
 
@@ -319,10 +323,17 @@ const validateSlackParams = (params: SlackActionValues) => {
       'Select a workspace Slack connection to load channels.'
   }
 
+  if (identity === 'personal_user' && !hasPersonalAuth) {
+    errors.personalConnection = SLACK_PERSONAL_AUTH_REQUIRED
+  }
+
   if (executionPhase) {
-    if (identity === 'personal_user' && !personalConnectionId) {
-      errors.personalConnection =
-        'Authorize your personal Slack account to post as yourself.'
+    if (
+      identity === 'personal_user' &&
+      hasPersonalAuth &&
+      !personalConnectionId
+    ) {
+      errors.personalConnection = SLACK_PERSONAL_AUTH_REQUIRED
     }
 
     if (!params.channel?.trim()) {
@@ -364,14 +375,21 @@ export default function SlackAction({
   )
 
   const validation = useMemo(
-    () => validateSlackParams(slackParams),
-    [slackParams]
+    () =>
+      validateSlackParams(slackParams, {
+        hasPersonalAuth: hasSlackPersonalAuth
+      }),
+    [slackParams, hasSlackPersonalAuth]
   )
   const { errors: validationErrors } = validation
 
   const currentWorkspace = useAuth(selectCurrentWorkspace)
   const workspaceId = currentWorkspace?.workspace.id ?? null
 
+  const [slackPersonalAuth, setSlackPersonalAuth] = useState<
+    GroupedConnectionsSnapshot['slackPersonalAuth'] | null
+  >(null)
+  const hasSlackPersonalAuth = Boolean(slackPersonalAuth?.hasPersonalAuth)
   const [connectionState, setConnectionState] =
     useState<ProviderConnectionSet | null>(null)
   const [connectionsLoading, setConnectionsLoading] = useState(false)
@@ -464,6 +482,7 @@ export default function SlackAction({
       const slackConnections = sanitizeConnections(
         pickProviderConnections(grouped, 'slack')
       )
+      setSlackPersonalAuth(grouped.slackPersonalAuth ?? null)
       setConnectionState(slackConnections)
     } catch (err) {
       if (isStale()) {
@@ -483,15 +502,15 @@ export default function SlackAction({
   }, [sanitizeConnections, workspaceId, pickProviderConnections])
 
   useEffect(() => {
-    const cached = pickProviderConnections(
-      getCachedConnections(workspaceId),
-      'slack'
-    )
+    const cachedSnapshot = getCachedConnections(workspaceId)
+    setSlackPersonalAuth(cachedSnapshot?.slackPersonalAuth ?? null)
+    const cached = pickProviderConnections(cachedSnapshot, 'slack')
     setConnectionState(sanitizeConnections(cached))
 
     const unsubscribe = subscribeToConnectionUpdates(
       (snapshot) => {
         if (!mountedRef.current) return
+        setSlackPersonalAuth(snapshot?.slackPersonalAuth ?? null)
         const slackConnections = pickProviderConnections(snapshot, 'slack')
         setConnectionState(sanitizeConnections(slackConnections))
       },
@@ -514,6 +533,7 @@ export default function SlackAction({
     (scope: ConnectionScope, id: string): SlackConnectionSelection | null => {
       if (!connectionState) return null
       if (scope === 'personal') {
+        if (!hasSlackPersonalAuth) return null
         const personal = (connectionState.personal ?? []).find(
           (entry) => entry.connected && entry.id === id
         )
@@ -544,7 +564,7 @@ export default function SlackAction({
       }
       return selection
     },
-    [connectionState]
+    [connectionState, hasSlackPersonalAuth]
   )
 
   const workspaceConnectionOptions = useMemo(() => {
@@ -560,7 +580,7 @@ export default function SlackAction({
   }, [connectionState])
 
   const personalConnectionOptions = useMemo(() => {
-    if (!connectionState) return []
+    if (!connectionState || !hasSlackPersonalAuth) return []
     return (connectionState.personal ?? [])
       .filter((entry) => entry.connected && entry.id)
       .map((entry) => ({
@@ -569,18 +589,20 @@ export default function SlackAction({
           : 'Personal Slack account',
         value: connectionValueKey('personal', entry.id as string)
       }))
-  }, [connectionState])
+  }, [connectionState, hasSlackPersonalAuth])
 
   const hasOAuthConnections = useMemo(() => {
     if (!connectionState) return false
-    const personalAvailable = (connectionState.personal ?? []).some(
-      (entry) => entry.connected && Boolean(entry.id)
-    )
+    const personalAvailable =
+      hasSlackPersonalAuth &&
+      (connectionState.personal ?? []).some(
+        (entry) => entry.connected && Boolean(entry.id)
+      )
     const workspaceAvailable = connectionState.workspace.some(
       (entry) => entry.connected && Boolean(entry.id)
     )
     return personalAvailable || workspaceAvailable
-  }, [connectionState])
+  }, [connectionState, hasSlackPersonalAuth])
 
   const buildChannelOptions = useCallback(
     (channels: SlackChannel[]): NodeDropdownOptionGroup[] => {
@@ -664,7 +686,9 @@ export default function SlackAction({
       const next = sanitizeSlackPayload({ ...slackParams, ...patch })
       if (deepEqual(slackParams, next)) return
 
-      const { hasValidationErrors } = validateSlackParams(next)
+      const { hasValidationErrors } = validateSlackParams(next, {
+        hasPersonalAuth: hasSlackPersonalAuth
+      })
 
       const slackPayload: SlackActionValues = { ...next }
       if (!slackPayload.connection) {
@@ -677,7 +701,7 @@ export default function SlackAction({
         hasValidationErrors
       })
     },
-    [effectiveCanEdit, nodeId, slackParams, updateNodeData]
+    [effectiveCanEdit, nodeId, slackParams, updateNodeData, hasSlackPersonalAuth]
   )
 
   const handleIdentityChange = useCallback(
@@ -925,7 +949,8 @@ export default function SlackAction({
               },
               {
                 label: 'Post as you',
-                value: 'personal_user'
+                value: 'personal_user',
+                disabled: !hasSlackPersonalAuth
               }
             ]
           }
@@ -939,6 +964,9 @@ export default function SlackAction({
       />
       {validationErrors.identity && (
         <p className={errorClass}>{validationErrors.identity}</p>
+      )}
+      {slackParams.identity === 'personal_user' && !hasSlackPersonalAuth && (
+        <p className={errorClass}>{SLACK_PERSONAL_AUTH_REQUIRED}</p>
       )}
 
       {slackParams.identity && (
@@ -1000,7 +1028,7 @@ export default function SlackAction({
               emptyMessage="No personal Slack authorizations are available"
               disabled={!slackParams.identity}
             />
-            {validationErrors.personalConnection && (
+            {validationErrors.personalConnection && hasSlackPersonalAuth && (
               <p className={errorClass}>
                 {validationErrors.personalConnection}
               </p>

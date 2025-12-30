@@ -22,7 +22,8 @@ vi.mock('@/lib/oauthApi', () => ({
   fetchConnections: (...args: any[]) => fetchConnections(...args),
   getCachedConnections: (...args: any[]) => getCachedConnections(...args),
   subscribeToConnectionUpdates: (...args: any[]) =>
-    subscribeToConnectionUpdates(...args)
+    subscribeToConnectionUpdates(...args),
+  SLACK_PERSONAL_AUTH_REQUIRED: 'Authorize Slack for yourself to post as you.'
 }))
 
 vi.mock('@/lib/slackApi', () => ({
@@ -220,7 +221,10 @@ describe('SlackAction identity enforcement and backend contract', () => {
           requiresReconnect: false,
           isShared: false
         }
-      ]
+      ],
+      slackPersonalAuth: {
+        hasPersonalAuth: true
+      }
     })
 
     renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
@@ -343,7 +347,10 @@ describe('SlackAction identity enforcement and backend contract', () => {
           requiresReconnect: false,
           isShared: true
         }
-      ]
+      ],
+      slackPersonalAuth: {
+        hasPersonalAuth: true
+      }
     }
 
     getCachedConnections.mockReturnValue(mockConnections)

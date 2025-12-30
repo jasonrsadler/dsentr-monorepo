@@ -6,6 +6,13 @@ export type OAuthProvider = 'google' | 'microsoft' | 'slack' | 'asana'
 
 export type ConnectionScope = 'personal' | 'workspace'
 
+export const SLACK_PERSONAL_AUTHORIZE_LABEL = 'Authorize Slack for yourself'
+export const SLACK_PERSONAL_REAUTHORIZE_LABEL = 'Reauthorize Slack'
+export const SLACK_PERSONAL_AUTHORIZED_LABEL = 'Personal Slack authorized'
+export const SLACK_PERSONAL_AUTHORIZED_HINT = 'Slack is authorized to post as you'
+export const SLACK_PERSONAL_AUTH_REQUIRED =
+  'Authorize Slack for yourself to post as you.'
+
 export interface BaseConnectionInfo {
   scope: ConnectionScope
   id: string | null
@@ -47,9 +54,15 @@ export interface PersonalConnectionRecord extends PersonalConnectionInfo {
   provider: OAuthProvider
 }
 
+export interface SlackPersonalAuthState {
+  hasPersonalAuth: boolean
+  personalAuthConnectedAt?: string
+}
+
 export interface GroupedConnectionsSnapshot {
   personal: PersonalConnectionRecord[]
   workspace: WorkspaceConnectionInfo[]
+  slackPersonalAuth?: SlackPersonalAuthState
 }
 
 const PROVIDER_KEYS: OAuthProvider[] = ['google', 'microsoft', 'slack', 'asana']
@@ -95,11 +108,19 @@ const defaultPersonalConnection = (): PersonalConnectionInfo => ({
   isShared: false
 })
 
+const cloneSlackPersonalAuth = (
+  value?: SlackPersonalAuthState | null
+): SlackPersonalAuthState | undefined => {
+  if (!value) return undefined
+  return { ...value }
+}
+
 const cloneGroupedSnapshot = (
   snapshot: GroupedConnectionsSnapshot
 ): GroupedConnectionsSnapshot => ({
   personal: snapshot.personal.map((p) => ({ ...p })),
-  workspace: snapshot.workspace.map((w) => ({ ...w }))
+  workspace: snapshot.workspace.map((w) => ({ ...w })),
+  slackPersonalAuth: cloneSlackPersonalAuth(snapshot.slackPersonalAuth)
 })
 
 const normalizeWorkspaceId = (value?: string | null): string | null => {
@@ -254,6 +275,13 @@ interface WorkspaceConnectionPayload {
 
 type ProviderConnectionBuckets<T> = Partial<Record<OAuthProvider, T[] | null>>
 
+interface SlackPersonalAuthPayload {
+  has_personal_auth?: boolean | null
+  hasPersonalAuth?: boolean | null
+  personal_auth_connected_at?: string | null
+  personalAuthConnectedAt?: string | null
+}
+
 interface ConnectionsApiResponse {
   success: boolean
   personal?:
@@ -264,6 +292,7 @@ interface ConnectionsApiResponse {
     | ProviderConnectionBuckets<WorkspaceConnectionPayload>
     | WorkspaceConnectionPayload[]
     | null
+  slack?: SlackPersonalAuthPayload | null
 }
 
 interface RefreshApiResponse {
@@ -302,7 +331,8 @@ const ensureGrouped = (
     : [],
   workspace: Array.isArray(snapshot?.workspace)
     ? snapshot!.workspace.map((w) => ({ ...w }))
-    : []
+    : [],
+  slackPersonalAuth: cloneSlackPersonalAuth(snapshot?.slackPersonalAuth)
 })
 
 export async function fetchConnections(
@@ -358,6 +388,21 @@ export async function fetchConnections(
         entry.id ??
         null
     )
+  }
+
+  const normalizeSlackPersonalAuth = (
+    payload?: SlackPersonalAuthPayload | null
+  ): SlackPersonalAuthState => {
+    const hasPersonalAuth = Boolean(
+      payload?.hasPersonalAuth ?? payload?.has_personal_auth
+    )
+    const connectedAt = normalize(
+      payload?.personalAuthConnectedAt ?? payload?.personal_auth_connected_at
+    )
+    return {
+      hasPersonalAuth,
+      personalAuthConnectedAt: connectedAt
+    }
   }
 
   const personalBuckets = data.personal
@@ -447,6 +492,8 @@ export async function fetchConnections(
       grouped.workspace.push(workspaceInfo)
     })
   })
+
+  grouped.slackPersonalAuth = normalizeSlackPersonalAuth(data.slack)
 
   setCachedConnections(grouped, { workspaceId: targetWorkspace })
   return grouped
@@ -574,7 +621,11 @@ export const clearProviderConnections = (provider: OAuthProvider) => {
     const nextWorkspace = snapshot.workspace.filter(
       (w) => w.provider !== provider
     )
-    return { personal: nextPersonal, workspace: nextWorkspace }
+    return {
+      personal: nextPersonal,
+      workspace: nextWorkspace,
+      slackPersonalAuth: snapshot.slackPersonalAuth
+    }
   })
 }
 
@@ -626,7 +677,11 @@ export const markProviderRevoked = (
         normalize(w.connectionId) ?? normalize(w.id) ?? undefined
       return workspaceKey !== targetConnection
     })
-    return { personal: nextPersonal, workspace: nextWorkspace }
+    return {
+      personal: nextPersonal,
+      workspace: nextWorkspace,
+      slackPersonalAuth: snapshot.slackPersonalAuth
+    }
   })
 }
 

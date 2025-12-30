@@ -60,6 +60,8 @@
 - Slack action now fetches channels only from the selected workspace connection, shows the channel dropdown as soon as that selection is made, and defers personal connection validation to execution so identity only affects posting.
 - Slack action channel refresh now runs only when the workspace connection changes so personal connection updates do not trigger redundant fetches.
 - Slack action now defaults to the workspace bot identity, clears incompatible connection selections when switching identity, and gates personal Slack selection on having a workspace connection.
+- Settings > Integrations: Slack now displays personal authorization status (with optional timestamp) and moves reauthorization behind a secondary menu so users can see post-as-you availability without triggering repeated OAuth flows.
+- Slack action identity selection now honors the Slack personal authorization state from the connections snapshot, disabling "Post as you" until personal authorization is present.
 - Asana action flyout: dropdowns (operation/workspace/project/task/assignee/section/tag/comment) are searchable when large, project/task/tag/assignee/comment now include manual options with GID inputs that sync selection states, due date/time fields mirror ISO text inputs, and the add-task-to-project flow uses task GID + project selection only (no section picker).
 - Asana action build hygiene: removed unused fetch import, simplified required-field ordering for add-task-to-project, and tightened API normalization to keep TS builds passing alongside the templated GID inputs.
 - Asana action inputs no longer trim user-entered text on change, preserving whitespace while typing; trimming happens later during validation/templating.

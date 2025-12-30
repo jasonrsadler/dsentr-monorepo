@@ -2,7 +2,7 @@ use super::{
     helpers::{
         map_oauth_error, parse_provider, ConnectionOwnerPayload, ConnectionsResponse,
         PersonalConnectionPayload, ProviderGroupedConnections, RefreshResponse,
-        WorkspaceConnectionPayload, OAUTH_PLAN_RESTRICTION_MESSAGE,
+        SlackPersonalAuthStatus, WorkspaceConnectionPayload, OAUTH_PLAN_RESTRICTION_MESSAGE,
     },
     prelude::*,
 };
@@ -275,9 +275,19 @@ pub async fn list_connections(
     }
 
     let personal_owner = connection_owner_from_claims(user_id, &claims);
-
+    let mut slack_personal_auth = SlackPersonalAuthStatus::default();
     let mut personal = ProviderGroupedConnections::default();
     for token in personal_tokens {
+        if token.provider == ConnectedOAuthProvider::Slack {
+            slack_personal_auth.has_personal_auth = true;
+            let should_update = slack_personal_auth
+                .personal_auth_connected_at
+                .as_ref()
+                .map_or(true, |current| token.updated_at > *current);
+            if should_update {
+                slack_personal_auth.personal_auth_connected_at = Some(token.updated_at);
+            }
+        }
         personal.push(
             token.provider,
             personal_payload_from_token(token, &personal_owner),
@@ -296,6 +306,7 @@ pub async fn list_connections(
         success: true,
         personal,
         workspace,
+        slack: slack_personal_auth,
     })
     .into_response()
 }

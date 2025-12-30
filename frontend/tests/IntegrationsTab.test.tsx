@@ -41,7 +41,13 @@ const oauthApiMocks = vi.hoisted(() => ({
   promoteConnection: vi.fn(),
   unshareWorkspaceConnection: vi.fn(),
   setCachedConnections: vi.fn(),
-  markProviderRevoked: vi.fn()
+  markProviderRevoked: vi.fn(),
+  startSlackPersonalAuthorization: vi.fn(),
+  SLACK_PERSONAL_AUTHORIZE_LABEL: 'Authorize Slack for yourself',
+  SLACK_PERSONAL_REAUTHORIZE_LABEL: 'Reauthorize Slack',
+  SLACK_PERSONAL_AUTHORIZED_LABEL: 'Personal Slack authorized',
+  SLACK_PERSONAL_AUTHORIZED_HINT: 'Slack is authorized to post as you',
+  SLACK_PERSONAL_AUTH_REQUIRED: 'Authorize Slack for yourself to post as you.'
 }))
 
 vi.mock('@/lib/oauthApi', () => oauthApiMocks)
@@ -827,12 +833,12 @@ describe('IntegrationsTab', () => {
       ).not.toBeInTheDocument()
     })
 
-    it('renders Authorize Slack for yourself when workspace connection exists', async () => {
-      fetchConnections.mockResolvedValueOnce({
-        personal: [],
-        workspace: [
-          {
-            scope: 'workspace',
+      it('renders Authorize Slack for yourself when workspace connection exists', async () => {
+        fetchConnections.mockResolvedValueOnce({
+          personal: [],
+          workspace: [
+            {
+              scope: 'workspace',
             provider: 'slack',
             id: 'slack-workspace-1',
             workspaceConnectionId: 'slack-workspace-1',
@@ -841,12 +847,15 @@ describe('IntegrationsTab', () => {
             accountEmail: 'workspace-bot@example.com',
             workspaceId: 'ws-1',
             workspaceName: 'Acme Workspace',
-            sharedByName: 'Owner Example',
-            sharedByEmail: 'owner@example.com',
-            requiresReconnect: false
+              sharedByName: 'Owner Example',
+              sharedByEmail: 'owner@example.com',
+              requiresReconnect: false
+            }
+          ],
+          slackPersonalAuth: {
+            hasPersonalAuth: false
           }
-        ]
-      })
+        })
 
       const user = userEvent.setup()
       render(<IntegrationsTab />)
@@ -874,12 +883,12 @@ describe('IntegrationsTab', () => {
       ).not.toBeInTheDocument()
     })
 
-    it('renders Slack workspace entry with proper identity and linking', async () => {
-      fetchConnections.mockResolvedValueOnce({
-        personal: [
-          {
-            scope: 'personal',
-            provider: 'slack',
+      it('renders Slack workspace entry with proper identity and linking', async () => {
+        fetchConnections.mockResolvedValueOnce({
+          personal: [
+            {
+              scope: 'personal',
+              provider: 'slack',
             id: 'slack-personal-1',
             connectionId: 'slack-personal-1',
             workspaceConnectionId: 'slack-workspace-1',
@@ -911,12 +920,16 @@ describe('IntegrationsTab', () => {
             accountEmail: 'workspace-bot@example.com',
             workspaceId: 'ws-1',
             workspaceName: 'Acme Workspace',
-            sharedByName: 'Owner Example',
-            sharedByEmail: 'owner@example.com',
-            requiresReconnect: false
+              sharedByName: 'Owner Example',
+              sharedByEmail: 'owner@example.com',
+              requiresReconnect: false
+            }
+          ],
+          slackPersonalAuth: {
+            hasPersonalAuth: true,
+            personalAuthConnectedAt: '2025-01-01T00:00:00.000Z'
           }
-        ]
-      })
+        })
 
       const user = userEvent.setup()
       render(<IntegrationsTab />)
@@ -938,12 +951,12 @@ describe('IntegrationsTab', () => {
         )
       ).toBeInTheDocument()
 
-      // Assert personal authorizations appear under workspace entry
+      // Assert personal Slack authorization status is visible
       expect(
-        within(slackSection).getByText('Authorized as you')
+        within(slackSection).getByText('Personal Slack authorized')
       ).toBeInTheDocument()
       expect(
-        within(slackSection).getByText('Authorized: teammate@example.com')
+        within(slackSection).getByText('Slack is authorized to post as you')
       ).toBeInTheDocument()
 
       // Assert personal connections still NOT in top-level personal list
@@ -955,11 +968,9 @@ describe('IntegrationsTab', () => {
         ?.closest('div')
       expect(personalConnectionsSection).toBeInTheDocument()
 
-      // Should show "No personal connections have been created yet" for Slack
+      // Slack personal auth hint replaces the empty personal list
       expect(
-        within(slackSection).getByText(
-          'No personal connections have been created yet.'
-        )
+        within(slackSection).getByText('Slack is authorized to post as you')
       ).toBeInTheDocument()
     })
 

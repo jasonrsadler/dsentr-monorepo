@@ -100,12 +100,21 @@ impl<T> ProviderGroupedConnections<T> {
     }
 }
 
+#[derive(Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct SlackPersonalAuthStatus {
+    pub(crate) has_personal_auth: bool,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub(crate) personal_auth_connected_at: Option<OffsetDateTime>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionsResponse {
     pub(crate) success: bool,
     pub(crate) personal: ProviderGroupedConnections<PersonalConnectionPayload>,
     pub(crate) workspace: ProviderGroupedConnections<WorkspaceConnectionPayload>,
+    pub(crate) slack: SlackPersonalAuthStatus,
 }
 
 #[derive(Serialize)]

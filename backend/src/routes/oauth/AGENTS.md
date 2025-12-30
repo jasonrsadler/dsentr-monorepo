@@ -41,3 +41,4 @@
 - OAuth route tests now set `workspace_connection_id: None` when constructing `ConnectQuery` to satisfy the new optional field.
 - Slack personal OAuth callbacks now pass Slack tokens through without metadata patching; Slack team ids are captured in the account service so the route layer stays read-only.
 - Slack OAuth starts now always use the combined install authorize URL with bot + user scopes and prompt=consent (no team parameter), so personal and workspace flows share a single Slack install path.
+- OAuth integrations listing now includes Slack personal authorization state (`has_personal_auth`, `personal_auth_connected_at`) derived from stored user tokens so Settings can show post-as-user status without extra API calls.
