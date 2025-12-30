@@ -98,6 +98,11 @@ struct SlackExchangeTokens {
     account_email: String,
 }
 
+struct SlackAuthTestResult {
+    team_id: String,
+    user_id: Option<String>,
+}
+
 #[derive(Error, Debug)]
 pub enum OAuthAccountError {
     #[error("token not found")]
@@ -202,6 +207,32 @@ impl OAuthAccountService {
     }
 
     #[cfg(test)]
+    fn slack_token_url(&self) -> &str {
+        self.endpoint_overrides
+            .slack_token_url
+            .as_deref()
+            .unwrap_or(SLACK_TOKEN_URL)
+    }
+
+    #[cfg(not(test))]
+    fn slack_token_url(&self) -> &str {
+        SLACK_TOKEN_URL
+    }
+
+    #[cfg(test)]
+    fn slack_userinfo_url(&self) -> &str {
+        self.endpoint_overrides
+            .slack_userinfo_url
+            .as_deref()
+            .unwrap_or(SLACK_USER_INFO_URL)
+    }
+
+    #[cfg(not(test))]
+    fn slack_userinfo_url(&self) -> &str {
+        SLACK_USER_INFO_URL
+    }
+
+    #[cfg(test)]
     pub fn set_refresh_override<F>(&mut self, override_fn: Option<Arc<F>>)
     where
         F: for<'a> Fn(
@@ -236,6 +267,16 @@ impl OAuthAccountService {
         self.endpoint_overrides.google_token_url = Some(token_url.into());
         self.endpoint_overrides.google_userinfo_url = Some(userinfo_url.into());
         self.endpoint_overrides.google_revocation_url = revocation_url.map(|url| url.to_string());
+    }
+
+    #[cfg(test)]
+    pub fn set_slack_endpoint_overrides(
+        &mut self,
+        token_url: impl Into<String>,
+        userinfo_url: impl Into<String>,
+    ) {
+        self.endpoint_overrides.slack_token_url = Some(token_url.into());
+        self.endpoint_overrides.slack_userinfo_url = Some(userinfo_url.into());
     }
 
     pub fn google_scopes(&self) -> &'static str {
@@ -942,22 +983,35 @@ impl OAuthAccountService {
         code: &str,
     ) -> Result<(AuthorizationTokens, AuthorizationTokens), OAuthAccountError> {
         let exchange = self.exchange_slack_code_raw(code).await?;
+        if exchange.user_access_token.trim().is_empty() {
+            return Err(OAuthAccountError::InvalidResponse(
+                "Slack OAuth exchange missing user access token for auth.test".into(),
+            ));
+        }
+        let SlackAuthTestResult { team_id, user_id } =
+            self.slack_auth_test(&exchange.user_access_token).await?;
         let personal_expires_at =
             slack_expiration(exchange.user_expires_in, exchange.user_expiration)?;
         let workspace_expires_at = slack_expiration(exchange.bot_expires_in, None)?;
-        let slack_meta = SlackOAuthMetadata {
+        let personal_slack_meta = SlackOAuthMetadata {
+            team_id: Some(team_id),
+            bot_user_id: exchange.bot_user_id.clone(),
+            incoming_webhook_url: None,
+        };
+        let workspace_slack_meta = SlackOAuthMetadata {
             team_id: Some(exchange.team_id.clone()),
             bot_user_id: exchange.bot_user_id.clone(),
             incoming_webhook_url: exchange.incoming_webhook_url.clone(),
         };
+        let provider_user_id = user_id.unwrap_or(exchange.user_id);
 
         let personal = AuthorizationTokens {
             access_token: exchange.user_access_token,
             refresh_token: exchange.user_refresh_token,
             expires_at: personal_expires_at,
             account_email: exchange.account_email.clone(),
-            provider_user_id: Some(exchange.user_id),
-            slack: Some(slack_meta.clone()),
+            provider_user_id: Some(provider_user_id),
+            slack: Some(personal_slack_meta),
         };
 
         let workspace = AuthorizationTokens {
@@ -966,7 +1020,7 @@ impl OAuthAccountService {
             expires_at: workspace_expires_at,
             account_email: exchange.account_email,
             provider_user_id: None,
-            slack: Some(slack_meta),
+            slack: Some(workspace_slack_meta),
         };
 
         Ok((personal, workspace))
@@ -1159,7 +1213,7 @@ impl OAuthAccountService {
 
         let response: SlackTokenResponse = self
             .client
-            .post(SLACK_TOKEN_URL)
+            .post(self.slack_token_url())
             .form(&[
                 ("code", code),
                 ("client_id", self.slack.client_id.as_str()),
@@ -1278,19 +1332,27 @@ impl OAuthAccountService {
         code: &str,
     ) -> Result<AuthorizationTokens, OAuthAccountError> {
         let exchange = self.exchange_slack_code_raw(code).await?;
+        if exchange.user_access_token.trim().is_empty() {
+            return Err(OAuthAccountError::InvalidResponse(
+                "Slack OAuth exchange missing user access token for auth.test".into(),
+            ));
+        }
+        let SlackAuthTestResult { team_id, user_id } =
+            self.slack_auth_test(&exchange.user_access_token).await?;
         let expires_at = slack_expiration(exchange.user_expires_in, exchange.user_expiration)?;
         let slack_meta = SlackOAuthMetadata {
-            team_id: Some(exchange.team_id),
+            team_id: Some(team_id),
             bot_user_id: exchange.bot_user_id,
             incoming_webhook_url: exchange.incoming_webhook_url,
         };
+        let provider_user_id = user_id.unwrap_or(exchange.user_id);
 
         Ok(AuthorizationTokens {
             access_token: exchange.user_access_token,
             refresh_token: exchange.user_refresh_token,
             expires_at,
             account_email: exchange.account_email,
-            provider_user_id: Some(exchange.user_id),
+            provider_user_id: Some(provider_user_id),
             slack: Some(slack_meta),
         })
     }
@@ -1555,7 +1617,7 @@ impl OAuthAccountService {
 
         let response = self
             .client
-            .post(SLACK_TOKEN_URL)
+            .post(self.slack_token_url())
             .form(&[
                 ("client_id", self.slack.client_id.as_str()),
                 ("client_secret", self.slack.client_secret.as_str()),
@@ -1880,6 +1942,71 @@ impl OAuthAccountService {
         }
     }
 
+    async fn slack_auth_test(
+        &self,
+        access_token: &str,
+    ) -> Result<SlackAuthTestResult, OAuthAccountError> {
+        #[derive(Deserialize)]
+        struct SlackAuthTestResponse {
+            ok: bool,
+            team_id: Option<String>,
+            user_id: Option<String>,
+            error: Option<String>,
+        }
+
+        let base = std::env::var("SLACK_API_BASE_URL")
+            .ok()
+            .or_else(|| std::env::var("SLACK_API_BASE").ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "https://slack.com/api".to_string());
+        let url = format!("{}/auth.test", base.trim_end_matches('/'));
+
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(access_token)
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(OAuthAccountError::InvalidResponse(
+                "Slack auth.test failed".into(),
+            ));
+        }
+
+        let parsed: SlackAuthTestResponse = serde_json::from_str(&body).map_err(|_| {
+            OAuthAccountError::InvalidResponse(
+                "Slack auth.test returned an unexpected response".into(),
+            )
+        })?;
+
+        if !parsed.ok {
+            let message = parsed
+                .error
+                .unwrap_or_else(|| "Slack auth.test failed".to_string());
+            return Err(OAuthAccountError::InvalidResponse(message));
+        }
+
+        let team_id = parsed
+            .team_id
+            .as_deref()
+            .and_then(normalize_provider_user_id)
+            .ok_or_else(|| {
+                OAuthAccountError::InvalidResponse("Slack auth.test missing team id".into())
+            })?;
+
+        let user_id = parsed
+            .user_id
+            .as_deref()
+            .and_then(normalize_provider_user_id);
+
+        Ok(SlackAuthTestResult { team_id, user_id })
+    }
+
     async fn fetch_slack_email(
         &self,
         access_token: &str,
@@ -1904,7 +2031,7 @@ impl OAuthAccountService {
 
         let response = self
             .client
-            .get(SLACK_USER_INFO_URL)
+            .get(self.slack_userinfo_url())
             .query(&[("user", user_id)])
             .bearer_auth(access_token)
             .send()
@@ -2379,6 +2506,8 @@ struct TestEndpointOverrides {
     google_token_url: Option<String>,
     google_userinfo_url: Option<String>,
     google_revocation_url: Option<String>,
+    slack_token_url: Option<String>,
+    slack_userinfo_url: Option<String>,
 }
 
 #[cfg(test)]

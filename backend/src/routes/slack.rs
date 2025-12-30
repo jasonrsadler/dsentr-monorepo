@@ -335,20 +335,18 @@ async fn fetch_slack_channels(
 
         if !status.is_success() {
             error!(%status, body, "Slack request failed");
-            return Err(if status == ReqStatusCode::UNAUTHORIZED
-                || status == ReqStatusCode::FORBIDDEN
-            {
-                SlackChannelError::Unauthorized
-            } else {
-                SlackChannelError::ServerError("Failed to load Slack channels".to_string())
-            });
+            return Err(
+                if status == ReqStatusCode::UNAUTHORIZED || status == ReqStatusCode::FORBIDDEN {
+                    SlackChannelError::Unauthorized
+                } else {
+                    SlackChannelError::ServerError("Failed to load Slack channels".to_string())
+                },
+            );
         }
 
         let parsed: SlackChannelsApiResponse = serde_json::from_str(&body).map_err(|err| {
             error!(?err, body, "Failed to parse Slack response");
-            SlackChannelError::ServerError(
-                "Received an unexpected response from Slack".to_string(),
-            )
+            SlackChannelError::ServerError("Received an unexpected response from Slack".to_string())
         })?;
 
         if !parsed.ok {
@@ -438,7 +436,11 @@ fn map_slack_channel_error(err: SlackChannelError) -> Response {
         )
         .into_response(),
         SlackChannelError::MissingScopes { needed, provided } => {
-            error!(?needed, ?provided, "Slack connection missing required scopes");
+            error!(
+                ?needed,
+                ?provided,
+                "Slack connection missing required scopes"
+            );
             JsonResponse::unauthorized(
                 "Slack connection is missing required scopes. Reinstall Slack to continue.",
             )
@@ -1505,35 +1507,37 @@ mod tests {
 
         let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
         let user_repo: Arc<dyn UserOAuthTokenRepository> = personal_repo.clone();
-        let connection_repo_trait: Arc<dyn WorkspaceConnectionRepository> =
-            connection_repo.clone();
+        let connection_repo_trait: Arc<dyn WorkspaceConnectionRepository> = connection_repo.clone();
         let workspace_repo_trait: Arc<dyn crate::db::workspace_repository::WorkspaceRepository> =
             workspace_repo.clone();
         let http_client = state_http_client();
 
-        let mut oauth_accounts =
-            crate::services::oauth::account_service::OAuthAccountService::new(
-                user_repo.clone(),
-                connection_repo_trait.clone(),
-                Arc::clone(&encryption_key),
-                http_client.clone(),
-                &config.oauth,
-            );
+        let mut oauth_accounts = crate::services::oauth::account_service::OAuthAccountService::new(
+            user_repo.clone(),
+            connection_repo_trait.clone(),
+            Arc::clone(&encryption_key),
+            http_client.clone(),
+            &config.oauth,
+        );
         oauth_accounts.set_refresh_override(Some(Arc::new(
             move |provider: ConnectedOAuthProvider, _refresh: &str| {
                 assert_eq!(provider, ConnectedOAuthProvider::Slack);
-                Ok(crate::services::oauth::account_service::AuthorizationTokens {
-                    access_token: "refreshed-access".into(),
-                    refresh_token: "refreshed-refresh".into(),
-                    expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
-                    account_email: "owner@example.com".into(),
-                    provider_user_id: None,
-                    slack: Some(crate::services::oauth::account_service::SlackOAuthMetadata {
-                        team_id: Some("T123".into()),
-                        bot_user_id: None,
-                        incoming_webhook_url: None,
-                    }),
-                })
+                Ok(
+                    crate::services::oauth::account_service::AuthorizationTokens {
+                        access_token: "refreshed-access".into(),
+                        refresh_token: "refreshed-refresh".into(),
+                        expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
+                        account_email: "owner@example.com".into(),
+                        provider_user_id: None,
+                        slack: Some(
+                            crate::services::oauth::account_service::SlackOAuthMetadata {
+                                team_id: Some("T123".into()),
+                                bot_user_id: None,
+                                incoming_webhook_url: None,
+                            },
+                        ),
+                    },
+                )
             },
         )));
         let oauth_accounts = Arc::new(oauth_accounts);

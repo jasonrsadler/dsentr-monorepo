@@ -2,8 +2,8 @@ use super::{
     helpers::{
         build_slack_state, build_state_cookie, clear_state_cookie, error_message_for_redirect,
         handle_callback, parse_slack_state, redirect_success_with_workspace, redirect_with_error,
-        redirect_with_error_for_provider, redirect_with_error_with_workspace, strip_slack_webhook,
-        CallbackQuery, ASANA_AUTH_URL, ASANA_STATE_COOKIE, GOOGLE_AUTH_URL, GOOGLE_STATE_COOKIE,
+        redirect_with_error_for_provider, redirect_with_error_with_workspace, CallbackQuery,
+        ASANA_AUTH_URL, ASANA_STATE_COOKIE, GOOGLE_AUTH_URL, GOOGLE_STATE_COOKIE,
         MICROSOFT_AUTH_URL, MICROSOFT_STATE_COOKIE, OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_AUTH_URL,
         SLACK_STATE_COOKIE, SLACK_WORKSPACE_REQUIRED_MESSAGE,
     },
@@ -487,7 +487,7 @@ pub async fn slack_connect_callback(
         return (jar, response).into_response();
     }
 
-    let (mut personal_tokens, workspace_tokens) = match state
+    let (personal_tokens, workspace_tokens) = match state
         .oauth_accounts
         .exchange_slack_install_tokens(&code)
         .await
@@ -505,15 +505,15 @@ pub async fn slack_connect_callback(
         }
     };
 
-    if let Err(message) =
-        validate_slack_bot_scopes(&state, &workspace_tokens.access_token).await
-    {
-        let response =
-            redirect_with_error_with_workspace(&state.config, provider, &message, Some(workspace_id));
+    if let Err(message) = validate_slack_bot_scopes(&state, &workspace_tokens.access_token).await {
+        let response = redirect_with_error_with_workspace(
+            &state.config,
+            provider,
+            &message,
+            Some(workspace_id),
+        );
         return (jar, response).into_response();
     }
-
-    strip_slack_webhook(&mut personal_tokens);
 
     let stored_personal = match state
         .oauth_accounts
@@ -573,6 +573,7 @@ pub async fn slack_connect_callback(
 struct SlackAuthTestResponse {
     ok: bool,
     team_id: Option<String>,
+    user_id: Option<String>,
     error: Option<String>,
     response_metadata: Option<SlackAuthTestMetadata>,
 }
@@ -586,14 +587,13 @@ struct SlackAuthTestMetadata {
 
 struct SlackAuthTestResult {
     team_id: Option<String>,
+    #[allow(dead_code)]
+    user_id: Option<String>,
     scopes: Vec<String>,
 }
 
-async fn validate_slack_bot_scopes(
-    state: &AppState,
-    access_token: &str,
-) -> Result<(), String> {
-    let auth_test = slack_auth_test(state, access_token).await?;
+async fn validate_slack_bot_scopes(state: &AppState, access_token: &str) -> Result<(), String> {
+    let auth_test = slack_auth_test(state, access_token, true).await?;
     let required = split_scopes(state.oauth_accounts.slack_bot_scopes());
     let missing: Vec<String> = required
         .iter()
@@ -618,7 +618,11 @@ async fn validate_slack_bot_scopes(
     ))
 }
 
-async fn slack_auth_test(state: &AppState, access_token: &str) -> Result<SlackAuthTestResult, String> {
+async fn slack_auth_test(
+    state: &AppState,
+    access_token: &str,
+    require_scopes: bool,
+) -> Result<SlackAuthTestResult, String> {
     let base = std::env::var("SLACK_API_BASE_URL")
         .ok()
         .or_else(|| std::env::var("SLACK_API_BASE").ok())
@@ -628,7 +632,7 @@ async fn slack_auth_test(state: &AppState, access_token: &str) -> Result<SlackAu
 
     let response = state
         .http_client
-        .post(&url)
+        .get(&url)
         .bearer_auth(access_token)
         .send()
         .await
@@ -682,21 +686,44 @@ async fn slack_auth_test(state: &AppState, access_token: &str) -> Result<SlackAu
         }
     }
 
-    if scopes.is_empty() {
+    if require_scopes && scopes.is_empty() {
         return Err("Slack auth.test response missing scopes".to_string());
     }
 
+    let team_id = parsed
+        .team_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    let user_id = parsed
+        .user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
     let token_prefix: String = access_token.chars().take(12).collect();
-    info!(
-        provider = "slack",
-        token_prefix = %token_prefix,
-        team_id = ?parsed.team_id,
-        scopes = %scopes.join(","),
-        "Slack bot token validated via auth.test"
-    );
+    if require_scopes {
+        info!(
+            provider = "slack",
+            token_prefix = %token_prefix,
+            team_id = ?team_id,
+            scopes = %scopes.join(","),
+            "Slack bot token validated via auth.test"
+        );
+    } else {
+        info!(
+            provider = "slack",
+            token_prefix = %token_prefix,
+            team_id = ?team_id,
+            user_id = ?user_id,
+            "Slack user token validated via auth.test"
+        );
+    }
 
     Ok(SlackAuthTestResult {
-        team_id: parsed.team_id,
+        team_id,
+        user_id,
         scopes,
     })
 }

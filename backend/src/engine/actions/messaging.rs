@@ -6,6 +6,7 @@ use crate::models::workflow_run::WorkflowRun;
 use crate::services::oauth::account_service::{is_revocation_signal, OAuthAccountError};
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
 use crate::state::AppState;
+use crate::utils::encryption::decrypt_secret;
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
     Url,
@@ -176,6 +177,27 @@ fn slack_auth_expired_error(connection_id: Uuid) -> String {
         connection_id,
     })
     .unwrap_or_else(|_| "auth_expired".to_string())
+}
+
+fn decode_slack_team_id(raw: &str, encryption_key: &[u8]) -> Result<String, ()> {
+    let decrypted = decrypt_secret(encryption_key, raw).unwrap_or_else(|_| raw.to_string());
+    let trimmed = decrypted.trim();
+    if is_valid_slack_team_id(trimmed) {
+        Ok(trimmed.to_string())
+    } else {
+        Err(())
+    }
+}
+
+fn is_valid_slack_team_id(value: &str) -> bool {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= 1 {
+        return false;
+    }
+    if chars[0] != 'T' {
+        return false;
+    }
+    chars.iter().all(|ch| matches!(ch, 'A'..='Z' | '0'..='9'))
 }
 
 async fn send_slack(
@@ -424,14 +446,20 @@ async fn send_slack(
                     "personal_user error: Failed to load personal token metadata".to_string()
                 })?;
 
-            let personal_team = metadata
-                .slack
-                .and_then(|s| s.team_id)
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| {
-                    "personal_user error: personal Slack token missing team id in metadata. Reconnect Slack.".to_string()
-                })?;
+            let personal_team_id = metadata.slack.and_then(|s| s.team_id);
+            let personal_team = match personal_team_id {
+                Some(value) => decode_slack_team_id(&value, &state.config.oauth.token_encryption_key)
+                    .map_err(|_| {
+                        "personal_user error: personal Slack token missing or invalid team id. Reconnect Slack."
+                            .to_string()
+                    })?,
+                None => {
+                    return Err(
+                        "personal_user error: personal Slack token missing or invalid team id. Reconnect Slack."
+                            .to_string(),
+                    );
+                }
+            };
 
             let workspace_connection = state
                 .workspace_connection_repo
@@ -2994,7 +3022,7 @@ mod tests {
         let res = execute_messaging(&node, &Value::Null, &state, &run).await;
         assert!(res.is_err());
         let err = res.err().unwrap();
-        assert!(err.contains("personal_user error: personal Slack token missing team id in metadata. Reconnect Slack."));
+        assert!(err.contains("personal_user error: personal Slack token missing or invalid team id. Reconnect Slack."));
     }
 
     #[tokio::test]
@@ -3278,6 +3306,7 @@ mod tests {
         let encrypted_refresh = encrypt_secret(&encryption_key, refresh_token).unwrap();
 
         let token_id = Uuid::new_v4();
+        let encrypted_team_id = encrypt_secret(&encryption_key, "T123").unwrap();
         let record = UserOAuthToken {
             id: token_id,
             user_id,
@@ -3288,7 +3317,7 @@ mod tests {
             expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
             account_email: "alice@example.com".into(),
             metadata: serde_json::json!({
-                "slack": { "team_id": "T123" }
+                "slack": { "team_id": encrypted_team_id }
             }),
             is_shared: false,
             created_at: OffsetDateTime::now_utc(),
@@ -3517,6 +3546,7 @@ mod tests {
         let encrypted_refresh = encrypt_secret(&encryption_key, refresh_token).unwrap();
 
         let token_id = Uuid::new_v4();
+        let encrypted_team_id = encrypt_secret(&encryption_key, "T123").unwrap();
         let record = UserOAuthToken {
             id: token_id,
             user_id,
@@ -3527,7 +3557,7 @@ mod tests {
             expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
             account_email: "alice@example.com".into(),
             metadata: serde_json::json!({
-                "slack": { "team_id": "T123" }
+                "slack": { "team_id": encrypted_team_id }
             }),
             is_shared: false,
             created_at: OffsetDateTime::now_utc(),

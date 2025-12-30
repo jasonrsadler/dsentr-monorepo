@@ -41,3 +41,5 @@
 - Slack messaging actions now require a workspace_connection_id for personal-user posting, refresh Slack tokens on token_expired with a single retry, and surface auth_expired errors only when refresh fails.
 - Slack messaging action tests now use refresh overrides and a synchronous token repo update path to satisfy Send bounds and clippy in mocked refresh flows.
 - Slack messaging now enforces explicit identity selection (`workspace_bot` vs `personal_user`) and checks Slack team IDs at execution time when posting as a user.
+- Slack personal-user execution now decrypts stored Slack team metadata before comparing with workspace team ids so encrypted values do not trigger false mismatches.
+- Slack personal-user execution now accepts either encrypted or legacy plaintext Slack team ids, validating format after decrypt fallback and returning a reconnect prompt when metadata is missing or invalid.

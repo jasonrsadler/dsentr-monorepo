@@ -675,9 +675,11 @@ impl WorkspaceOAuthService {
 
         let mut decrypted = self.decrypt_connection(record.clone())?;
         if decrypted.provider != ConnectedOAuthProvider::Slack {
-            return Err(WorkspaceOAuthError::OAuth(OAuthAccountError::InvalidResponse(
-                "Slack workspace refresh requires a Slack connection".into(),
-            )));
+            return Err(WorkspaceOAuthError::OAuth(
+                OAuthAccountError::InvalidResponse(
+                    "Slack workspace refresh requires a Slack connection".into(),
+                ),
+            ));
         }
 
         let refreshed = self

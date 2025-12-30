@@ -1,6 +1,4 @@
 use super::prelude::*;
-use crate::services::oauth::account_service::AuthorizationTokens;
-
 pub(crate) const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub(crate) const MICROSOFT_AUTH_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
@@ -207,12 +205,6 @@ pub(crate) fn parse_slack_state(value: &str) -> Option<Uuid> {
         return None;
     }
     Uuid::parse_str(workspace).ok()
-}
-
-pub(crate) fn strip_slack_webhook(tokens: &mut AuthorizationTokens) {
-    if let Some(slack) = tokens.slack.as_mut() {
-        slack.incoming_webhook_url = None;
-    }
 }
 
 pub(crate) fn build_state_cookie(name: &str, value: &str) -> Cookie<'static> {
