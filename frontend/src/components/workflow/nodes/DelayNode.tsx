@@ -97,6 +97,33 @@ function DelayNodeContent({
     () => validateDelayConfig(normalizedConfig),
     [normalizedConfig]
   )
+  const summaryItems = useMemo(() => {
+    const items: Array<{ label: string; value: string }> = []
+    const modeLabel =
+      normalizedConfig.mode === 'datetime' ? 'Date/time' : 'Duration'
+    items.push({ label: 'Mode', value: modeLabel })
+
+    if (normalizedConfig.mode === 'datetime') {
+      items.push({
+        label: 'Until',
+        value: formatDelayDateTime(normalizedConfig.wait_until)
+      })
+    } else {
+      items.push({
+        label: 'Wait',
+        value: formatDelayDuration(normalizedConfig.wait_for)
+      })
+    }
+
+    if (typeof normalizedConfig.jitter_seconds === 'number') {
+      const jitter = normalizedConfig.jitter_seconds
+      if (jitter > 0) {
+        items.push({ label: 'Jitter', value: `${jitter}s` })
+      }
+    }
+
+    return items
+  }, [normalizedConfig])
 
   useEffect(() => {
     if ((nodeData?.hasValidationErrors ?? false) !== hasValidationErrors) {
@@ -190,6 +217,7 @@ function DelayNodeContent({
         ) : null}
         <ActionNodeSummary
           nodeId={id}
+          summaryItems={summaryItems}
           hint="Open the Delay flyout to configure wait duration/date and jitter."
         />
       </div>
@@ -226,4 +254,27 @@ function DelayNodeContent({
       </AnimatePresence>
     </motion.div>
   )
+}
+
+const formatDelayDuration = (waitFor?: DelayConfig['wait_for']) => {
+  if (!waitFor) return 'Not set'
+  const parts: string[] = []
+  if (waitFor.days) parts.push(`${waitFor.days}d`)
+  if (waitFor.hours) parts.push(`${waitFor.hours}h`)
+  if (waitFor.minutes) parts.push(`${waitFor.minutes}m`)
+  return parts.length > 0 ? parts.join(' ') : 'Not set'
+}
+
+const formatDelayDateTime = (value?: string) => {
+  const trimmed = value?.trim()
+  if (!trimmed) return 'Not set'
+  const parsed = new Date(trimmed)
+  if (Number.isNaN(parsed.getTime())) return trimmed
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(parsed)
 }

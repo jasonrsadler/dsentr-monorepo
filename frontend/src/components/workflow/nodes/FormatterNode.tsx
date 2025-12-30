@@ -3,6 +3,7 @@ import { Handle, Position } from '@xyflow/react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   normalizeFormatterConfig,
+  OPERATION_GROUPS,
   validateFormatterConfig,
   type FormatterConfig
 } from '@/components/actions/logic/FormatterNode/helpers'
@@ -98,6 +99,28 @@ function FormatterNodeContent({
     () => validateFormatterConfig(normalizedConfig),
     [normalizedConfig]
   )
+  const operationLabel = useMemo(() => {
+    const operation = normalizedConfig.operation?.trim()
+    if (!operation) return ''
+    const options = OPERATION_GROUPS.flatMap((group) => group.options)
+    return options.find((option) => option.value === operation)?.label ?? ''
+  }, [normalizedConfig.operation])
+  const summaryItems = useMemo(() => {
+    const items: Array<{ label: string; value: string }> = []
+    if (operationLabel) {
+      items.push({ label: 'Operation', value: operationLabel })
+    }
+    if (normalizedConfig.input?.trim()) {
+      items.push({ label: 'Input', value: normalizedConfig.input.trim() })
+    }
+    if (normalizedConfig.output_key?.trim()) {
+      items.push({
+        label: 'Output',
+        value: normalizedConfig.output_key.trim()
+      })
+    }
+    return items
+  }, [normalizedConfig.input, normalizedConfig.output_key, operationLabel])
 
   useEffect(() => {
     const hasValidationErrors = validation.hasErrors
@@ -194,6 +217,7 @@ function FormatterNodeContent({
         <div className="mt-3 px-1">
           <ActionNodeSummary
             nodeId={id}
+            summaryItems={summaryItems}
             hint="Open the Formatter flyout to edit operations and mappings."
           />
         </div>

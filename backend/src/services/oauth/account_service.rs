@@ -2825,7 +2825,7 @@ mod tests {
         let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
         assert_eq!(
             service.google_scopes(),
-            "openid email https://www.googleapis.com/auth/spreadsheets"
+            "openid email https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file"
         );
         assert_eq!(
             service.microsoft_scopes(),

@@ -1,6 +1,7 @@
 # Components Agent Notes
 
 ## Change Reasons
+- Workflow action node hint surfaces now include read-only summaries (key targets, destinations, and message snippets) so users can view common configuration details without opening the flyout. Delay and Formatter nodes show mode/operation summaries on the card.
 - Workflow canvas nodes now render minimal on-canvas shells, auto-open the flyout on selection, and defer configuration (and any API-backed dropdowns like Asana's) to the flyout only to avoid heavy loads during workflow hydration.
 - Asana workspace dropdown fetches now run once per visible connection instead of refiring on each render, preventing repeated backend/API calls when opening the flyout.
 - Asana project dropdown fetches are now gated the same way as workspace fetches, so opening the flyout no longer hammers the backend/Asana when the project field is visible.
