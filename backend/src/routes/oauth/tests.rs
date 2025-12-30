@@ -2415,6 +2415,7 @@ async fn solo_plan_slack_start_redirects_with_upgrade_message() {
         AuthSession(claims),
         Query(ConnectQuery {
             workspace: Some(workspace_id),
+            workspace_connection_id: None,
         }),
         CookieJar::new(),
     )
@@ -2455,6 +2456,7 @@ async fn workspace_plan_slack_start_sets_state_cookie() {
         AuthSession(claims),
         Query(ConnectQuery {
             workspace: Some(workspace_id),
+            workspace_connection_id: None,
         }),
         CookieJar::new(),
     )
@@ -2494,6 +2496,7 @@ async fn joined_workspace_member_with_solo_claims_can_connect() {
         AuthSession(claims),
         Query(ConnectQuery {
             workspace: Some(workspace_id),
+            workspace_connection_id: None,
         }),
         CookieJar::new(),
     )
@@ -2530,6 +2533,7 @@ async fn workspace_viewer_is_blocked_from_connecting() {
         AuthSession(claims),
         Query(ConnectQuery {
             workspace: Some(workspace_id),
+            workspace_connection_id: None,
         }),
         CookieJar::new(),
     )

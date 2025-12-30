@@ -37,3 +37,5 @@
 - Slack OAuth start/callback now require an explicit workspace context, include workspace-aware redirects, and strip incoming webhooks so workspace-scoped flows have no fallback semantics.
 - Slack OAuth callback now installs workspace Slack connections via the Slack-specific install helper while storing personal tokens separately for workspace-first isolation.
 - Slack OAuth installs now log requested scopes and validate bot token scopes via `auth.test` before persisting workspace connections.
+- Slack personal OAuth start now forces `prompt=consent` and locks the `team` to the workspace Slack team id so Slack issues a user token without changing workspace installs.
+- OAuth route tests now set `workspace_connection_id: None` when constructing `ConnectQuery` to satisfy the new optional field.

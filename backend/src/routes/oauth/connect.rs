@@ -17,6 +17,12 @@ use tracing::{info, warn};
 pub struct ConnectQuery {
     #[serde(default)]
     pub workspace: Option<Uuid>,
+    #[serde(
+        default,
+        rename = "workspaceConnectionId",
+        alias = "workspace_connection_id"
+    )]
+    pub workspace_connection_id: Option<Uuid>,
 }
 
 const OAUTH_VIEWER_RESTRICTION_MESSAGE: &str =
@@ -276,22 +282,108 @@ pub async fn slack_connect_start(
 
     let bot_scopes = state.oauth_accounts.slack_bot_scopes();
     let user_scopes = state.oauth_accounts.slack_scopes();
-    info!(
-        provider = "slack",
-        workspace_id = %workspace_id,
-        bot_scopes,
-        user_scopes,
-        "Starting Slack OAuth install with requested scopes"
-    );
+    let personal_team_id = if let Some(workspace_connection_id) = params.workspace_connection_id {
+        let connection = match state
+            .workspace_connection_repo
+            .find_by_id(workspace_connection_id)
+            .await
+        {
+            Ok(Some(connection)) => connection,
+            Ok(None) => {
+                return redirect_with_error_for_provider(
+                    &state.config,
+                    ConnectedOAuthProvider::Slack,
+                    "Slack personal authorization requires a workspace Slack connection.",
+                    Some(workspace_id),
+                );
+            }
+            Err(err) => {
+                error!(
+                    %workspace_id,
+                    %workspace_connection_id,
+                    ?err,
+                    "failed to load workspace connection for Slack personal OAuth"
+                );
+                return redirect_with_error_for_provider(
+                    &state.config,
+                    ConnectedOAuthProvider::Slack,
+                    OAUTH_WORKSPACE_ACCESS_ERROR_MESSAGE,
+                    Some(workspace_id),
+                );
+            }
+        };
+
+        if connection.workspace_id != workspace_id
+            || connection.provider != ConnectedOAuthProvider::Slack
+        {
+            return redirect_with_error_for_provider(
+                &state.config,
+                ConnectedOAuthProvider::Slack,
+                "Slack personal authorization requires a workspace Slack connection.",
+                Some(workspace_id),
+            );
+        }
+
+        let team_id = connection
+            .slack_team_id
+            .as_deref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
+
+        match team_id {
+            Some(team_id) => Some(team_id),
+            None => {
+                return redirect_with_error_for_provider(
+                    &state.config,
+                    ConnectedOAuthProvider::Slack,
+                    "Slack personal authorization requires a workspace Slack connection.",
+                    Some(workspace_id),
+                );
+            }
+        }
+    } else {
+        None
+    };
+
+    if personal_team_id.is_some() {
+        info!(
+            provider = "slack",
+            workspace_id = %workspace_id,
+            user_scopes,
+            "Starting Slack personal OAuth authorization"
+        );
+    } else {
+        info!(
+            provider = "slack",
+            workspace_id = %workspace_id,
+            bot_scopes,
+            user_scopes,
+            "Starting Slack OAuth install with requested scopes"
+        );
+    }
 
     let mut url = Url::parse(SLACK_AUTH_URL).expect("valid slack auth url");
-    url.query_pairs_mut()
-        .append_pair("client_id", &state.config.oauth.slack.client_id)
-        .append_pair("redirect_uri", &state.config.oauth.slack.redirect_uri)
-        .append_pair("response_type", "code")
-        .append_pair("scope", bot_scopes)
-        .append_pair("user_scope", user_scopes)
-        .append_pair("state", &state_token);
+    {
+        let mut query = url.query_pairs_mut();
+        query
+            .append_pair("client_id", &state.config.oauth.slack.client_id)
+            .append_pair("redirect_uri", &state.config.oauth.slack.redirect_uri)
+            .append_pair("response_type", "code")
+            .append_pair("state", &state_token);
+
+        if let Some(team_id) = personal_team_id {
+            // Slack reuses existing grants; prompt=consent forces the user OAuth screen.
+            query
+                .append_pair("user_scope", user_scopes)
+                .append_pair("team", &team_id)
+                .append_pair("prompt", "consent");
+        } else {
+            query
+                .append_pair("scope", bot_scopes)
+                .append_pair("user_scope", user_scopes);
+        }
+    }
 
     (jar, Redirect::to(url.as_str())).into_response()
 }
