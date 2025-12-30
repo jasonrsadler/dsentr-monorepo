@@ -283,7 +283,7 @@ impl OAuthAccountService {
         // `openid email` lets us call the Google OpenID Connect userinfo endpoint and confirm the
         // caller's verified email address. The Sheets scope is required by workflow actions that
         // append rows via the Google Sheets API.
-        "openid email https://www.googleapis.com/auth/spreadsheets"
+        "openid email https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file"
     }
 
     pub fn microsoft_scopes(&self) -> &'static str {
