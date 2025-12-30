@@ -43,5 +43,5 @@
 - Removed unused mutable locals in OAuth account token validation to satisfy clippy without changing behavior.
 - Slack OAuth scope lists now include the required bot read + public write scopes and the expanded user read scopes to support channel discovery and delegated posting.
 - OAuth account tests can now override Slack token and user info endpoints so Slack exchange/auth flows are stubbable without hitting Slack.
-- Slack personal token exchanges now call Slack `auth.test` inside the account service to capture team ids and keep webhook stripping/metadata writes centralized in one place.
-- Slack personal OAuth exchanges now guard against missing user access tokens before calling `auth.test` to surface a clear, descriptive error.
+- Slack personal tokens now always come from the combined Slack install exchange, with `auth.test` supplying the team id and the install response supplying webhook metadata in one service path.
+- Slack OAuth exchanges now guard against missing user access tokens before calling `auth.test` to surface clear errors.

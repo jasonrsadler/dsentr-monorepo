@@ -996,7 +996,7 @@ impl OAuthAccountService {
         let personal_slack_meta = SlackOAuthMetadata {
             team_id: Some(team_id),
             bot_user_id: exchange.bot_user_id.clone(),
-            incoming_webhook_url: None,
+            incoming_webhook_url: exchange.incoming_webhook_url.clone(),
         };
         let workspace_slack_meta = SlackOAuthMetadata {
             team_id: Some(exchange.team_id.clone()),
