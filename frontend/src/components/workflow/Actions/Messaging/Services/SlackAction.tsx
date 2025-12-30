@@ -141,13 +141,12 @@ const EMPTY_SLACK_PARAMS: SlackActionValues = {
   connectionScope: '',
   connectionId: '',
   accountEmail: '',
-  identity: undefined,
+  identity: 'workspace_bot',
   workspace_connection_id: undefined,
   personal_connection_id: undefined
 }
 
 const sanitizeSlackPayload = (params: any): SlackActionValues => {
-  // Legacy payloads may include postAsUser; intentionally ignored.
   const sanitized: SlackActionValues = {
     channel: typeof params.channel === 'string' ? params.channel : '',
     message: typeof params.message === 'string' ? params.message : '',
@@ -205,6 +204,19 @@ const sanitizeSlackPayload = (params: any): SlackActionValues => {
 
   if (sanitized.identity === 'workspace_bot') {
     sanitized.personal_connection_id = undefined
+    if (sanitized.connectionScope === 'user') {
+      sanitized.connectionScope = ''
+      sanitized.connectionId = ''
+      sanitized.accountEmail = ''
+      sanitized.connection = undefined
+    }
+  } else if (sanitized.identity === 'personal_user') {
+    if (sanitized.connectionScope === 'workspace') {
+      sanitized.connectionScope = ''
+      sanitized.connectionId = ''
+      sanitized.accountEmail = ''
+      sanitized.connection = undefined
+    }
   }
 
   return sanitized
@@ -247,6 +259,8 @@ const extractSlackParams = (source: unknown): SlackActionValues => {
     slackRecord.identity === 'personal_user'
   ) {
     base.identity = slackRecord.identity
+  } else if (typeof slackRecord.postAsUser === 'boolean') {
+    base.identity = slackRecord.postAsUser ? 'personal_user' : 'workspace_bot'
   }
   // NEW explicit backend parameters extraction
   if (typeof slackRecord.workspace_connection_id === 'string') {

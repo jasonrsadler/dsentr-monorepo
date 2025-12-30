@@ -156,6 +156,12 @@ enum SlackConnectionContext {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SlackIdentity {
+    WorkspaceBot,
+    PersonalUser,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SlackAuthExpiredPayload {
@@ -178,11 +184,51 @@ async fn send_slack(
     state: &AppState,
     run: &WorkflowRun,
 ) -> Result<(Value, Option<String>), String> {
-    // Enforce explicit identity selection: exactly one of workspace (bot) or personal (post-as-user)
-    let post_as_user = params
-        .get("postAsUser")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
+    let identity_param = params
+        .get("identity")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    let legacy_post_as_user = params.get("postAsUser").and_then(|value| value.as_bool());
+
+    let identity = match identity_param {
+        Some("workspace_bot") => Some(SlackIdentity::WorkspaceBot),
+        Some("personal_user") => Some(SlackIdentity::PersonalUser),
+        Some(_) => {
+            return Err(
+                "identity selection error: identity must be 'workspace_bot' or 'personal_user'"
+                    .to_string(),
+            );
+        }
+        None => None,
+    };
+
+    let identity = match (identity, legacy_post_as_user) {
+        (Some(identity), Some(legacy)) => {
+            let legacy_identity = if legacy {
+                SlackIdentity::PersonalUser
+            } else {
+                SlackIdentity::WorkspaceBot
+            };
+            if identity != legacy_identity {
+                return Err(
+                    "identity selection error: identity does not match postAsUser".to_string(),
+                );
+            }
+            Some(identity)
+        }
+        (Some(identity), None) => Some(identity),
+        (None, Some(legacy)) => Some(if legacy {
+            SlackIdentity::PersonalUser
+        } else {
+            SlackIdentity::WorkspaceBot
+        }),
+        (None, None) => None,
+    };
+
+    let identity = identity.ok_or_else(|| {
+        "identity selection error: no explicit identity provided. Provide identity='workspace_bot' or identity='personal_user'.".to_string()
+    })?;
 
     // allow connection info to be provided either as a `connection` object or top-level
     // (they may be duplicated by the sanitizer). Do not treat this as specifying two identities.
@@ -215,7 +261,7 @@ async fn send_slack(
                 return Err("workspace_bot error: workspace Slack execution requires an explicit connectionId".to_string());
             }
 
-            return Err("identity selection error: no explicit identity provided. Provide exactly one: a workspace-scoped connection (connectionScope='workspace' + connectionId) for workspace_bot, or a personal connection (connectionScope='user' + connectionId) for personal_user".to_string());
+            return Err("identity selection error: connectionScope and connectionId are required for Slack execution.".to_string());
         }
     };
 
@@ -224,8 +270,8 @@ async fn send_slack(
 
     let (token, token_email, connection_context) = match connection_usage {
         NodeConnectionUsage::Workspace(info) => {
-            if post_as_user {
-                return Err("personal_user error: 'postAsUser' is true but a workspace-scoped connection was provided. To post as a user, supply a personal connection (connectionScope='user').".to_string());
+            if identity == SlackIdentity::PersonalUser {
+                return Err("personal_user error: a workspace connection was supplied, but identity is personal_user. Select a personal Slack connection.".to_string());
             }
             let workspace_id = run.workspace_id.ok_or_else(|| {
                     "This workflow run is not associated with a workspace. Promote the Slack connection to the workspace or switch the action back to a personal connection.".to_string()
@@ -324,8 +370,8 @@ async fn send_slack(
             )
         }
         NodeConnectionUsage::User(info) => {
-            if !post_as_user {
-                return Err("workspace_bot error: a personal connection was provided but 'postAsUser' is false. To post as a user set postAsUser=true and supply a personal connection (connectionScope='user').".to_string());
+            if identity == SlackIdentity::WorkspaceBot {
+                return Err("workspace_bot error: a personal connection was supplied, but identity is workspace_bot. Select a workspace Slack connection.".to_string());
             }
 
             let connection_id_str = info.connection_id.ok_or_else(|| {
@@ -350,9 +396,10 @@ async fn send_slack(
                     "personal_user error: workspace_connection_id is required for Slack execution."
                         .to_string()
                 })?;
-            let workspace_connection_id = Uuid::parse_str(workspace_connection_id).map_err(|_| {
-                "personal_user error: workspace_connection_id must be a valid UUID.".to_string()
-            })?;
+            let workspace_connection_id =
+                Uuid::parse_str(workspace_connection_id).map_err(|_| {
+                    "personal_user error: workspace_connection_id must be a valid UUID.".to_string()
+                })?;
 
             let token = state
                     .oauth_accounts
@@ -1952,7 +1999,10 @@ mod tests {
             smtp_mailer::MockMailer,
         },
         state::{test_pg_pool, AppState},
-        utils::{encryption::{decrypt_secret, encrypt_secret}, jwt::JwtKeys},
+        utils::{
+            encryption::{decrypt_secret, encrypt_secret},
+            jwt::JwtKeys,
+        },
     };
     use sqlx::Error as SqlxError;
     use uuid::Uuid;
@@ -3009,6 +3059,7 @@ mod tests {
                     "platform": "Slack",
                     "channel": "#team",
                     "message": "Hello workspace",
+                    "identity": "workspace_bot",
                     "connectionScope": "workspace",
                     "connectionId": connection_id,
                     "accountEmail": "workspace@example.com",
@@ -3142,6 +3193,7 @@ mod tests {
                     "platform": "Slack",
                     "channel": "#team",
                     "message": "Hello workspace",
+                    "identity": "workspace_bot",
                     "connectionScope": "workspace",
                     "connectionId": connection_id,
                     "accountEmail": "workspace@example.com",
@@ -3235,7 +3287,9 @@ mod tests {
             refresh_token: encrypted_refresh,
             expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
             account_email: "alice@example.com".into(),
-            metadata: serde_json::json!({ "slack": { "team_id": "T123" } }),
+            metadata: serde_json::json!({
+                "slack": { "team_id": "T123" }
+            }),
             is_shared: false,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
@@ -3261,8 +3315,9 @@ mod tests {
             slack_team_id: Some("T123".into()),
         };
 
-        let connection_repo =
-            Arc::new(RecordingWorkspaceConnections::with_connection(connection.clone()));
+        let connection_repo = Arc::new(RecordingWorkspaceConnections::with_connection(
+            connection.clone(),
+        ));
         let token_repo = Arc::new(RecordingTokenRepo::new(record));
         let token_repo_trait: Arc<dyn UserOAuthTokenRepository> = token_repo.clone();
 
@@ -3416,6 +3471,7 @@ mod tests {
                     "platform": "Slack",
                     "channel": "#team",
                     "message": "Hello workspace",
+                    "identity": "workspace_bot",
                     "connection": {
                         "connectionScope": "workspace",
                         "connectionId": connection_id,
@@ -3454,6 +3510,7 @@ mod tests {
         let user_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
 
+        let connection_id = Uuid::new_v4();
         let access_token = "slack-personal-access";
         let refresh_token = "slack-personal-refresh";
         let encrypted_access = encrypt_secret(&encryption_key, access_token).unwrap();
@@ -3469,14 +3526,15 @@ mod tests {
             refresh_token: encrypted_refresh.clone(),
             expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
             account_email: "alice@example.com".into(),
-            metadata: serde_json::json!({ "slack": { "team_id": "T123" } }),
+            metadata: serde_json::json!({
+                "slack": { "team_id": "T123" }
+            }),
             is_shared: false,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
         };
 
         // workspace connection has a different team
-        let connection_id = Uuid::new_v4();
         let token_id_ws = Uuid::new_v4();
         let creator_id = Uuid::new_v4();
         let connection = WorkspaceConnection {
@@ -3788,6 +3846,7 @@ mod tests {
                     "platform": "Slack",
                     "channel": "#team",
                     "message": "Hello workspace",
+                    "identity": "workspace_bot",
                     "connection": {
                         "connectionScope": "workspace",
                         "connectionId": connection_a.id,
@@ -4057,6 +4116,7 @@ mod tests {
                     "platform": "Slack",
                     "channel": "#team",
                     "message": "Hello",
+                    "identity": "workspace_bot",
                     "connection": { "connectionScope": "workspace" }
                 }
             }),
@@ -4124,6 +4184,7 @@ mod tests {
                     "platform": "Slack",
                     "channel": "#team",
                     "message": "Hello",
+                    "identity": "workspace_bot",
                     "connection": { "connectionScope": "workspace" }
                 }
             }),
@@ -5440,6 +5501,7 @@ mod tests {
                     "deliveryMethod": "Incoming Webhook",
                     "channel": "#alerts",
                     "message": "hello webhook",
+                    "identity": "workspace_bot",
                     "connection": {
                         "connectionScope": "workspace",
                         "connectionId": connection_id.to_string(),

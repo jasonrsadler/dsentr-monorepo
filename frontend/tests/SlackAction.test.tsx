@@ -137,7 +137,7 @@ const secrets = {}
 const baseParams = () => ({
   channel: '',
   message: '',
-  identity: undefined,
+  identity: 'workspace_bot' as const,
   workspace_connection_id: undefined,
   personal_connection_id: undefined
 })
@@ -167,7 +167,7 @@ describe('SlackAction identity enforcement and backend contract', () => {
 
   /* ---------- identity required ---------- */
 
-  it('does not execute without identity', async () => {
+  it('defaults to workspace_bot and requires a workspace connection', async () => {
     fetchConnections.mockResolvedValue({ workspace: [], personal: [] })
 
     renderWithSecrets(<SlackAction nodeId={nodeId} />, { secrets })
@@ -179,7 +179,7 @@ describe('SlackAction identity enforcement and backend contract', () => {
     expect(updateNodeData).toHaveBeenCalled()
     const [, payload] = updateNodeData.mock.calls.at(-1)!
     expect(payload.hasValidationErrors).toBe(true)
-    expect(payload.params.identity).toBeUndefined()
+    expect(payload.params.identity).toBe('workspace_bot')
     expect(payload.params.workspace_connection_id).toBeUndefined()
     expect(payload.params.personal_connection_id).toBeUndefined()
     expect(fetchSlackChannels).not.toHaveBeenCalled()

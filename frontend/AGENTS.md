@@ -248,6 +248,7 @@ Content Security Policy hardening:
 
 Slack action UX:
 - When an OAuth connection is selected in the Slack action node, the manual token selector ("Select Slack token") and its helper text are hidden. Selecting "Use manual Slack token" reveals the selector again. This avoids confusing, disabled controls and clarifies which auth mode is active.
+- Slack action now defaults to the workspace bot identity and clears incompatible selections when switching identities so invalid combinations are not saved.
 
 CSP automation:
 - Frontend CI workflow patches rontend/index.html before build to remove localhost development hosts from the CSP meta tag. This keeps dev convenient while ensuring production builds enforce the stricter, approved CSP (ASVS 14.1.2/STIG 5.10).
