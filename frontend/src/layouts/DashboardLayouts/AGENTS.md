@@ -18,6 +18,8 @@
 - Flyout: when opened from the dashed hint surface, the canvas pans smoothly to keep the activated node visible beside the flyout instead of being covered.
 - Asana flyout now receives the normalized plan tier from the canvas controller so workspace plans skip the solo-only upgrade notice while keeping solo gating intact.
 - Asana canvas nodes now pass the normalized plan tier into the node controller so the solo-only upgrade banner no longer appears for workspace plans when viewing the node on the canvas.
+- Added Notion action palette entry plus trigger flyout controls (connection + database pickers) so Notion workflows can be configured alongside existing triggers and actions.
+- Notion trigger fetch hooks drop the static `errorMessage` dependency to satisfy hooks lint while keeping error mapping intact.
 
 ## Notes
 - Pickers are locally stateful and wrapped in useMemo/useCallback with click-outside + Escape handling to avoid React Flow re-render loops.

@@ -6,6 +6,7 @@ pub mod billing;
 pub mod dashboard;
 pub mod early_access;
 pub mod google;
+pub mod integrations;
 pub mod issues;
 pub mod microsoft;
 pub mod oauth;

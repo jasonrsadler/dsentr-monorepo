@@ -4,10 +4,12 @@ pub(crate) const MICROSOFT_AUTH_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 pub(crate) const SLACK_AUTH_URL: &str = "https://slack.com/oauth/v2/authorize";
 pub(crate) const ASANA_AUTH_URL: &str = "https://app.asana.com/-/oauth_authorize";
+pub(crate) const NOTION_AUTH_URL: &str = "https://api.notion.com/v1/oauth/authorize";
 pub(crate) const GOOGLE_STATE_COOKIE: &str = "oauth_google_state";
 pub(crate) const MICROSOFT_STATE_COOKIE: &str = "oauth_microsoft_state";
 pub(crate) const SLACK_STATE_COOKIE: &str = "oauth_slack_state";
 pub(crate) const ASANA_STATE_COOKIE: &str = "oauth_asana_state";
+pub(crate) const NOTION_STATE_COOKIE: &str = "oauth_notion_state";
 pub(crate) const STATE_COOKIE_MAX_MINUTES: i64 = 10;
 pub(crate) const OAUTH_PLAN_RESTRICTION_MESSAGE: &str =
     "OAuth integrations are available on workspace plans and above. Upgrade to connect accounts.";
@@ -76,6 +78,7 @@ pub(crate) struct ProviderGroupedConnections<T> {
     pub(crate) microsoft: Vec<T>,
     pub(crate) slack: Vec<T>,
     pub(crate) asana: Vec<T>,
+    pub(crate) notion: Vec<T>,
 }
 
 impl<T> Default for ProviderGroupedConnections<T> {
@@ -85,6 +88,7 @@ impl<T> Default for ProviderGroupedConnections<T> {
             microsoft: Vec::new(),
             slack: Vec::new(),
             asana: Vec::new(),
+            notion: Vec::new(),
         }
     }
 }
@@ -96,6 +100,7 @@ impl<T> ProviderGroupedConnections<T> {
             ConnectedOAuthProvider::Microsoft => self.microsoft.push(payload),
             ConnectedOAuthProvider::Slack => self.slack.push(payload),
             ConnectedOAuthProvider::Asana => self.asana.push(payload),
+            ConnectedOAuthProvider::Notion => self.notion.push(payload),
         }
     }
 }
@@ -243,6 +248,7 @@ pub(crate) fn parse_provider(raw: &str) -> Option<ConnectedOAuthProvider> {
         "microsoft" => Some(ConnectedOAuthProvider::Microsoft),
         "slack" => Some(ConnectedOAuthProvider::Slack),
         "asana" => Some(ConnectedOAuthProvider::Asana),
+        "notion" => Some(ConnectedOAuthProvider::Notion),
         _ => None,
     }
 }
@@ -253,6 +259,7 @@ pub(crate) fn provider_to_key(provider: ConnectedOAuthProvider) -> &'static str 
         ConnectedOAuthProvider::Microsoft => "microsoft",
         ConnectedOAuthProvider::Slack => "slack",
         ConnectedOAuthProvider::Asana => "asana",
+        ConnectedOAuthProvider::Notion => "notion",
     }
 }
 
@@ -357,6 +364,7 @@ pub fn map_oauth_error(err: OAuthAccountError) -> Response {
                 ConnectedOAuthProvider::Microsoft => "Microsoft",
                 ConnectedOAuthProvider::Slack => "Slack",
                 ConnectedOAuthProvider::Asana => "Asana",
+                ConnectedOAuthProvider::Notion => "Notion",
             };
             JsonResponse::bad_request(&format!(
                 "The {provider_name} account email must be verified before connecting."

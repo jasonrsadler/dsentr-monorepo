@@ -16,7 +16,7 @@ Open the Settings button in the dashboard header to manage plans, people, and pl
 
 ## Integrations
 
-- Connect Google, Microsoft, or Slack accounts for OAuth-powered actions. The tab loads personal and workspace-level connections, surfaces expiration or revocation warnings, and lets admins promote personal credentials to shared workspace credentials.【F:src/components/settings/tabs/IntegrationsTab.tsx†L1-L121】【F:src/components/settings/tabs/IntegrationsTab.tsx†L123-L233】
+- Connect Google, Microsoft, Slack, Asana, or Notion accounts for OAuth-powered actions. The tab loads personal and workspace-level connections, surfaces expiration or revocation warnings, and lets admins promote personal credentials to shared workspace credentials.?F:src/components/settings/tabs/IntegrationsTab.tsx�L1-L121??F:src/components/settings/tabs/IntegrationsTab.tsx�L123-L233?
 - Reconnect, refresh, or disconnect providers from the same screen. Admins can unshare workspace connections or remove them entirely, while Solo users see plan upgrade prompts for restricted features.【F:src/components/settings/tabs/IntegrationsTab.tsx†L235-L344】【F:src/components/settings/tabs/IntegrationsTab.tsx†L346-L470】
 - The tab accepts notices passed from OAuth callback routes so successful and failed connections open the modal with contextual messaging automatically.【F:src/layouts/DashboardLayout.tsx†L190-L259】【F:src/components/settings/tabs/IntegrationsTab.tsx†L472-L547】
 

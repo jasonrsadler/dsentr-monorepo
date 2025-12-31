@@ -43,3 +43,6 @@
 - Slack messaging now enforces explicit identity selection (`workspace_bot` vs `personal_user`) and checks Slack team IDs at execution time when posting as a user.
 - Slack personal-user execution now decrypts stored Slack team metadata before comparing with workspace team ids so encrypted values do not trigger false mismatches.
 - Slack personal-user execution now accepts either encrypted or legacy plaintext Slack team ids, validating format after decrypt fallback and returning a reconnect prompt when metadata is missing or invalid.
+- Added Notion action executors for create/update/query/database operations with type-aware property mapping, connection-scope validation, and error handling aligned with OAuth/token ownership rules.
+- Notion query results now wrap page summary mapping to avoid move/borrow conflicts while streaming page payloads.
+- Notion action helpers now use an `if let` object destructure in select-property mapping, and tests import OAuth token types from the db repository module.

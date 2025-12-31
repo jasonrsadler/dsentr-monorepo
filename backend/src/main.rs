@@ -55,6 +55,7 @@ use routes::{
     },
     dashboard::dashboard_handler,
     early_access::handle_early_access,
+    integrations::notion::{get_notion_database_schema, list_notion_databases},
     issues::{
         get_issue_with_messages, list_user_issues, mark_issue_messages_read, reply_to_issue,
         submit_issue_report,
@@ -63,8 +64,9 @@ use routes::{
     oauth::{
         asana_connect_callback, asana_connect_start, disconnect_connection, get_connection_by_id,
         google_connect_callback, google_connect_start, list_connections, list_provider_connections,
-        microsoft_connect_callback, microsoft_connect_start, refresh_connection, revoke_connection,
-        slack_connect_callback, slack_connect_start,
+        microsoft_connect_callback, microsoft_connect_start, notion_connect_callback,
+        notion_connect_start, refresh_connection, revoke_connection, slack_connect_callback,
+        slack_connect_start,
     },
     options::{
         secrets::{delete_secret, list_secrets, upsert_secret},
@@ -620,6 +622,8 @@ async fn main() -> Result<()> {
         .route("/slack/callback", get(slack_connect_callback))
         .route("/asana/start", get(asana_connect_start))
         .route("/asana/callback", get(asana_connect_callback))
+        .route("/notion/start", get(notion_connect_start))
+        .route("/notion/callback", get(notion_connect_callback))
         .layer(session_guard.clone());
 
     let oauth_private_routes = Router::new()
@@ -662,6 +666,15 @@ async fn main() -> Result<()> {
         .route("/projects/{project_gid}/sections", get(list_asana_sections))
         .route("/tasks/{task_gid}", get(get_task_details))
         .route("/tasks/{task_gid}/stories", get(list_asana_task_stories))
+        .layer(csrf_layer.clone())
+        .layer(session_guard.clone());
+
+    let integrations_routes = Router::new()
+        .route("/notion/databases", get(list_notion_databases))
+        .route(
+            "/notion/databases/{database_id}/schema",
+            get(get_notion_database_schema),
+        )
         .layer(csrf_layer.clone())
         .layer(session_guard.clone());
 
@@ -755,6 +768,7 @@ async fn main() -> Result<()> {
         .nest("/api/microsoft", microsoft_routes)
         .nest("/api/slack", slack_routes)
         .nest("/api/asana", asana_routes)
+        .nest("/api/integrations", integrations_routes)
         .nest("/api/options", options_routes)
         .nest("/api/admin", admin_routes)
         .with_state(state)

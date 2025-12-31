@@ -1,16 +1,19 @@
 use super::{
     helpers::{
         build_slack_state, build_state_cookie, clear_state_cookie, error_message_for_redirect,
-        handle_callback, parse_slack_state, redirect_success_with_workspace, redirect_with_error,
-        redirect_with_error_for_provider, redirect_with_error_with_workspace, CallbackQuery,
-        ASANA_AUTH_URL, ASANA_STATE_COOKIE, GOOGLE_AUTH_URL, GOOGLE_STATE_COOKIE,
-        MICROSOFT_AUTH_URL, MICROSOFT_STATE_COOKIE, OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_AUTH_URL,
-        SLACK_STATE_COOKIE, SLACK_WORKSPACE_REQUIRED_MESSAGE,
+        handle_callback, parse_slack_state, provider_to_key, redirect_success_with_workspace,
+        redirect_with_error, redirect_with_error_for_provider, redirect_with_error_with_workspace,
+        CallbackQuery, ASANA_AUTH_URL, ASANA_STATE_COOKIE, GOOGLE_AUTH_URL, GOOGLE_STATE_COOKIE,
+        MICROSOFT_AUTH_URL, MICROSOFT_STATE_COOKIE, NOTION_AUTH_URL, NOTION_STATE_COOKIE,
+        OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_AUTH_URL, SLACK_STATE_COOKIE,
+        SLACK_WORKSPACE_REQUIRED_MESSAGE,
     },
     prelude::*,
 };
 use crate::models::workspace::WorkspaceRole;
 use crate::services::oauth::workspace_service::WorkspaceOAuthError;
+use base64::Engine as _;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 #[derive(Debug, Default, Deserialize)]
@@ -23,6 +26,65 @@ pub struct ConnectQuery {
         alias = "workspace_connection_id"
     )]
     pub workspace_connection_id: Option<Uuid>,
+    #[serde(default, rename = "connectionScope", alias = "connection_scope")]
+    pub connection_scope: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotionState {
+    user_id: Uuid,
+    workspace_id: Option<Uuid>,
+    connection_scope: String,
+    nonce: String,
+}
+
+fn encode_notion_state(state: &NotionState) -> Result<String, Box<Response>> {
+    serde_json::to_vec(state)
+        .map(|payload| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload))
+        .map_err(|err| {
+            error!(?err, "Failed to encode Notion OAuth state");
+            Box::new(
+                JsonResponse::server_error("Failed to start Notion OAuth flow").into_response(),
+            )
+        })
+}
+
+fn decode_notion_state(raw: &str) -> Option<NotionState> {
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(raw)
+        .ok()?;
+    serde_json::from_slice(&decoded).ok()
+}
+
+fn normalize_notion_scope(
+    raw: Option<&str>,
+    workspace_id: Option<Uuid>,
+) -> Result<String, Box<Response>> {
+    if let Some(scope) = raw {
+        let normalized = scope.trim().to_ascii_lowercase();
+        if normalized == "workspace" {
+            if workspace_id.is_none() {
+                return Err(Box::new(
+                    JsonResponse::bad_request("Workspace scope requires a workspace id")
+                        .into_response(),
+                ));
+            }
+            return Ok("workspace".to_string());
+        }
+        if normalized == "personal" || normalized == "user" {
+            return Ok("personal".to_string());
+        }
+        return Err(Box::new(
+            JsonResponse::bad_request("Unsupported connection scope").into_response(),
+        ));
+    }
+
+    if workspace_id.is_some() {
+        Ok("workspace".to_string())
+    } else {
+        Ok("personal".to_string())
+    }
 }
 
 const OAUTH_VIEWER_RESTRICTION_MESSAGE: &str =
@@ -767,4 +829,230 @@ pub async fn asana_connect_callback(
         ASANA_STATE_COOKIE,
     )
     .await
+}
+
+pub async fn notion_connect_start(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    Query(params): Query<ConnectQuery>,
+    jar: CookieJar,
+) -> Response {
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(user_id) => user_id,
+        Err(_) => {
+            return redirect_with_error(
+                &state.config,
+                ConnectedOAuthProvider::Notion,
+                "Invalid user",
+            );
+        }
+    };
+
+    let connection_scope =
+        match normalize_notion_scope(params.connection_scope.as_deref(), params.workspace) {
+            Ok(scope) => scope,
+            Err(resp) => return *resp,
+        };
+
+    let workspace_id = if connection_scope == "workspace" {
+        params.workspace
+    } else {
+        None
+    };
+
+    if let Err(response) = ensure_oauth_permissions(
+        &state,
+        user_id,
+        claims.plan.as_deref(),
+        workspace_id,
+        ConnectedOAuthProvider::Notion,
+    )
+    .await
+    {
+        return response;
+    }
+
+    let state_payload = NotionState {
+        user_id,
+        workspace_id,
+        connection_scope: connection_scope.clone(),
+        nonce: generate_csrf_token(),
+    };
+
+    let state_token = match encode_notion_state(&state_payload) {
+        Ok(token) => token,
+        Err(resp) => return *resp,
+    };
+
+    let cookie = build_state_cookie(NOTION_STATE_COOKIE, &state_token);
+    let jar = jar.add(cookie);
+
+    let mut url = Url::parse(NOTION_AUTH_URL).expect("valid notion auth url");
+    url.query_pairs_mut()
+        .append_pair("client_id", &state.config.oauth.notion.client_id)
+        .append_pair("redirect_uri", &state.config.oauth.notion.redirect_uri)
+        .append_pair("response_type", "code")
+        .append_pair(
+            "owner",
+            if connection_scope == "workspace" {
+                "workspace"
+            } else {
+                "user"
+            },
+        )
+        .append_pair("state", &state_token);
+
+    (jar, Redirect::to(url.as_str())).into_response()
+}
+
+pub async fn notion_connect_callback(
+    State(state): State<AppState>,
+    AuthSession(claims): AuthSession,
+    jar: CookieJar,
+    Query(query): Query<CallbackQuery>,
+) -> Response {
+    let provider = ConnectedOAuthProvider::Notion;
+
+    if let Some(error) = query.error.clone().or(query.error_description.clone()) {
+        return redirect_with_error(&state.config, provider, &error);
+    }
+
+    let code = match query.code.clone() {
+        Some(code) => code,
+        None => {
+            return redirect_with_error(&state.config, provider, "Missing code");
+        }
+    };
+
+    let expected_state = match jar.get(NOTION_STATE_COOKIE) {
+        Some(cookie) => cookie.value().to_string(),
+        None => return redirect_with_error(&state.config, provider, "Missing state"),
+    };
+
+    let provided_state = match query.state.clone() {
+        Some(state) => state,
+        None => return redirect_with_error(&state.config, provider, "Missing state"),
+    };
+
+    if provided_state != expected_state {
+        return redirect_with_error(&state.config, provider, "Invalid state");
+    }
+
+    let jar = clear_state_cookie(jar, NOTION_STATE_COOKIE);
+
+    let state_payload = match decode_notion_state(&expected_state) {
+        Some(payload) => payload,
+        None => {
+            let response = redirect_with_error(&state.config, provider, "Invalid state payload");
+            return (jar, response).into_response();
+        }
+    };
+
+    let user_id = match Uuid::parse_str(&claims.id) {
+        Ok(id) => id,
+        Err(_) => {
+            let response = redirect_with_error(&state.config, provider, "Invalid user");
+            return (jar, response).into_response();
+        }
+    };
+
+    if state_payload.user_id != user_id {
+        let response = redirect_with_error(&state.config, provider, "Invalid state");
+        return (jar, response).into_response();
+    }
+
+    let connection_scope = state_payload.connection_scope.trim().to_ascii_lowercase();
+    let workspace_id = state_payload.workspace_id;
+
+    if let Err(response) = ensure_oauth_permissions(
+        &state,
+        user_id,
+        claims.plan.as_deref(),
+        workspace_id,
+        provider,
+    )
+    .await
+    {
+        return (jar, response).into_response();
+    }
+
+    let tokens = match state
+        .oauth_accounts
+        .exchange_authorization_code(provider, &code)
+        .await
+    {
+        Ok(tokens) => tokens,
+        Err(err) => {
+            error!("OAuth authorization exchange failed: {err}");
+            let response =
+                redirect_with_error(&state.config, provider, &error_message_for_redirect(&err));
+            return (jar, response).into_response();
+        }
+    };
+
+    let stored = match state
+        .oauth_accounts
+        .save_authorization_deduped(user_id, provider, tokens)
+        .await
+    {
+        Ok(token) => token,
+        Err(err) => {
+            error!("Saving OAuth authorization failed: {err}");
+            let response =
+                redirect_with_error(&state.config, provider, &error_message_for_redirect(&err));
+            return (jar, response).into_response();
+        }
+    };
+
+    if connection_scope == "workspace" {
+        let Some(workspace_id) = workspace_id else {
+            let response = redirect_with_error(
+                &state.config,
+                provider,
+                "Workspace connection requires a workspace id",
+            );
+            return (jar, response).into_response();
+        };
+
+        if let Err(err) = state
+            .workspace_oauth
+            .promote_connection_with_token(workspace_id, user_id, provider, Some(stored.id))
+            .await
+        {
+            error!("Saving Notion workspace connection failed: {err}");
+            let message = match err {
+                WorkspaceOAuthError::Forbidden => {
+                    "Not authorized to install Notion for this workspace".to_string()
+                }
+                WorkspaceOAuthError::SlackInstallRequired => err.to_string(),
+                WorkspaceOAuthError::OAuth(inner) => error_message_for_redirect(&inner),
+                _ => "Failed to install Notion workspace connection".to_string(),
+            };
+            let response = redirect_with_error_with_workspace(
+                &state.config,
+                provider,
+                &message,
+                Some(workspace_id),
+            );
+            return (jar, response).into_response();
+        }
+
+        (
+            jar,
+            redirect_success_with_workspace(&state.config, provider, workspace_id),
+        )
+            .into_response()
+    } else {
+        let response = if let Some(workspace_id) = workspace_id {
+            redirect_success_with_workspace(&state.config, provider, workspace_id)
+        } else {
+            let url = format!(
+                "{}/dashboard?connected=true&provider={}",
+                state.config.frontend_origin,
+                provider_to_key(provider)
+            );
+            Redirect::to(&url)
+        };
+        (jar, response).into_response()
+    }
 }

@@ -7,6 +7,8 @@ use axum::{
     Router,
 };
 use axum_extra::extract::cookie::CookieJar;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use once_cell::sync::Lazy;
 use std::{
     collections::HashMap,
@@ -52,6 +54,8 @@ use crate::state::test_pg_pool;
 use crate::state::AppState;
 use crate::utils::encryption::{decrypt_secret, encrypt_secret};
 use crate::utils::jwt::JwtKeys;
+use reqwest::Url;
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::Error;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
@@ -64,11 +68,14 @@ use super::{
         disconnect_connection, get_connection_by_id, list_connections, list_provider_connections,
         refresh_connection, revoke_connection, ConnectionTarget, ListConnectionsQuery,
     },
-    connect::{google_connect_start, slack_connect_callback, slack_connect_start, ConnectQuery},
+    connect::{
+        google_connect_start, notion_connect_callback, notion_connect_start,
+        slack_connect_callback, slack_connect_start, ConnectQuery,
+    },
     helpers::{
         build_slack_state, build_state_cookie, error_message_for_redirect, handle_callback,
-        parse_provider, CallbackQuery, GOOGLE_STATE_COOKIE, OAUTH_PLAN_RESTRICTION_MESSAGE,
-        SLACK_STATE_COOKIE, SLACK_WORKSPACE_REQUIRED_MESSAGE,
+        parse_provider, CallbackQuery, GOOGLE_STATE_COOKIE, NOTION_STATE_COOKIE,
+        OAUTH_PLAN_RESTRICTION_MESSAGE, SLACK_STATE_COOKIE, SLACK_WORKSPACE_REQUIRED_MESSAGE,
     },
     prelude::ConnectedOAuthProvider,
 };
@@ -98,6 +105,11 @@ fn stub_config() -> Arc<Config> {
                 client_id: "client".into(),
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost/asana".into(),
+            },
+            notion: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/notion".into(),
             },
             token_encryption_key: vec![0u8; 32],
         },
@@ -242,9 +254,7 @@ fn build_list_connections_state(
         Arc::new(MembershipWorkspaceRepo::new(memberships));
     let workspace_connections: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(workspace_entries));
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: personal_tokens,
-    });
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo::new(personal_tokens));
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_client = Arc::new(reqwest::Client::new());
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -333,6 +343,22 @@ fn workspace_connection_fixture(
 
 const SLACK_BOT_SCOPES: &str =
     "channels:read,groups:read,im:read,mpim:read,chat:write,chat:write.public,incoming-webhook";
+const NOTION_TOKEN_RESPONSE: &str = r#"{
+    "access_token": "notion-access",
+    "bot_id": "bot-123",
+    "workspace_id": "ws-123",
+    "workspace_name": "Acme Workspace",
+    "owner": {
+        "type": "workspace",
+        "workspace": {
+            "id": "ws-123",
+            "name": "Acme Workspace"
+        }
+    }
+}"#;
+const NOTION_TOKEN_RESPONSE_MINIMAL: &str = r#"{
+    "access_token": "notion-access"
+}"#;
 
 async fn spawn_slack_stub_server() -> (std::net::SocketAddr, JoinHandle<()>) {
     async fn slack_oauth_access() -> Response<Body> {
@@ -397,9 +423,53 @@ async fn spawn_slack_stub_server() -> (std::net::SocketAddr, JoinHandle<()>) {
     (addr, handle)
 }
 
-#[derive(Clone)]
+async fn spawn_notion_stub_server(
+    token_response: &'static str,
+) -> (std::net::SocketAddr, JoinHandle<()>) {
+    let response_body = token_response.to_string();
+    let app = Router::new().route(
+        "/oauth/token",
+        post(move || {
+            let response_body = response_body.clone();
+            async move {
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(response_body))
+                    .unwrap()
+            }
+        }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = axum::serve(listener, app.into_make_service());
+    let handle = tokio::spawn(async move {
+        if let Err(err) = server.await {
+            eprintln!("stub server exited with error: {err}");
+        }
+    });
+
+    (addr, handle)
+}
+
 struct TokenRepo {
-    tokens: Vec<UserOAuthToken>,
+    tokens: Mutex<Vec<UserOAuthToken>>,
+}
+
+impl TokenRepo {
+    fn new(tokens: Vec<UserOAuthToken>) -> Self {
+        Self {
+            tokens: Mutex::new(tokens),
+        }
+    }
+}
+
+impl Clone for TokenRepo {
+    fn clone(&self) -> Self {
+        let tokens = self.tokens.lock().unwrap().clone();
+        Self::new(tokens)
+    }
 }
 
 #[async_trait]
@@ -414,6 +484,8 @@ impl UserOAuthTokenRepository for TokenRepo {
     async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error> {
         Ok(self
             .tokens
+            .lock()
+            .unwrap()
             .iter()
             .find(|token| token.id == token_id)
             .cloned())
@@ -426,6 +498,8 @@ impl UserOAuthTokenRepository for TokenRepo {
     ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
         Ok(self
             .tokens
+            .lock()
+            .unwrap()
             .iter()
             .find(|token| token.user_id == user_id && token.provider == provider)
             .cloned())
@@ -445,6 +519,8 @@ impl UserOAuthTokenRepository for TokenRepo {
     ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
         Ok(self
             .tokens
+            .lock()
+            .unwrap()
             .iter()
             .filter(|token| token.user_id == user_id)
             .cloned()
@@ -457,7 +533,15 @@ impl UserOAuthTokenRepository for TokenRepo {
         _provider: ConnectedOAuthProvider,
         _is_shared: bool,
     ) -> Result<UserOAuthToken, sqlx::Error> {
-        Err(sqlx::Error::RowNotFound)
+        let mut guard = self.tokens.lock().unwrap();
+        let Some(token) = guard
+            .iter_mut()
+            .find(|token| token.user_id == _user_id && token.provider == _provider)
+        else {
+            return Err(sqlx::Error::RowNotFound);
+        };
+        token.is_shared = _is_shared;
+        Ok(token.clone())
     }
 
     async fn list_by_user_and_provider(
@@ -467,6 +551,8 @@ impl UserOAuthTokenRepository for TokenRepo {
     ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
         Ok(self
             .tokens
+            .lock()
+            .unwrap()
             .iter()
             .filter(|token| token.user_id == user_id && token.provider == provider)
             .cloned()
@@ -483,7 +569,7 @@ struct SpyTokenRepo {
 impl SpyTokenRepo {
     fn new(tokens: Vec<UserOAuthToken>) -> Self {
         Self {
-            inner: TokenRepo { tokens },
+            inner: TokenRepo::new(tokens),
             calls: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
@@ -512,6 +598,8 @@ impl UserOAuthTokenRepository for SpyTokenRepo {
         Ok(self
             .inner
             .tokens
+            .lock()
+            .unwrap()
             .iter()
             .find(|token| token.id == token_id)
             .cloned())
@@ -526,6 +614,8 @@ impl UserOAuthTokenRepository for SpyTokenRepo {
         Ok(self
             .inner
             .tokens
+            .lock()
+            .unwrap()
             .iter()
             .find(|token| token.user_id == user_id && token.provider == provider)
             .cloned())
@@ -548,6 +638,8 @@ impl UserOAuthTokenRepository for SpyTokenRepo {
         Ok(self
             .inner
             .tokens
+            .lock()
+            .unwrap()
             .iter()
             .filter(|token| token.user_id == user_id)
             .cloned()
@@ -573,6 +665,8 @@ impl UserOAuthTokenRepository for SpyTokenRepo {
         Ok(self
             .inner
             .tokens
+            .lock()
+            .unwrap()
             .iter()
             .filter(|token| token.user_id == user_id && token.provider == provider)
             .cloned()
@@ -666,7 +760,15 @@ impl UserOAuthTokenRepository for RecordingTokenRepo {
         _provider: ConnectedOAuthProvider,
         _is_shared: bool,
     ) -> Result<UserOAuthToken, sqlx::Error> {
-        Err(sqlx::Error::RowNotFound)
+        let mut guard = self.saved.lock().unwrap();
+        let Some(token) = guard.as_mut() else {
+            return Err(sqlx::Error::RowNotFound);
+        };
+        if token.user_id != _user_id || token.provider != _provider {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        token.is_shared = _is_shared;
+        Ok(token.clone())
     }
 
     async fn list_by_user_and_provider(
@@ -854,8 +956,9 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
 
     async fn record_audit_event(
         &self,
-        _event: NewWorkspaceAuditEvent,
+        event: NewWorkspaceAuditEvent,
     ) -> Result<WorkspaceAuditEvent, sqlx::Error> {
+        let _ = event;
         Err(sqlx::Error::RowNotFound)
     }
 }
@@ -863,6 +966,12 @@ impl WorkspaceConnectionRepository for WorkspaceConnectionsStub {
 #[derive(Default)]
 struct RecordingWorkspaceConnectionRepo {
     connections: Mutex<Vec<WorkspaceConnection>>,
+}
+
+impl RecordingWorkspaceConnectionRepo {
+    fn connections(&self) -> Vec<WorkspaceConnection> {
+        self.connections.lock().unwrap().clone()
+    }
 }
 
 #[async_trait]
@@ -1066,9 +1175,16 @@ impl WorkspaceConnectionRepository for RecordingWorkspaceConnectionRepo {
 
     async fn record_audit_event(
         &self,
-        _event: NewWorkspaceAuditEvent,
+        event: NewWorkspaceAuditEvent,
     ) -> Result<WorkspaceAuditEvent, sqlx::Error> {
-        Err(sqlx::Error::RowNotFound)
+        Ok(WorkspaceAuditEvent {
+            id: Uuid::new_v4(),
+            workspace_id: event.workspace_id,
+            actor_id: event.actor_id,
+            event_type: event.event_type,
+            metadata: event.metadata,
+            created_at: OffsetDateTime::now_utc(),
+        })
     }
 }
 
@@ -1125,9 +1241,8 @@ async fn list_connections_returns_personal_and_workspace_entries() {
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(vec![(user_id, listing)]));
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![personal_token],
-    });
+    let token_repo: Arc<dyn UserOAuthTokenRepository> =
+        Arc::new(TokenRepo::new(vec![personal_token]));
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_client = Arc::new(reqwest::Client::new());
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -1282,7 +1397,7 @@ async fn list_connections_requires_membership() {
 
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(vec![]));
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo { tokens: vec![] });
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo::new(vec![]));
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_client = Arc::new(reqwest::Client::new());
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -1640,7 +1755,7 @@ async fn list_connections_includes_workspace_reconnect_flag() {
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(vec![(user_id, listing)]));
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo { tokens: Vec::new() });
+    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo::new(Vec::new()));
     let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
     let oauth_client = Arc::new(reqwest::Client::new());
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -1867,8 +1982,8 @@ async fn get_connection_by_id_returns_personal_connection() {
     let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "personal-refresh")
         .expect("encrypt refresh token");
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![UserOAuthToken {
+    let token_repo: Arc<dyn UserOAuthTokenRepository> =
+        Arc::new(TokenRepo::new(vec![UserOAuthToken {
             id: token_id,
             user_id,
             workspace_id: None,
@@ -1881,8 +1996,7 @@ async fn get_connection_by_id_returns_personal_connection() {
             is_shared: false,
             created_at: now - Duration::hours(1),
             updated_at: now - Duration::minutes(10),
-        }],
-    });
+        }]));
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -2006,8 +2120,8 @@ async fn refresh_connection_missing_connection_id_does_not_fallback_to_provider(
     let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
         .expect("encrypt refresh token");
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![UserOAuthToken {
+    let token_repo: Arc<dyn UserOAuthTokenRepository> =
+        Arc::new(TokenRepo::new(vec![UserOAuthToken {
             id: token_id,
             user_id,
             workspace_id: None,
@@ -2020,8 +2134,7 @@ async fn refresh_connection_missing_connection_id_does_not_fallback_to_provider(
             is_shared: false,
             created_at: now - Duration::hours(1),
             updated_at: now - Duration::minutes(5),
-        }],
-    });
+        }]));
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -2062,8 +2175,8 @@ async fn refresh_connection_accepts_connection_id_query() {
     let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
         .expect("encrypt refresh token");
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![UserOAuthToken {
+    let token_repo: Arc<dyn UserOAuthTokenRepository> =
+        Arc::new(TokenRepo::new(vec![UserOAuthToken {
             id: token_id,
             user_id,
             workspace_id: None,
@@ -2076,8 +2189,7 @@ async fn refresh_connection_accepts_connection_id_query() {
             is_shared: false,
             created_at: now - Duration::hours(1),
             updated_at: now - Duration::minutes(2),
-        }],
-    });
+        }]));
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -2128,8 +2240,8 @@ async fn disconnect_connection_accepts_connection_id_body() {
     let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
         .expect("encrypt refresh token");
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![UserOAuthToken {
+    let token_repo: Arc<dyn UserOAuthTokenRepository> =
+        Arc::new(TokenRepo::new(vec![UserOAuthToken {
             id: token_id,
             user_id,
             workspace_id: None,
@@ -2142,8 +2254,7 @@ async fn disconnect_connection_accepts_connection_id_body() {
             is_shared: false,
             created_at: now - Duration::hours(1),
             updated_at: now - Duration::minutes(5),
-        }],
-    });
+        }]));
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -2242,8 +2353,8 @@ async fn disconnect_connection_missing_connection_id_does_not_fallback_to_provid
     let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
         .expect("encrypt refresh token");
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![UserOAuthToken {
+    let token_repo: Arc<dyn UserOAuthTokenRepository> =
+        Arc::new(TokenRepo::new(vec![UserOAuthToken {
             id: token_id,
             user_id,
             workspace_id: None,
@@ -2256,8 +2367,7 @@ async fn disconnect_connection_missing_connection_id_does_not_fallback_to_provid
             is_shared: false,
             created_at: now - Duration::hours(1),
             updated_at: now - Duration::minutes(5),
-        }],
-    });
+        }]));
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -2298,8 +2408,8 @@ async fn revoke_connection_accepts_connection_id_query() {
     let encrypted_refresh = encrypt_secret(&config.oauth.token_encryption_key, "refresh-token")
         .expect("encrypt refresh token");
 
-    let token_repo: Arc<dyn UserOAuthTokenRepository> = Arc::new(TokenRepo {
-        tokens: vec![UserOAuthToken {
+    let token_repo: Arc<dyn UserOAuthTokenRepository> =
+        Arc::new(TokenRepo::new(vec![UserOAuthToken {
             id: token_id,
             user_id,
             workspace_id: None,
@@ -2312,8 +2422,7 @@ async fn revoke_connection_accepts_connection_id_query() {
             is_shared: false,
             created_at: now - Duration::hours(1),
             updated_at: now - Duration::minutes(3),
-        }],
-    });
+        }]));
     let workspace_repo: Arc<dyn WorkspaceConnectionRepository> =
         Arc::new(WorkspaceConnectionsStub::new(Vec::new()));
     let oauth_service = Arc::new(OAuthAccountService::new(
@@ -2670,6 +2779,30 @@ fn stub_claims() -> Claims {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NotionStatePayload {
+    user_id: Uuid,
+    workspace_id: Option<Uuid>,
+    connection_scope: String,
+    nonce: String,
+}
+
+fn build_notion_state_token(
+    user_id: Uuid,
+    workspace_id: Option<Uuid>,
+    connection_scope: &str,
+) -> String {
+    let payload = NotionStatePayload {
+        user_id,
+        workspace_id,
+        connection_scope: connection_scope.to_string(),
+        nonce: "test-nonce".into(),
+    };
+    let bytes = serde_json::to_vec(&payload).expect("serialize notion state");
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
 #[test]
 fn parse_provider_handles_known_values() {
     assert_eq!(
@@ -2682,6 +2815,10 @@ fn parse_provider_handles_known_values() {
     );
     assert_eq!(parse_provider("slack"), Some(ConnectedOAuthProvider::Slack));
     assert_eq!(parse_provider("asana"), Some(ConnectedOAuthProvider::Asana));
+    assert_eq!(
+        parse_provider("notion"),
+        Some(ConnectedOAuthProvider::Notion)
+    );
     assert_eq!(parse_provider("unknown"), None);
 }
 
@@ -2831,6 +2968,7 @@ async fn solo_plan_slack_start_redirects_with_upgrade_message() {
         Query(ConnectQuery {
             workspace: Some(workspace_id),
             workspace_connection_id: None,
+            connection_scope: None,
         }),
         CookieJar::new(),
     )
@@ -2872,6 +3010,7 @@ async fn workspace_plan_slack_start_sets_state_cookie() {
         Query(ConnectQuery {
             workspace: Some(workspace_id),
             workspace_connection_id: None,
+            connection_scope: None,
         }),
         CookieJar::new(),
     )
@@ -2888,6 +3027,309 @@ async fn workspace_plan_slack_start_sets_state_cookie() {
     assert!(cookies.iter().any(|cookie| {
         cookie.contains(SLACK_STATE_COOKIE) && cookie.contains(&workspace_id_str)
     }));
+}
+
+#[tokio::test]
+async fn workspace_plan_notion_start_sets_state_cookie_and_owner_user() {
+    let config = stub_config();
+    let state = stub_state(config.clone());
+    let claims = Claims {
+        plan: Some("workspace".into()),
+        ..stub_claims()
+    };
+
+    let response = notion_connect_start(
+        State(state),
+        AuthSession(claims),
+        Query(ConnectQuery::default()),
+        CookieJar::new(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let cookies = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(cookies
+        .iter()
+        .any(|cookie| cookie.contains(NOTION_STATE_COOKIE)));
+
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("location header present")
+        .to_str()
+        .unwrap();
+    let url = Url::parse(location).expect("notion redirect url");
+    let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+    assert_eq!(params.get("owner").map(String::as_str), Some("user"));
+    assert_eq!(params.get("client_id").map(String::as_str), Some("client"));
+    assert_eq!(
+        params.get("redirect_uri").map(String::as_str),
+        Some("http://localhost/notion")
+    );
+    assert_eq!(
+        params.get("response_type").map(String::as_str),
+        Some("code")
+    );
+}
+
+#[tokio::test]
+async fn workspace_plan_notion_start_with_workspace_scope_encodes_state() {
+    let config = stub_config();
+    let workspace_id = Uuid::new_v4();
+    let user_id = Uuid::new_v4();
+    let membership = workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace");
+    let state = stub_state_with_workspace_repo(
+        config.clone(),
+        Arc::new(MembershipWorkspaceRepo::new(vec![(user_id, membership)])),
+    );
+    let claims = Claims {
+        id: user_id.to_string(),
+        plan: Some("workspace".into()),
+        ..stub_claims()
+    };
+
+    let response = notion_connect_start(
+        State(state),
+        AuthSession(claims),
+        Query(ConnectQuery {
+            workspace: Some(workspace_id),
+            workspace_connection_id: None,
+            connection_scope: Some("workspace".into()),
+        }),
+        CookieJar::new(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("location header present")
+        .to_str()
+        .unwrap();
+    let url = Url::parse(location).expect("notion redirect url");
+    let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+    assert_eq!(params.get("owner").map(String::as_str), Some("workspace"));
+    let state_param = params.get("state").expect("state param");
+    let decoded = URL_SAFE_NO_PAD
+        .decode(state_param.as_bytes())
+        .expect("decode state");
+    let payload: Value = serde_json::from_slice(&decoded).expect("state json");
+    assert_eq!(
+        payload["workspaceId"].as_str(),
+        Some(workspace_id.to_string().as_str())
+    );
+    assert_eq!(payload["connectionScope"].as_str(), Some("workspace"));
+}
+
+#[tokio::test]
+async fn notion_callback_saves_personal_token() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+
+    let (addr, _handle) = spawn_notion_stub_server(NOTION_TOKEN_RESPONSE).await;
+
+    let token_repo = Arc::new(RecordingTokenRepo::default());
+    let workspace_connections = Arc::new(RecordingWorkspaceConnectionRepo::default());
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+    let mut oauth_service = OAuthAccountService::new(
+        token_repo.clone(),
+        workspace_connections,
+        encryption_key.clone(),
+        Arc::new(reqwest::Client::new()),
+        &config.oauth,
+    );
+    oauth_service.set_notion_endpoint_override(format!("http://{}/oauth/token", addr));
+    let oauth_service = Arc::new(oauth_service);
+
+    let mut state = stub_state(config.clone());
+    state.oauth_accounts = oauth_service;
+
+    let claims = Claims {
+        id: user_id.to_string(),
+        plan: Some("workspace".into()),
+        ..stub_claims()
+    };
+
+    let state_token = build_notion_state_token(user_id, None, "personal");
+    let jar = CookieJar::new().add(build_state_cookie(NOTION_STATE_COOKIE, &state_token));
+    let response = notion_connect_callback(
+        State(state),
+        AuthSession(claims),
+        jar,
+        Query(CallbackQuery {
+            code: Some("auth-code".into()),
+            state: Some(state_token),
+            error: None,
+            error_description: None,
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("location header present")
+        .to_str()
+        .unwrap();
+    assert!(location.contains("connected=true"));
+    assert!(location.contains("provider=notion"));
+
+    let saved = token_repo.saved_token().expect("token saved");
+    assert_eq!(saved.provider, ConnectedOAuthProvider::Notion);
+    assert_eq!(saved.account_email, "Acme Workspace");
+    let metadata = parse_token_metadata(&saved.metadata);
+    let notion_meta = metadata.notion.expect("notion metadata");
+    assert_eq!(notion_meta.workspace_id.as_deref(), Some("ws-123"));
+    assert_eq!(
+        notion_meta.workspace_name.as_deref(),
+        Some("Acme Workspace")
+    );
+    assert_eq!(notion_meta.bot_id.as_deref(), Some("bot-123"));
+    assert_eq!(notion_meta.owner_type.as_deref(), Some("workspace"));
+    assert_eq!(notion_meta.owner_id.as_deref(), Some("ws-123"));
+    assert_eq!(notion_meta.owner_name.as_deref(), Some("Acme Workspace"));
+}
+
+#[tokio::test]
+async fn notion_callback_handles_missing_fields() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+
+    let (addr, _handle) = spawn_notion_stub_server(NOTION_TOKEN_RESPONSE_MINIMAL).await;
+
+    let token_repo = Arc::new(RecordingTokenRepo::default());
+    let workspace_connections = Arc::new(RecordingWorkspaceConnectionRepo::default());
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+    let mut oauth_service = OAuthAccountService::new(
+        token_repo.clone(),
+        workspace_connections,
+        encryption_key.clone(),
+        Arc::new(reqwest::Client::new()),
+        &config.oauth,
+    );
+    oauth_service.set_notion_endpoint_override(format!("http://{}/oauth/token", addr));
+    let oauth_service = Arc::new(oauth_service);
+
+    let mut state = stub_state(config.clone());
+    state.oauth_accounts = oauth_service;
+
+    let claims = Claims {
+        id: user_id.to_string(),
+        plan: Some("workspace".into()),
+        ..stub_claims()
+    };
+
+    let state_token = build_notion_state_token(user_id, None, "personal");
+    let jar = CookieJar::new().add(build_state_cookie(NOTION_STATE_COOKIE, &state_token));
+    let response = notion_connect_callback(
+        State(state),
+        AuthSession(claims),
+        jar,
+        Query(CallbackQuery {
+            code: Some("auth-code".into()),
+            state: Some(state_token),
+            error: None,
+            error_description: None,
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let saved = token_repo.saved_token().expect("token saved");
+    assert_eq!(saved.provider, ConnectedOAuthProvider::Notion);
+    assert_eq!(saved.account_email, "Notion Workspace");
+    let metadata = parse_token_metadata(&saved.metadata);
+    assert!(metadata.notion.is_none());
+}
+
+#[tokio::test]
+async fn notion_callback_promotes_workspace_connection() {
+    let config = stub_config();
+    let user_id = Uuid::new_v4();
+    let workspace_id = Uuid::new_v4();
+    let membership = workspace_membership(workspace_id, WorkspaceRole::Admin, "workspace");
+    let workspace_repo: Arc<dyn WorkspaceRepository> =
+        Arc::new(MembershipWorkspaceRepo::new(vec![(user_id, membership)]));
+
+    let (addr, _handle) = spawn_notion_stub_server(NOTION_TOKEN_RESPONSE).await;
+
+    let token_repo = Arc::new(RecordingTokenRepo::default());
+    let workspace_connections = Arc::new(RecordingWorkspaceConnectionRepo::default());
+    let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+
+    let mut oauth_service = OAuthAccountService::new(
+        token_repo.clone(),
+        workspace_connections.clone(),
+        encryption_key.clone(),
+        Arc::new(reqwest::Client::new()),
+        &config.oauth,
+    );
+    oauth_service.set_notion_endpoint_override(format!("http://{}/oauth/token", addr));
+    let oauth_service = Arc::new(oauth_service);
+    let oauth_refresher: Arc<dyn WorkspaceTokenRefresher> = oauth_service.clone();
+
+    let workspace_oauth = Arc::new(WorkspaceOAuthService::new(
+        token_repo.clone(),
+        workspace_repo.clone(),
+        workspace_connections.clone(),
+        oauth_refresher,
+        encryption_key.clone(),
+    ));
+
+    let mut state = stub_state_with_workspace_repo(config.clone(), workspace_repo);
+    state.oauth_accounts = oauth_service;
+    state.workspace_oauth = workspace_oauth;
+    state.workspace_connection_repo = workspace_connections.clone();
+
+    let claims = Claims {
+        id: user_id.to_string(),
+        plan: Some("workspace".into()),
+        ..stub_claims()
+    };
+
+    let state_token = build_notion_state_token(user_id, Some(workspace_id), "workspace");
+    let jar = CookieJar::new().add(build_state_cookie(NOTION_STATE_COOKIE, &state_token));
+    let response = notion_connect_callback(
+        State(state),
+        AuthSession(claims),
+        jar,
+        Query(CallbackQuery {
+            code: Some("auth-code".into()),
+            state: Some(state_token),
+            error: None,
+            error_description: None,
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("location header present")
+        .to_str()
+        .unwrap();
+    assert!(location.contains("connected=true"), "location: {location}");
+    assert!(location.contains("provider=notion"));
+    assert!(location.contains(&format!("workspace={workspace_id}")));
+
+    let saved = token_repo.saved_token().expect("token saved");
+    let connections = workspace_connections.connections();
+    assert_eq!(connections.len(), 1);
+    let connection = &connections[0];
+    assert_eq!(connection.provider, ConnectedOAuthProvider::Notion);
+    assert_eq!(connection.workspace_id, workspace_id);
+    assert_eq!(connection.connection_id, Some(saved.id));
+    assert_eq!(connection.user_oauth_token_id, Some(saved.id));
 }
 
 #[tokio::test]
@@ -2988,6 +3430,7 @@ async fn joined_workspace_member_with_solo_claims_can_connect() {
         Query(ConnectQuery {
             workspace: Some(workspace_id),
             workspace_connection_id: None,
+            connection_scope: None,
         }),
         CookieJar::new(),
     )
@@ -3025,6 +3468,7 @@ async fn workspace_viewer_is_blocked_from_connecting() {
         Query(ConnectQuery {
             workspace: Some(workspace_id),
             workspace_connection_id: None,
+            connection_scope: None,
         }),
         CookieJar::new(),
     )

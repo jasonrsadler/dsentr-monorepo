@@ -28,3 +28,6 @@
  - Added Asana provider support to the OAuth service so Asana tokens refresh, revoke, and promote alongside existing Google/Microsoft/Slack credentials.
 - OAuth services now support connection-id aware installs/refresh/revoke flows, avoid provider-level overwrites on new installs, and include unit coverage for multi-connection selection.
 - OAuth account refresh now propagates updated encrypted tokens into dependent workspace connections via repository lookups, logging sync failures without interrupting the personal token update.
+- Added a Notion API client with versioned headers, pagination helpers, and retry/backoff for rate limits so integration routes and actions can share consistent error mapping.
+- Notion client structs now derive defaults and drop unused imports to keep deserialization and clippy clean.
+- Notion error response parsing no longer carries unused fields so dead-code warnings stay clean under clippy.

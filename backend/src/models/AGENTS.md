@@ -37,3 +37,4 @@
 - Documented the non-unique OAuth token/provider relationship and workspace connection lookup indexes so the models reflect the new schema expectations.
 - Workspace connection token references are now optional to match the nullable FK that is set to NULL when personal tokens are deleted.
 - Workspace connection models now carry `connection_id` so workspace listings can return the stable personal connection identity after promotion.
+- Connected OAuth provider enum now includes Notion so Notion tokens and workspace connections can be stored alongside existing providers.

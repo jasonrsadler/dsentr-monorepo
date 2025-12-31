@@ -43,3 +43,8 @@
 - Slack OAuth starts now always use the combined install authorize URL with bot + user scopes and prompt=consent (no team parameter), so personal and workspace flows share a single Slack install path.
 - OAuth integrations listing now includes Slack personal authorization state (`has_personal_auth`, `personal_auth_connected_at`) derived from stored user tokens so Settings can show post-as-user status without extra API calls.
 - Slack personal authorization timestamp selection now uses `is_none_or` to satisfy clippy without changing behavior.
+- Added Notion OAuth start/callback handling with scoped state payloads (user/workspace), token exchange via the Notion API, and workspace promotion support aligned with existing OAuth connection listings.
+- Notion OAuth helper utilities now box responses to avoid large Result error warnings, and tests reuse reqwest's Url type to avoid extra dependencies.
+- OAuth route test token repositories now use shared mutable state for `mark_shared` so compile-time stubs match the real repository interface.
+- OAuth route test stubs now update saved tokens in `mark_shared` so workspace promotion tests can succeed when Notion connections are promoted.
+- OAuth route test workspace connection stubs now return a synthetic audit event so workspace promotion flows don't fail on audit logging during tests.

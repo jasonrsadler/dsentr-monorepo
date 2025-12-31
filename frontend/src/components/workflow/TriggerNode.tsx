@@ -12,6 +12,8 @@ import type { RunAvailability } from '@/types/runAvailability'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
   'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'
+const NOTION_TRIGGER_RESTRICTION_MESSAGE =
+  'Notion triggers are available on workspace plans and above. Upgrade in Settings > Plan to keep polling Notion.'
 
 const repeatUnits = ['minutes', 'hours', 'days', 'weeks'] as const
 
@@ -213,19 +215,25 @@ function TriggerNodeContent({
   )
 
   const scheduleRestricted = isSoloPlan && normalizedTriggerType === 'schedule'
-  const scheduleRestrictionMessage = scheduleRestricted
+  const notionRestricted =
+    isSoloPlan &&
+    (normalizedTriggerType === 'notion.new_database_row' ||
+      normalizedTriggerType === 'notion.updated_database_row')
+  const restrictionMessage = scheduleRestricted
     ? SCHEDULE_RESTRICTION_MESSAGE
-    : null
+    : notionRestricted
+      ? NOTION_TRIGGER_RESTRICTION_MESSAGE
+      : null
 
   useEffect(() => {
-    if (!onRestrictionNotice || !scheduleRestrictionMessage) {
+    if (!onRestrictionNotice || !restrictionMessage) {
       lastPlanNoticeRef.current = null
       return
     }
-    if (lastPlanNoticeRef.current === scheduleRestrictionMessage) return
-    lastPlanNoticeRef.current = scheduleRestrictionMessage
-    onRestrictionNotice(scheduleRestrictionMessage)
-  }, [scheduleRestrictionMessage, onRestrictionNotice])
+    if (lastPlanNoticeRef.current === restrictionMessage) return
+    lastPlanNoticeRef.current = restrictionMessage
+    onRestrictionNotice(restrictionMessage)
+  }, [restrictionMessage, onRestrictionNotice])
 
   const openPlanSettings = useCallback(() => {
     try {
@@ -253,7 +261,8 @@ function TriggerNodeContent({
     hasDuplicateKeys ||
     hasInvalidInputs ||
     Boolean(labelError) ||
-    scheduleRestricted
+    scheduleRestricted ||
+    notionRestricted
 
   useEffect(() => {
     if (!effectiveCanEdit) return
@@ -357,10 +366,10 @@ function TriggerNodeContent({
           {running ? 'Running...' : 'Run'}
         </button>
 
-        {scheduleRestrictionMessage ? (
+        {restrictionMessage ? (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100">
             <div className="flex items-start justify-between gap-2">
-              <span>{scheduleRestrictionMessage}</span>
+              <span>{restrictionMessage}</span>
               <button
                 type="button"
                 onClick={openPlanSettings}

@@ -1,9 +1,13 @@
+mod notion;
+
 use std::time::Duration;
 
 #[cfg(test)]
 use std::sync::Arc;
 
+use crate::engine::actions::{ensure_run_membership, ensure_workspace_plan};
 use crate::engine::{complete_run_with_retry, execute_run, ExecutorError};
+use crate::models::workflow::Workflow;
 use crate::models::workflow_run::WorkflowRun;
 use crate::models::workflow_run_event::NewWorkflowRunEvent;
 use crate::models::workflow_schedule::WorkflowSchedule;
@@ -18,13 +22,14 @@ use crate::utils::schedule::{
     compute_next_run, offset_to_utc, parse_schedule_config, utc_to_offset,
 };
 use crate::utils::workflow_connection_metadata;
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::{json, Value};
 use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
 use tracing::{error, warn};
 use uuid::Uuid;
 
+use crate::models::oauth_token::ConnectedOAuthProvider;
 #[cfg(test)]
 fn test_jwt_keys() -> Arc<JwtKeys> {
     Arc::new(
@@ -32,6 +37,10 @@ fn test_jwt_keys() -> Arc<JwtKeys> {
             .expect("test JWT secret should be valid"),
     )
 }
+
+const DEFAULT_NOTION_POLL_INTERVAL_SECONDS: i64 = 300;
+const MIN_NOTION_POLL_INTERVAL_SECONDS: i64 = 30;
+const MAX_NOTION_POLL_INTERVAL_SECONDS: i64 = 3600;
 
 pub async fn start_background_workers(state: AppState) {
     // Simple single-worker for now. Can be extended to multiple tasks.
@@ -303,30 +312,8 @@ async fn process_due_schedules(state: &AppState) -> Result<(), sqlx::Error> {
 }
 
 async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Result<(), sqlx::Error> {
-    let config = match parse_schedule_config(&schedule.config) {
-        Some(cfg) => cfg,
-        None => {
-            state
-                .workflow_repo
-                .disable_workflow_schedule(schedule.workflow_id)
-                .await?;
-            return Ok(());
-        }
-    };
-
     let next_time = match schedule.next_run_at {
         Some(ts) => ts,
-        None => {
-            state
-                .workflow_repo
-                .disable_workflow_schedule(schedule.workflow_id)
-                .await?;
-            return Ok(());
-        }
-    };
-
-    let last_run_utc = match offset_to_utc(next_time) {
-        Some(dt) => dt,
         None => {
             state
                 .workflow_repo
@@ -362,6 +349,41 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
                 "worker: failed to load user settings for schedule"
             );
             Value::Object(Default::default())
+        }
+    };
+
+    if let Some((notion_kind, notion_config)) = notion::parse_trigger_config(&schedule.config) {
+        return trigger_notion_schedule(
+            state,
+            schedule,
+            workflow,
+            &settings,
+            next_time,
+            notion_kind,
+            notion_config,
+        )
+        .await;
+    }
+
+    let last_run_utc = match offset_to_utc(next_time) {
+        Some(dt) => dt,
+        None => {
+            state
+                .workflow_repo
+                .disable_workflow_schedule(schedule.workflow_id)
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let config = match parse_schedule_config(&schedule.config) {
+        Some(cfg) => cfg,
+        None => {
+            state
+                .workflow_repo
+                .disable_workflow_schedule(schedule.workflow_id)
+                .await?;
+            return Ok(());
         }
     };
 
@@ -538,6 +560,583 @@ async fn trigger_schedule(state: &AppState, schedule: WorkflowSchedule) -> Resul
     Ok(())
 }
 
+async fn trigger_notion_schedule(
+    state: &AppState,
+    schedule: WorkflowSchedule,
+    workflow: Workflow,
+    settings: &Value,
+    scheduled_for: time::OffsetDateTime,
+    notion_kind: notion::NotionTriggerKind,
+    notion_config: notion::NotionTriggerConfig,
+) -> Result<(), sqlx::Error> {
+    let now = Utc::now();
+    let last_offset = match utc_to_offset(now) {
+        Some(v) => v,
+        None => {
+            state
+                .workflow_repo
+                .disable_workflow_schedule(schedule.workflow_id)
+                .await?;
+            return Ok(());
+        }
+    };
+    let next_offset = notion_next_run_offset(now, &notion_config);
+    if next_offset.is_none() {
+        warn!(
+            schedule_id = %schedule.id,
+            workflow_id = %schedule.workflow_id,
+            "worker: unable to compute next Notion poll interval; disabling schedule"
+        );
+        state
+            .workflow_repo
+            .disable_workflow_schedule(schedule.workflow_id)
+            .await?;
+        return Ok(());
+    }
+
+    let scope_raw = notion_config.connection_scope.trim().to_ascii_lowercase();
+    let connection_id = notion_config.connection_id.trim();
+    if scope_raw.is_empty() || connection_id.is_empty() {
+        warn!(
+            schedule_id = %schedule.id,
+            workflow_id = %schedule.workflow_id,
+            "worker: Notion trigger missing connection scope or connection id"
+        );
+        state
+            .workflow_repo
+            .mark_schedule_run(schedule.id, last_offset, next_offset)
+            .await?;
+        return Ok(());
+    }
+
+    let access_token = match scope_raw.as_str() {
+        "workspace" => {
+            let Some(workspace_id) = workflow.workspace_id else {
+                warn!(
+                    schedule_id = %schedule.id,
+                    workflow_id = %schedule.workflow_id,
+                    "worker: Notion workspace trigger requires workspace-bound workflow"
+                );
+                state
+                    .workflow_repo
+                    .mark_schedule_run(schedule.id, last_offset, next_offset)
+                    .await?;
+                return Ok(());
+            };
+            if let Err(err) = ensure_run_membership(state, workspace_id, schedule.user_id).await {
+                warn!(
+                    schedule_id = %schedule.id,
+                    workflow_id = %schedule.workflow_id,
+                    %workspace_id,
+                    %err,
+                    "worker: Notion trigger workspace membership check failed"
+                );
+                state
+                    .workflow_repo
+                    .mark_schedule_run(schedule.id, last_offset, next_offset)
+                    .await?;
+                return Ok(());
+            }
+            if let Err(err) = ensure_workspace_plan(state, workspace_id).await {
+                warn!(
+                    schedule_id = %schedule.id,
+                    workflow_id = %schedule.workflow_id,
+                    %workspace_id,
+                    %err,
+                    "worker: Notion trigger requires workspace plan"
+                );
+                state
+                    .workflow_repo
+                    .mark_schedule_run(schedule.id, last_offset, next_offset)
+                    .await?;
+                return Ok(());
+            }
+
+            let parsed = match Uuid::parse_str(connection_id) {
+                Ok(id) => id,
+                Err(_) => {
+                    warn!(
+                        schedule_id = %schedule.id,
+                        workflow_id = %schedule.workflow_id,
+                        connection_id = %connection_id,
+                        "worker: Notion workspace connection id must be a UUID"
+                    );
+                    state
+                        .workflow_repo
+                        .mark_schedule_run(schedule.id, last_offset, next_offset)
+                        .await?;
+                    return Ok(());
+                }
+            };
+
+            match state
+                .workspace_oauth
+                .ensure_valid_workspace_token(parsed)
+                .await
+            {
+                Ok(connection) => {
+                    if connection.workspace_id != workspace_id {
+                        warn!(
+                            schedule_id = %schedule.id,
+                            workflow_id = %schedule.workflow_id,
+                            %workspace_id,
+                            "worker: Notion workspace connection belongs to another workspace"
+                        );
+                        state
+                            .workflow_repo
+                            .mark_schedule_run(schedule.id, last_offset, next_offset)
+                            .await?;
+                        return Ok(());
+                    }
+                    if connection.provider != ConnectedOAuthProvider::Notion {
+                        warn!(
+                            schedule_id = %schedule.id,
+                            workflow_id = %schedule.workflow_id,
+                            "worker: Notion trigger connection is not Notion provider"
+                        );
+                        state
+                            .workflow_repo
+                            .mark_schedule_run(schedule.id, last_offset, next_offset)
+                            .await?;
+                        return Ok(());
+                    }
+                    connection.access_token
+                }
+                Err(err) => match err {
+                    crate::services::oauth::workspace_service::WorkspaceOAuthError::Database(
+                        db_err,
+                    ) => return Err(db_err),
+                    other => {
+                        warn!(
+                            schedule_id = %schedule.id,
+                            workflow_id = %schedule.workflow_id,
+                            error = %other,
+                            "worker: failed to resolve Notion workspace access token"
+                        );
+                        state
+                            .workflow_repo
+                            .mark_schedule_run(schedule.id, last_offset, next_offset)
+                            .await?;
+                        return Ok(());
+                    }
+                },
+            }
+        }
+        "personal" | "user" => {
+            let parsed = match Uuid::parse_str(connection_id) {
+                Ok(id) => id,
+                Err(_) => {
+                    warn!(
+                        schedule_id = %schedule.id,
+                        workflow_id = %schedule.workflow_id,
+                        connection_id = %connection_id,
+                        "worker: Notion personal connection id must be a UUID"
+                    );
+                    state
+                        .workflow_repo
+                        .mark_schedule_run(schedule.id, last_offset, next_offset)
+                        .await?;
+                    return Ok(());
+                }
+            };
+
+            match state
+                .oauth_accounts
+                .ensure_valid_access_token_for_connection(schedule.user_id, parsed)
+                .await
+            {
+                Ok(token) => {
+                    if token.provider != ConnectedOAuthProvider::Notion {
+                        warn!(
+                            schedule_id = %schedule.id,
+                            workflow_id = %schedule.workflow_id,
+                            "worker: Notion trigger connection is not Notion provider"
+                        );
+                        state
+                            .workflow_repo
+                            .mark_schedule_run(schedule.id, last_offset, next_offset)
+                            .await?;
+                        return Ok(());
+                    }
+                    token.access_token
+                }
+                Err(err) => match err {
+                    crate::services::oauth::account_service::OAuthAccountError::Database(
+                        db_err,
+                    ) => return Err(db_err),
+                    other => {
+                        warn!(
+                            schedule_id = %schedule.id,
+                            workflow_id = %schedule.workflow_id,
+                            error = %other,
+                            "worker: failed to resolve Notion personal access token"
+                        );
+                        state
+                            .workflow_repo
+                            .mark_schedule_run(schedule.id, last_offset, next_offset)
+                            .await?;
+                        return Ok(());
+                    }
+                },
+            }
+        }
+        other => {
+            warn!(
+                schedule_id = %schedule.id,
+                workflow_id = %schedule.workflow_id,
+                scope = %other,
+                "worker: Notion trigger has unsupported connection scope"
+            );
+            state
+                .workflow_repo
+                .mark_schedule_run(schedule.id, last_offset, next_offset)
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let poll_result = match notion::poll_database(
+        &state.http_client,
+        &access_token,
+        &notion_config,
+        notion_kind,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(err) => {
+            if err.is_auth_error() {
+                warn!(
+                    schedule_id = %schedule.id,
+                    workflow_id = %schedule.workflow_id,
+                    "worker: Notion auth error while polling"
+                );
+            } else {
+                warn!(
+                    schedule_id = %schedule.id,
+                    workflow_id = %schedule.workflow_id,
+                    error = %err,
+                    "worker: Notion polling failed"
+                );
+            }
+            state
+                .workflow_repo
+                .mark_schedule_run(schedule.id, last_offset, next_offset)
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let mut schedule_config = schedule.config.clone();
+    if let Some(updated) = notion::update_config_state(&schedule.config, &poll_result.state) {
+        if updated != schedule.config {
+            state
+                .workflow_repo
+                .upsert_workflow_schedule(
+                    schedule.user_id,
+                    schedule.workflow_id,
+                    updated.clone(),
+                    next_offset,
+                )
+                .await?;
+        }
+        schedule_config = updated;
+    }
+
+    let mut base_snapshot = workflow.data.clone();
+    base_snapshot["_egress_allowlist"] = Value::Array(
+        workflow
+            .egress_allowlist
+            .iter()
+            .cloned()
+            .map(Value::String)
+            .collect(),
+    );
+    if let Some(obj) = base_snapshot.as_object_mut() {
+        obj.remove("_trigger_context");
+    }
+
+    if let Some(start_id) = find_trigger_start_node_by_type(
+        &base_snapshot,
+        notion_kind.as_str(),
+        Some(&schedule_config),
+    ) {
+        base_snapshot["_start_from_node"] = Value::String(start_id);
+    }
+
+    let connection_metadata = workflow_connection_metadata::collect(&base_snapshot);
+    workflow_connection_metadata::embed(&mut base_snapshot, &connection_metadata);
+
+    let triggered_by = format!("schedule:{}", schedule.id);
+    let mut skip_all_runs = false;
+    if let Some(workspace_id) = workflow.workspace_id {
+        match enforce_runaway_protection(state, workspace_id, settings).await {
+            Ok(()) => {}
+            Err(RunawayProtectionError::RunawayProtectionTriggered { count, limit }) => {
+                warn!(
+                    worker_id = %state.worker_id,
+                    %workspace_id,
+                    %schedule.id,
+                    %count,
+                    %limit,
+                    "runaway protection blocked Notion trigger runs"
+                );
+                skip_all_runs = true;
+            }
+            Err(RunawayProtectionError::Database(err)) => {
+                return Err(err);
+            }
+        }
+    }
+
+    for event in poll_result.events {
+        if skip_all_runs {
+            break;
+        }
+
+        let mut snapshot = base_snapshot.clone();
+        snapshot["_trigger_context"] =
+            build_notion_trigger_context(event, &schedule, &schedule_config, scheduled_for);
+
+        let mut workspace_quota: Option<WorkspaceRunQuotaTicket> = None;
+        let mut skip_run = false;
+        if let Some(workspace_id) = workflow.workspace_id {
+            match state.consume_workspace_run_quota(workspace_id).await {
+                Ok(Some(ticket)) => {
+                    if ticket.run_count > ticket.limit {
+                        warn!(
+                            worker_id = %state.worker_id,
+                            %workspace_id,
+                            overage_count = ticket.overage_count,
+                            run_count = ticket.run_count,
+                            %schedule.id,
+                            %ticket.limit,
+                            "workspace run overage recorded for Notion trigger run"
+                        );
+                    }
+                    workspace_quota = Some(ticket);
+                }
+                Ok(None) => {}
+                Err(WorkspaceLimitError::WorkspacePlanRequired) => {
+                    warn!(
+                        worker_id = %state.worker_id,
+                        %workspace_id,
+                        schedule_id = %schedule.id,
+                        "skipping Notion trigger run because workspace reverted to the Solo plan"
+                    );
+                    skip_run = true;
+                    skip_all_runs = true;
+                }
+                Err(WorkspaceLimitError::RunLimitReached { limit }) => {
+                    warn!(
+                        worker_id = %state.worker_id,
+                        %workspace_id,
+                        schedule_id = %schedule.id,
+                        %limit,
+                        "workspace run usage exceeded limit; continuing and recording overage"
+                    );
+                }
+                Err(WorkspaceLimitError::MemberLimitReached { limit }) => {
+                    warn!(
+                        worker_id = %state.worker_id,
+                        %workspace_id,
+                        schedule_id = %schedule.id,
+                        %limit,
+                        "unexpected member limit error while triggering Notion schedule"
+                    );
+                    skip_run = true;
+                    skip_all_runs = true;
+                }
+                Err(WorkspaceLimitError::Database(err)) => {
+                    return Err(err);
+                }
+            }
+        }
+
+        if skip_run {
+            continue;
+        }
+
+        let outcome = match state
+            .workflow_repo
+            .create_workflow_run(
+                schedule.user_id,
+                schedule.workflow_id,
+                workflow.workspace_id,
+                snapshot,
+                None,
+            )
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                if let Some(ticket) = workspace_quota {
+                    let _ = state.release_workspace_run_quota(ticket).await;
+                }
+                return Err(err);
+            }
+        };
+
+        if let (Some(ticket), false) = (&workspace_quota, outcome.created) {
+            let _ = state.release_workspace_run_quota(*ticket).await;
+        }
+
+        let run = outcome.run;
+        let events = workflow_connection_metadata::build_run_events(
+            &run,
+            &triggered_by,
+            &connection_metadata,
+        );
+        for event in events {
+            state.workflow_repo.record_run_event(event).await?;
+        }
+    }
+
+    state
+        .workflow_repo
+        .mark_schedule_run(schedule.id, last_offset, next_offset)
+        .await?;
+
+    Ok(())
+}
+
+fn notion_poll_interval_seconds(config: &notion::NotionTriggerConfig) -> i64 {
+    let from_env = std::env::var("NOTION_POLL_INTERVAL_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok());
+    let raw = config
+        .poll_interval_seconds
+        .or(from_env)
+        .unwrap_or(DEFAULT_NOTION_POLL_INTERVAL_SECONDS);
+    raw.clamp(
+        MIN_NOTION_POLL_INTERVAL_SECONDS,
+        MAX_NOTION_POLL_INTERVAL_SECONDS,
+    )
+}
+
+fn notion_next_run_offset(
+    now: chrono::DateTime<Utc>,
+    config: &notion::NotionTriggerConfig,
+) -> Option<time::OffsetDateTime> {
+    let interval = notion_poll_interval_seconds(config).max(1);
+    let next = now.checked_add_signed(ChronoDuration::seconds(interval))?;
+    utc_to_offset(next)
+}
+
+fn build_notion_trigger_context(
+    mut event: Value,
+    schedule: &WorkflowSchedule,
+    schedule_config: &Value,
+    scheduled_for: time::OffsetDateTime,
+) -> Value {
+    if let Value::Object(map) = &mut event {
+        map.insert("scheduled".to_string(), Value::Bool(true));
+        map.insert(
+            "scheduleId".to_string(),
+            Value::String(schedule.id.to_string()),
+        );
+        map.insert(
+            "scheduledFor".to_string(),
+            Value::String(scheduled_for.to_string()),
+        );
+        map.insert("scheduleConfig".to_string(), schedule_config.clone());
+        return event;
+    }
+
+    json!({
+        "event": event,
+        "scheduled": true,
+        "scheduleId": schedule.id,
+        "scheduledFor": scheduled_for.to_string(),
+        "scheduleConfig": schedule_config.clone(),
+    })
+}
+
+fn find_trigger_start_node_by_type(
+    snapshot: &Value,
+    trigger_type: &str,
+    schedule_config: Option<&Value>,
+) -> Option<String> {
+    let nodes = snapshot.get("nodes")?.as_array()?;
+    let normalized_trigger = trigger_type.trim().to_ascii_lowercase();
+    let mut fallback: Option<String> = None;
+
+    for node in nodes {
+        let Some(node_type) = node.get("type").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !node_type.eq_ignore_ascii_case("trigger") {
+            continue;
+        }
+        let Some(id) = node.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let data = node.get("data").and_then(|v| v.as_object());
+        let node_trigger = data
+            .and_then(|map| map.get("triggerType"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Manual");
+        if node_trigger.trim().to_ascii_lowercase() != normalized_trigger {
+            continue;
+        }
+
+        if let (Some(config), Some(map)) = (schedule_config, data) {
+            if notion_trigger_matches_config(map, config) {
+                return Some(id.to_string());
+            }
+        }
+
+        if fallback.is_none() {
+            fallback = Some(id.to_string());
+        }
+    }
+
+    fallback
+}
+
+fn notion_trigger_matches_config(
+    node_data: &serde_json::Map<String, Value>,
+    config: &Value,
+) -> bool {
+    let Some(config_map) = config.as_object() else {
+        return false;
+    };
+
+    let config_db = read_config_string(config_map.get("databaseId"));
+    if let Some(expected) = config_db.as_deref() {
+        let actual = read_config_string(node_data.get("databaseId"));
+        if actual.as_deref() != Some(expected) {
+            return false;
+        }
+    }
+
+    let config_conn = read_config_string(config_map.get("connectionId"));
+    if let Some(expected) = config_conn.as_deref() {
+        let actual = read_config_string(node_data.get("connectionId"));
+        if actual.as_deref() != Some(expected) {
+            return false;
+        }
+    }
+
+    let config_scope = read_config_string(config_map.get("connectionScope"));
+    if let Some(expected) = config_scope.as_deref() {
+        let actual = read_config_string(node_data.get("connectionScope"));
+        if actual.as_deref() != Some(expected) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn read_config_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 fn find_schedule_trigger_start_node(snapshot: &Value, schedule_config: &Value) -> Option<String> {
     let nodes = snapshot.get("nodes")?.as_array()?;
     let mut fallback: Option<String> = None;
@@ -670,6 +1269,11 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 asana: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                notion: OAuthProviderConfig {
                     client_id: "stub".into(),
                     client_secret: "stub".into(),
                     redirect_uri: "http://localhost".into(),
@@ -914,6 +1518,11 @@ mod tests {
                     client_secret: "stub".into(),
                     redirect_uri: "http://localhost".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
                 token_encryption_key: vec![0u8; 32],
             },
             api_secrets_encryption_key: vec![1u8; 32],
@@ -1108,6 +1717,11 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 asana: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                notion: OAuthProviderConfig {
                     client_id: "stub".into(),
                     client_secret: "stub".into(),
                     redirect_uri: "http://localhost".into(),
@@ -1319,6 +1933,11 @@ mod tests {
                     client_secret: "stub".into(),
                     redirect_uri: "http://localhost".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
                 token_encryption_key: vec![0u8; 32],
             },
             api_secrets_encryption_key: vec![1u8; 32],
@@ -1487,6 +2106,11 @@ mod tests {
                     client_secret: "stub".into(),
                     redirect_uri: "http://localhost".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
                 token_encryption_key: vec![0u8; 32],
             },
             api_secrets_encryption_key: vec![1u8; 32],
@@ -1637,6 +2261,11 @@ mod tests {
                     redirect_uri: "http://localhost".into(),
                 },
                 asana: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
+                notion: OAuthProviderConfig {
                     client_id: "stub".into(),
                     client_secret: "stub".into(),
                     redirect_uri: "http://localhost".into(),

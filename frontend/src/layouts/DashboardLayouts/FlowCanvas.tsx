@@ -37,7 +37,8 @@ import {
   GoogleSheetsActionNode,
   HttpRequestActionNode,
   RunCustomCodeActionNode,
-  AsanaActionNode
+  AsanaActionNode,
+  NotionActionNode
 } from '@/components/workflow/nodes'
 import NodeEdge from '@/components/workflow/NodeEdge'
 import CustomControls from '@/components/ui/ReactFlow/CustomControl'
@@ -51,6 +52,16 @@ import FormatterNode, {
   type FormatterNodeData
 } from '@/components/workflow/nodes/FormatterNode'
 import { normalizePlanTier } from '@/lib/planTiers'
+import { fetchNotionDatabases, type NotionDatabase } from '@/lib/notionApi'
+import {
+  fetchConnections,
+  getCachedConnections,
+  subscribeToConnectionUpdates,
+  type ConnectionScope,
+  type GroupedConnectionsSnapshot,
+  type ProviderConnectionSet
+} from '@/lib/oauthApi'
+import { selectCurrentWorkspace, useAuth } from '@/stores/auth'
 import { generateUniqueLabel } from '@/lib/workflowGraph'
 import {
   useWorkflowStore,
@@ -79,7 +90,10 @@ import { ScheduleTimezonePicker } from '@/components/ui/schedule/ScheduleTimezon
 import NodeHeader from '@/components/ui/ReactFlow/NodeHeader'
 import NodeInputField from '@/components/ui/InputFields/NodeInputField'
 import NodeCheckBoxField from '@/components/ui/InputFields/NodeCheckboxField'
-import NodeDropdownField from '@/components/ui/InputFields/NodeDropdownField'
+import NodeDropdownField, {
+  type NodeDropdownOption,
+  type NodeDropdownOptionGroup
+} from '@/components/ui/InputFields/NodeDropdownField'
 import KeyValuePair from '@/components/ui/ReactFlow/KeyValuePair'
 import DelayNodeConfig from '@/components/actions/logic/DelayNode'
 import {
@@ -105,15 +119,19 @@ import SheetsAction from '@/components/workflow/Actions/Google/SheetsAction'
 import HttpRequestAction from '@/components/workflow/Actions/HttpRequestAction'
 import RunCustomCodeAction from '@/components/workflow/Actions/RunCustomCodeAction'
 import AsanaAction from '@/components/workflow/Actions/Asana/AsanaAction'
+import NotionAction from '@/components/workflow/Actions/Notion/NotionAction'
 import useActionNodeController, {
   type ActionNodeData
 } from '@/components/workflow/nodes/useActionNodeController'
 import useMessagingActionRestriction from '@/components/workflow/nodes/useMessagingActionRestriction'
+import { errorMessage } from '@/lib/errorMessage'
 import type { RunAvailability } from '@/types/runAvailability'
 import { shallow } from 'zustand/shallow'
 
 const SCHEDULE_RESTRICTION_MESSAGE =
   'Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.'
+const NOTION_TRIGGER_RESTRICTION_MESSAGE =
+  'Notion triggers are available on workspace plans and above. Upgrade in Settings > Plan to keep polling Notion.'
 
 type WorkflowEdgeStyle = 'default' | 'bold' | 'dashed'
 
@@ -172,6 +190,7 @@ type ActionDropSubtype =
   | 'actionHttp'
   | 'actionCode'
   | 'actionAsana'
+  | 'actionNotion'
 type LogicDropSubtype = 'delay' | 'formatter'
 
 interface DropDescriptor {
@@ -403,6 +422,37 @@ const ACTION_NODE_DROP_CONFIG: Record<ActionDropSubtype, ActionDropConfig> = {
       stopOnError: true
     })
   },
+  actionNotion: {
+    nodeType: 'actionNotion',
+    labelBase: 'Notion',
+    idPrefix: 'action-notion',
+    expanded: true,
+    createData: () => ({
+      actionType: 'notion',
+      params: {
+        operation: 'create_database_row',
+        connectionScope: '',
+        connectionId: '',
+        databaseId: '',
+        pageId: '',
+        parentType: 'database',
+        parentDatabaseId: '',
+        parentPageId: '',
+        title: '',
+        properties: {},
+        filter: {
+          propertyId: '',
+          propertyType: '',
+          operator: 'equals',
+          value: ''
+        },
+        limit: ''
+      },
+      timeout: 5000,
+      retries: 0,
+      stopOnError: true
+    })
+  },
   actionCode: {
     nodeType: 'actionCode',
     labelBase: 'Code step',
@@ -455,6 +505,9 @@ function normalizeActionDropSubtype(
     case 'actionasana':
     case 'asana':
       return 'actionAsana'
+    case 'actionnotion':
+    case 'notion':
+      return 'actionNotion'
     case 'actionsheets':
     case 'sheets':
     case 'create google sheet row':
@@ -796,6 +849,8 @@ export default function FlowCanvas({
           return 'actionGoogleChat'
         case 'asana':
           return 'actionAsana'
+        case 'notion':
+          return 'actionNotion'
         case 'sheets':
           return 'actionSheets'
         case 'http':
@@ -927,6 +982,18 @@ export default function FlowCanvas({
           isFailed={failedIdsRef.current.has(props.id)}
         />
       ),
+      actionNotion: (props: ActionNodeRendererProps) => (
+        <NotionActionNode
+          key={`action-notion-${props.id}-${props?.data?.wfEpoch ?? ''}`}
+          {...props}
+          {...createSharedRunProps()}
+          planTier={normalizedPlanTierRef.current}
+          onRestrictionNotice={onRestrictionNoticeRef.current}
+          isRunning={runningIdsRef.current.has(props.id)}
+          isSucceeded={succeededIdsRef.current.has(props.id)}
+          isFailed={failedIdsRef.current.has(props.id)}
+        />
+      ),
       actionCode: (props: ActionNodeRendererProps) => (
         <RunCustomCodeActionNode
           key={`action-code-${props.id}-${props?.data?.wfEpoch ?? ''}`}
@@ -1019,6 +1086,8 @@ export default function FlowCanvas({
         renderActionNode('actionHttp', props),
       actionAsana: (props: ActionNodeRendererProps) =>
         renderActionNode('actionAsana', props),
+      actionNotion: (props: ActionNodeRendererProps) =>
+        renderActionNode('actionNotion', props),
       actionCode: (props: ActionNodeRendererProps) =>
         renderActionNode('actionCode', props),
       action: (props: ActionNodeRendererProps) => {
@@ -1282,7 +1351,8 @@ export default function FlowCanvas({
       'actionSheets',
       'actionHttp',
       'actionCode',
-      'actionAsana'
+      'actionAsana',
+      'actionNotion'
     ])
     if (known.has(t)) {
       return t as ActionDropSubtype
@@ -1672,6 +1742,10 @@ function FlyoutActionFields({
             planTier={normalizedPlanTier}
           />
         )
+      case 'actionNotion':
+        return controller.planRestrictionMessage ? null : (
+          <NotionAction nodeId={nodeId} canEdit={controller.effectiveCanEdit} />
+        )
       case 'actionCode':
         return (
           <RunCustomCodeAction
@@ -1848,6 +1922,11 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
   const labelError: string | null = nodeData?.labelError ?? null
   const triggerType: string =
     typeof nodeData?.triggerType === 'string' ? nodeData.triggerType : 'Manual'
+  const normalizedTriggerType = triggerType.trim().toLowerCase() || 'manual'
+  const isScheduleTrigger = normalizedTriggerType === 'schedule'
+  const isNotionTrigger =
+    normalizedTriggerType === 'notion.new_database_row' ||
+    normalizedTriggerType === 'notion.updated_database_row'
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const handleLabelChange = useCallback(
@@ -1874,6 +1953,297 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
       updateNodeData(nodeId, { inputs: vars, dirty: true }),
     [nodeId, updateNodeData]
   )
+
+  const currentWorkspace = useAuth(selectCurrentWorkspace)
+  const workspaceId = currentWorkspace?.workspace.id ?? null
+  const notionConnectionScope =
+    typeof nodeData?.connectionScope === 'string'
+      ? nodeData.connectionScope.trim()
+      : ''
+  const notionConnectionId =
+    typeof nodeData?.connectionId === 'string'
+      ? nodeData.connectionId.trim()
+      : ''
+  const notionDatabaseId =
+    typeof nodeData?.databaseId === 'string' ? nodeData.databaseId.trim() : ''
+
+  const [notionConnections, setNotionConnections] =
+    useState<ProviderConnectionSet | null>(null)
+  const [notionConnectionsLoading, setNotionConnectionsLoading] =
+    useState(false)
+  const [notionConnectionsError, setNotionConnectionsError] = useState<
+    string | null
+  >(null)
+
+  const sanitizeNotionConnections = useCallback(
+    (connections: ProviderConnectionSet) => {
+      const personal = (connections.personal ?? []).map((entry) => {
+        const requiresReconnect = Boolean(entry.requiresReconnect)
+        const id = entry.id ?? entry.connectionId ?? null
+        return {
+          ...entry,
+          id,
+          connectionId: entry.connectionId ?? entry.id ?? undefined,
+          connected: Boolean(entry.connected && id && !requiresReconnect),
+          requiresReconnect
+        }
+      })
+      const workspace = (connections.workspace ?? [])
+        .filter((entry) => !entry.requiresReconnect)
+        .map((entry) => ({ ...entry }))
+      return { personal, workspace }
+    },
+    []
+  )
+
+  const pickNotionConnections = useCallback(
+    (
+      snapshot: GroupedConnectionsSnapshot | null
+    ): ProviderConnectionSet | null => {
+      if (!snapshot) return null
+      const personal = (snapshot.personal ?? [])
+        .filter((entry) => entry.provider === 'notion')
+        .map((entry) => ({ ...entry }))
+      const workspace = (snapshot.workspace ?? [])
+        .filter((entry) => entry.provider === 'notion')
+        .map((entry) => ({ ...entry }))
+      if (personal.length === 0 && workspace.length === 0) {
+        return null
+      }
+      return { personal, workspace }
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (!isNotionTrigger) {
+      setNotionConnections(null)
+      setNotionConnectionsLoading(false)
+      setNotionConnectionsError(null)
+      return
+    }
+
+    let active = true
+    const cached = pickNotionConnections(getCachedConnections(workspaceId))
+    if (cached) {
+      setNotionConnections(sanitizeNotionConnections(cached))
+      setNotionConnectionsLoading(false)
+    } else {
+      setNotionConnections(null)
+    }
+
+    const unsubscribe = subscribeToConnectionUpdates(
+      (snapshot) => {
+        if (!active) return
+        const notionSnapshot = pickNotionConnections(snapshot)
+        if (!notionSnapshot) {
+          setNotionConnections(null)
+          setNotionConnectionsLoading(false)
+          return
+        }
+        setNotionConnections(sanitizeNotionConnections(notionSnapshot))
+        setNotionConnectionsLoading(false)
+        setNotionConnectionsError(null)
+      },
+      { workspaceId }
+    )
+
+    if (!cached) {
+      setNotionConnectionsLoading(true)
+      fetchConnections({ workspaceId })
+        .then((grouped) => {
+          if (!active) return
+          const notionSnapshot = pickNotionConnections(grouped)
+          setNotionConnections(
+            notionSnapshot ? sanitizeNotionConnections(notionSnapshot) : null
+          )
+          setNotionConnectionsError(null)
+        })
+        .catch((err) => {
+          if (!active) return
+          setNotionConnectionsError(errorMessage(err))
+          setNotionConnections(null)
+        })
+        .finally(() => {
+          if (!active) return
+          setNotionConnectionsLoading(false)
+        })
+    }
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [
+    isNotionTrigger,
+    pickNotionConnections,
+    sanitizeNotionConnections,
+    workspaceId
+  ])
+
+  const notionActiveConnection = useMemo(() => {
+    if (!notionConnectionScope || !notionConnectionId) return null
+    const normalized =
+      notionConnectionScope === 'personal' ||
+      notionConnectionScope === 'workspace'
+        ? (notionConnectionScope as ConnectionScope)
+        : null
+    if (!normalized) return null
+    return { scope: normalized, id: notionConnectionId }
+  }, [notionConnectionId, notionConnectionScope])
+
+  const notionConnectionOptions = useMemo<NodeDropdownOptionGroup[]>(() => {
+    if (!notionConnections) return []
+    const groups: NodeDropdownOptionGroup[] = []
+    if (notionConnections.personal.length > 0) {
+      groups.push({
+        label: 'Personal connections',
+        options: notionConnections.personal.map((entry) => {
+          const label =
+            entry.ownerName ||
+            entry.accountEmail ||
+            entry.ownerEmail ||
+            'Personal Notion'
+          const id = entry.id ?? entry.connectionId ?? ''
+          return {
+            label: entry.requiresReconnect ? `${label} (reconnect)` : label,
+            value: `${'personal'}:${id || ''}`,
+            disabled: !id || entry.requiresReconnect
+          }
+        })
+      })
+    }
+    if (notionConnections.workspace.length > 0) {
+      groups.push({
+        label: 'Workspace connections',
+        options: notionConnections.workspace.map((entry) => {
+          const label =
+            entry.workspaceName || entry.sharedByName || 'Workspace Notion'
+          const id = entry.id ?? entry.workspaceConnectionId ?? ''
+          return {
+            label: entry.requiresReconnect ? `${label} (reconnect)` : label,
+            value: `${'workspace'}:${id || ''}`,
+            disabled: !id || entry.requiresReconnect
+          }
+        })
+      })
+    }
+    return groups
+  }, [notionConnections])
+
+  const notionSelectedConnectionValue = useMemo(() => {
+    if (!notionConnectionScope || !notionConnectionId) return ''
+    return `${notionConnectionScope}:${notionConnectionId}`
+  }, [notionConnectionId, notionConnectionScope])
+
+  const handleNotionConnectionChange = useCallback(
+    (value: string) => {
+      const [scopePart, ...rest] = value.split(':')
+      const idPart = rest.join(':').trim()
+      if (!idPart || (scopePart !== 'personal' && scopePart !== 'workspace')) {
+        updateNodeData(nodeId, {
+          connectionScope: '',
+          connectionId: '',
+          databaseId: '',
+          dirty: true
+        })
+        return
+      }
+      updateNodeData(nodeId, {
+        connectionScope: scopePart,
+        connectionId: idPart,
+        databaseId: '',
+        dirty: true
+      })
+    },
+    [nodeId, updateNodeData]
+  )
+
+  const [notionDatabaseSearch, setNotionDatabaseSearch] = useState('')
+  const [notionDatabases, setNotionDatabases] = useState<NotionDatabase[]>([])
+  const [notionDatabasesLoading, setNotionDatabasesLoading] = useState(false)
+  const [notionDatabasesError, setNotionDatabasesError] = useState<
+    string | null
+  >(null)
+  const [notionDatabaseCursor, setNotionDatabaseCursor] = useState<
+    string | null
+  >(null)
+  const [notionDatabasesHasMore, setNotionDatabasesHasMore] = useState(false)
+
+  useEffect(() => {
+    if (!isNotionTrigger || !notionActiveConnection) {
+      setNotionDatabases([])
+      setNotionDatabasesLoading(false)
+      setNotionDatabasesError(null)
+      setNotionDatabaseCursor(null)
+      setNotionDatabasesHasMore(false)
+      return
+    }
+
+    let active = true
+    setNotionDatabasesLoading(true)
+    setNotionDatabasesError(null)
+    const timeout = setTimeout(() => {
+      fetchNotionDatabases({
+        scope: notionActiveConnection.scope,
+        connectionId: notionActiveConnection.id,
+        search: notionDatabaseSearch,
+        cursor: null
+      })
+        .then((payload) => {
+          if (!active) return
+          setNotionDatabases(payload.databases)
+          setNotionDatabaseCursor(payload.nextCursor ?? null)
+          setNotionDatabasesHasMore(payload.hasMore)
+        })
+        .catch((err) => {
+          if (!active) return
+          setNotionDatabasesError(errorMessage(err))
+          setNotionDatabases([])
+          setNotionDatabaseCursor(null)
+          setNotionDatabasesHasMore(false)
+        })
+        .finally(() => {
+          if (!active) return
+          setNotionDatabasesLoading(false)
+        })
+    }, 250)
+
+    return () => {
+      active = false
+      clearTimeout(timeout)
+    }
+  }, [isNotionTrigger, notionActiveConnection, notionDatabaseSearch])
+
+  const handleLoadMoreNotionDatabases = useCallback(() => {
+    if (!notionActiveConnection || !notionDatabaseCursor) return
+    setNotionDatabasesLoading(true)
+    setNotionDatabasesError(null)
+    fetchNotionDatabases({
+      scope: notionActiveConnection.scope,
+      connectionId: notionActiveConnection.id,
+      search: notionDatabaseSearch,
+      cursor: notionDatabaseCursor
+    })
+      .then((payload) => {
+        setNotionDatabases((prev) => [...prev, ...payload.databases])
+        setNotionDatabaseCursor(payload.nextCursor ?? null)
+        setNotionDatabasesHasMore(payload.hasMore)
+      })
+      .catch((err) => {
+        setNotionDatabasesError(errorMessage(err))
+      })
+      .finally(() => {
+        setNotionDatabasesLoading(false)
+      })
+  }, [notionActiveConnection, notionDatabaseCursor, notionDatabaseSearch])
+
+  const notionDatabaseOptions = useMemo<NodeDropdownOption[]>(() => {
+    return notionDatabases.map((db) => ({
+      label: db.name || db.id,
+      value: db.id
+    }))
+  }, [notionDatabases])
 
   const scheduleConfig = useMemo(
     () => (nodeData?.scheduleConfig as any) || {},
@@ -2157,13 +2527,97 @@ function FlyoutTriggerFields({ nodeId, isSoloPlan }: FlyoutTriggerFieldsProps) {
               value={triggerType}
               onChange={handleTriggerTypeChange}
               disabledOptions={
-                isSoloPlan ? { Schedule: SCHEDULE_RESTRICTION_MESSAGE } : {}
+                isSoloPlan
+                  ? {
+                      Schedule: SCHEDULE_RESTRICTION_MESSAGE,
+                      'notion.new_database_row':
+                        NOTION_TRIGGER_RESTRICTION_MESSAGE,
+                      'notion.updated_database_row':
+                        NOTION_TRIGGER_RESTRICTION_MESSAGE
+                    }
+                  : {}
               }
             />
           </div>
         </div>
 
-        {triggerType === 'Schedule' ? (
+        {isNotionTrigger ? (
+          <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                Notion Trigger
+              </h4>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Connection
+                </label>
+                <div className="mt-2">
+                  <NodeDropdownField
+                    options={notionConnectionOptions}
+                    value={notionSelectedConnectionValue}
+                    onChange={handleNotionConnectionChange}
+                    placeholder="Select a Notion connection"
+                    loading={notionConnectionsLoading}
+                    disabled={!isNotionTrigger}
+                    emptyMessage="No Notion connections available"
+                    searchable
+                  />
+                </div>
+                {notionConnectionsError ? (
+                  <p className="mt-2 text-xs text-red-500">
+                    {notionConnectionsError}
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Database
+                </label>
+                <div className="mt-2 space-y-2">
+                  <NodeInputField
+                    placeholder="Search databases..."
+                    value={notionDatabaseSearch}
+                    onChange={setNotionDatabaseSearch}
+                    disabled={!notionActiveConnection}
+                  />
+                  <NodeDropdownField
+                    options={notionDatabaseOptions}
+                    value={notionDatabaseId}
+                    onChange={(value) =>
+                      updateNodeData(nodeId, { databaseId: value, dirty: true })
+                    }
+                    placeholder="Select a database"
+                    loading={notionDatabasesLoading}
+                    disabled={!notionActiveConnection}
+                    emptyMessage="No databases found"
+                    searchable
+                  />
+                </div>
+                {notionDatabasesError ? (
+                  <p className="mt-2 text-xs text-red-500">
+                    {notionDatabasesError}
+                  </p>
+                ) : null}
+                {notionDatabasesHasMore ? (
+                  <button
+                    type="button"
+                    onClick={handleLoadMoreNotionDatabases}
+                    disabled={notionDatabasesLoading}
+                    className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60"
+                  >
+                    Load more databases
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isScheduleTrigger ? (
           <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/40">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">

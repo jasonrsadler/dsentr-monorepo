@@ -144,10 +144,12 @@ impl WorkspaceOAuthService {
         let mut refresh_token = token.refresh_token.clone();
         let mut expires_at = token.expires_at;
         let mut account_email = token.account_email.clone();
+        let existing_metadata = parse_token_metadata(&token.metadata);
         let mut slack_meta: Option<EncryptedSlackOAuthMetadata> =
             slack_metadata_from_value(&token.metadata);
-        let existing_provider_user_id = parse_token_metadata(&token.metadata).provider_user_id;
+        let existing_provider_user_id = existing_metadata.provider_user_id.clone();
         let mut provider_user_id = existing_provider_user_id.clone();
+        let notion_meta = existing_metadata.notion.clone();
 
         if provider == ConnectedOAuthProvider::Slack {
             let refresh_plain = decrypt_secret(&self.encryption_key, &token.refresh_token)?;
@@ -175,6 +177,7 @@ impl WorkspaceOAuthService {
             let personal_metadata = serialize_token_metadata(OAuthTokenMetadata {
                 slack: slack_meta.clone(),
                 provider_user_id: provider_user_id.clone(),
+                notion: notion_meta.clone(),
             });
 
             let _ = self
@@ -204,6 +207,16 @@ impl WorkspaceOAuthService {
         }
 
         // Create workspace connection by COPYING encrypted fields (Slack metadata populated above)
+        let connection_metadata = if provider == ConnectedOAuthProvider::Slack {
+            serde_json::json!({})
+        } else {
+            serialize_token_metadata(OAuthTokenMetadata {
+                slack: None,
+                provider_user_id: provider_user_id.clone(),
+                notion: notion_meta.clone(),
+            })
+        };
+
         let connection = self
             .workspace_connections
             .insert_connection(NewWorkspaceConnection {
@@ -220,7 +233,7 @@ impl WorkspaceOAuthService {
                 slack_team_id,
                 bot_user_id,
                 incoming_webhook_url: incoming_webhook_url.clone(),
-                metadata: serde_json::json!({}),
+                metadata: connection_metadata,
             })
             .await?;
 
@@ -234,6 +247,7 @@ impl WorkspaceOAuthService {
             let cleared_metadata = serialize_token_metadata(OAuthTokenMetadata {
                 slack: clear_webhook(slack_meta.clone()),
                 provider_user_id: provider_user_id.clone(),
+                notion: notion_meta.clone(),
             });
 
             let _ = self
@@ -791,6 +805,7 @@ impl WorkspaceOAuthService {
             ConnectedOAuthProvider::Microsoft => 1,
             ConnectedOAuthProvider::Slack => 2,
             ConnectedOAuthProvider::Asana => 3,
+            ConnectedOAuthProvider::Notion => 4,
         }
     }
 
@@ -2664,6 +2679,7 @@ mod tests {
             expires_at: expires_at + Duration::hours(2),
             account_email: "owner@example.com".into(),
             provider_user_id: None,
+            notion: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: Some("T123".into()),
@@ -2764,6 +2780,7 @@ mod tests {
             expires_at: now + Duration::hours(1),
             account_email: "installer@example.com".into(),
             provider_user_id: None,
+            notion: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: None,
@@ -2809,6 +2826,7 @@ mod tests {
             expires_at: now + Duration::hours(1),
             account_email: "installer@example.com".into(),
             provider_user_id: None,
+            notion: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: Some("T123".into()),
@@ -2848,6 +2866,7 @@ mod tests {
             expires_at: now + Duration::hours(3),
             account_email: "installer@example.com".into(),
             provider_user_id: None,
+            notion: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: Some("T123".into()),
@@ -2918,6 +2937,7 @@ mod tests {
             expires_at: now + Duration::hours(1),
             account_email: "installer@example.com".into(),
             provider_user_id: None,
+            notion: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: Some("T999".into()),
@@ -2986,6 +3006,7 @@ mod tests {
             expires_at: now + Duration::hours(1),
             account_email: "installer@example.com".into(),
             provider_user_id: None,
+            notion: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: Some("T123".into()),
@@ -4006,6 +4027,7 @@ mod tests {
             expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
             account_email: "workspace@example.com".into(),
             provider_user_id: None,
+            notion: None,
             slack: None,
         };
         let refresher = RecordingTokenRefresher::without_delay(refreshed_tokens.clone());
@@ -4079,6 +4101,7 @@ mod tests {
             expires_at: OffsetDateTime::now_utc() + Duration::hours(4),
             account_email: "slack@example.com".into(),
             provider_user_id: Some("U123".into()),
+            notion: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: Some("T123".into()),
@@ -4170,6 +4193,7 @@ mod tests {
             expires_at: OffsetDateTime::now_utc() + Duration::hours(4),
             account_email: "slack@example.com".into(),
             provider_user_id: Some("U123".into()),
+            notion: None,
             slack: Some(
                 crate::services::oauth::account_service::SlackOAuthMetadata {
                     team_id: Some("T123".into()),
@@ -4319,6 +4343,7 @@ mod tests {
             expires_at: OffsetDateTime::now_utc() + Duration::hours(3),
             account_email: "workspace@example.com".into(),
             provider_user_id: None,
+            notion: None,
             slack: None,
         };
         let refresher = RecordingTokenRefresher::new(refreshed_tokens.clone());

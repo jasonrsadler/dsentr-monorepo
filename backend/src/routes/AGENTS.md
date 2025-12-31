@@ -85,6 +85,7 @@
 - Added a Slack channels route that pulls channel lists via personal or workspace OAuth tokens, applies plan/membership checks, and paginates Slack API responses for the Slack action dropdown.
 - Slack channels route now requires an explicit workspace_connection_id, refreshes Slack workspace tokens on token_expired, retries once, and returns auth_expired errors only when refresh fails.
 - Slack channel route tests now import workspace connection listing/audit types explicitly to keep clippy clean after expanding refresh coverage.
+- Added Notion integration routes to list shared databases and retrieve database schemas using stored OAuth connections so the UI can render property-aware inputs.
 - Workspace OAuth endpoints now surface stable `connectionId` values for shared connections so frontend promotion visibility persists across reloads.
 - Workspace promotion now rejects Slack with an explicit workspace-install requirement, and route helpers map the new Slack install error consistently.
 - Route fixtures now populate `slack_team_id` on Slack workspace connections so Slack connection invariants hold in tests and workspace token lookups.

@@ -17,3 +17,4 @@
 - Added egress allowlist enforcement notes so engineers understand how snapshot metadata interacts with environment policies and audit logging.
 - Added plan limit reference (member/run quotas + error codes) so API consumers know how to handle `workspace_plan_required`, `workspace_member_limit`, and `workspace_run_limit` responses.
 - Listed the Asana OAuth callback URL and environment variables so credential provisioning stays consistent with the new integration.
+- Added the Notion OAuth callback URL and env var list so credential setup stays aligned with the integration config.

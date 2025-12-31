@@ -8,5 +8,7 @@ Welcome to the DSentr documentation hub. DSentr is a modular no-code automation 
 - **[Dashboard Overview](./dashboard.md)** – Learn how the authenticated dashboard is structured, how workspace switching works, and where to find global actions.
 - **[Settings & Administration](./settings.md)** – Manage plans, members, integrations, secrets, engine limits, logs, and webhooks.
 - **[Workflow Designer](./workflow-designer.md)** – Understand the canvas, toolbar, and run controls used to design and operate automations.
+- **[Notion Integration](./notion-integration.md)** - Connect Notion, share databases, and troubleshoot common errors.
+- **[Notion Nodes](./notion-nodes.md)** - Configure Notion actions and polling triggers with stable property mappings.
 
 Each page references the live product behavior implemented in the frontend codebase so you can rely on these instructions while using DSentr today. If you are new to automation platforms, start with Getting Started and progress in order.

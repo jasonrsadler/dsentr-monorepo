@@ -301,6 +301,21 @@ const buildSummaryItems = (
       }
       break
     }
+    case 'notion': {
+      const operation = toStringValue(params.operation)
+      addItem('Operation', formatOperationLabel(operation))
+      const database =
+        normalizeSummaryText(params.databaseId) ||
+        normalizeSummaryText(params.parentDatabaseId)
+      const page =
+        normalizeSummaryText(params.pageId) ||
+        normalizeSummaryText(params.parentPageId)
+      const title = normalizeSummaryText(params.title)
+      if (database) addItem('Database', database)
+      if (page) addItem('Page', page)
+      if (title) addItem('Title', title)
+      break
+    }
     default:
       break
   }

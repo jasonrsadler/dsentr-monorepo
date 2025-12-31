@@ -45,3 +45,6 @@
 - OAuth account tests can now override Slack token and user info endpoints so Slack exchange/auth flows are stubbable without hitting Slack.
 - Slack personal tokens now always come from the combined Slack install exchange, with `auth.test` supplying the team id and the install response supplying webhook metadata in one service path.
 - Slack OAuth exchanges now guard against missing user access tokens before calling `auth.test` to surface clear errors.
+- Added Notion OAuth exchange/refresh handling with token metadata capture (workspace/bot/owner) and provider user id dedupe so Notion connections persist like other providers.
+- Fixed a duplicated OAuth account service block that broke compilation, restoring the single `store_authorization` flow for token persistence.
+- Notion OAuth exchange now preserves owner metadata for provider id derivation without moving values, fixing borrow-check failures.

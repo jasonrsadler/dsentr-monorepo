@@ -1,5 +1,6 @@
 pub mod mailjet_mailer;
 pub mod microsoft;
+pub mod notion;
 pub mod oauth;
 pub mod pluggable_mailer;
 pub mod sendgrid_mailer;

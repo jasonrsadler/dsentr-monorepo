@@ -69,6 +69,8 @@
 - Asana action inputs no longer trim user-entered text on change, preserving whitespace while typing; trimming happens later during validation/templating.
 - Formatter node config now preserves whitespace while typing (no trimming on change) and defers string cleanup to validation so text fields keep the user's in-progress spacing.
 
+- Added Notion workflow controls: action flyout with schema-driven property mapping, trigger configuration with Notion connections and database picker, and supporting dropdown updates.
+- Notion action multi-select normalization now emits stable typed entries with memoized option lists, and Trigger node restriction banners reuse the unified restriction message to fix lint/build failures.
 ## Affected Areas
 - Settings > LogsTab: change history list
 - Settings > WebhooksTab: code examples and raw payload blocks

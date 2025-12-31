@@ -1,4 +1,4 @@
-Ôªø# Frontend Agent Notes
+# Frontend Agent Notes
 
 Vite build output (warnings-free):
 - Added Rollup chunk splitting to group large vendor deps (React, XYFlow, framer-motion, router, zustand, etc.) and reduce main bundle size.
@@ -43,7 +43,7 @@ SheetsAction credential fallback guard:
 - Prevent Sheets action nodes from silently auto-selecting the personal Google credential after a shared workspace credential disappears. Track when we clear a workspace selection and suppress the automatic fallback so users must explicitly pick another connection, keeping React Flow updates bounded.
 
 Runaway workflow protection toggle:
-- Settings ÔøΩ+' Workflows now surfaces a Runaway Protection checkbox that reads/writes `workflows.runaway_protection_enabled` via `/api/options/user-settings` with optimistic updates so workspaces can disable runaway run blocking when needed.
+- Settings ?+' Workflows now surfaces a Runaway Protection checkbox that reads/writes `workflows.runaway_protection_enabled` via `/api/options/user-settings` with optimistic updates so workspaces can disable runaway run blocking when needed.
 
 OAuth connections response normalization:
 - `fetchConnections` now tolerates API responses where `personal`/`workspace` are provided as flat arrays instead of provider buckets by grouping entries client-side. This keeps the cached snapshot populated for tests and production regardless of response shape.
@@ -53,15 +53,15 @@ Vite 7 migration:
 - Moved Vitest options into `vitest.config.ts` and removed the `test` field from `vite.config.ts` because Vite 7's `UserConfig` no longer includes `test`. Mirrored aliases/plugins so test transforms and import paths match the app.
 
 Vitest config type compatibility:
-- Removed Vite plugins from `vitest.config.ts` to avoid cross-package `PluginOption` type mismatches between Vitest‚Äôs bundled Vite types and the app‚Äôs Vite types. Vitest/esbuild handles JSX/TS without these plugins; aliases are preserved for import resolution.
+- Removed Vite plugins from `vitest.config.ts` to avoid cross-package `PluginOption` type mismatches between Vitestís bundled Vite types and the appís Vite types. Vitest/esbuild handles JSX/TS without these plugins; aliases are preserved for import resolution.
 
 Lint hygiene:
-- Added `vitest.config.ts` to `tsconfig.node.json` includes so ESLint‚Äôs typed parser (`parserOptions.project`) can resolve it and avoid parsing errors.
+- Added `vitest.config.ts` to `tsconfig.node.json` includes so ESLintís typed parser (`parserOptions.project`) can resolve it and avoid parsing errors.
 - Removed temporary root-level re-export shims (`frontend/DashboardLayout.tsx`, `frontend/IntegrationsTab.tsx`) and updated tests to import via `'@/components/...` paths. `tsconfig.app.json` now includes only `src` again.
 - Updated ESLint rule `react-refresh/only-export-components` to allow exports `useSecrets` and `SecretsContext`, matching our context/provider pattern without forcing file splits.
 - Stabilized React hooks deps in `src/components/ui/InputFields/NodeSecretDropdown.tsx` by using a shared empty object constant instead of recreating `{}` each render.
 Additional TypeScript build fixes (build hygiene):
-- Excluded 	ests from 	sconfig.app.json so app builds don‚Äôt typecheck test files. Added missing TS path aliases (@components, @hooks, @utils, @assets) to mirror Vite aliases.
+- Excluded 	ests from 	sconfig.app.json so app builds donít typecheck test files. Added missing TS path aliases (@components, @hooks, @utils, @assets) to mirror Vite aliases.
 - Replaced uses of JSX.Element in public props with ReactNode to avoid JSX namespace issues in TS 5.x with React 19.
 - Normalized import casing and resolved duplicate-casing conflicts (e.g., UI/dialog vs ui/dialog, Settings vs settings). Kept a single canonical path to avoid TS1261 on case-insensitive filesystems.
 - React Flow: wrapped control callbacks to accept mouse events, ensured WorkflowEdgeData and ActionNodeData extend Record<string, unknown>, and cast node/edge data where needed to satisfy @xyflow/react v12 generics.
@@ -87,9 +87,9 @@ oUnusedLocals.
 - Shared credential removal flows now warn about potential workflow failures and ensure personal disconnects also revoke shared workspace connections.
 - Integrations tab now surfaces an Asana card with OAuth connect/disconnect support using the new backend provider and displays both personal and workspace connections.
 - Added an Asana action node (palette + flyout) with connection selector, plan restriction messaging, and operations for managing Asana projects, tasks, subtasks, comments, tags, and users.
-- Asana node now fetches workspaces/projects/sections/tags/teams/users from the selected connection and renders dropdowns alongside manual GID inputs so users don‚Äôt have to look up IDs.
+- Asana node now fetches workspaces/projects/sections/tags/teams/users from the selected connection and renders dropdowns alongside manual GID inputs so users donít have to look up IDs.
 - Asana node now enforces Workspace-plan-only UI (Solo shows an upgrade notice), replaces GID labels with dropdowns for tasks/comments, adds due-on/at toggling with pickers only, and prevents solo users from triggering metadata fetches.
-- Asana node dropdown fetch effects are gated by visibility to avoid redundant API calls while hidden fields stay collapsed, and the assignee label now omits ‚ÄúGID‚Äù for consistency with other fields.
+- Asana node dropdown fetch effects are gated by visibility to avoid redundant API calls while hidden fields stay collapsed, and the assignee label now omits ìGIDî for consistency with other fields.
 - Asana create task now leaves project selection optional with a default "No Project" choice, shows the name/optional fields as soon as a workspace is selected, and pins the project dropdown to the top of the optional section so tasks can be created without assigning them to a project.
 - Asana update task now supports a "No Project" selection that reveals a manual Task GID input (fetches details on blur, auto-populates fields, hides the task dropdown), while keeping optional fields available once a task GID is provided.
 - Manual Task GID entry (No Project path) no longer triggers an API fetch or auto-prefill; dropdown task selection still pre-fills fields as before.
@@ -97,7 +97,7 @@ oUnusedLocals.
 - Asana list tasks now includes a "No Project" choice, shows tag/assignee with workspace, and validates that project, tag, or assignee+workspace is present to satisfy Asana filtering rules.
 - Asana list tasks now offers "No Tag" and "No Assignee" dropdown choices so users can explicitly clear those filters while following the allowed query combinations.
 - Asana delete task supports a "No Project" option that hides the task dropdown and shows a manual Task GID input when no project is chosen.
-- Asana action fields are now sequenced strictly by dependency (connection ‚Üí operation ‚Üí workspace ‚Üí downstream choices), and project/tag/team/user fetches run only when their dropdowns are visible to stop circular API triggers while configuring nodes.
+- Asana action fields are now sequenced strictly by dependency (connection ? operation ? workspace ? downstream choices), and project/tag/team/user fetches run only when their dropdowns are visible to stop circular API triggers while configuring nodes.
 - Action nodes now deep-compare local state before notifying the canvas so update notifications don't trigger infinite React Flow rerender loops.
 - Action node prop-to-state sync skips redundant param updates to prevent React Flow dirty-check loops when toggling node UI.
 - Condition nodes now deep-compare update payloads before notifying the canvas so toggling other nodes or edges doesn't trigger infinite workflow rerenders.
@@ -134,9 +134,10 @@ oUnusedLocals.
 - Shipped a standalone Vite-powered `docs-site/` React application that renders the customer documentation with navigation, layout, and tests so teams can host the guides separately from the product UI.
 - Guarded unread message fetching in `DashboardLayout` so state updates are skipped after unmount or in non-window environments, preventing test-time window reference errors.
 
+- Added Notion integration UI (connection picker, database/schema mapping, action flyout, polling trigger setup) plus dashboard palette and docs links so Notion workflows are first-class.
 ## Additional Changes (test fixes + tooling alignment)
 - Downgraded  to  to satisfy  peer constraints and unblock installs/tests without .
-- Enabled React transform in tests by adding  to  plugins. This resolves ‚ÄúReact is not defined‚Äù errors in TSX test files under Vitest 3.
+- Enabled React transform in tests by adding  to  plugins. This resolves ìReact is not definedî errors in TSX test files under Vitest 3.
 - Mirrored path aliases in  to keep  imports working during tests.
 - TeamsAction: prevented duplicate store writes on no-op input changes by tracking the last committed params in a  and comparing against it before dispatch.
 - SMTPAction: improved accessibility by marking helper text as  and labeling radio inputs via  so  works in jsdom; also compute validation on each field emit and include  in the same  call to keep store state in sync with UI.
@@ -146,7 +147,7 @@ oUnusedLocals.
 
 ## Additional Changes (test fixes + tooling alignment)
 - Downgraded  to  to satisfy  peer constraints and unblock installs/tests without .
-- Enabled React transform in tests by adding  to  plugins. This resolves ‚ÄúReact is not defined‚Äù errors in TSX test files under Vitest 3.
+- Enabled React transform in tests by adding  to  plugins. This resolves ìReact is not definedî errors in TSX test files under Vitest 3.
 - Mirrored path aliases in  to keep  imports working during tests.
 - TeamsAction: prevented duplicate store writes on no-op input changes by tracking the last committed params in a  and comparing against it before dispatch.
 - SMTPAction: improved accessibility by marking helper text as  and labeling radio inputs via  so  works in jsdom; also compute validation on each field emit and include  in the same  call to keep store state in sync with UI.
@@ -154,7 +155,7 @@ oUnusedLocals.
 
 ## Additional Changes (test fixes + tooling alignment)
 - Aligned Vite to ^6.4.1 to satisfy @tailwindcss/vite@4.1.5 peer constraints and unblock clean installs/tests.
-- Added @vitejs/plugin-react to vitest.config.ts plugins so JSX transforms in tests match the app, fixing ‚ÄúReact is not defined‚Äù in TSX tests.
+- Added @vitejs/plugin-react to vitest.config.ts plugins so JSX transforms in tests match the app, fixing ìReact is not definedî in TSX tests.
 - Mirrored @ path aliases in vitest.config.ts to keep imports resolvable under Vitest.
 - TeamsAction: prevented duplicate store writes on no-op updates by tracking the last committed params ref and short-circuiting identical patches.
 - SMTPAction: improved a11y and testability by labeling TLS radio inputs via aria-label, marking helper text aria-hidden, and emitting hasValidationErrors alongside field patches.
@@ -172,24 +173,24 @@ Content Security Policy hardening:
 
 ## Test Fixes (marketing pages + store)
 - Home: aligned hero heading/description and CTA label to tests; feature card titles/descriptions now match expected copy.
-- HowItWorks: updated section titles/descriptions and CTA to ‚ÄúTry Now‚Äù to satisfy tests.
-- About: hero title now ‚ÄúAbout DSentr‚Äù; added ‚ÄúThe Story Behind DSentr‚Äù section with expected opening line.
-- CheckEmail: hero title/copy now ‚ÄúCheck your email‚Äù and ‚Äúwe've sent you a verification link‚Ä¶‚Äù.
-- GetStarted: success message updated to ‚ÄúYou're in! We'll be in touch soon.‚Äù
-- BrandHero: removed inline brand text ‚ÄúDSentr‚Äù to avoid duplicate matches with header in App tests.
+- HowItWorks: updated section titles/descriptions and CTA to ìTry Nowî to satisfy tests.
+- About: hero title now ìAbout DSentrî; added ìThe Story Behind DSentrî section with expected opening line.
+- CheckEmail: hero title/copy now ìCheck your emailî and ìwe've sent you a verification linkÖî.
+- GetStarted: success message updated to ìYou're in! We'll be in touch soon.î
+- BrandHero: removed inline brand text ìDSentrî to avoid duplicate matches with header in App tests.
 - GoogleChatAction: commit payload now includes both flattened fields and a namespaced `'Google Chat'` object, and preserves `dirty` + `hasValidationErrors` per updates.
-- GoogleChatAction: fixed message type dropdown reverting to ‚ÄúText message‚Äù by decoupling mode from `cardJson` content. Mode is now tracked in local state and only promoted to `card` when external params include a non-empty cards payload. Prevents unintended reversions when switching between ‚ÄúText message‚Äù and ‚ÄúCard JSON (cardsV2)‚Äù.
+- GoogleChatAction: fixed message type dropdown reverting to ìText messageî by decoupling mode from `cardJson` content. Mode is now tracked in local state and only promoted to `card` when external params include a non-empty cards payload. Prevents unintended reversions when switching between ìText messageî and ìCard JSON (cardsV2)î.
 - Test shims: added lightweight re-exports so tests resolve their intended imports:
-  - `frontend/DashboardLayout.tsx` ‚Üí `@/layouts/DashboardLayout`
-  - `frontend/IntegrationsTab.tsx` ‚Üí `@/components/settings/tabs/IntegrationsTab`
-  - `frontend/tests/MembersTab.tsx` ‚Üí `@/components/settings/tabs/MembersTab`
+  - `frontend/DashboardLayout.tsx` ? `@/layouts/DashboardLayout`
+  - `frontend/IntegrationsTab.tsx` ? `@/components/settings/tabs/IntegrationsTab`
+  - `frontend/tests/MembersTab.tsx` ? `@/components/settings/tabs/MembersTab`
 
 ## IntegrationsTab test fixes
 - On mount/workspace change, reset local provider statuses to a clean initial state before fetching to avoid state bleed between renders in tests.
 - After promoting a personal connection, perform a best-effort re-fetch of provider connections and merge back into local state. This mirrors expected UX and consumes the second mocked response in tests that queue two `fetchConnections` results, preventing cross-test leakage.
 
 ## DashboardLayout test fix
-- Changed the workspace switcher label from ‚ÄúWorkspace‚Äù to ‚ÄúActive workspace‚Äù to disambiguate it from the plan badge text ‚ÄúWorkspace‚Äù, preventing duplicate text matches in tests that assert the plan badge value.
+- Changed the workspace switcher label from ìWorkspaceî to ìActive workspaceî to disambiguate it from the plan badge text ìWorkspaceî, preventing duplicate text matches in tests that assert the plan badge value.
 - Query param syncing: On first mount, respect an existing `?workspace=` in the URL by not overriding it immediately; subsequent changes always sync the query param to the current selection. This avoids a mount-time race that previously caused timeouts in `prefers workspace specified in the query string`.
 
 ## Email Actions type fixes
@@ -201,19 +202,19 @@ Content Security Policy hardening:
 - Plan change flows now initiate Stripe Checkout for the Workspace tier instead of directly patching the plan:
   - `src/components/settings/tabs/PlanTab.tsx`: when selecting Workspace, calls `POST /api/workspaces/plan`, uses the returned `checkout_url` to redirect (prefers `stripe.redirectToCheckout` if a session id is present; falls back to `window.location.assign(checkout_url)`).
   - `src/WorkspaceOnboarding.tsx`: when selecting Workspace, calls `POST /api/workspaces/onboarding`, then redirects similarly.
-- UI updates: disabled submit while redirecting and surface a "Redirecting to Stripe Checkout‚Ä¶" status. Solo plan behavior remains unchanged and does not use Stripe.
+- UI updates: disabled submit while redirecting and surface a "Redirecting to Stripe CheckoutÖ" status. Solo plan behavior remains unchanged and does not use Stripe.
 - Tests: added `PlanTab.stripe.test.tsx` and `WorkspaceOnboarding.stripe.test.tsx`; globally mocked `@stripe/stripe-js` in `tests/setup.ts`.
 
 ## Plan tab renewal/downgrade UX (Stripe)
 - Plans tab now shows renewal or scheduled downgrade date for Workspace subscribers:
   - `GET /api/workspaces/onboarding` returns `billing.subscription` with `renews_at`, `cancel_at`, and `cancel_at_period_end`.
-  - The tab renders ‚ÄúRenews on <date>‚Äù when active, or ‚ÄúWorkspace subscription will revert back to Solo on <date>‚Äù when `cancel_at_period_end` is set.
+  - The tab renders ìRenews on <date>î when active, or ìWorkspace subscription will revert back to Solo on <date>î when `cancel_at_period_end` is set.
 - Downgrading from Workspace to Solo is now scheduled at the end of the current billing period when the account has an active Stripe subscription:
   - Submitting `Solo` triggers `POST /api/workspaces/plan`. If backend returns `{ scheduled_downgrade: { effective_at } }`, the UI keeps the current plan as `Workspace`, sets the status message with the effective date, and updates its local billing state.
-  - For non‚ÄëStripe accounts (or no active subscription), downgrade remains immediate as before.
+  - For non-Stripe accounts (or no active subscription), downgrade remains immediate as before.
 - While a scheduled downgrade is pending (`cancel_at_period_end = true`):
-  - The primary ‚ÄúUpdate plan‚Äù button stays disabled until the subscription actually expires.
-  - The Workspace card shows an info message with the reversion date and a small ‚ÄúContinue subscription‚Äù button that calls `POST /api/workspaces/billing/subscription/resume` to clear the scheduled cancel.
+  - The primary ìUpdate planî button stays disabled until the subscription actually expires.
+  - The Workspace card shows an info message with the reversion date and a small ìContinue subscriptionî button that calls `POST /api/workspaces/billing/subscription/resume` to clear the scheduled cancel.
   - Messages include an inline info icon; spacing uses `inline-flex` + `gap-1` to avoid layout jitter.
 
 ## Test reliability and signup UX
@@ -224,7 +225,7 @@ Content Security Policy hardening:
 
 ## Auth pages compact layout
 - Added compact prop to src/components/marketing/MarketingShell.tsx to reduce outer/inner padding on pages that must fit above the fold.
-- Updated src/Login.tsx and src/Signup.tsx to use compact and hide the left marketing column on small screens (hidden lg:block / lg:flex), minimizing vertical scroll on mobile while keeping the two‚Äëcolumn layout on desktop.
+- Updated src/Login.tsx and src/Signup.tsx to use compact and hide the left marketing column on small screens (hidden lg:block / lg:flex), minimizing vertical scroll on mobile while keeping the two-column layout on desktop.
 - Moved the Signup validation error summary into the form card so feedback appears near controls even when the marketing column is hidden.
 - Kept invite preview/decision UI unchanged and within the form card; OAuth buttons remain visible above the fold.
 - Rationale: make login/signup usable with minimal scrolling on small viewports without sacrificing clarity or accessibility.
@@ -237,7 +238,7 @@ Content Security Policy hardening:
 - Cloudflare setup test
 
 ## OAuth login UX
-- When a user attempts OAuth login (Google/GitHub) without an existing DSentr account, the backend now redirects them to `/signup?oauth=‚Ä¶` with provider/email/name hints. The Signup page parses these params to prefill fields and shows a non-error notice, ensuring users accept the Terms of Service before starting OAuth signup via the provider button.
+- When a user attempts OAuth login (Google/GitHub) without an existing DSentr account, the backend now redirects them to `/signup?oauth=Ö` with provider/email/name hints. The Signup page parses these params to prefill fields and shows a non-error notice, ensuring users accept the Terms of Service before starting OAuth signup via the provider button.
 
 ## Change Reasons
 - Webhooks tab gating: HMAC verification controls are disabled for Solo plan workspaces, with an upgrade CTA linking to the Plan tab. This keeps paid features restricted to workspace plans and aligns UI with backend enforcement.
@@ -257,11 +258,11 @@ CSP automation:
 - Approved domains explicitly included: https://js.stripe.com, https://fonts.googleapis.com, https://fonts.gstatic.com, https://api.dsentr.com, ws://app.dsentr.com, wss://app.dsentr.com.
 
 Secrets & API Keys autofill hardening:
-- Disabled browser/password-manager autofill on the Settings ‚Üí Secrets & API Keys inputs by setting `autoComplete="off"` for the name field and `autoComplete="new-password"` for the secret value field, while also disabling spellcheck/autocapitalize/autocorrect. Added `data-lpignore` and `data-1p-ignore` to hint common managers (LastPass/1Password) to ignore these fields. This prevents unintended autofill (e.g., username/password injection into the Mailgun card) and reduces accidental secret leakage during demos.
+- Disabled browser/password-manager autofill on the Settings ? Secrets & API Keys inputs by setting `autoComplete="off"` for the name field and `autoComplete="new-password"` for the secret value field, while also disabling spellcheck/autocapitalize/autocorrect. Added `data-lpignore` and `data-1p-ignore` to hint common managers (LastPass/1Password) to ignore these fields. This prevents unintended autofill (e.g., username/password injection into the Mailgun card) and reduces accidental secret leakage during demos.
 
 WorkspaceOnboarding checkout flow (network calls simplification):
 - Removed the initial `getPrivacyPreference()` fetch from `src/WorkspaceOnboarding.tsx` and kept the default (`allowWorkflowInsights=true`). This avoids an extra GET during mount that interfered with test fetch ordering and can introduce subtle race conditions.
-- Deferred persisting the privacy preference (`setPrivacyPreference`) to only the Solo path, after navigation completes. For the Workspace (Stripe) path, we no longer issue this extra request before redirecting to Checkout. Result: the upgrade flow performs exactly three calls in order (GET onboarding context ‚Üí GET CSRF ‚Üí POST onboarding) and immediately transitions to the ‚ÄúRedirecting‚Ä¶‚Äù state.
+- Deferred persisting the privacy preference (`setPrivacyPreference`) to only the Solo path, after navigation completes. For the Workspace (Stripe) path, we no longer issue this extra request before redirecting to Checkout. Result: the upgrade flow performs exactly three calls in order (GET onboarding context ? GET CSRF ? POST onboarding) and immediately transitions to the ìRedirectingÖî state.
 - Rationale: keeps the checkout flow snappy and deterministic in tests and production, and prevents redundant background calls right before leaving the page.
 
 OAuth connections grouping (Google Sheets, Microsoft Teams):
@@ -270,7 +271,7 @@ OAuth connections grouping (Google Sheets, Microsoft Teams):
 - Updated validation to check the selected `scope/id` within the appropriate group and surface errors when the selection is missing or stale per group, without intermediate flattening logic.
 - Adjusted related unit tests to assert grouped behavior and guard against regressions.
 
-- Added workspace-only run usage bar in the dashboard header and a new Settings ÔøΩ Usage tab to show workspace totals, member run breakdowns, and overage indicators so over-limit runs remain visible for billing.
+- Added workspace-only run usage bar in the dashboard header and a new Settings ? Usage tab to show workspace totals, member run breakdowns, and overage indicators so over-limit runs remain visible for billing.
 - Added a support entry point in the dashboard header plus an issue-report modal that submits user/workspace context to the backend for troubleshooting.
 - Added a header message badge and inbox modal so customers can read/reply to system messages and clear unread counts synced with backend read tracking.
 - Added a Delay (Wait) logic node with palette entry, validation, and config UI so workflows can pause before continuing to downstream steps.

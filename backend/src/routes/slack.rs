@@ -819,6 +819,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: vec![0u8; 32],
             },
             api_secrets_encryption_key: vec![1u8; 32],
@@ -1529,6 +1534,7 @@ mod tests {
                         expires_at: OffsetDateTime::now_utc() + Duration::hours(2),
                         account_email: "owner@example.com".into(),
                         provider_user_id: None,
+                        notion: None,
                         slack: Some(
                             crate::services::oauth::account_service::SlackOAuthMetadata {
                                 team_id: Some("T123".into()),

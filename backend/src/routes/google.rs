@@ -551,6 +551,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: vec![1u8; 32],
             },
             api_secrets_encryption_key: vec![2u8; 32],

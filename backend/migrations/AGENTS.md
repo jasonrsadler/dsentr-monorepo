@@ -52,3 +52,4 @@
 - Added `connection_id` to `workspace_connections` with a backfill from `user_oauth_token_id` and a unique index per workspace so OAuth promotions retain stable identity.
 - Enforced Slack workspace connection team-id requirements with non-null/length checks and a per-workspace uniqueness index on `(workspace_id, slack_team_id)`.
 - Moving back commit indices
+- Added the Notion OAuth provider value to the `oauth_connection_provider` enum so Notion connections can be persisted.

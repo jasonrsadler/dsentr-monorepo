@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use chrono::Duration as ChronoDuration;
+
 use super::prelude::*;
+use crate::models::workflow_schedule::WorkflowSchedule;
 
 pub(crate) fn is_unique_violation(err: &sqlx::Error) -> bool {
     if let sqlx::Error::Database(db_err) = err {
@@ -91,6 +94,9 @@ pub(crate) fn extract_schedule_config(graph: &Value) -> Option<Value> {
             .and_then(|value| value.as_str())
             .unwrap_or("Manual");
         if !trigger_type.eq_ignore_ascii_case("schedule") {
+            if is_notion_trigger_type(trigger_type) {
+                return build_notion_trigger_config(data, trigger_type);
+            }
             continue;
         }
         if let Some(cfg) = data.get("scheduleConfig") {
@@ -121,6 +127,30 @@ async fn sync_workflow_schedule_inner(
 
     match schedule_value {
         Some(cfg_value) => {
+            if is_notion_trigger_config(&cfg_value) {
+                let merged_config = merge_notion_state(cfg_value, existing.as_ref());
+                let next_offset = compute_notion_next_run(
+                    existing.as_ref().and_then(|s| s.next_run_at),
+                    &merged_config,
+                );
+                if let Some(next_run_at) = next_offset {
+                    state
+                        .workflow_repo
+                        .upsert_workflow_schedule(
+                            workflow.user_id,
+                            workflow.id,
+                            merged_config,
+                            Some(next_run_at),
+                        )
+                        .await?;
+                } else {
+                    state
+                        .workflow_repo
+                        .disable_workflow_schedule(workflow.id)
+                        .await?;
+                }
+                return Ok(());
+            }
             if let Some(cfg) = parse_schedule_config(&cfg_value) {
                 let last_run = existing
                     .as_ref()
@@ -166,6 +196,117 @@ async fn sync_workflow_schedule_inner(
     }
 
     Ok(())
+}
+
+const DEFAULT_NOTION_POLL_INTERVAL_SECONDS: i64 = 300;
+const MIN_NOTION_POLL_INTERVAL_SECONDS: i64 = 30;
+const MAX_NOTION_POLL_INTERVAL_SECONDS: i64 = 3600;
+
+fn is_notion_trigger_type(trigger_type: &str) -> bool {
+    matches!(
+        trigger_type.trim().to_ascii_lowercase().as_str(),
+        "notion.new_database_row" | "notion.updated_database_row"
+    )
+}
+
+fn is_notion_trigger_config(config: &Value) -> bool {
+    config
+        .get("triggerType")
+        .and_then(|value| value.as_str())
+        .map(is_notion_trigger_type)
+        .unwrap_or(false)
+}
+
+fn build_notion_trigger_config(data: &Value, trigger_type: &str) -> Option<Value> {
+    let map = data.as_object()?;
+    let connection_scope = read_string(map.get("connectionScope"))?;
+    let connection_id = read_string(map.get("connectionId"))?;
+    let database_id = read_string(map.get("databaseId"))?;
+
+    let mut out = serde_json::Map::new();
+    out.insert(
+        "triggerType".to_string(),
+        Value::String(trigger_type.to_string()),
+    );
+    out.insert(
+        "connectionScope".to_string(),
+        Value::String(connection_scope),
+    );
+    out.insert("connectionId".to_string(), Value::String(connection_id));
+    out.insert("databaseId".to_string(), Value::String(database_id));
+
+    if let Some(page_size) = read_page_size(map.get("pageSize")) {
+        out.insert(
+            "pageSize".to_string(),
+            Value::Number(serde_json::Number::from(page_size)),
+        );
+    }
+
+    Some(Value::Object(out))
+}
+
+fn merge_notion_state(config: Value, existing: Option<&WorkflowSchedule>) -> Value {
+    let Some(existing) = existing else {
+        return config;
+    };
+    let Some(existing_state) = existing.config.get("state") else {
+        return config;
+    };
+
+    let mut updated = config;
+    if let Value::Object(map) = &mut updated {
+        if !map.contains_key("state") {
+            map.insert("state".to_string(), existing_state.clone());
+        }
+    }
+    updated
+}
+
+fn compute_notion_next_run(
+    existing_next: Option<OffsetDateTime>,
+    config: &Value,
+) -> Option<OffsetDateTime> {
+    let now_offset = OffsetDateTime::now_utc();
+    if let Some(existing) = existing_next {
+        if existing > now_offset {
+            return Some(existing);
+        }
+    }
+
+    let interval = notion_poll_interval_seconds(config).max(1);
+    let next_dt = Utc::now().checked_add_signed(ChronoDuration::seconds(interval))?;
+    utc_to_offset(next_dt)
+}
+
+fn notion_poll_interval_seconds(config: &Value) -> i64 {
+    let from_config = read_page_size(config.get("pollIntervalSeconds")).map(|value| value as i64);
+    let from_env = std::env::var("NOTION_POLL_INTERVAL_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok());
+
+    let raw = from_config
+        .or(from_env)
+        .unwrap_or(DEFAULT_NOTION_POLL_INTERVAL_SECONDS);
+    raw.clamp(
+        MIN_NOTION_POLL_INTERVAL_SECONDS,
+        MAX_NOTION_POLL_INTERVAL_SECONDS,
+    )
+}
+
+fn read_page_size(value: Option<&Value>) -> Option<u32> {
+    match value {
+        Some(Value::Number(num)) => num.as_u64().and_then(|v| u32::try_from(v).ok()),
+        Some(Value::String(raw)) => raw.trim().parse::<u32>().ok(),
+        _ => None,
+    }
+}
+
+fn read_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 pub(crate) fn plan_violation_response(violations: Vec<PlanViolation>) -> Response {

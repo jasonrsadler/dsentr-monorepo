@@ -6,6 +6,7 @@ pub(crate) mod formatter;
 mod google;
 mod http;
 mod messaging;
+mod notion;
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -433,6 +434,7 @@ pub(crate) async fn execute_action(
             messaging::execute_messaging(node, context, state, run).await
         }
         "sheets" => google::execute_sheets(node, context, state, run).await,
+        "notion" => notion::execute_notion(node, context, state, run).await,
         "code" => code::execute_code(node, context).await,
         "asana" => asana::execute_asana(node, context, state, run).await,
         _ => Ok((

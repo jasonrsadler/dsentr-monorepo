@@ -116,6 +116,14 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
         dragType: 'action:actionAsana',
         gradient: 'from-orange-500 to-rose-500',
         icon: <ActionIcon />
+      },
+      {
+        id: 'action-notion',
+        label: 'Notion',
+        description: 'Create and query Notion databases',
+        dragType: 'action:actionNotion',
+        gradient: 'from-stone-600 to-zinc-800',
+        icon: <ActionIcon />
       }
     ]
   },

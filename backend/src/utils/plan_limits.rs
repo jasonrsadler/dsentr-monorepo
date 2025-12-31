@@ -150,6 +150,13 @@ fn trigger_type(node: &Value) -> Option<Cow<'_, str>> {
         .map(|value| Cow::Owned(value.to_lowercase()))
 }
 
+fn is_notion_trigger_type(trigger: &str) -> bool {
+    matches!(
+        trigger.trim(),
+        "notion.new_database_row" | "notion.updated_database_row"
+    )
+}
+
 pub fn assess_workflow_for_plan(graph: &Value) -> WorkflowAssessment {
     let nodes = graph
         .get("nodes")
@@ -161,6 +168,7 @@ pub fn assess_workflow_for_plan(graph: &Value) -> WorkflowAssessment {
 
     let mut premium_nodes: Vec<(Option<String>, &'static str)> = Vec::new();
     let mut schedule_nodes: Vec<Option<String>> = Vec::new();
+    let mut notion_trigger_nodes: Vec<Option<String>> = Vec::new();
 
     for node in &nodes {
         let node_type = node
@@ -173,6 +181,7 @@ pub fn assess_workflow_for_plan(graph: &Value) -> WorkflowAssessment {
             if let Some(action) = action_type(node) {
                 match action.as_ref() {
                     "sheets" => premium_nodes.push((node_label(node), "Google Sheets")),
+                    "notion" => premium_nodes.push((node_label(node), "Notion")),
                     "messaging" | "teams" | "slack" | "googlechat" | "microsoftteams" => {
                         match messaging_integration(node) {
                             Some(MessagingIntegration::Slack) => {
@@ -194,6 +203,8 @@ pub fn assess_workflow_for_plan(graph: &Value) -> WorkflowAssessment {
             if let Some(trigger) = trigger_type(node) {
                 if trigger == "schedule" {
                     schedule_nodes.push(node_label(node));
+                } else if is_notion_trigger_type(trigger.as_ref()) {
+                    notion_trigger_nodes.push(node_label(node));
                 }
             }
             continue;
@@ -217,6 +228,16 @@ pub fn assess_workflow_for_plan(graph: &Value) -> WorkflowAssessment {
             violations.push(PlanViolation::new(
                 "premium-trigger",
                 "Scheduled triggers are available on workspace plans and above. Switch this trigger to Manual or Webhook to keep running on the solo plan.",
+                label,
+            ));
+        }
+    }
+
+    if !notion_trigger_nodes.is_empty() {
+        for label in notion_trigger_nodes {
+            violations.push(PlanViolation::new(
+                "premium-trigger",
+                "Notion triggers are available on workspace plans and above. Upgrade in Settings ƒ+' Plan to keep polling Notion.",
                 label,
             ));
         }

@@ -47,3 +47,4 @@ Operational notes:
 - Added optimistic concurrency and workflow SSE streaming so workspace users get the latest graph automatically and stale saves return 409 with the authoritative payload.
 - Webhook trigger URLs now accept a trigger name suffix; the handler validates the named webhook trigger and seeds runs with `_start_from_node` so multi-trigger workflows dispatch from the requested node.
 - Manual run requests accept `start_from_node_id` and seed `_start_from_node` when the target trigger exists so multi-trigger workflows only dispatch the chosen entry instead of activating every trigger.
+- Workflow schedule sync now recognizes Notion polling triggers, persisting their connection/database config and preserving cursor state between updates.

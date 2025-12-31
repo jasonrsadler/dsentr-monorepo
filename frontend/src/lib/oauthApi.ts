@@ -2,7 +2,12 @@ import { API_BASE_URL } from './config'
 import { getCsrfToken } from './csrfCache'
 import { useAuth } from '@/stores/auth'
 
-export type OAuthProvider = 'google' | 'microsoft' | 'slack' | 'asana'
+export type OAuthProvider =
+  | 'google'
+  | 'microsoft'
+  | 'slack'
+  | 'asana'
+  | 'notion'
 
 export type ConnectionScope = 'personal' | 'workspace'
 
@@ -66,7 +71,13 @@ export interface GroupedConnectionsSnapshot {
   slackPersonalAuth?: SlackPersonalAuthState
 }
 
-const PROVIDER_KEYS: OAuthProvider[] = ['google', 'microsoft', 'slack', 'asana']
+const PROVIDER_KEYS: OAuthProvider[] = [
+  'google',
+  'microsoft',
+  'slack',
+  'asana',
+  'notion'
+]
 
 const resolveApiBaseUrl = (): string => {
   const rawBase =

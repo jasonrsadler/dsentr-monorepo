@@ -24,3 +24,6 @@
 - Runaway workflow protection blocks runs in the worker before execution, records a `runaway_protection_triggered` event, fails the run without retries, and skips workspace quota/overage increments when the limit is exceeded.
 - Worker/AppState test scaffolding now seeds the Asana OAuth provider config so executor paths compile with the expanded provider set.
 - Scheduled runs now resolve a matching schedule trigger and seed `_start_from_node` so only the intended branch executes instead of activating every trigger in multi-trigger workflows.
+- Added Notion polling schedule handling that resolves OAuth tokens by scope, emits trigger events, updates cursor state, and respects workspace plan/membership gating.
+- Notion polling now clones page payloads before emitting events to satisfy borrow rules while updating cursor state.
+- Notion polling state updates now use `is_none_or` and a single shared state update branch to satisfy clippy warnings without changing behavior.

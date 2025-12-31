@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use base64::Engine as _;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -37,6 +38,8 @@ const SLACK_REVOCATION_URL: &str = "https://slack.com/api/auth.revoke";
 const ASANA_TOKEN_URL: &str = "https://app.asana.com/-/oauth_token";
 const ASANA_USERINFO_URL: &str = "https://app.asana.com/api/1.0/users/me";
 const ASANA_REVOCATION_URL: &str = "https://app.asana.com/-/oauth_revoke";
+const NOTION_TOKEN_URL: &str = "https://api.notion.com/v1/oauth/token";
+const NOTION_ACCESS_TTL_DAYS: i64 = 3650;
 
 #[derive(Debug, Clone)]
 pub struct StoredOAuthToken {
@@ -58,6 +61,7 @@ pub struct AuthorizationTokens {
     pub account_email: String,
     pub provider_user_id: Option<String>,
     pub slack: Option<SlackOAuthMetadata>,
+    pub notion: Option<NotionOAuthMetadata>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -65,6 +69,22 @@ pub struct SlackOAuthMetadata {
     pub team_id: Option<String>,
     pub bot_user_id: Option<String>,
     pub incoming_webhook_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NotionOAuthMetadata {
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub workspace_name: Option<String>,
+    #[serde(default)]
+    pub bot_id: Option<String>,
+    #[serde(default)]
+    pub owner_type: Option<String>,
+    #[serde(default)]
+    pub owner_id: Option<String>,
+    #[serde(default)]
+    pub owner_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -80,6 +100,8 @@ pub struct OAuthTokenMetadata {
     pub slack: Option<EncryptedSlackOAuthMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_user_id: Option<String>,
+    #[serde(default)]
+    pub notion: Option<NotionOAuthMetadata>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +155,7 @@ pub struct OAuthAccountService {
     microsoft: OAuthProviderConfig,
     slack: OAuthProviderConfig,
     asana: OAuthProviderConfig,
+    notion: OAuthProviderConfig,
     #[cfg(test)]
     refresh_override: Option<Arc<RefreshOverride>>,
     #[cfg(test)]
@@ -158,6 +181,7 @@ impl OAuthAccountService {
             microsoft: settings.microsoft.clone(),
             slack: settings.slack.clone(),
             asana: settings.asana.clone(),
+            notion: settings.notion.clone(),
             #[cfg(test)]
             refresh_override: None,
             #[cfg(test)]
@@ -233,6 +257,19 @@ impl OAuthAccountService {
     }
 
     #[cfg(test)]
+    fn notion_token_url(&self) -> &str {
+        self.endpoint_overrides
+            .notion_token_url
+            .as_deref()
+            .unwrap_or(NOTION_TOKEN_URL)
+    }
+
+    #[cfg(not(test))]
+    fn notion_token_url(&self) -> &str {
+        NOTION_TOKEN_URL
+    }
+
+    #[cfg(test)]
     pub fn set_refresh_override<F>(&mut self, override_fn: Option<Arc<F>>)
     where
         F: for<'a> Fn(
@@ -277,6 +314,11 @@ impl OAuthAccountService {
     ) {
         self.endpoint_overrides.slack_token_url = Some(token_url.into());
         self.endpoint_overrides.slack_userinfo_url = Some(userinfo_url.into());
+    }
+
+    #[cfg(test)]
+    pub fn set_notion_endpoint_override(&mut self, token_url: impl Into<String>) {
+        self.endpoint_overrides.notion_token_url = Some(token_url.into());
     }
 
     pub fn google_scopes(&self) -> &'static str {
@@ -413,6 +455,7 @@ impl OAuthAccountService {
             existing.as_ref().map(|record| &record.metadata),
             encrypted_slack.clone(),
             provider_user_id,
+            tokens.notion.clone(),
         );
 
         let stored = if let Some(existing) = existing {
@@ -747,6 +790,7 @@ impl OAuthAccountService {
             Some(&record.metadata),
             encrypted_slack.clone(),
             refreshed.provider_user_id.clone(),
+            refreshed.notion.clone(),
         );
 
         let updated = self
@@ -975,6 +1019,7 @@ impl OAuthAccountService {
                 Ok(auth)
             }
             ConnectedOAuthProvider::Asana => self.exchange_asana_code(code).await,
+            ConnectedOAuthProvider::Notion => self.exchange_notion_code(code).await,
         }
     }
 
@@ -1012,6 +1057,7 @@ impl OAuthAccountService {
             account_email: exchange.account_email.clone(),
             provider_user_id: Some(provider_user_id),
             slack: Some(personal_slack_meta),
+            notion: None,
         };
 
         let workspace = AuthorizationTokens {
@@ -1021,6 +1067,7 @@ impl OAuthAccountService {
             account_email: exchange.account_email,
             provider_user_id: None,
             slack: Some(workspace_slack_meta),
+            notion: None,
         };
 
         Ok((personal, workspace))
@@ -1101,6 +1148,7 @@ impl OAuthAccountService {
                 .as_deref()
                 .and_then(normalize_provider_user_id),
             slack: None,
+            notion: None,
         })
     }
 
@@ -1172,6 +1220,7 @@ impl OAuthAccountService {
             account_email: email,
             provider_user_id: user_info.id.as_deref().and_then(normalize_provider_user_id),
             slack: None,
+            notion: None,
         })
     }
 
@@ -1354,6 +1403,7 @@ impl OAuthAccountService {
             account_email: exchange.account_email,
             provider_user_id: Some(provider_user_id),
             slack: Some(slack_meta),
+            notion: None,
         })
     }
 
@@ -1432,6 +1482,129 @@ impl OAuthAccountService {
             account_email,
             provider_user_id,
             slack: None,
+            notion: None,
+        })
+    }
+
+    async fn exchange_notion_code(
+        &self,
+        code: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        #[derive(Deserialize)]
+        struct NotionOwnerUser {
+            id: Option<String>,
+            name: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct NotionOwnerWorkspace {
+            id: Option<String>,
+            name: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct NotionOwner {
+            #[serde(rename = "type")]
+            owner_type: Option<String>,
+            user: Option<NotionOwnerUser>,
+            workspace: Option<NotionOwnerWorkspace>,
+        }
+
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+            #[serde(default)]
+            refresh_token: Option<String>,
+            #[serde(default)]
+            bot_id: Option<String>,
+            #[serde(default)]
+            workspace_id: Option<String>,
+            #[serde(default)]
+            workspace_name: Option<String>,
+            #[serde(default)]
+            owner: Option<NotionOwner>,
+        }
+
+        let auth = base64::engine::general_purpose::STANDARD.encode(format!(
+            "{}:{}",
+            self.notion.client_id, self.notion.client_secret
+        ));
+
+        let response: TokenResponse = self
+            .client
+            .post(self.notion_token_url())
+            .header("Authorization", format!("Basic {auth}"))
+            .json(&json!({
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": self.notion.redirect_uri,
+            }))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let normalize = |value: Option<String>| {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(|v| v.to_string())
+        };
+
+        let workspace_id = normalize(response.workspace_id);
+        let workspace_name = normalize(response.workspace_name);
+        let bot_id = normalize(response.bot_id);
+
+        let (owner_type, owner_id, owner_name) = response
+            .owner
+            .and_then(|owner| {
+                let owner_type = normalize(owner.owner_type);
+                let (owner_id, owner_name) = match owner_type.as_deref() {
+                    Some("user") => {
+                        let user = owner.user?;
+                        (normalize(user.id), normalize(user.name))
+                    }
+                    Some("workspace") => {
+                        let workspace = owner.workspace?;
+                        (normalize(workspace.id), normalize(workspace.name))
+                    }
+                    _ => (None, None),
+                };
+                Some((owner_type, owner_id, owner_name))
+            })
+            .unwrap_or((None, None, None));
+
+        let metadata = NotionOAuthMetadata {
+            workspace_id: workspace_id.clone(),
+            workspace_name: workspace_name.clone(),
+            bot_id: bot_id.clone(),
+            owner_type,
+            owner_id: owner_id.clone(),
+            owner_name,
+        };
+
+        let provider_user_id = workspace_id
+            .as_deref()
+            .and_then(normalize_provider_user_id)
+            .or_else(|| owner_id.as_deref().and_then(normalize_provider_user_id))
+            .or_else(|| bot_id.as_deref().and_then(normalize_provider_user_id));
+
+        let account_label = workspace_name
+            .clone()
+            .unwrap_or_else(|| "Notion Workspace".to_string());
+        let refresh_token = response.refresh_token.unwrap_or_default();
+        let expires_at = OffsetDateTime::now_utc() + Duration::days(NOTION_ACCESS_TTL_DAYS);
+
+        Ok(AuthorizationTokens {
+            access_token: response.access_token,
+            refresh_token,
+            expires_at,
+            account_email: account_label,
+            provider_user_id,
+            slack: None,
+            notion: Some(metadata),
         })
     }
 
@@ -1449,6 +1622,7 @@ impl OAuthAccountService {
             ConnectedOAuthProvider::Microsoft => self.refresh_microsoft_token(refresh_token).await,
             ConnectedOAuthProvider::Slack => self.refresh_slack_token(refresh_token).await,
             ConnectedOAuthProvider::Asana => self.refresh_asana_token(refresh_token).await,
+            ConnectedOAuthProvider::Notion => self.refresh_notion_token(refresh_token).await,
         }
     }
 
@@ -1512,6 +1686,7 @@ impl OAuthAccountService {
             account_email: String::new(),
             provider_user_id: None,
             slack: None,
+            notion: None,
         })
     }
 
@@ -1576,6 +1751,7 @@ impl OAuthAccountService {
             account_email: String::new(),
             provider_user_id: None,
             slack: None,
+            notion: None,
         })
     }
 
@@ -1719,6 +1895,7 @@ impl OAuthAccountService {
             account_email: String::new(),
             provider_user_id: Some(user_id),
             slack: Some(slack_meta),
+            notion: None,
         })
     }
 
@@ -1782,7 +1959,15 @@ impl OAuthAccountService {
             account_email: String::new(),
             provider_user_id: None,
             slack: None,
+            notion: None,
         })
+    }
+
+    async fn refresh_notion_token(
+        &self,
+        _refresh_token: &str,
+    ) -> Result<AuthorizationTokens, OAuthAccountError> {
+        Err(OAuthAccountError::MissingRefreshToken)
     }
 
     fn encrypt_slack_metadata(
@@ -1939,6 +2124,7 @@ impl OAuthAccountService {
                     )))
                 }
             }
+            ConnectedOAuthProvider::Notion => Ok(()),
         }
     }
 
@@ -2336,6 +2522,11 @@ impl OAuthAccountService {
                 client_secret: "stub".into(),
                 redirect_uri: "http://localhost".into(),
             },
+            notion: OAuthProviderConfig {
+                client_id: "stub".into(),
+                client_secret: "stub".into(),
+                redirect_uri: "http://localhost".into(),
+            },
             token_encryption_key: vec![0u8; 32],
         };
         Arc::new(Self::new(
@@ -2431,6 +2622,36 @@ pub(crate) fn merge_slack_metadata(
     has_slack_fields(&merged).then_some(merged)
 }
 
+pub(crate) fn merge_notion_metadata(
+    existing: Option<NotionOAuthMetadata>,
+    incoming: Option<NotionOAuthMetadata>,
+) -> Option<NotionOAuthMetadata> {
+    let mut merged = existing.unwrap_or_default();
+
+    if let Some(mut incoming_meta) = incoming {
+        if incoming_meta.workspace_id.is_some() {
+            merged.workspace_id = incoming_meta.workspace_id.take();
+        }
+        if incoming_meta.workspace_name.is_some() {
+            merged.workspace_name = incoming_meta.workspace_name.take();
+        }
+        if incoming_meta.bot_id.is_some() {
+            merged.bot_id = incoming_meta.bot_id.take();
+        }
+        if incoming_meta.owner_type.is_some() {
+            merged.owner_type = incoming_meta.owner_type.take();
+        }
+        if incoming_meta.owner_id.is_some() {
+            merged.owner_id = incoming_meta.owner_id.take();
+        }
+        if incoming_meta.owner_name.is_some() {
+            merged.owner_name = incoming_meta.owner_name.take();
+        }
+    }
+
+    has_notion_fields(&merged).then_some(merged)
+}
+
 fn normalize_provider_user_id(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -2451,15 +2672,26 @@ fn merge_metadata_value(
     existing: Option<&Value>,
     slack: Option<EncryptedSlackOAuthMetadata>,
     provider_user_id: Option<String>,
+    notion: Option<NotionOAuthMetadata>,
 ) -> (OAuthTokenMetadata, Value) {
     let mut metadata = existing.map(parse_token_metadata).unwrap_or_default();
 
     metadata.slack = merge_slack_metadata(metadata.slack.clone(), slack);
     metadata.provider_user_id =
         merge_provider_user_id(metadata.provider_user_id.clone(), provider_user_id);
+    metadata.notion = merge_notion_metadata(metadata.notion.clone(), notion);
 
     let value = serialize_token_metadata(metadata.clone());
     (metadata, value)
+}
+
+fn has_notion_fields(metadata: &NotionOAuthMetadata) -> bool {
+    metadata.workspace_id.is_some()
+        || metadata.workspace_name.is_some()
+        || metadata.bot_id.is_some()
+        || metadata.owner_type.is_some()
+        || metadata.owner_id.is_some()
+        || metadata.owner_name.is_some()
 }
 
 pub(crate) fn slack_metadata_from_value(metadata: &Value) -> Option<EncryptedSlackOAuthMetadata> {
@@ -2508,6 +2740,7 @@ struct TestEndpointOverrides {
     google_revocation_url: Option<String>,
     slack_token_url: Option<String>,
     slack_userinfo_url: Option<String>,
+    notion_token_url: Option<String>,
 }
 
 #[cfg(test)]
@@ -2820,6 +3053,11 @@ mod tests {
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost".into(),
             },
+            notion: OAuthProviderConfig {
+                client_id: "id".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost".into(),
+            },
             token_encryption_key: vec![0u8; 32],
         };
         let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
@@ -2882,6 +3120,11 @@ mod tests {
                 redirect_uri: "http://localhost/slack".into(),
             },
             asana: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/asana".into(),
+            },
+            notion: OAuthProviderConfig {
                 client_id: "client".into(),
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost/asana".into(),
@@ -2952,6 +3195,11 @@ mod tests {
                 redirect_uri: "http://localhost/slack".into(),
             },
             asana: OAuthProviderConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://localhost/asana".into(),
+            },
+            notion: OAuthProviderConfig {
                 client_id: "client".into(),
                 client_secret: "secret".into(),
                 redirect_uri: "http://localhost/asana".into(),
@@ -3683,6 +3931,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -3768,6 +4021,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: vec![0u8; 32],
             },
         );
@@ -3825,6 +4083,11 @@ mod tests {
                     redirect_uri: "http://localhost/slack".into(),
                 },
                 asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
+                notion: OAuthProviderConfig {
                     client_id: "client".into(),
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
@@ -3903,6 +4166,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -3926,6 +4194,7 @@ mod tests {
             account_email: "updated@example.com".into(),
             provider_user_id: None,
             slack: None,
+            notion: None,
         };
 
         let stored = service
@@ -3991,6 +4260,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -4006,6 +4280,7 @@ mod tests {
                     account_email: "first@example.com".into(),
                     provider_user_id: None,
                     slack: None,
+                    notion: None,
                 },
             )
             .await
@@ -4022,6 +4297,7 @@ mod tests {
                     account_email: "second@example.com".into(),
                     provider_user_id: None,
                     slack: None,
+                    notion: None,
                 },
             )
             .await
@@ -4047,6 +4323,7 @@ mod tests {
         let encrypted_refresh = encrypt_secret(&key, "old-refresh").expect("encrypt refresh");
         let metadata = serialize_token_metadata(OAuthTokenMetadata {
             slack: None,
+            notion: None,
             provider_user_id: Some("google-123".into()),
         });
 
@@ -4118,6 +4395,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -4136,6 +4418,7 @@ mod tests {
             account_email: "new@example.com".into(),
             provider_user_id: Some("google-123".into()),
             slack: None,
+            notion: None,
         };
 
         let stored = service
@@ -4170,6 +4453,7 @@ mod tests {
                 incoming_webhook_url: None,
             }),
             provider_user_id: Some("slack-123".into()),
+            notion: None,
         });
 
         let repo = Arc::new(MultiTokenRepo::new());
@@ -4224,6 +4508,7 @@ mod tests {
                 bot_user_id: Some("B456".into()),
                 incoming_webhook_url: None,
             }),
+            notion: None,
         };
 
         let stored = OAuthAccountService::new(
@@ -4248,6 +4533,11 @@ mod tests {
                     redirect_uri: "http://localhost/slack".into(),
                 },
                 asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
+                notion: OAuthProviderConfig {
                     client_id: "client".into(),
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
@@ -4277,6 +4567,7 @@ mod tests {
                 incoming_webhook_url: None,
             }),
             provider_user_id: Some("U123".into()),
+            notion: None,
         });
 
         let repo = Arc::new(MultiTokenRepo::new());
@@ -4322,6 +4613,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -4337,6 +4633,7 @@ mod tests {
                 bot_user_id: Some("B456".into()),
                 incoming_webhook_url: None,
             }),
+            notion: None,
         };
 
         let stored = service
@@ -4368,6 +4665,7 @@ mod tests {
             account_email: "old@example.com".into(),
             metadata: serialize_token_metadata(OAuthTokenMetadata {
                 slack: None,
+                notion: None,
                 provider_user_id: Some("google-456".into()),
             }),
             is_shared: false,
@@ -4404,6 +4702,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -4415,6 +4718,7 @@ mod tests {
             account_email: "new@example.com".into(),
             provider_user_id: Some("google-456".into()),
             slack: None,
+            notion: None,
         };
 
         let stored = service
@@ -4499,6 +4803,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -4514,6 +4823,7 @@ mod tests {
                     account_email: "first@example.com".into(),
                     provider_user_id: None,
                     slack: None,
+                    notion: None,
                 },
             )
             .await
@@ -4530,6 +4840,7 @@ mod tests {
                     account_email: "second@example.com".into(),
                     provider_user_id: None,
                     slack: None,
+                    notion: None,
                 },
             )
             .await
@@ -4597,6 +4908,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -4612,6 +4928,7 @@ mod tests {
                     account_email: "expiring@example.com".into(),
                     provider_user_id: None,
                     slack: None,
+                    notion: None,
                 },
             )
             .await
@@ -4628,6 +4945,7 @@ mod tests {
                     account_email: "stable@example.com".into(),
                     provider_user_id: None,
                     slack: None,
+                    notion: None,
                 },
             )
             .await
@@ -4644,6 +4962,7 @@ mod tests {
                     account_email: "expiring@example.com".into(),
                     provider_user_id: None,
                     slack: None,
+                    notion: None,
                 })
             },
         )));
@@ -4683,6 +5002,7 @@ mod tests {
         let encrypted_refresh = encrypt_secret(&key, "slack-old-refresh").unwrap();
         let metadata = serialize_token_metadata(OAuthTokenMetadata {
             slack: None,
+            notion: None,
             provider_user_id: Some("U123".into()),
         });
 
@@ -4753,6 +5073,11 @@ mod tests {
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
                 token_encryption_key: (*key).clone(),
             },
         );
@@ -4772,6 +5097,7 @@ mod tests {
                         bot_user_id: Some("B456".into()),
                         incoming_webhook_url: None,
                     }),
+                    notion: None,
                 })
             },
         )));
@@ -4816,6 +5142,11 @@ mod tests {
                     redirect_uri: "http://localhost/slack".into(),
                 },
                 asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
+                notion: OAuthProviderConfig {
                     client_id: "client".into(),
                     client_secret: "secret".into(),
                     redirect_uri: "http://localhost/asana".into(),

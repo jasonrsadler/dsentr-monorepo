@@ -2493,6 +2493,11 @@ mod tests {
                     client_secret: "stub".into(),
                     redirect_uri: "http://localhost".into(),
                 },
+                notion: OAuthProviderConfig {
+                    client_id: "stub".into(),
+                    client_secret: "stub".into(),
+                    redirect_uri: "http://localhost".into(),
+                },
                 token_encryption_key: vec![0u8; 32],
             },
             api_secrets_encryption_key: vec![1u8; 32],
@@ -3183,6 +3188,7 @@ mod tests {
                     expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
                     account_email: "workspace@example.com".into(),
                     provider_user_id: None,
+                    notion: None,
                     slack: Some(SlackOAuthMetadata {
                         team_id: Some("T123".into()),
                         ..Default::default()
@@ -3367,6 +3373,7 @@ mod tests {
                     expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
                     account_email: "alice@example.com".into(),
                     provider_user_id: None,
+                    notion: None,
                     slack: Some(SlackOAuthMetadata {
                         team_id: Some("T123".into()),
                         ..Default::default()

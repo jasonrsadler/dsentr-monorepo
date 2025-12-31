@@ -9,6 +9,7 @@ async function waitForProviders() {
       expect(screen.getByTestId('provider-google')).toBeInTheDocument()
       expect(screen.getByTestId('provider-slack')).toBeInTheDocument()
       expect(screen.getByTestId('provider-asana')).toBeInTheDocument()
+      expect(screen.getByTestId('provider-notion')).toBeInTheDocument()
     },
     { timeout: 3000 }
   )
@@ -77,7 +78,7 @@ useAuth.mockImplementation((selector?: any) =>
 async function expandProviderSections(
   user: ReturnType<typeof userEvent.setup>
 ) {
-  for (const name of ['Google', 'Slack', 'Asana']) {
+  for (const name of ['Google', 'Slack', 'Asana', 'Notion']) {
     const toggle = await screen.findByRole('button', {
       name: new RegExp(`${name}`, 'i')
     })

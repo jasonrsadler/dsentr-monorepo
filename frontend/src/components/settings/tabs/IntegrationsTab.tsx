@@ -28,6 +28,7 @@ import { normalizePlanTier, type PlanTier } from '@/lib/planTiers'
 import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog'
 import GoogleIcon from '@/assets/svg-components/third-party/GoogleIcon'
 import MicrosoftIcon from '@/assets/svg-components/third-party/MicrosoftIcon'
+import NotionIcon from '@/assets/svg-components/third-party/NotionIcon'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
 export type IntegrationNotice =
@@ -52,7 +53,8 @@ const PROVIDER_ICONS: Partial<
   slack: SlackIcon,
   google: GoogleIcon,
   microsoft: MicrosoftIcon,
-  asana: AsanaIcon
+  asana: AsanaIcon,
+  notion: NotionIcon
 }
 
 const PROVIDERS: ProviderMeta[] = [
@@ -77,6 +79,13 @@ const PROVIDERS: ProviderMeta[] = [
     description:
       'Connect Asana to create and update projects, tasks, and comments directly from your workflows.',
     scopes: 'default email'
+  },
+  {
+    key: 'notion',
+    name: 'Notion',
+    description:
+      'Connect Notion to create, update, and query databases and pages from DSentr workflows.',
+    scopes: 'read write'
   }
 ]
 
