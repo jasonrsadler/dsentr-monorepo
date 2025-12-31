@@ -140,6 +140,15 @@ export default function SheetsAction({
     oauthConnectionScope,
     oauthConnectionId
   } = params
+  const rawParams = params as Record<string, unknown>
+  const rawConnectionScope =
+    typeof rawParams.connectionScope === 'string'
+      ? rawParams.connectionScope.trim()
+      : ''
+  const rawConnectionId =
+    typeof rawParams.connectionId === 'string'
+      ? rawParams.connectionId.trim()
+      : ''
 
   const [connectionState, setConnectionState] =
     useState<ProviderConnectionSet | null>(null)
@@ -336,7 +345,9 @@ export default function SheetsAction({
         applySheetsParamsPatch({
           oauthConnectionScope: '',
           oauthConnectionId: '',
-          accountEmail: ''
+          accountEmail: '',
+          connectionScope: '',
+          connectionId: ''
         })
       }
       return
@@ -371,7 +382,9 @@ export default function SheetsAction({
         applySheetsParamsPatch({
           oauthConnectionScope: '',
           oauthConnectionId: '',
-          accountEmail: ''
+          accountEmail: '',
+          connectionScope: '',
+          connectionId: ''
         })
       }
       return
@@ -381,7 +394,10 @@ export default function SheetsAction({
     const nextId = selected.id ?? ''
     const nextEmail = selected.accountEmail ?? ''
 
-    const updates: Partial<SheetsActionParams> = {}
+    const updates: Partial<SheetsActionParams> & {
+      connectionScope?: string
+      connectionId?: string
+    } = {}
     if (oauthConnectionScope !== nextScope) {
       updates.oauthConnectionScope = nextScope
     }
@@ -390,6 +406,12 @@ export default function SheetsAction({
     }
     if ((accountEmail ?? '') !== nextEmail) {
       updates.accountEmail = nextEmail
+    }
+    if (rawConnectionScope !== nextScope) {
+      updates.connectionScope = nextScope
+    }
+    if (rawConnectionId !== nextId) {
+      updates.connectionId = nextId
     }
 
     if (Object.keys(updates).length > 0) {
@@ -403,7 +425,9 @@ export default function SheetsAction({
     findConnectionByEmail,
     findConnectionById,
     oauthConnectionId,
-    oauthConnectionScope
+    oauthConnectionScope,
+    rawConnectionId,
+    rawConnectionScope
   ])
 
   useEffect(() => {
@@ -574,7 +598,9 @@ export default function SheetsAction({
         applySheetsParamsPatch({
           oauthConnectionScope: '',
           oauthConnectionId: '',
-          accountEmail: ''
+          accountEmail: '',
+          connectionScope: '',
+          connectionId: ''
         })
         return
       }
@@ -583,7 +609,9 @@ export default function SheetsAction({
       applySheetsParamsPatch({
         oauthConnectionScope: parsed.scope,
         oauthConnectionId: parsed.id,
-        accountEmail: match?.accountEmail ?? ''
+        accountEmail: match?.accountEmail ?? '',
+        connectionScope: parsed.scope,
+        connectionId: parsed.id
       })
     },
     [applySheetsParamsPatch, findConnectionById]
@@ -668,7 +696,10 @@ export default function SheetsAction({
     setSheetsLoading(true)
     fetchSpreadsheetSheets(id, {
       scope: scope === 'personal' || scope === 'workspace' ? scope : undefined,
-      connectionId: connId && scope === 'workspace' ? connId : undefined
+      connectionId:
+        connId && (scope === 'personal' || scope === 'workspace')
+          ? connId
+          : undefined
     })
       .then((items) => {
         if (!active) return

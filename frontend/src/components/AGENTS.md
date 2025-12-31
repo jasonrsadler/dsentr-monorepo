@@ -56,6 +56,7 @@
 - Settings > Integrations: Promote visibility and guards now derive from workspace connectionIds per personal credential, and post-promote refreshes replace state wholesale from the backend.
 - Workflow action OAuth selectors now keep personal connections as per-provider arrays so multiple personal credentials appear instead of collapsing to a single entry.
 - Google Sheets flyout picker now sends client/app IDs, scope, and the fetched OAuth token to Drive Picker and blocks missing-config cases so the picker works in the flyout without console errors.
+- Google Sheets action now syncs connectionScope/connectionId alongside OAuth fields and includes personal connection IDs when loading worksheets so personal selections populate correctly.
 - Delay and Formatter nodes now mirror other action nodes: canvas cards are minimal and configuration is handled exclusively in the flyout.
 - Slack action channel selection now hides the manual input when an OAuth connection is chosen and loads channels into a dropdown from the backend Slack channels endpoint.
 - Slack action now fetches channels only from the selected workspace connection, shows the channel dropdown as soon as that selection is made, and defers personal connection validation to execution so identity only affects posting.

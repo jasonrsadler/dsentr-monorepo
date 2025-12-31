@@ -89,3 +89,5 @@
 - Workspace promotion now rejects Slack with an explicit workspace-install requirement, and route helpers map the new Slack install error consistently.
 - Route fixtures now populate `slack_team_id` on Slack workspace connections so Slack connection invariants hold in tests and workspace token lookups.
 - Slack channel listing now requests IM/MPIM types and surfaces missing-scope errors with reconnect guidance instead of opaque Slack failures.
+- Google Sheets routes now accept personal OAuth scope with explicit `connection_id` so personal connections can fetch tokens and worksheets without affecting workspace handling.
+- Added a Debug derive for the Google Sheets token proxy so personal-scope route tests can call `expect_err` without compile failures.

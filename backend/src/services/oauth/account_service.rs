@@ -283,7 +283,7 @@ impl OAuthAccountService {
         // `openid email` lets us call the Google OpenID Connect userinfo endpoint and confirm the
         // caller's verified email address. The Sheets scope is required by workflow actions that
         // append rows via the Google Sheets API.
-        "openid email https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file"
+        "openid email https://www.googleapis.com/auth/spreadsheets"
     }
 
     pub fn microsoft_scopes(&self) -> &'static str {
@@ -2825,7 +2825,7 @@ mod tests {
         let service = OAuthAccountService::new(repo, workspace_repo, key, client, &settings);
         assert_eq!(
             service.google_scopes(),
-            "openid email https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file"
+            "openid email https://www.googleapis.com/auth/spreadsheets"
         );
         assert_eq!(
             service.microsoft_scopes(),

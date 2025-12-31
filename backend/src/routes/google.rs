@@ -307,11 +307,15 @@ async fn determine_scope_and_token(
     query: &ConnectionQuery,
 ) -> Result<StoredOAuthTokenProxy, Response> {
     // Determine requested scope
-    let Some(scope) = query.scope.as_deref() else {
+    let Some(scope) = query
+        .scope
+        .as_deref()
+        .map(|value| value.trim().to_ascii_lowercase())
+    else {
         return Err(JsonResponse::bad_request("scope is required").into_response());
     };
 
-    match scope {
+    match scope.as_str() {
         "workspace" => {
             let conn_id = match query.connection_id {
                 Some(id) => id,
@@ -347,6 +351,37 @@ async fn determine_scope_and_token(
                 .into_response()),
             }
         }
+        "personal" | "user" => {
+            let conn_id = match query.connection_id {
+                Some(id) => id,
+                None => {
+                    return Err(JsonResponse::bad_request(
+                        "connection_id is required for personal scope",
+                    )
+                    .into_response())
+                }
+            };
+
+            let token = match state
+                .oauth_accounts
+                .ensure_valid_access_token_for_connection(user_id, conn_id)
+                .await
+            {
+                Ok(token) => token,
+                Err(err) => return Err(crate::routes::oauth::map_oauth_error(err)),
+            };
+
+            if token.provider != ConnectedOAuthProvider::Google {
+                return Err(JsonResponse::forbidden(
+                    "Selected connection is not a Google connection",
+                )
+                .into_response());
+            }
+
+            Ok(StoredOAuthTokenProxy {
+                access_token: token.access_token.clone(),
+            })
+        }
         _ => Err(JsonResponse::bad_request("unsupported scope").into_response()),
     }
 }
@@ -374,12 +409,304 @@ fn map_workspace_oauth_error(err: WorkspaceOAuthError) -> Response {
 }
 
 // Small proxy type used to unify token shapes returned for personal and workspace tokens
+#[derive(Debug)]
 struct StoredOAuthTokenProxy {
     access_token: String,
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use axum::http::StatusCode;
+    use reqwest::Client;
+    use time::{Duration, OffsetDateTime};
+    use uuid::Uuid;
+
+    use crate::config::{
+        Config, OAuthProviderConfig, OAuthSettings, StripeSettings, DEFAULT_WORKSPACE_MEMBER_LIMIT,
+        DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT, RUNAWAY_LIMIT_5MIN,
+    };
+    use crate::db::mock_db::{MockDb, NoopWorkflowRepository, NoopWorkspaceRepository};
+    use crate::db::mock_stripe_event_log_repository::MockStripeEventLogRepository;
+    use crate::db::oauth_token_repository::{NewUserOAuthToken, UserOAuthTokenRepository};
+    use crate::db::workspace_connection_repository::NoopWorkspaceConnectionRepository;
+    use crate::models::oauth_token::{ConnectedOAuthProvider, UserOAuthToken};
+    use crate::services::oauth::account_service::OAuthAccountService;
+    use crate::services::oauth::github::mock_github_oauth::MockGitHubOAuth;
+    use crate::services::oauth::google::mock_google_oauth::MockGoogleOAuth;
+    use crate::services::oauth::workspace_service::WorkspaceOAuthService;
+    use crate::services::smtp_mailer::MockMailer;
+    use crate::services::stripe::MockStripeService;
+    use crate::state::{test_pg_pool, AppState};
+    use crate::utils::encryption::encrypt_secret;
+    use crate::utils::jwt::JwtKeys;
+
+    use super::{determine_scope_and_token, ConnectionQuery};
+
+    #[derive(Clone)]
+    struct StaticTokenRepo {
+        token: Option<UserOAuthToken>,
+    }
+
+    #[async_trait]
+    impl UserOAuthTokenRepository for StaticTokenRepo {
+        async fn upsert_token(
+            &self,
+            _new_token: NewUserOAuthToken,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(sqlx::Error::RowNotFound)
+        }
+
+        async fn find_by_id(&self, token_id: Uuid) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            Ok(self.token.clone().filter(|token| token.id == token_id))
+        }
+
+        async fn find_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Option<UserOAuthToken>, sqlx::Error> {
+            if provider != ConnectedOAuthProvider::Google {
+                return Ok(None);
+            }
+
+            Ok(self
+                .token
+                .clone()
+                .filter(|record| record.user_id == user_id))
+        }
+
+        async fn delete_token(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+
+        async fn list_by_user_and_provider(
+            &self,
+            user_id: Uuid,
+            provider: ConnectedOAuthProvider,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            if provider != ConnectedOAuthProvider::Google {
+                return Ok(vec![]);
+            }
+
+            Ok(self
+                .token
+                .clone()
+                .filter(|record| record.user_id == user_id)
+                .into_iter()
+                .collect())
+        }
+
+        async fn list_tokens_for_user(
+            &self,
+            user_id: Uuid,
+        ) -> Result<Vec<UserOAuthToken>, sqlx::Error> {
+            Ok(self
+                .token
+                .clone()
+                .filter(|record| record.user_id == user_id)
+                .into_iter()
+                .collect())
+        }
+
+        async fn mark_shared(
+            &self,
+            _user_id: Uuid,
+            _provider: ConnectedOAuthProvider,
+            _is_shared: bool,
+        ) -> Result<UserOAuthToken, sqlx::Error> {
+            Err(sqlx::Error::RowNotFound)
+        }
+    }
+
+    fn stub_config() -> Arc<Config> {
+        Arc::new(Config {
+            database_url: "postgres://localhost".into(),
+            frontend_origin: "http://localhost:5173".into(),
+            admin_origin: "http://localhost:5173".into(),
+            oauth: OAuthSettings {
+                google: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/google".into(),
+                },
+                microsoft: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/microsoft".into(),
+                },
+                slack: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/slack".into(),
+                },
+                asana: OAuthProviderConfig {
+                    client_id: "client".into(),
+                    client_secret: "secret".into(),
+                    redirect_uri: "http://localhost/asana".into(),
+                },
+                token_encryption_key: vec![1u8; 32],
+            },
+            api_secrets_encryption_key: vec![2u8; 32],
+            stripe: StripeSettings {
+                client_id: "stub".into(),
+                secret_key: "stub".into(),
+                webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            },
+            auth_cookie_secure: true,
+            webhook_secret: "0123456789abcdef0123456789ABCDEF".into(),
+            jwt_issuer: "test-issuer".into(),
+            jwt_audience: "test-audience".into(),
+            workspace_member_limit: DEFAULT_WORKSPACE_MEMBER_LIMIT,
+            workspace_monthly_run_limit: DEFAULT_WORKSPACE_MONTHLY_RUN_LIMIT,
+            runaway_limit_5min: RUNAWAY_LIMIT_5MIN,
+        })
+    }
+
+    fn base_state(config: Arc<Config>, oauth_accounts: Arc<OAuthAccountService>) -> AppState {
+        AppState {
+            db: Arc::new(MockDb::default()),
+            workflow_repo: Arc::new(NoopWorkflowRepository),
+            workspace_repo: Arc::new(NoopWorkspaceRepository),
+            workspace_connection_repo: Arc::new(NoopWorkspaceConnectionRepository),
+            stripe_event_log_repo: Arc::new(MockStripeEventLogRepository::default()),
+            db_pool: test_pg_pool(),
+            mailer: Arc::new(MockMailer::default()),
+            google_oauth: Arc::new(MockGoogleOAuth::default()),
+            github_oauth: Arc::new(MockGitHubOAuth::default()),
+            oauth_accounts,
+            workspace_oauth: WorkspaceOAuthService::test_stub(),
+            stripe: Arc::new(MockStripeService::new()),
+            http_client: Arc::new(Client::new()),
+            config,
+            worker_id: Arc::new("test-worker".into()),
+            worker_lease_seconds: 30,
+            jwt_keys: test_jwt_keys(),
+        }
+    }
+
+    fn test_jwt_keys() -> Arc<JwtKeys> {
+        Arc::new(
+            JwtKeys::from_secret("0123456789abcdef0123456789abcdef")
+                .expect("test JWT secret should be valid"),
+        )
+    }
+
+    #[tokio::test]
+    async fn determine_scope_and_token_accepts_personal_scope() {
+        let config = stub_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let user_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let token = UserOAuthToken {
+            id: token_id,
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Google,
+            access_token: encrypt_secret(&encryption_key, "access").expect("encrypt access"),
+            refresh_token: encrypt_secret(&encryption_key, "refresh").expect("encrypt refresh"),
+            expires_at: now + Duration::hours(1),
+            account_email: "user@example.com".into(),
+            metadata: serde_json::json!({}),
+            is_shared: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let repo = Arc::new(StaticTokenRepo { token: Some(token) });
+        let oauth_accounts = Arc::new(OAuthAccountService::new(
+            repo,
+            Arc::new(NoopWorkspaceConnectionRepository),
+            Arc::clone(&encryption_key),
+            Arc::new(Client::new()),
+            &config.oauth,
+        ));
+        let state = base_state(config, oauth_accounts);
+
+        let query = ConnectionQuery {
+            scope: Some("personal".into()),
+            connection_id: Some(token_id),
+        };
+
+        let result = determine_scope_and_token(&state, user_id, &query)
+            .await
+            .expect("personal token should resolve");
+
+        assert_eq!(result.access_token, "access");
+    }
+
+    #[tokio::test]
+    async fn determine_scope_and_token_rejects_personal_non_google() {
+        let config = stub_config();
+        let encryption_key = Arc::new(config.oauth.token_encryption_key.clone());
+        let user_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
+        let now = OffsetDateTime::now_utc();
+
+        let token = UserOAuthToken {
+            id: token_id,
+            user_id,
+            workspace_id: None,
+            provider: ConnectedOAuthProvider::Microsoft,
+            access_token: encrypt_secret(&encryption_key, "access").expect("encrypt access"),
+            refresh_token: encrypt_secret(&encryption_key, "refresh").expect("encrypt refresh"),
+            expires_at: now + Duration::hours(1),
+            account_email: "user@example.com".into(),
+            metadata: serde_json::json!({}),
+            is_shared: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let repo = Arc::new(StaticTokenRepo { token: Some(token) });
+        let oauth_accounts = Arc::new(OAuthAccountService::new(
+            repo,
+            Arc::new(NoopWorkspaceConnectionRepository),
+            Arc::clone(&encryption_key),
+            Arc::new(Client::new()),
+            &config.oauth,
+        ));
+        let state = base_state(config, oauth_accounts);
+
+        let query = ConnectionQuery {
+            scope: Some("personal".into()),
+            connection_id: Some(token_id),
+        };
+
+        let err = determine_scope_and_token(&state, user_id, &query)
+            .await
+            .expect_err("non-google token should be rejected");
+
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn determine_scope_and_token_requires_connection_id_for_personal_scope() {
+        let config = stub_config();
+        let oauth_accounts = OAuthAccountService::test_stub();
+        let state = base_state(config, oauth_accounts);
+        let user_id = Uuid::new_v4();
+
+        let query = ConnectionQuery {
+            scope: Some("personal".into()),
+            connection_id: None,
+        };
+
+        let err = determine_scope_and_token(&state, user_id, &query)
+            .await
+            .expect_err("connection_id is required");
+
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
     #[test]
     fn parse_google_sheets_list_response() {
         let sample = r#"
