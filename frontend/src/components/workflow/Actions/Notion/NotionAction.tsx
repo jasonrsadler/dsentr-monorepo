@@ -586,11 +586,17 @@ export default function NotionAction({
 
         const normalized: NotionDatabaseSchema = {
           ...payload,
-          properties: (payload.properties ?? []).map((prop: any) => ({
-            ...prop,
-            property_type: prop.property_type ?? prop.propertyType ?? '',
-            is_title: Boolean(prop.is_title ?? prop.isTitle)
-          }))
+          properties: (payload.properties ?? []).map((prop: any) => {
+            const type = (prop.property_type ?? prop.propertyType ?? '')
+              .trim()
+              .toLowerCase()
+
+            return {
+              ...prop,
+              property_type: type,
+              is_title: Boolean(prop.is_title ?? prop.isTitle)
+            }
+          })
         }
 
         setSchema(normalized)
@@ -619,24 +625,13 @@ export default function NotionAction({
       return
     }
     if (prev !== next) {
-      const patch: Record<string, unknown> = {}
-
-      if (!(schema && schema.properties.length === 0)) {
-        if (Object.keys(propertyEntries).length > 0) {
-          patch.properties = {}
-        }
-        if (Object.keys(filter).length > 0) {
-          patch.filter = {}
-        }
-      }
-
-      if (Object.keys(patch).length > 0) {
-        applyParamsPatch(patch)
-      }
-
+      applyParamsPatch({
+        properties: {},
+        filter: {}
+      })
       lastDatabaseRef.current = next
     }
-  }, [activeDatabaseId, applyParamsPatch, filter, propertyEntries, schema])
+  }, [activeDatabaseId, applyParamsPatch])
 
   const handlePropertyChange = useCallback(
     (property: NotionProperty, value: unknown) => {
@@ -666,10 +661,11 @@ export default function NotionAction({
 
   const schemaProperties = useMemo(() => {
     const props = schema?.properties ?? []
-    const supported = props.filter((prop) => {
-      const type = prop.property_type
-      return Boolean(type && SUPPORTED_PROPERTY_TYPES.has(type))
-    })
+    const supported = props.filter(
+      (prop) =>
+        typeof prop.property_type === 'string' &&
+        SUPPORTED_PROPERTY_TYPES.has(prop.property_type)
+    )
 
     return supported.sort((a, b) => {
       if (a.is_title && !b.is_title) return -1
