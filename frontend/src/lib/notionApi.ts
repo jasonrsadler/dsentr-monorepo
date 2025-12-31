@@ -152,28 +152,34 @@ export async function fetchNotionDatabaseSchema(
   )
 
   const properties = Array.isArray(data.properties) ? data.properties : []
+  const normalizedProperties = (properties ?? []).filter(
+    (p: any) =>
+      typeof p?.propertyId === 'string' &&
+      typeof p?.propertyType === 'string' &&
+      p.propertyId.trim() &&
+      p.propertyType.trim()
+  )
+
   return {
     database_id: normalizeString(data.database_id) || trimmedId,
     title_property_id: normalizeString(data.title_property_id ?? undefined),
-    properties: properties
-      .filter(
-        (property) =>
-          typeof property?.property_id === 'string' &&
-          property.property_id.trim()
-      )
-      .map((property) => ({
-        property_id: property.property_id.trim(),
-        name: normalizeString(property.name) || property.property_id.trim(),
-        property_type: normalizeString(property.property_type) || 'rich_text',
-        options: Array.isArray(property.options)
-          ? property.options.filter(
-              (opt) =>
-                normalizeString(opt.id) ||
-                normalizeString(opt.name) ||
-                normalizeString(opt.color)
-            )
-          : undefined,
-        is_title: Boolean(property.is_title)
-      }))
+    properties: normalizedProperties.map((property: any) => {
+      const options = Array.isArray(property.options)
+        ? property.options.filter(
+            (opt: any) =>
+              normalizeString(opt.id) ||
+              normalizeString(opt.name) ||
+              normalizeString(opt.color)
+          )
+        : undefined
+
+      return {
+        property_id: property.propertyId.trim(),
+        name: normalizeString(property.name) || property.propertyId.trim(),
+        property_type: property.propertyType.trim().toLowerCase(),
+        ...(options ? { options } : {}),
+        is_title: Boolean(property.isTitle)
+      }
+    })
   }
 }
