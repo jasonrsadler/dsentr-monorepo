@@ -360,6 +360,16 @@ export default function NotionAction({
     return null
   }, [connectionId, connectionScope, connectionState])
 
+  const formatConnectionLabel = (
+    name?: string,
+    email?: string,
+    fallback = 'Notion'
+  ) => {
+    const base = name?.trim() || fallback
+    const mail = email?.trim()
+    return mail && !base.includes(mail) ? `${base} (${mail})` : base
+  }
+
   const connectionOptions = useMemo<NodeDropdownOptionGroup[]>(() => {
     if (!connectionState) return []
     const groups: NodeDropdownOptionGroup[] = []
@@ -367,15 +377,15 @@ export default function NotionAction({
       groups.push({
         label: 'Personal connections',
         options: connectionState.personal.map((entry) => {
-          const label =
-            entry.ownerName ||
-            entry.accountEmail ||
-            entry.ownerEmail ||
+          const label = formatConnectionLabel(
+            entry.ownerName,
+            entry.ownerEmail || entry.accountEmail,
             'Personal Notion'
+          )
           const id = entry.id ?? entry.connectionId ?? ''
           return {
             label: entry.requiresReconnect ? `${label} (reconnect)` : label,
-            value: connectionValueKey('personal', id || ''),
+            value: connectionValueKey('personal', id),
             disabled: !id || entry.requiresReconnect
           }
         })
