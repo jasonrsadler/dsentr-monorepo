@@ -97,14 +97,6 @@ const ACTION_SIDEBAR_TILE_GROUPS = [
         icon: <ActionIcon />
       },
       {
-        id: 'action-teams',
-        label: 'Teams',
-        description: 'Notify Microsoft Teams',
-        dragType: 'action:actionTeams',
-        gradient: 'from-blue-500 to-indigo-600',
-        icon: <ActionIcon />
-      },
-      {
         id: 'action-google-chat',
         label: 'Google Chat',
         description: 'Send a Google Chat message',

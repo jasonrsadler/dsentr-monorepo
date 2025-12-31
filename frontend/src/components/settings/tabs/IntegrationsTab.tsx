@@ -61,14 +61,8 @@ const PROVIDERS: ProviderMeta[] = [
     name: 'Google',
     description:
       'Connect your Google Workspace account to enable actions that call Gmail, Calendar, and other Google APIs on your behalf.',
-    scopes: 'openid email profile userinfo'
-  },
-  {
-    key: 'microsoft',
-    name: 'Microsoft',
-    description:
-      'Connect your Microsoft 365 account to run Outlook and Teams actions with delegated permissions managed by DSentr.',
-    scopes: 'offline_access User.Read'
+    scopes:
+      'openid email profile userinfo ./auth/drive.file ./auth/spreadsheets'
   },
   {
     key: 'slack',
