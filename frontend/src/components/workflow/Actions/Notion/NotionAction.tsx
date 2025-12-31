@@ -572,16 +572,28 @@ export default function NotionAction({
       setSchemaError(null)
       return
     }
+
     let active = true
     setSchemaLoading(true)
     setSchemaError(null)
+
     fetchNotionDatabaseSchema(activeDatabaseId, {
       scope: activeConnection.scope,
       connectionId: activeConnection.id
     })
       .then((payload) => {
         if (!active) return
-        setSchema(payload)
+
+        const normalized: NotionDatabaseSchema = {
+          ...payload,
+          properties: (payload.properties ?? []).map((prop: any) => ({
+            ...prop,
+            property_type: prop.property_type ?? prop.propertyType ?? '',
+            is_title: Boolean(prop.is_title ?? prop.isTitle)
+          }))
+        }
+
+        setSchema(normalized)
       })
       .catch((err) => {
         if (!active) return
@@ -592,6 +604,7 @@ export default function NotionAction({
         if (!active) return
         setSchemaLoading(false)
       })
+
     return () => {
       active = false
     }
@@ -607,18 +620,23 @@ export default function NotionAction({
     }
     if (prev !== next) {
       const patch: Record<string, unknown> = {}
-      if (Object.keys(propertyEntries).length > 0) {
-        patch.properties = {}
+
+      if (!(schema && schema.properties.length === 0)) {
+        if (Object.keys(propertyEntries).length > 0) {
+          patch.properties = {}
+        }
+        if (Object.keys(filter).length > 0) {
+          patch.filter = {}
+        }
       }
-      if (Object.keys(filter).length > 0) {
-        patch.filter = {}
-      }
+
       if (Object.keys(patch).length > 0) {
         applyParamsPatch(patch)
       }
+
       lastDatabaseRef.current = next
     }
-  }, [activeDatabaseId, applyParamsPatch, filter, propertyEntries])
+  }, [activeDatabaseId, applyParamsPatch, filter, propertyEntries, schema])
 
   const handlePropertyChange = useCallback(
     (property: NotionProperty, value: unknown) => {
@@ -648,9 +666,11 @@ export default function NotionAction({
 
   const schemaProperties = useMemo(() => {
     const props = schema?.properties ?? []
-    const supported = props.filter((prop) =>
-      SUPPORTED_PROPERTY_TYPES.has(prop.property_type)
-    )
+    const supported = props.filter((prop) => {
+      const type = prop.property_type
+      return Boolean(type && SUPPORTED_PROPERTY_TYPES.has(type))
+    })
+
     return supported.sort((a, b) => {
       if (a.is_title && !b.is_title) return -1
       if (!a.is_title && b.is_title) return 1
