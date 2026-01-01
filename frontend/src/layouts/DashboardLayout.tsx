@@ -256,7 +256,8 @@ export default function DashboardLayout() {
       providerParamRaw === 'google' ||
       providerParamRaw === 'microsoft' ||
       providerParamRaw === 'slack' ||
-      providerParamRaw === 'asana'
+      providerParamRaw === 'asana' ||
+      providerParamRaw === 'notion'
         ? (providerParamRaw as OAuthProvider)
         : undefined
     const error = params.get('error') || undefined
