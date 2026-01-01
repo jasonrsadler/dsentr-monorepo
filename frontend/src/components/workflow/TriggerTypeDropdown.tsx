@@ -8,12 +8,7 @@ type TriggerOption = {
 const triggerOptions: TriggerOption[] = [
   { label: 'Manual', value: 'Manual' },
   { label: 'Webhook', value: 'Webhook' },
-  { label: 'Schedule', value: 'Schedule' },
-  { label: 'Notion: New database row', value: 'notion.new_database_row' },
-  {
-    label: 'Notion: Updated database row',
-    value: 'notion.updated_database_row'
-  }
+  { label: 'Schedule', value: 'Schedule' }
 ]
 
 export default function TriggerTypeDropdown({
