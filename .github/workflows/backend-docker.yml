@@ -1,17 +1,17 @@
-name: Backend CI + Docker Deploy
+name: Backend CI + Docker Build
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, develop ]
     paths:
       - "backend/**"
   pull_request:
-    branches: [ master ]
+    branches: [ master, develop ]
     paths:
       - "backend/**"
 
 jobs:
-  backend-ci-docker-deploy:
+  backend-ci-docker:
     runs-on: ubuntu-latest
 
     steps:
@@ -32,7 +32,7 @@ jobs:
         run: cargo test --locked --all
         working-directory: backend
 
-      - name: Log in to Docker registry
+      - name: Log in to Docker Hub
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login \
             -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
@@ -44,17 +44,22 @@ jobs:
             -t ${{ secrets.DOCKER_REPO }}:${{ github.sha }} \
             .
 
-      - name: Tag latest
+      - name: Tag image for branch
         run: |
-          docker tag ${{ secrets.DOCKER_REPO }}:${{ github.sha }} \
-                     ${{ secrets.DOCKER_REPO }}:latest
+          if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+            docker tag ${{ secrets.DOCKER_REPO }}:${{ github.sha }} \
+                       ${{ secrets.DOCKER_REPO }}:latest
+          elif [ "${GITHUB_REF}" = "refs/heads/develop" ]; then
+            docker tag ${{ secrets.DOCKER_REPO }}:${{ github.sha }} \
+                       ${{ secrets.DOCKER_REPO }}:dev
+          fi
 
-      - name: Push images
+      - name: Push Docker images
         run: |
           docker push ${{ secrets.DOCKER_REPO }}:${{ github.sha }}
-          docker push ${{ secrets.DOCKER_REPO }}:latest
 
-      - name: Trigger Render Deploy
-        if: github.ref == 'refs/heads/master'
-        run: |
-          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+            docker push ${{ secrets.DOCKER_REPO }}:latest
+          elif [ "${GITHUB_REF}" = "refs/heads/develop" ]; then
+            docker push ${{ secrets.DOCKER_REPO }}:dev
+          fi
