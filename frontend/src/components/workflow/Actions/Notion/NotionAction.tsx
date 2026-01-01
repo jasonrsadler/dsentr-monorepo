@@ -65,7 +65,8 @@ const SUPPORTED_PROPERTY_TYPES = new Set([
   'select',
   'multi_select',
   'date',
-  'checkbox'
+  'checkbox',
+  'email'
 ])
 
 const CUSTOM_OPTION_VALUE = '__custom__'
