@@ -2,12 +2,12 @@
 
 on:
   push:
-    branches: [master]
+    branches: [master, develop]
     paths:
       - "frontend-admin/**"
       - ".github/workflows/frontend-admin-deploy.yml"
   pull_request:
-    branches: [master]
+    branches: [master, develop]
     paths:
       - "frontend-admin/**"
       - ".github/workflows/frontend-admin-deploy.yml"
@@ -15,8 +15,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
-      VITE_API_BASE_URL: https://api.dsentr.com
+      VITE_API_BASE_URL: ${{ github.ref == 'refs/heads/master' && 'https://api.dsentr.com' || 'https://api-dev.dsentr.com' }}
 
     steps:
       - name: Checkout repo
@@ -28,7 +29,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend-admin/package-lock.json
-      
+
       - name: Clean npm cache
         run: npm cache clean --force
 
@@ -36,7 +37,7 @@ jobs:
         run: |
           cd frontend-admin
           npm ci
-          
+
       - name: Lint
         run: |
           cd frontend-admin
@@ -47,8 +48,12 @@ jobs:
           cd frontend-admin
           npm run build
 
-      - name: Trigger Cloudflare Admin Pages Deploy
-        if: success()  # only after build passes
+      - name: Trigger Cloudflare Admin Pages Deploy (prod)
+        if: github.ref == 'refs/heads/master'
         run: |
           curl -fsS -X POST "${{ secrets.CF_ADMIN_PAGES_DEPLOY_HOOK_URL }}"
 
+      - name: Trigger Cloudflare Admin Pages Deploy (dev)
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          curl -fsS -X POST "${{ secrets.CF_ADMIN_PAGES_DEPLOY_HOOK_URL_DEV }}"
