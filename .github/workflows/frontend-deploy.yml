@@ -2,12 +2,12 @@
 
 on:
   push:
-    branches: [master]
+    branches: [master, develop]
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-deploy.yml"
   pull_request:
-    branches: [master]
+    branches: [master, develop]
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-deploy.yml"
@@ -15,8 +15,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
-      VITE_API_BASE_URL: https://api.dsentr.com
+      VITE_API_BASE_URL: ${{ github.ref == 'refs/heads/master' && 'https://api.dsentr.com' || 'https://api-dev.dsentr.com' }}
 
     steps:
       - name: Checkout repo
@@ -28,7 +29,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      
+
       - name: Clean npm cache
         run: npm cache clean --force
 
@@ -36,7 +37,7 @@ jobs:
         run: |
           cd frontend
           npm ci
-          
+
       - name: Lint
         run: |
           cd frontend
@@ -47,7 +48,8 @@ jobs:
           cd frontend
           npm test -- --watch=false
 
-      - name: Patch CSP to production-only (strip localhost)
+      - name: Patch CSP (prod only)
+        if: github.ref == 'refs/heads/master'
         run: |
           sed -i 's| https://localhost:3000||g' frontend/index.html
           sed -i 's| ws://localhost:5173||g' frontend/index.html
@@ -58,8 +60,12 @@ jobs:
           cd frontend
           npm run build
 
-      - name: Trigger Cloudflare Pages Deploy
-        if: success()  # only after build passes
+      - name: Trigger Cloudflare Pages Deploy (prod)
+        if: github.ref == 'refs/heads/master'
         run: |
           curl -fsS -X POST "${{ secrets.CF_PAGES_DEPLOY_HOOK_URL }}"
 
+      - name: Trigger Cloudflare Pages Deploy (dev)
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          curl -fsS -X POST "${{ secrets.CF_PAGES_DEPLOY_HOOK_URL_DEV }}"
